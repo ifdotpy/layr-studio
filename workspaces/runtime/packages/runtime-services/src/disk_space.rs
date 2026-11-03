@@ -305,22 +305,31 @@ pub struct StorageReport {
 }
 
 impl StorageReport {
+    fn blocked_volume(&self, role: crate::thread_prepare::Role) -> Option<(&FilesystemSpace, u64)> {
+        self.filesystems.iter().find_map(|volume| {
+            if volume.state_full {
+                return Some((volume, DISK_FULL_EXIT_FREE_BYTES));
+            }
+            let floor = volume
+                .rules
+                .iter()
+                .filter(|rule| rule.purpose != StoragePurpose::State)
+                .map(|rule| rule.minimum_free_bytes)
+                .max()?;
+            (role == crate::thread_prepare::Role::Implementer
+                && !volume.free_bytes.is_some_and(|free| free >= floor))
+            .then_some((volume, floor))
+        })
+    }
     /// One decision for every watched filesystem. Leads/reviewers retain access
     /// to cleanup while worker storage is low; state-volume ENOSPC holds all roles.
     pub fn hold_reason(&self, role: crate::thread_prepare::Role) -> Option<String> {
-        self.filesystems.iter().find_map(|volume| {
+        self.blocked_volume(role).map(|(volume, worker_floor)| {
             if volume.state_full {
-                return Some(held_reason(volume.free_bytes));
+                return held_reason(volume.free_bytes);
             }
-            let worker_floor = volume.rules.iter()
-                .filter(|rule| rule.purpose != StoragePurpose::State)
-                .map(|rule| rule.minimum_free_bytes).max()?;
-            if role != crate::thread_prepare::Role::Implementer
-                || volume.free_bytes.is_some_and(|free| free >= worker_floor) {
-                return None;
-            }
-            Some(format!("Worker storage held: {} free on {} ({} bytes required). Free space or archive finished workers; queued input is retained.",
-                mib(volume.free_bytes), volume.paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", "), worker_floor))
+            format!("Worker storage held: {} free on {} ({} bytes required). Free space or archive finished workers; queued input is retained.",
+                mib(volume.free_bytes), volume.paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(", "), worker_floor)
         })
     }
 }
@@ -510,11 +519,29 @@ async fn hold_agent_turn_with_gate(
         Some(gate) => gate.report(&workspaces),
         None => DiskGate::new(store.root().to_path_buf()).report(&workspaces),
     };
-    let reason = report.hold_reason(context.role()).map(|_| {
-        format!(
-            "{STORAGE_HOLD_PREFIX}Not enough free disk space. Free space and resend your message."
-        )
-    });
+    let (free, required) = report
+        .blocked_volume(context.role())
+        .or_else(|| {
+            report
+                .filesystems
+                .iter()
+                .find(|volume| {
+                    volume
+                        .rules
+                        .iter()
+                        .any(|rule| rule.purpose == StoragePurpose::State)
+                })
+                .map(|volume| (volume, DISK_FULL_EXIT_FREE_BYTES))
+        })
+        .map_or((None, DISK_FULL_EXIT_FREE_BYTES), |(volume, required)| {
+            (volume.free_bytes, required)
+        });
+    let blocked = report.blocked_volume(context.role()).is_some();
+    let reason = format!(
+        "{STORAGE_HOLD_PREFIX}The disk space check prevented this start: {} free, {} MiB required. Resend after freeing space.",
+        mib(free),
+        required / MIB
+    );
     crate::scheduler::lifecycle_transaction_with(store, move |tx| {
             let Some(mut agent) = studio_runtime_store::AgentRepository::get(tx, &id)? else {
                 return Ok(TurnStorageAdmission::Stale);
@@ -530,15 +557,17 @@ async fn hold_agent_turn_with_gate(
             if agent.auto_wake != Some(true) || agent.is_deleted() {
                 return Ok(TurnStorageAdmission::Stale);
             }
-            let Some(reason) = reason else {
+            let legacy_disk_wait = matches!(agent.start_wait, Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: wait_epoch }) if wait_epoch == epoch);
+            if !blocked && !legacy_disk_wait {
                 if agent.error_text().is_some_and(|text| text.starts_with("Storage hold: ")) {
                     agent.error = studio_runtime_schema::queue_command::Field::Missing;
                     agent.start_wait = None;
                     studio_runtime_store::AgentRepository::put(tx, &agent)?;
                 }
                 return Ok(TurnStorageAdmission::Ready);
-            };
-            if let Some(attempt) = agent.start_attempt.as_ref() {
+            }
+            if agent.status == studio_runtime_store::AgentStatus::Starting {
+                let Some(attempt) = agent.start_attempt.as_ref() else { return Ok(TurnStorageAdmission::Stale); };
                 if attempt.submitted != Some(false) || attempt.epoch != Some(epoch) {
                     return Ok(TurnStorageAdmission::Stale);
                 }
@@ -550,7 +579,7 @@ async fn hold_agent_turn_with_gate(
                 if agent.status != studio_runtime_store::AgentStatus::Failed {
                     return Ok(TurnStorageAdmission::Stale);
                 }
-            } else if agent.status != studio_runtime_store::AgentStatus::Queued || agent.in_flight == Some(true) {
+            } else if agent.in_flight == Some(true) {
                 return Ok(TurnStorageAdmission::Stale);
             }
             tx.execute("UPDATE runtime_events SET status='failed',error=?1 WHERE agent=?2 AND epoch=?3 AND status='pending'", rusqlite::params![reason, id.0, epoch])?;
@@ -758,7 +787,10 @@ mod tests {
             .transaction_with_error(move |tx| {
                 let agent =
                     AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker", "rootId":"worker", "epoch":1,
-                    "status":"queued", "role":"implementer", "autoWake":true, "cwd":cwd, "startWait":{"reason":"slot", "epoch":1, "runningTurns":1, "maxRunningTurns":2}}))?;
+                    "status":"queued", "role":"implementer", "autoWake":true, "inFlight":false, "cwd":cwd,
+                    "lastCompletedTurn":"old-turn", "lastCompletedTurnStatus":"completed",
+                    "startAttempt":{"id":"old-attempt","epoch":1,"submitted":true,"turnId":"old-turn","executionOutcome":"accepted","events":[]},
+                    "startWait":{"reason":"disk", "epoch":1}}))?;
                 AgentRepository::put(tx, &agent)?;
                 crate::event_write::enqueue_event(
                     tx,
@@ -819,6 +851,12 @@ mod tests {
                 .expect("visible reason")
                 .starts_with(STORAGE_HOLD_PREFIX)
         );
+        let error = agent.error_text().unwrap();
+        assert!(
+            error.contains("free")
+                && error.contains("required")
+                && error.contains("Resend after freeing space")
+        );
         // One sampler serves the state volume too, and a full state volume keeps
         // its sample and latch until its recheck; a new gate sees the freed disk.
         free.store(DISK_FULL_EXIT_FREE_BYTES, Ordering::SeqCst);
@@ -853,6 +891,28 @@ mod tests {
         assert_eq!(after.id, before.id);
         assert_eq!(after.text, before.text);
         assert_eq!(after.status, "failed");
+
+        store.transaction_with_error(|tx| {
+            let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"legacy","rootId":"legacy","epoch":1,"status":"queued","autoWake":true,"cwd":"/tmp","startWait":{"reason":"disk","epoch":1}}))?;
+            AgentRepository::put(tx, &agent)?;
+            crate::event_write::enqueue_event(tx, &agent, "legacy-input".into(), "user", "keep me".into(), 11.0).unwrap();
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+        assert_eq!(
+            hold_agent_turn_with_gate(&store, "legacy", 1, Some(&gate))
+                .await
+                .unwrap(),
+            TurnStorageAdmission::Failed
+        );
+        let legacy = store
+            .read_async("test/legacy-disk", |tx| {
+                QueueEventRepository::get(tx, &QueueEventId::from("legacy-input"))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(legacy.status, "failed");
+        assert_eq!(legacy.text, "keep me");
     }
 
     fn gate(free: &Arc<AtomicU64>) -> DiskGate {
