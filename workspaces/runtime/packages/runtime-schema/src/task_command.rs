@@ -31,6 +31,10 @@ pub const MAX_FILES: usize = 50;
 pub const REVIEW_RESULT_REQUIRED: &str =
     "Supply result with 1 to 32000 characters for accept or reject";
 
+fn empty_revision() -> BoundedText<0, MAX_REVISION_CODEPOINTS> {
+    String::new().try_into().expect("empty revision fits")
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InitialStatus {
@@ -169,6 +173,7 @@ pub enum TaskCommand<
         result: Value,
         #[schemars(length(max = MAX_CHECKS_CODEPOINTS))]
         checks: BoundedText<0, MAX_CHECKS_CODEPOINTS>,
+        #[serde(default = "empty_revision")]
         #[schemars(length(max = MAX_REVISION_CODEPOINTS))]
         revision: BoundedText<0, MAX_REVISION_CODEPOINTS>,
         #[serde(default)]
@@ -480,6 +485,15 @@ pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn submission_revision_can_be_omitted_at_ingress() {
+        assert!(
+            TaskCommand::parse_tool(
+                &json!({"action":"submit","task_id":"task","result":"reviewed","checks":"read"})
+            )
+            .is_ok()
+        );
+    }
     #[test]
     fn task_command_schema_matches_owner_and_transport_variants() {
         let document: Value =

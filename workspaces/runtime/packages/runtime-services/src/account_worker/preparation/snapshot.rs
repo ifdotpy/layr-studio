@@ -211,6 +211,10 @@ impl PreparationResources {
                     "enum": crate::claude_controls::PERMISSION_MODES,
                     "description": "Claude child permission mode. Defaults to the parent's mode. Bypass requires a bypass parent. Reviewers always use plan."
                 }));
+                properties.insert(
+                    "review_state".into(),
+                    studio_runtime_schema::creation_intent::review_state_tool_schema(),
+                );
             }
         }
         let skills_root = root.join(".agents/skills");
