@@ -425,6 +425,21 @@ class StopBackendHandover(unittest.TestCase):
         self.assertEqual(answers, [])
         self.assertEqual(self.killed, [])
 
+    def test_another_http_error_during_the_handover_is_reported(self):
+        (self.state / installer.HANDOVER_SOCKET).touch()
+        answers = [
+            {"pid": 100},
+            urllib.error.HTTPError("http://127.0.0.1:4620/api/desktop", 500, "Internal Server Error", None, None),
+        ]
+        def identity(*_):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        with self.assertRaises(urllib.error.HTTPError):
+            self.stop(identity=identity)
+        self.assertEqual(self.killed, [])
+
     def test_a_new_build_that_exits_is_reported_and_the_old_one_is_not_signalled(self):
         (self.state / installer.HANDOVER_SOCKET).touch()
         with self.assertRaisesRegex(RuntimeError, "exited with 1 during the live handover"):
