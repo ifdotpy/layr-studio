@@ -2435,7 +2435,7 @@ mod voice_composition_tests {
                         PortError::Identity
                         | PortError::ScopeMismatch
                         | PortError::Invalid
-                        | PortError::NotSent
+                        | PortError::NotSent(_)
                         | PortError::Deadline => {
                             AccountSessionError::Refused("Provider request was refused")
                         }

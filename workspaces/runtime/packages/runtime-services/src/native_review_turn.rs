@@ -605,7 +605,7 @@ impl ReviewPreparation {
                 | ReceiptOutcome::NoLiveAccountWorker
                 | ReceiptOutcome::ExpectedScopeMismatch
                 | ReceiptOutcome::DeadlineExpired
-                | ReceiptOutcome::NotHandedOff => (NativeReviewThreadStatus::NotSent, None),
+                | ReceiptOutcome::NotHandedOff(_) => (NativeReviewThreadStatus::NotSent, None),
                 ReceiptOutcome::Unknown { .. } => (NativeReviewThreadStatus::Unknown, None),
             },
             Err(AccountSessionError::Expired) => return Err(NativeError::Expired),

@@ -179,6 +179,11 @@ pub struct SessionStatus {
     pub initialize_result: Option<Arc<Value>>,
     /// Transport-owned proof, never a provider-reported initialize capability.
     pub supervisor_write_deduplication: bool,
+    /// Whether a journal barrier holds new provider work. Diagnostics only; not change-detected.
+    pub barrier_set: bool,
+    /// Current-generation journal entries held against [`MAX_UNSETTLED`]; unit: entries.
+    /// Diagnostics only; not change-detected.
+    pub held_entries: usize,
 }
 
 impl SessionStatus {
@@ -382,6 +387,8 @@ impl SessionHandle {
             initialization: InitializationStatus::AwaitingReply,
             initialize_result: None,
             supervisor_write_deduplication: false,
+            barrier_set: false,
+            held_entries: 0,
             attachment: AttachmentStatus {
                 handle: handle.clone(),
                 open_attempted: false,
@@ -407,6 +414,7 @@ impl SessionHandle {
             attachment_known: false,
             acknowledged: EventCursor(0),
             ack_target: None,
+            barrier_set: false,
             retained: Retained::default(),
         };
         let task = tokio::spawn(actor.run(factory, options));
@@ -469,6 +477,13 @@ impl SessionControl {
     pub fn cancel(&self) {
         self.stop.cancel();
     }
+    /// Diagnostics for a refused prepare: whether a journal barrier is set and
+    /// how many current-generation journal entries are held.
+    pub fn journal_gate(&self) -> (bool, usize) {
+        let status = self.status.borrow();
+        (status.barrier_set, status.held_entries)
+    }
+
     pub async fn prepare(&self, spec: RequestSpec) -> Result<PreparedRequest, SessionTaskError> {
         if *self.stop.subscribe().borrow() {
             return Err(SessionTaskError::Closed);
@@ -722,6 +737,8 @@ struct SessionTask {
     attachment_known: bool,
     acknowledged: EventCursor,
     ack_target: Option<EventCursor>,
+    /// Mirrors whether the serve loop holds a journal barrier, for diagnostics.
+    barrier_set: bool,
     retained: Retained,
 }
 
@@ -931,6 +948,7 @@ impl SessionTask {
             oneshot::Sender<Result<EventCursor, SessionTaskError>>,
         )> = None;
         loop {
+            self.barrier_set = barrier.is_some();
             self.publish(adapter);
             if !self.attachment_known
                 && let Some(info) = &adapter.status.borrow().info
@@ -1179,6 +1197,8 @@ impl SessionTask {
             status.initialization = self.state.initialization_status();
             status.attachment = attachment;
             status.supervisor_write_deduplication = adapter.supervisor_write_deduplication();
+            status.barrier_set = self.barrier_set;
+            status.held_entries = self.held_current();
             changed
         });
     }

@@ -26,6 +26,8 @@ fn lifecycle_capability_requires_exact_ready_connection_and_boolean_proof() {
         initialize_result: Some(Arc::new(
             serde_json::json!({"capabilities":{CAPABILITY:true}}),
         )),
+        barrier_set: false,
+        held_entries: 0,
         attachment: AttachmentStatus {
             handle: handle.clone(),
             open_attempted: true,

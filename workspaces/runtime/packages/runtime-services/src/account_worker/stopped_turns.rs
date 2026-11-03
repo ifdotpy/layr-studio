@@ -431,7 +431,7 @@ async fn request(
             RequestResult::NotSent => (Outcome::NotSent, Value::Null),
             RequestResult::Unknown => (Outcome::Unknown, Value::Null),
         },
-        Err(super::retained::PortError::NotSent) => (Outcome::NotSent, Value::Null),
+        Err(super::retained::PortError::NotSent(_)) => (Outcome::NotSent, Value::Null),
         Err(_) => (Outcome::Unknown, Value::Null),
     }
 }

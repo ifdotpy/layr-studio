@@ -1225,6 +1225,8 @@ mod tests {
         let handle = ProviderHandle::for_account("default");
         let mut status = SessionStatus {
             supervisor_write_deduplication: false,
+            barrier_set: false,
+            held_entries: 0,
             generation,
             initialization: InitializationStatus::Ready,
             initialize_result: None,
