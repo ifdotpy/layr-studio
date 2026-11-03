@@ -116,7 +116,7 @@ async fn signed_post(
         .map_err(|_| ApiError::new(StatusCode::FORBIDDEN, "Invalid federation timestamp"))?;
     let observed_user = optional_single_header(&parts.headers, "tailscale-user-login")?;
     let origin = federation_effects::OriginObservation::from_trusted_serve(observed_user);
-    if refused_from_outside(&parts.headers, &action, &raw) {
+    if refused_from_outside(&parts.headers, action, &raw) {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "Only a lead message is allowed from outside the tailnet",
@@ -383,7 +383,7 @@ mod ingress_tests {
 /// admits only that route; this keeps every other federation action on the tailnet.
 fn refused_from_outside(
     headers: &HeaderMap,
-    action: &federation_effects::FederationAction,
+    action: federation_effects::FederationAction,
     raw: &[u8],
 ) -> bool {
     let outside = crate::middleware::forwarded_source(headers)
@@ -408,11 +408,11 @@ mod outside_tests {
         let lead = br#"{"envelope":{"kind":"lead-message"}}"#;
         let other = br#"{"envelope":{"kind":"chat"}}"#;
         let message = federation_effects::FederationAction::Message;
-        assert!(!refused_from_outside(&outside_headers(), &message, lead));
-        assert!(refused_from_outside(&outside_headers(), &message, other));
+        assert!(!refused_from_outside(&outside_headers(), message, lead));
+        assert!(refused_from_outside(&outside_headers(), message, other));
         assert!(refused_from_outside(
             &outside_headers(),
-            &federation_effects::FederationAction::Pull,
+            federation_effects::FederationAction::Pull,
             lead
         ));
     }
@@ -423,7 +423,7 @@ mod outside_tests {
         tailnet.insert("x-forwarded-for", "100.75.160.63".parse().expect("header"));
         let other = br#"{"envelope":{"kind":"chat"}}"#;
         let pull = federation_effects::FederationAction::Pull;
-        assert!(!refused_from_outside(&tailnet, &pull, other));
-        assert!(!refused_from_outside(&HeaderMap::new(), &pull, other));
+        assert!(!refused_from_outside(&tailnet, pull, other));
+        assert!(!refused_from_outside(&HeaderMap::new(), pull, other));
     }
 }
