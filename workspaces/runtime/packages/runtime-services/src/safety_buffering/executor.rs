@@ -1331,6 +1331,7 @@ async fn persist_preparation_failure(
             if current.initial.attempt_id != expected.initial.attempt_id
                 || current.initial.stage != expected.initial.stage
                 || current.dispatch.state != expected.dispatch.state
+                || !matches!(current.dispatch.state, DispatchState::Ready)
             {
                 return Ok((current, false));
             }
@@ -1610,5 +1611,45 @@ mod initial_receipt_test {
         assert!(settled);
         assert_eq!(current.initial.stage, Stage::Failed);
         assert_eq!(current.error.as_deref(), Some("preparation refused"));
+    }
+
+    #[tokio::test]
+    async fn dispatched_start_ignores_preparation_failure_and_accepts_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
+        let mut operation: SafetyOperation = serde_json::from_str(STORED).unwrap();
+        operation.initial.stage = Stage::Start;
+        operation.dispatch.state = DispatchState::Intent;
+        let saved = operation.clone();
+        store.transaction_with(move |tx| {
+            let mut agent = json!({"id":"agent", "rootId":"agent", "epoch":7, "status":"starting", "accountKey":"acct", "provider":"codex", "compactions":0, "startAttempt":{"id":saved.initial.attempt_id,"epoch":7,"submitted":true,"events":[]}});
+            save_operation(tx, &mut agent, &saved)
+        }).await.unwrap();
+        let (current, settled) =
+            persist_preparation_failure(&store, &operation, "preparation refused")
+                .await
+                .unwrap();
+        assert!(!settled);
+        assert!(matches!(current.dispatch.state, DispatchState::Intent));
+        let receipt = SessionReceipt {
+            scope: operation.scope.clone(),
+            operation: "agent:turn:start".into(),
+            outcome: ReceiptOutcome::Written {
+                ticket: studio_runtime_providers::RequestTicket {
+                    generation: 1,
+                    id: RequestId::String("ticket".into()),
+                    method: Method::TurnStart,
+                },
+                response: ProviderResponse::Reply(json!({"turn":{"id":"accepted-turn"}})),
+            },
+            replayed: false,
+        };
+        assert!(
+            persist_stage_receipt(&store, &mut operation, Stage::Start, &receipt)
+                .await
+                .unwrap()
+        );
+        assert!(matches!(operation.dispatch.state, DispatchState::Received));
+        assert_eq!(operation.receipts["start"].len(), 1);
     }
 }
