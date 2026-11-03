@@ -104,3 +104,38 @@ test("reaper stops fixture descendants after the direct process exits", async ()
     rmSync(registryDirectory, { recursive: true, force: true });
   }
 });
+
+test("a fixture provider exits when the server that started it closes its stdin", async () => {
+  if (process.platform === "win32") return;
+
+  // The control socket keeps a provider alive after its stdin ends, as in the leak.
+  const control = mkdtempSync(join(tmpdir(), "fixture-provider-control-"));
+  const provider = spawn(
+    process.execPath,
+    [
+      fileURLToPath(
+        new URL("./fixtures/fake-codex-app-server.ts", import.meta.url),
+      ),
+    ],
+    {
+      env: { ...process.env, FAKE_CODEX_CONTROL: control },
+      stdio: ["pipe", "ignore", "ignore"],
+    },
+  );
+
+  try {
+    await once(provider, "spawn");
+    const pid = provider.pid!;
+    assert.equal(process.kill(pid, 0), true);
+
+    // The server exits and its end of stdin closes.
+    provider.stdin!.end();
+    await once(provider, "exit", { signal: AbortSignal.timeout(10_000) });
+
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally {
+    if (provider.exitCode === null && provider.signalCode === null)
+      provider.kill("SIGKILL");
+    rmSync(control, { recursive: true, force: true });
+  }
+});
