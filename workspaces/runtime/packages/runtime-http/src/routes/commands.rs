@@ -14,7 +14,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json, extract::State};
 use serde_json::Value;
 use studio_runtime_schema::command::{
-    Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow,
+    Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow, LeadMessageResult,
 };
 use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
 use studio_runtime_services::commands::{self, CommandError, Start};
@@ -82,7 +82,8 @@ async fn command(
         Command::Withdraw { .. }
         | Command::Stop { .. }
         | Command::Resolve { .. }
-        | Command::Pause { .. } => {
+        | Command::Pause { .. }
+        | Command::LeadMessage { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, request) = (ports.clone(), request.clone());
             let now = now_ms as f64 / 1000.0;
@@ -225,9 +226,16 @@ async fn command(
             }
         }
     };
-    let outcome = match answer {
-        Some(result) => CommandOutcome::Answer { result },
-        None => CommandOutcome::without_result(&request.command).ok_or_else(ApiError::internal)?,
+    let outcome = match (answer, &request.command) {
+        (Some(result), _) => CommandOutcome::Answer { result },
+        (None, Command::LeadMessage { .. }) => CommandOutcome::LeadMessage {
+            result: LeadMessageResult {
+                id: reference.id.clone(),
+            },
+        },
+        (None, _) => {
+            CommandOutcome::without_result(&request.command).ok_or_else(ApiError::internal)?
+        }
     };
     let mut response = store
         .read_async("runtime-http/routes/commands", move |connection| {
@@ -506,6 +514,44 @@ mod tests {
             assert_eq!(response["error"], "Invalid request");
             assert_eq!(response["location"][0], "body");
         }
+    }
+
+    fn lead_message(id: &str, number: u64, grant: &str, text: &str) -> Value {
+        json!({"id":id,"client":"web-1","number":number,"kind":"lead_message","target":grant,"body":{"text":text}})
+    }
+
+    async fn outbox_count(store: &RuntimeStore) -> i64 {
+        store
+            .transaction(|tx| {
+                Ok(
+                    tx.query_row("SELECT COUNT(*) FROM runtime_outbox", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                )
+            })
+            .await
+            .expect("outbox count")
+    }
+
+    #[tokio::test]
+    async fn lead_message_to_an_unknown_grant_is_refused_and_queues_nothing() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let (status, response) =
+            post(&app, None, lead_message(&id, 1, "no-such-grant", "hello")).await;
+        assert_eq!(status, 403, "{response}");
+        assert_eq!(outbox_count(&store).await, 0);
+    }
+
+    #[tokio::test]
+    async fn lead_message_needs_a_text_body() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let mut wire = lead_message(&id, 1, "grant-1", "hello");
+        wire["body"] = json!({});
+        let (status, response) = post(&app, None, wire).await;
+        assert_eq!(status, 400, "{response}");
+        assert_eq!(outbox_count(&store).await, 0);
     }
 
     #[tokio::test]

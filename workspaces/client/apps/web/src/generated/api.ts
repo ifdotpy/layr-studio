@@ -2617,6 +2617,17 @@ export interface components {
       action: "accept_peer";
       invitation: components["schemas"]["FederationInvitation"];
     };
+    /** AcceptProjectPeerRequest */
+    AcceptProjectPeerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "accept_project_peer";
+      invitation: components["schemas"]["FederationInvitation"];
+      /** Project Id */
+      project_id: string;
+    };
     /** AccessAudit */
     AccessAudit: {
       /**
@@ -11043,6 +11054,9 @@ export interface components {
     CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
     CommandId: string;
+    CommandLeadMessageBody: {
+      text: string;
+    };
     /**
      * CommandRequest
      * @description One write action. The owner is runtime-schema/src/command.rs.
@@ -11053,7 +11067,8 @@ export interface components {
       | components["schemas"]["CommandRequestStop"]
       | components["schemas"]["CommandRequestResolve"]
       | components["schemas"]["CommandRequestPause"]
-      | components["schemas"]["CommandRequestAnswer"];
+      | components["schemas"]["CommandRequestAnswer"]
+      | components["schemas"]["CommandRequestLeadMessage"];
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
       client: string;
@@ -11063,6 +11078,18 @@ export interface components {
        * @enum {string}
        */
       kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestLeadMessage: {
+      body: components["schemas"]["CommandLeadMessageBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "lead_message";
       number: number;
       target: string;
     };
@@ -11134,7 +11161,8 @@ export interface components {
     /** @description One applied command. The kind names the kind-specific result; only answer has one. */
     CommandResponse:
       | components["schemas"]["CommandResponseApplied"]
-      | components["schemas"]["CommandResponseAnswer"];
+      | components["schemas"]["CommandResponseAnswer"]
+      | components["schemas"]["CommandResponseLeadMessage"];
     CommandResponseAnswer: {
       /**
        * @description discriminator enum property added by openapi-typescript
@@ -11158,6 +11186,23 @@ export interface components {
       kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
+      rev: number;
+      rows: components["schemas"]["CommandRow"][];
+      seq: number;
+      /** @enum {string} */
+      status: "applied";
+    };
+    CommandResponseLeadMessage: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "lead_message";
+      ref_id: string;
+      ref_kind: string;
+      result: {
+        id: string;
+      };
       rev: number;
       rows: components["schemas"]["CommandRow"][];
       seq: number;
@@ -12373,6 +12418,16 @@ export interface components {
        * @default true
        */
       yolo_mode?: boolean | undefined;
+    };
+    /** CreateProjectInviteRequest */
+    CreateProjectInviteRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "create_project_invite";
+      /** Project Id */
+      project_id: string;
     };
     /** CreateRoomRequest */
     CreateRoomRequest: {
@@ -13829,8 +13884,16 @@ export interface components {
        * @default null
        */
       leadName?: null | string | undefined;
-      /** Origin */
-      origin: string;
+      /**
+       * Origin
+       * @default null
+       */
+      origin?: null | string | undefined;
+      /**
+       * Projectid
+       * @default null
+       */
+      projectId?: null | string | undefined;
       /**
        * Protocol
        * @constant
@@ -13838,6 +13901,11 @@ export interface components {
       protocol: 1;
       /** Publickey */
       publicKey: string;
+      /**
+       * Scope
+       * @default null
+       */
+      scope?: "project" | null | undefined;
       /** Stateid */
       stateId: string;
       /** @default null */
@@ -14442,6 +14510,16 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** ListProjectGrantsRequest */
+    ListProjectGrantsRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "list_project_grants";
+      /** Project Id */
+      project_id: string;
+    };
     /**
      * LiveUpdateState
      * @enum {string}
@@ -14697,7 +14775,11 @@ export interface components {
      * MessageKind
      * @enum {string}
      */
-    MessageKind: "chat-message" | "room-invite" | "room-accept";
+    MessageKind:
+      | "chat-message"
+      | "room-invite"
+      | "room-accept"
+      | "lead-message";
     /** MessageReceiptEntityDto */
     MessageReceiptEntityDto: {
       /** Agent */
@@ -16638,12 +16720,27 @@ export interface components {
       /** Origin */
       origin: string;
       /**
+       * Peerprojectid
+       * @default null
+       */
+      peerProjectId?: null | string | undefined;
+      /**
+       * Projectid
+       * @default null
+       */
+      projectId?: null | string | undefined;
+      /**
        * Protocol
        * @constant
        */
       protocol: 1;
       /** Publickey */
       publicKey: string;
+      /**
+       * Scope
+       * @default null
+       */
+      scope?: "project" | null | undefined;
       /** Stateid */
       stateId: string;
       /**
@@ -17039,6 +17136,19 @@ export interface components {
       members?: string[] | null | undefined;
       /** Name */
       name?: null | string | undefined;
+      /** Peerleads */
+      peerLeads?:
+        | {
+            /** Grant */
+            grant: string;
+            /** Label */
+            label: string;
+            /** Remoteproject */
+            remoteProject: string;
+            /** Server */
+            server: string;
+          }[]
+        | undefined;
       /** Projectpath */
       projectPath?: null | string | undefined;
       /** Revision */
@@ -18175,6 +18285,36 @@ export interface components {
       parentId?: null | string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** ProjectGrant */
+    ProjectGrant: {
+      /** Capabilities */
+      capabilities: string[];
+      /** Createdat */
+      createdAt: number;
+      /** Fingerprint */
+      fingerprint: string;
+      /** Grantid */
+      grantId: string;
+      /** Localproject */
+      localProject: string;
+      /** Peerstateid */
+      peerStateId: string;
+      /** Remoteproject */
+      remoteProject: string;
+    };
+    /** ProjectGrantsResponse */
+    ProjectGrantsResponse: {
+      /** Grants */
+      grants: components["schemas"]["ProjectGrant"][];
+    };
+    /** ProjectInviteResponse */
+    ProjectInviteResponse: {
+      /** Expires */
+      expires: number;
+      invitation: components["schemas"]["FederationInvitation"];
+      /** Warning */
+      warning: string;
     };
     /**
      * ProjectLayrReadinessDto
@@ -20312,6 +20452,16 @@ export interface components {
       action: "revoke_peer";
       /** State Id */
       state_id: string;
+    };
+    /** RevokeProjectGrantRequest */
+    RevokeProjectGrantRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "revoke_project_grant";
+      /** Grant Id */
+      grant_id: string;
     };
     /** RoomDeleteBody */
     RoomDeleteBody: {
@@ -25435,6 +25585,13 @@ export interface components {
       phase?: null | string | undefined;
       /** @default null */
       previousError?: components["schemas"]["JsonValue"] | null | undefined;
+      /** @description Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text. */
+      providerUnknown?:
+        | {
+            kind: string;
+            raw: string;
+          }
+        | undefined;
       /**
        * Reasoningms
        * @default null
@@ -32134,7 +32291,11 @@ export interface operations {
           | components["schemas"]["RevokePeerRequest"]
           | components["schemas"]["RoomOptionsRequest"]
           | components["schemas"]["SetEnabledRequest"]
-          | components["schemas"]["StatusActionRequest"];
+          | components["schemas"]["StatusActionRequest"]
+          | components["schemas"]["CreateProjectInviteRequest"]
+          | components["schemas"]["AcceptProjectPeerRequest"]
+          | components["schemas"]["ListProjectGrantsRequest"]
+          | components["schemas"]["RevokeProjectGrantRequest"];
       };
     };
     responses: {
@@ -32159,7 +32320,9 @@ export interface operations {
         content: {
           "application/json":
             | components["schemas"]["CreateInviteResponse"]
-            | components["schemas"]["FederationSnapshot"];
+            | components["schemas"]["FederationSnapshot"]
+            | components["schemas"]["ProjectGrantsResponse"]
+            | components["schemas"]["ProjectInviteResponse"];
         };
       };
       /** @description Bad Request */
@@ -39140,6 +39303,7 @@ export const MessageKind = {
   "chat-message": "chat-message",
   "room-invite": "room-invite",
   "room-accept": "room-accept",
+  "lead-message": "lead-message",
 } as const;
 export type MessageKind = components["schemas"]["MessageKind"];
 export const MessageSendStatus = {

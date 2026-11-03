@@ -301,7 +301,11 @@ impl FederationRepository {
             | FederationRequest::RevokePeer { .. }
             | FederationRequest::RoomOptions { .. }
             | FederationRequest::CreateInvite { .. }
-            | FederationRequest::AcceptPeer { .. } => {
+            | FederationRequest::AcceptPeer { .. }
+            | FederationRequest::CreateProjectInvite { .. }
+            | FederationRequest::AcceptProjectPeer { .. }
+            | FederationRequest::ListProjectGrants { .. }
+            | FederationRequest::RevokeProjectGrant { .. } => {
                 return Err(StoreError::SchemaMismatch(
                     "invalid federation room action".into(),
                 ));

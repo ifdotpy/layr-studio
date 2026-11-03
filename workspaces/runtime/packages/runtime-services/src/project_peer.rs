@@ -82,6 +82,7 @@ mod tests {
                         capability: Capability::LeadMessages,
                         created_at: 100,
                         revoked_at: None,
+                        peer_label: "Server B".into(),
                     }],
                 )?;
                 if revoke {

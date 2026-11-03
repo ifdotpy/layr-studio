@@ -117,11 +117,13 @@ pub async fn peer_team_write(
         ProjectsRepository::put_project(tx, &project)?;
         let team_values = project.get("peerTeams").and_then(Value::as_array).cloned().unwrap_or_default();
         let live = live_teams(&team_values, &agents, &path, &prepared)?;
+        let project_id = project.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
+        let peer_leads = crate::project_projection::peer_leads_of(tx, &project_id)?;
         let mut live_ids = std::collections::HashSet::new();
         for team in &live {
             let id = team.get("id").and_then(Value::as_str).ok_or(ProjectsError::InvalidStored { table: "runtime_projects", id: path.clone() })?;
             live_ids.insert(id.to_owned());
-            SyncDocumentsRepository::put_entity(tx, "peerTeam", id, peer_team_projection(team, &path, current + 1)?, false)?;
+            SyncDocumentsRepository::put_entity(tx, "peerTeam", id, peer_team_projection(team, &path, current + 1, &peer_leads)?, false)?;
         }
         for id in previous_ids.difference(&live_ids) { SyncDocumentsRepository::put_entity(tx, "peerTeam", id, json!({}), true)?; }
         refresh_project_rooms(tx, &path, &prepared)?;
@@ -199,12 +201,15 @@ pub(crate) fn peer_team_projection(
     team: &Value,
     path: &str,
     revision: u64,
+    peer_leads: &[studio_runtime_schema::project_record::PeerLead],
 ) -> Result<Value, ProjectsError> {
-    Ok(
-        json!({"id":team.get("id").and_then(Value::as_str).ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,
+    let mut value = json!({"id":team.get("id").and_then(Value::as_str).ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,
         "name":team.get("name").and_then(Value::as_str).ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,
-        "projectPath":path,"members":team.get("members").ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,"revision":revision}),
-    )
+        "projectPath":path,"members":team.get("members").ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,"revision":revision});
+    if !peer_leads.is_empty() {
+        value["peerLeads"] = json!(peer_leads);
+    }
+    Ok(value)
 }
 
 pub(crate) fn refresh_project_rooms(

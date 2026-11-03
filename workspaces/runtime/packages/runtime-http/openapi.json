@@ -918,6 +918,30 @@
         "title": "AcceptPeerRequest",
         "type": "object"
       },
+      "AcceptProjectPeerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "accept_project_peer",
+            "title": "Action",
+            "type": "string"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/FederationInvitation"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "invitation",
+          "project_id"
+        ],
+        "title": "AcceptProjectPeerRequest",
+        "type": "object"
+      },
       "AccessAudit": {
         "additionalProperties": false,
         "properties": {
@@ -22272,11 +22296,26 @@
         "description": "Identity of the outbox command that delivers an answer.",
         "type": "string"
       },
+      "CommandLeadMessageBody": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
       "CommandRequest": {
         "description": "One write action. The owner is runtime-schema/src/command.rs.",
         "discriminator": {
           "mapping": {
             "answer": "#/components/schemas/CommandRequestAnswer",
+            "lead_message": "#/components/schemas/CommandRequestLeadMessage",
             "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
             "send": "#/components/schemas/CommandRequestSend",
@@ -22303,6 +22342,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestAnswer"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestLeadMessage"
           }
         ],
         "title": "CommandRequest"
@@ -22324,6 +22366,46 @@
           },
           "kind": {
             "const": "answer",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CommandRequestLeadMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandLeadMessageBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "lead_message",
             "type": "string"
           },
           "number": {
@@ -22570,6 +22652,7 @@
         "discriminator": {
           "mapping": {
             "answer": "#/components/schemas/CommandResponseAnswer",
+            "lead_message": "#/components/schemas/CommandResponseLeadMessage",
             "pause": "#/components/schemas/CommandResponseApplied",
             "resolve": "#/components/schemas/CommandResponseApplied",
             "send": "#/components/schemas/CommandResponseApplied",
@@ -22584,6 +22667,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandResponseAnswer"
+          },
+          {
+            "$ref": "#/components/schemas/CommandResponseLeadMessage"
           }
         ]
       },
@@ -22680,6 +22766,62 @@
           "seq",
           "rows",
           "kind"
+        ],
+        "type": "object"
+      },
+      "CommandResponseLeadMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "lead_message",
+            "type": "string"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "ref_kind": {
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "rev": {
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CommandRow"
+            },
+            "type": "array"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "applied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "ref_kind",
+          "ref_id",
+          "rev",
+          "seq",
+          "rows",
+          "kind",
+          "result"
         ],
         "type": "object"
       },
@@ -25141,6 +25283,26 @@
           }
         },
         "title": "CreateLeadRequest",
+        "type": "object"
+      },
+      "CreateProjectInviteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "create_project_invite",
+            "title": "Action",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "CreateProjectInviteRequest",
         "type": "object"
       },
       "CreateRoomRequest": {
@@ -28788,8 +28950,28 @@
             "title": "Leadname"
           },
           "origin": {
-            "title": "Origin",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Origin"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Projectid"
           },
           "protocol": {
             "const": 1,
@@ -28801,6 +28983,21 @@
           "publicKey": {
             "title": "Publickey",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope"
           },
           "stateId": {
             "title": "Stateid",
@@ -28840,7 +29037,6 @@
           "token",
           "stateId",
           "label",
-          "origin",
           "publicKey",
           "expires"
         ],
@@ -30436,6 +30632,26 @@
         "title": "LinuxVMStatus",
         "type": "object"
       },
+      "ListProjectGrantsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "list_project_grants",
+            "title": "Action",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "ListProjectGrantsRequest",
+        "type": "object"
+      },
       "LiveUpdateState": {
         "enum": [
           "idle",
@@ -31143,7 +31359,8 @@
         "enum": [
           "chat-message",
           "room-invite",
-          "room-accept"
+          "room-accept",
+          "lead-message"
         ],
         "title": "MessageKind",
         "type": "string"
@@ -35316,6 +35533,30 @@
             "title": "Origin",
             "type": "string"
           },
+          "peerProjectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Peerprojectid"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Projectid"
+          },
           "protocol": {
             "const": 1,
             "maximum": 1,
@@ -35326,6 +35567,21 @@
           "publicKey": {
             "title": "Publickey",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope"
           },
           "stateId": {
             "title": "Stateid",
@@ -36376,6 +36632,39 @@
               }
             ],
             "title": "Name"
+          },
+          "peerLeads": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "grant": {
+                  "title": "Grant",
+                  "type": "string"
+                },
+                "label": {
+                  "title": "Label",
+                  "type": "string"
+                },
+                "remoteProject": {
+                  "title": "Remoteproject",
+                  "type": "string"
+                },
+                "server": {
+                  "title": "Server",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "grant",
+                "remoteProject",
+                "server",
+                "label"
+              ],
+              "title": "PeerLead",
+              "type": "object"
+            },
+            "title": "Peerleads",
+            "type": "array"
           },
           "projectPath": {
             "anyOf": [
@@ -39478,6 +39767,93 @@
           "name"
         ],
         "title": "ProjectFolder",
+        "type": "object"
+      },
+      "ProjectGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "grantId": {
+            "title": "Grantid",
+            "type": "string"
+          },
+          "localProject": {
+            "title": "Localproject",
+            "type": "string"
+          },
+          "peerStateId": {
+            "title": "Peerstateid",
+            "type": "string"
+          },
+          "remoteProject": {
+            "title": "Remoteproject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grantId",
+          "peerStateId",
+          "fingerprint",
+          "localProject",
+          "remoteProject",
+          "capabilities",
+          "createdAt"
+        ],
+        "title": "ProjectGrant",
+        "type": "object"
+      },
+      "ProjectGrantsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectGrant"
+            },
+            "title": "Grants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "grants"
+        ],
+        "title": "ProjectGrantsResponse",
+        "type": "object"
+      },
+      "ProjectInviteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires": {
+            "title": "Expires",
+            "type": "integer"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/FederationInvitation"
+          },
+          "warning": {
+            "title": "Warning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation",
+          "expires",
+          "warning"
+        ],
+        "title": "ProjectInviteResponse",
         "type": "object"
       },
       "ProjectLayrReadinessDto": {
@@ -45116,6 +45492,26 @@
           "state_id"
         ],
         "title": "RevokePeerRequest",
+        "type": "object"
+      },
+      "RevokeProjectGrantRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "revoke_project_grant",
+            "title": "Action",
+            "type": "string"
+          },
+          "grant_id": {
+            "title": "Grant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "grant_id"
+        ],
+        "title": "RevokeProjectGrantRequest",
         "type": "object"
       },
       "RoomDeleteBody": {
@@ -58262,6 +58658,22 @@
               }
             ],
             "default": null
+          },
+          "providerUnknown": {
+            "description": "Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text.",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "raw": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "raw"
+            ],
+            "type": "object"
           },
           "reasoningMs": {
             "anyOf": [
@@ -72752,11 +73164,15 @@
                 "discriminator": {
                   "mapping": {
                     "accept_peer": "#/components/schemas/AcceptPeerRequest",
+                    "accept_project_peer": "#/components/schemas/AcceptProjectPeerRequest",
                     "approve_peer": "#/components/schemas/ApprovePeerRequest",
                     "approve_room": "#/components/schemas/ApproveRoomRequest",
                     "create_invite": "#/components/schemas/CreateInviteRequest",
+                    "create_project_invite": "#/components/schemas/CreateProjectInviteRequest",
                     "create_room": "#/components/schemas/CreateRoomRequest",
+                    "list_project_grants": "#/components/schemas/ListProjectGrantsRequest",
                     "revoke_peer": "#/components/schemas/RevokePeerRequest",
+                    "revoke_project_grant": "#/components/schemas/RevokeProjectGrantRequest",
                     "room_options": "#/components/schemas/RoomOptionsRequest",
                     "set_enabled": "#/components/schemas/SetEnabledRequest",
                     "status": "#/components/schemas/StatusActionRequest"
@@ -72790,6 +73206,18 @@
                   },
                   {
                     "$ref": "#/components/schemas/StatusActionRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateProjectInviteRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptProjectPeerRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ListProjectGrantsRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RevokeProjectGrantRequest"
                   }
                 ],
                 "title": "Body"
@@ -72809,6 +73237,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/FederationSnapshot"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProjectGrantsResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProjectInviteResponse"
                     }
                   ],
                   "title": "Response Manage Federation Api Federation Post"

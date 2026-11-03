@@ -8,6 +8,36 @@ use studio_runtime_store::TaskRecord;
 
 pub(super) const TOOL_OUTPUT_CHARS: usize = 12_000;
 
+/// Provider item kinds Studio handles by name. Owner of the list: this module.
+/// Any other kind is stored with its raw provider item as `providerUnknown`.
+const KNOWN_ITEM_KINDS: &[&str] = &[
+    "userMessage",
+    "agentMessage",
+    "reasoning",
+    "plan",
+    "commandExecution",
+    "fileChange",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "collabAgentToolCall",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+    "enteredReviewMode",
+    "exitedReviewMode",
+    "contextCompaction",
+    "hookPrompt",
+];
+
+/// Adds `providerUnknown: {kind, raw}` to an item record of a kind Studio does not know.
+/// `raw` is the provider item as JSON text, opaque to Studio (never decoded as a typed value).
+pub(super) fn item_metadata(kind: &str, raw: &Value, mut metadata: Value) -> Value {
+    if !KNOWN_ITEM_KINDS.contains(&kind) {
+        metadata["providerUnknown"] = json!({"kind": kind, "raw": raw.to_string()});
+    }
+    metadata
+}
+
 #[derive(Default)]
 pub(super) struct ItemDecision {
     pub task: Option<TaskRecord>,

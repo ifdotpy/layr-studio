@@ -538,9 +538,15 @@ pub fn maintain_entity_projections_with_server_id(
                         project_context(value.and_then(|value| value.get("vault")))?,
                     )
                 };
-                if let Some(projected) =
-                    crate::project_projection::project_record(*project, readiness, sync, vault)
-                {
+                let peer_leads =
+                    crate::project_projection::peer_leads_of(transaction, &project.id)?;
+                if let Some(projected) = crate::project_projection::project_record(
+                    *project,
+                    readiness,
+                    sync,
+                    vault,
+                    &peer_leads,
+                ) {
                     SyncDocumentsRepository::put_entity(
                         transaction,
                         "project",
@@ -2282,6 +2288,19 @@ struct PeerTeamProjection {
     project_path: String,
     members: Vec<String>,
     revision: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    peer_leads: Vec<studio_runtime_schema::project_record::PeerLead>,
+}
+
+/// Republish every peer team entity from the project records and the project grants.
+/// A writer of grants calls it in its transaction, so the peer leads show or hide at once.
+pub(crate) fn publish_peer_teams(transaction: &Transaction<'_>) -> StoreResult<()> {
+    maintain_peer_team_entities(
+        transaction,
+        &live_agent_records(transaction)?,
+        &projection_records(transaction, "runtime_projects")?,
+        &|_, _, _, _| true,
+    )
 }
 
 fn maintain_peer_team_entities(
@@ -2328,6 +2347,7 @@ fn maintain_peer_team_entities(
         else {
             continue;
         };
+        let peer_leads = crate::project_projection::peer_leads_of(transaction, &project.id)?;
         let revision = match project.peer_teams_revision {
             studio_runtime_schema::queue_command::Field::Missing => Some(0),
             studio_runtime_schema::queue_command::Field::Null => None,
@@ -2362,6 +2382,7 @@ fn maintain_peer_team_entities(
                             .map(|member| bound(&member, ""))
                             .collect(),
                         revision,
+                        peer_leads: peer_leads.clone(),
                     },
                 );
             }

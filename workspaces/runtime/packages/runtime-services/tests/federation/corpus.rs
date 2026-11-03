@@ -1,5 +1,6 @@
 use crate::{
-    federation_delivery as delivery, federation_effects as effects, remote_transport as transport,
+    federation_delivery as delivery, federation_effects as effects, federation_lead,
+    federation_messaging::FederationMessageError, remote_transport as transport,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
@@ -11,6 +12,7 @@ use studio_runtime_store::RuntimeStore;
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,
 };
+use studio_runtime_store::project_grants::{self, Capability, GrantRow};
 
 const NOW: f64 = 1_700_000_000.0;
 static FIXTURE_REQUEST_MS: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
@@ -1858,4 +1860,334 @@ async fn oversized_batches() {
         })
             .await.expect("batch size fixture");
     }
+}
+
+/// Two stores paired by one project grant each. The sender lead of "sender-proj" holds grant
+/// "g-send". The root lead of "proj" on the receiver holds grant "g-recv".
+async fn lead_pair(
+    corpus: &Corpus,
+    name: &str,
+) -> (std::sync::Arc<RuntimeStore>, std::sync::Arc<RuntimeStore>) {
+    let (_, sender) = corpus.store(&format!("{name}-sender"), false).await;
+    let (_, receiver) = corpus.store(&format!("{name}-receiver"), true).await;
+    let row = |grant: &str, peer: String, key: String, local: &str, remote: &str| GrantRow {
+        grant_id: grant.into(),
+        peer,
+        peer_public_key: key,
+        local_project: local.into(),
+        remote_project: remote.into(),
+        capability: Capability::LeadMessages,
+        created_at: 1,
+        revoked_at: None,
+        peer_label: "Peer".into(),
+    };
+    let peer = corpus.peer().to_owned();
+    let remote_key = corpus.data["seed"]["remote"]["publicKey"]
+        .as_str()
+        .expect("fixture key")
+        .to_owned();
+    let local = corpus.data["seed"]["local"]["stateId"]
+        .as_str()
+        .expect("fixture id")
+        .to_owned();
+    let local_key = corpus.data["seed"]["local"]["publicKey"]
+        .as_str()
+        .expect("fixture key")
+        .to_owned();
+    let send_row = row("g-send", peer, remote_key, "sender-proj", "proj");
+    sender
+        .transaction(move |tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.projectId','sender-proj') WHERE id='lead'",
+                [],
+            )?;
+            project_grants::insert_rows(tx, &[send_row])?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        })
+        .await
+        .expect("fixture operation");
+    let recv_row = row("g-recv", local, local_key, "proj", "sender-proj");
+    receiver
+        .transaction(move |tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.projectId','proj') WHERE id='lead'",
+                [],
+            )?;
+            project_grants::insert_rows(tx, &[recv_row])?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        })
+        .await
+        .expect("fixture operation");
+    (sender, receiver)
+}
+
+/// Queue a lead message from `lead` (an agent record) to `grant` in one transaction.
+async fn queue_lead(
+    store: &std::sync::Arc<RuntimeStore>,
+    lead: Value,
+    grant: &str,
+    text: &str,
+    key: &str,
+    now: f64,
+) -> Result<federation_lead::LeadSendReply, FederationMessageError> {
+    let (grant, text, key) = (grant.to_owned(), text.to_owned(), key.to_owned());
+    store
+        .transaction_with(move |tx| {
+            federation_lead::send_in_transaction(tx, &lead, &grant, &text, &key, now)
+        })
+        .await
+}
+
+/// The text and grant of every peer-lead event of the lead of one store.
+fn peer_lead_events(store: &RuntimeStore) -> Vec<Value> {
+    let db = store.test_reader().expect("fixture operation");
+    let mut query = db
+        .prepare("SELECT text FROM runtime_events WHERE agent='lead' AND kind='agent_message'")
+        .expect("fixture operation");
+    query
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("fixture operation")
+        .map(|text| {
+            serde_json::from_str(&text.expect("fixture operation")).expect("fixture operation")
+        })
+        .collect()
+}
+
+fn lead_record(project: &str) -> Value {
+    json!({"id":"lead","isLead":true,"projectId":project})
+}
+
+#[tokio::test]
+async fn lead_message_is_queued_once_and_delivered_to_the_peer_root_lead() {
+    let corpus = &Corpus::new();
+    let (sender, receiver) = lead_pair(corpus, "lead-send").await;
+    let now = corpus.now();
+    let key = fixture_request_id("lead-send-key");
+    let first = queue_lead(
+        &sender,
+        lead_record("sender-proj"),
+        "g-send",
+        "hello peer",
+        key,
+        now,
+    )
+    .await
+    .expect("queue lead message");
+    // A retry with the same key and body returns the first reply and queues nothing.
+    let again = queue_lead(
+        &sender,
+        lead_record("sender-proj"),
+        "g-send",
+        "hello peer",
+        key,
+        now + 1.0,
+    )
+    .await
+    .expect("retry lead message");
+    assert_eq!(first, again);
+    assert!(
+        queue_lead(
+            &sender,
+            lead_record("sender-proj"),
+            "g-send",
+            "changed",
+            key,
+            now
+        )
+        .await
+        .is_err()
+    );
+    let outbox = rows(&sender, "runtime_federation_outbox");
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0]["id"], json!(first.id));
+    assert_eq!(outbox[0]["kind"], "lead-message");
+    assert_eq!(outbox[0]["room"], "proj");
+    let local = corpus.data["seed"]["local"]["stateId"]
+        .as_str()
+        .expect("fixture id");
+    let wire = PeerTransport {
+        receiver: std::sync::Arc::clone(&receiver),
+        sender: local.to_owned(),
+        now,
+        state: std::sync::Mutex::new(PeerTransportState::default()),
+        bad_receipt: None,
+        bad_response_signature: false,
+        link_advert: None,
+        cancel_after: None,
+    };
+    assert_eq!(
+        delivery::pump_peer(
+            std::sync::Arc::clone(&sender),
+            corpus.peer(),
+            now,
+            &wire,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))
+        )
+        .await
+        .expect("deliver lead message"),
+        1
+    );
+    assert!(rows(&sender, "runtime_federation_outbox").is_empty());
+    let events = peer_lead_events(&receiver);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["source"], "peer_lead");
+    assert_eq!(events[0]["untrusted"], json!(true));
+    assert_eq!(events[0]["text"], "hello peer");
+    assert_eq!(events[0]["peerServer"], local);
+    assert_eq!(events[0]["grant"], "g-recv");
+}
+
+#[tokio::test]
+async fn owner_lead_message_uses_the_root_lead_and_dedupes_by_command_id() {
+    let corpus = &Corpus::new();
+    let (sender, _) = lead_pair(corpus, "owner-lead").await;
+    let now = corpus.now();
+    let key = fixture_request_id("owner-lead-key").to_owned();
+    let (first_key, retry_key) = (key.clone(), key.clone());
+    let first = sender
+        .transaction_with(move |tx| {
+            federation_lead::lead_message_in_transaction(
+                tx,
+                "g-send",
+                "hello peer",
+                &first_key,
+                now,
+            )
+        })
+        .await
+        .expect("owner lead message");
+    assert_eq!(first.grant, "g-send");
+    // A retry with the same command id returns the first reply and queues nothing more.
+    let again = sender
+        .transaction_with(move |tx| {
+            federation_lead::lead_message_in_transaction(
+                tx,
+                "g-send",
+                "hello peer",
+                &retry_key,
+                now + 1.0,
+            )
+        })
+        .await
+        .expect("retry owner lead message");
+    assert_eq!(first, again);
+    let outbox = rows(&sender, "runtime_federation_outbox");
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0]["id"], json!(first.id));
+    assert_eq!(outbox[0]["room"], "proj");
+    let unknown = sender
+        .transaction_with(move |tx| {
+            federation_lead::lead_message_in_transaction(tx, "no-such-grant", "x", &key, now)
+        })
+        .await;
+    assert!(
+        matches!(unknown, Err(FederationMessageError::Forbidden(_))),
+        "{unknown:?}"
+    );
+}
+
+#[tokio::test]
+async fn only_the_root_lead_sends_to_a_peer_lead() {
+    let corpus = &Corpus::new();
+    let (sender, _) = lead_pair(corpus, "lead-refusal").await;
+    let key = fixture_request_id("lead-refusal-key");
+    let subagent =
+        json!({"id":"helper","isLead":false,"parentId":"lead","projectId":"sender-proj"});
+    let refused = queue_lead(
+        &sender,
+        subagent,
+        "g-send",
+        "from a subagent",
+        key,
+        corpus.now(),
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(FederationMessageError::Forbidden(_))),
+        "{refused:?}"
+    );
+    assert!(rows(&sender, "runtime_federation_outbox").is_empty());
+}
+
+#[tokio::test]
+async fn the_peer_lead_reply_reaches_the_original_sender() {
+    let corpus = &Corpus::new();
+    let (sender, receiver) = lead_pair(corpus, "lead-reply").await;
+    let now = corpus.now();
+    let local = corpus.data["seed"]["local"]["stateId"]
+        .as_str()
+        .expect("fixture id")
+        .to_owned();
+    let key = fixture_request_id("lead-reply-key");
+    queue_lead(
+        &sender,
+        lead_record("sender-proj"),
+        "g-send",
+        "question",
+        key,
+        now,
+    )
+    .await
+    .expect("queue lead message");
+    let forward = PeerTransport {
+        receiver: std::sync::Arc::clone(&receiver),
+        sender: local.clone(),
+        now,
+        state: std::sync::Mutex::new(PeerTransportState::default()),
+        bad_receipt: None,
+        bad_response_signature: false,
+        link_advert: None,
+        cancel_after: None,
+    };
+    delivery::pump_peer(
+        std::sync::Arc::clone(&sender),
+        corpus.peer(),
+        now,
+        &forward,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .await
+    .expect("deliver lead message");
+    // The receiving lead replies with the grant named by the received event.
+    let received = peer_lead_events(&receiver);
+    let grant = received[0]["grant"]
+        .as_str()
+        .expect("event grant")
+        .to_owned();
+    queue_lead(
+        &receiver,
+        lead_record("proj"),
+        &grant,
+        "answer",
+        fixture_request_id("lead-reply-answer"),
+        now,
+    )
+    .await
+    .expect("reply to the peer lead");
+    let back = PeerTransport {
+        receiver: std::sync::Arc::clone(&sender),
+        sender: corpus.peer().to_owned(),
+        now,
+        state: std::sync::Mutex::new(PeerTransportState::default()),
+        bad_receipt: None,
+        bad_response_signature: false,
+        link_advert: None,
+        cancel_after: None,
+    };
+    assert_eq!(
+        delivery::pump_peer(
+            std::sync::Arc::clone(&receiver),
+            &local,
+            now,
+            &back,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))
+        )
+        .await
+        .expect("deliver the reply"),
+        1
+    );
+    let replies = peer_lead_events(&sender);
+    assert_eq!(replies.len(), 1, "{replies:?}");
+    assert_eq!(replies[0]["text"], "answer");
+    assert_eq!(replies[0]["grant"], "g-send");
 }

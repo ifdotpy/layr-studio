@@ -128,7 +128,9 @@ pub fn authorize(
                 | Command::Withdraw { target, .. }
                 | Command::Stop { target, .. }
                 | Command::Pause { target, .. } => target.as_str().to_owned(),
-                Command::Answer { .. } => return Err(CommandError::Forbidden),
+                Command::Answer { .. } | Command::LeadMessage { .. } => {
+                    return Err(CommandError::Forbidden);
+                }
             };
             let below = crate::managed_host_tools::is_descendant(tx, id, &chat)
                 .map_err(|_| CommandError::Invalid("Invalid stored agent ancestry"))?;
@@ -634,6 +636,21 @@ pub fn execute_sync(
             crate::outbox_resolve::decide(&entry, body.action)?;
             crate::outbox_resolve::apply(tx, &entry, body.action, now_ms)?
         }
+        Command::LeadMessage { target, body } => {
+            let sent = crate::federation_lead::lead_message_in_transaction(
+                tx,
+                target.as_str(),
+                body.text.as_str(),
+                request.id.as_str(),
+                now,
+            )
+            .map_err(lead_message_error)?;
+            RequestReference {
+                kind: RequestReferenceKind::Outbox,
+                id: sent.id,
+                revision: 0,
+            }
+        }
         Command::Send { .. } | Command::Answer { .. } => unreachable!("refused above"),
     };
     let reference = finish(tx, &begun, &reference)?;
@@ -642,6 +659,20 @@ pub fn execute_sync(
         replayed: false,
         reply,
     })
+}
+
+fn lead_message_error(error: crate::federation_messaging::FederationMessageError) -> CommandError {
+    use crate::federation_messaging::FederationMessageError as FederationError;
+    match error {
+        FederationError::Store(error) => CommandError::Store(error),
+        FederationError::RequestResult(error) => CommandError::RequestResult(error),
+        FederationError::Forbidden(_) => CommandError::Forbidden,
+        FederationError::Conflict(message) => CommandError::Conflict(message),
+        FederationError::Invalid(_)
+        | FederationError::Unavailable(_)
+        | FederationError::Transport(_)
+        | FederationError::Event(_) => CommandError::Invalid("The peer lead message was refused"),
+    }
 }
 
 /// An agent sends a message to one of its descendants (the tool `orchestration_send`). The

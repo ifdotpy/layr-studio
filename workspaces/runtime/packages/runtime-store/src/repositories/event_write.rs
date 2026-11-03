@@ -126,11 +126,15 @@ impl EventWriteRepository {
         )?)
     }
 
+    /// Insert an event. The id is the dedupe key: a repeated id is a no-op
+    /// (`Ok(false)`) and keeps the first row. Any other refused row, such as an
+    /// unknown kind, is an error.
     pub fn insert_event(connection: &Connection, event: &QueueEvent) -> StoreResult<bool> {
         let inserted = connection.execute_cached(
-            "INSERT OR IGNORE INTO runtime_events \
+            "INSERT INTO runtime_events \
              (id,agent,kind,text,status,created,epoch,turn_id,error) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL) \
+             ON CONFLICT(id) DO NOTHING",
             params![
                 event.id.0,
                 event.agent.0,
