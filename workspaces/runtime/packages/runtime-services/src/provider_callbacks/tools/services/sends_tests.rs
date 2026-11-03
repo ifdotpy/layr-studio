@@ -802,6 +802,63 @@ async fn monitor_cancel_release_notifies_only_the_monitor_dispatcher() {
 }
 
 #[tokio::test]
+async fn complaint_read_projects_a_page_with_one_agent_scan() {
+    let (_directory, store, oracle) = frozen::state().await;
+    let lead = oracle["agents"][0].clone();
+    let worker = oracle["agents"][1].clone();
+    let lead_id = lead["id"].as_str().unwrap();
+    let worker_id = worker["id"].as_str().unwrap();
+    let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
+    let tx = db.transaction().unwrap();
+    for index in 0..100 {
+        let complaint: studio_runtime_store::ComplaintRecord = serde_json::from_value(json!({
+            "id":format!("complaint-{index}"), "leadId":lead_id, "author":worker_id,
+            "text":format!("Question {index}"), "recipient":"lead", "status":"open",
+            "created":index, "updated":index, "readAt":null, "version":1, "responses":[]
+        }))
+        .unwrap();
+        studio_runtime_store::Table::<studio_runtime_store::ComplaintRecord>::new(&tx)
+            .put(&complaint)
+            .unwrap();
+    }
+    tx.commit().unwrap();
+    AGENT_SCANS.set(0);
+    db.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(trace_agent_scans),
+    );
+    let tx = db.transaction().unwrap();
+    let read = crate::notification_dispatch::agent_complaint_action(
+        &tx,
+        &lead,
+        &json!({"action":"read"}),
+        "read-page",
+        200.0,
+    )
+    .unwrap();
+    assert_eq!(read["complaints"].as_array().unwrap().len(), 50);
+    assert_eq!(read["remaining"], 50);
+    assert!(
+        read["complaints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["readAt"] == 200.0)
+    );
+    let projected: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='complaint' AND deleted=0 AND json_extract(payload,'$.value.readAt')=200", [], |row| row.get(0)).unwrap();
+    assert_eq!(projected, 50);
+    let first = &read["complaints"][0];
+    let projected: String = tx.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='complaint' AND id=?1 AND deleted=0",
+        [first["id"].as_str().unwrap()], |row| row.get(0),
+    ).unwrap();
+    let projected: Value = serde_json::from_str(&projected).unwrap();
+    assert_eq!(projected["value"]["authorName"], worker["name"]);
+    assert_eq!(projected["value"]["leadName"], lead["name"]);
+    assert_eq!(AGENT_SCANS.get(), 1, "one agent scan for the whole page");
+}
+
+#[tokio::test]
 async fn complaint_submit_read_and_respond_share_the_notification_service() {
     let (_directory, store, oracle) = frozen::state().await;
     let worker = oracle["agents"][1].clone();

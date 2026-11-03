@@ -152,7 +152,7 @@ pub(super) fn submit_user_message(
     }
     let mut message = submit_agent_complaint(tx, lead, request_id, text, at)?;
     message.source_type = Some(ComplaintSource::Message);
-    save_complaint_projection(tx, &message)?;
+    save_complaint_projection(tx, &message, &mut None)?;
     Ok(message)
 }
 
@@ -218,6 +218,7 @@ pub(crate) fn agent_complaint_action(
                     })
             });
             let total = complaints.len();
+            let mut agents = None;
             for complaint in complaints.iter_mut().take(50) {
                 if actor_id == root_id
                     && complaint.recipient == ComplaintRecipient::Lead
@@ -225,7 +226,7 @@ pub(crate) fn agent_complaint_action(
                 {
                     complaint.read_at =
                         studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
-                    save_complaint_projection(tx, complaint)?;
+                    save_complaint_projection(tx, complaint, &mut agents)?;
                 }
             }
             complaints.truncate(50);
@@ -301,7 +302,7 @@ pub(crate) fn agent_complaint_action(
                     studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
             }
             complaint.version = Some(complaint.version.unwrap_or(0) + 1);
-            save_complaint_projection(tx, &complaint)?;
+            save_complaint_projection(tx, &complaint, &mut None)?;
             reconcile_complaint_notifications(tx, actor_id)?;
             let author = complaint.author().unwrap_or_default();
             if author != "user" && author != actor_id {
@@ -371,13 +372,30 @@ fn reconcile_complaint_notifications(
             continue;
         }
         let mut all_answered = true;
-        for entry in entries {
-            let Some(id) = entry.get("complaint_id").and_then(Value::as_str) else {
+        let ids: Vec<_> = entries
+            .iter()
+            .map(|entry| entry.get("complaint_id").and_then(Value::as_str))
+            .collect();
+        let mut statement = tx
+            .prepare_cached(
+                "SELECT requested.value, complaint.record FROM json_each(?1) requested \
+             LEFT JOIN runtime_complaints complaint ON complaint.id=requested.value",
+            )
+            .map_err(studio_runtime_store::StoreError::from)?;
+        let mut rows = statement
+            .query([serde_json::to_string(&ids)?])
+            .map_err(studio_runtime_store::StoreError::from)?;
+        while let Some(row) = rows
+            .next()
+            .map_err(studio_runtime_store::StoreError::from)?
+        {
+            let id: Option<String> = row.get(0).map_err(studio_runtime_store::StoreError::from)?;
+            let Some(id) = id else {
                 all_answered = false;
                 break;
             };
-            let Some(raw) = studio_runtime_store::QuestionsWriteRepository::complaint(tx, id)?
-            else {
+            let raw: Option<String> = row.get(1).map_err(studio_runtime_store::StoreError::from)?;
+            let Some(raw) = raw else {
                 all_answered = false;
                 break;
             };
@@ -385,7 +403,7 @@ fn reconcile_complaint_notifications(
                 all_answered = false;
                 break;
             };
-            if complaint.id() != id
+            if complaint.id() != &id
                 || complaint.lead_id() != Some(lead_id)
                 || needs_agent_response(&complaint)
             {
@@ -403,17 +421,96 @@ fn reconcile_complaint_notifications(
     Ok(())
 }
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod reconciliation_tests {
+    use super::*;
+    use rusqlite::trace::{TraceEvent, TraceEventCodes};
+
+    thread_local! { static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+    #[test]
+    fn reconciles_batched_complaints_and_stops_at_first_missing_entry() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,error TEXT);").unwrap();
+        let tx = db.transaction().unwrap();
+        let mut entries = Vec::new();
+        for index in 0..100 {
+            let id = format!("c{index}");
+            let record = json!({"id":id,"author":"worker","leadId":"lead","text":"question","recipient":"lead","status":"resolved","created":1,"updated":1,"readAt":1,"version":1,"responses":[]});
+            tx.execute(
+                "INSERT INTO runtime_complaints VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            entries.push(json!({"complaint_id":id}));
+        }
+        tx.execute("INSERT INTO runtime_complaints VALUES('bad',x'ff')", [])
+            .unwrap();
+        for (id, entries) in [
+            ("answered", entries),
+            (
+                "missing",
+                vec![
+                    json!({"complaint_id":"absent"}),
+                    json!({"complaint_id":"bad"}),
+                ],
+            ),
+        ] {
+            tx.execute(
+                "INSERT INTO runtime_events VALUES(?1,'lead','complaint',?2,'pending',NULL)",
+                rusqlite::params![id, json!({"complaints":entries}).to_string()],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        READS.set(0);
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let TraceEvent::Stmt(statement, _) = event
+                    && statement.sql().contains("LEFT JOIN runtime_complaints")
+                {
+                    READS.set(READS.get() + 1);
+                }
+            }),
+        );
+        let tx = db.transaction().unwrap();
+        reconcile_complaint_notifications(&tx, "lead").unwrap();
+        let statuses: Vec<String> = ["answered", "missing"]
+            .into_iter()
+            .map(|id| {
+                tx.query_row(
+                    "SELECT status FROM runtime_events WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            })
+            .collect();
+        assert_eq!(statuses, ["stored_only", "pending"]);
+        assert_eq!(READS.get(), 2);
+    }
+}
+
 fn save_complaint_projection(
     tx: &Transaction<'_>,
     complaint: &ComplaintRecord,
+    agents: &mut Option<Vec<crate::submit_gates::AgentAuthorityRow>>,
 ) -> Result<(), NotificationDispatchError> {
     let id = complaint.id();
     Table::<ComplaintRecord>::new(tx).put(complaint)?;
-    let agents: Vec<_> = records::all(tx, "runtime_agents")?
-        .into_iter()
-        .map(serde::Deserialize::deserialize)
-        .collect::<Result<_, _>>()?;
-    let context = crate::sync_views::ComplaintViewContext { agents: &agents };
+    if agents.is_none() {
+        *agents = Some(
+            records::all(tx, "runtime_agents")?
+                .into_iter()
+                .map(serde::Deserialize::deserialize)
+                .collect::<Result<_, _>>()?,
+        );
+    }
+    let context = crate::sync_views::ComplaintViewContext {
+        agents: agents.as_deref().unwrap_or_default(),
+    };
     let view = crate::sync_views::project_complaint_record(complaint, &context)
         .ok_or_else(|| stored("runtime_complaints", id))?;
     SyncDocumentsRepository::put_entity(tx, "complaint", id, view, false)?;
