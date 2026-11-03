@@ -3553,6 +3553,7 @@ mod commit_notification_tests {
                 ("runtime_rules", 0),
                 ("runtime_server_links", 0),
                 ("runtime_federation_settings", 0),
+                ("project_grants", 0),
                 ("runtime_federation_identity", 0),
                 ("runtime_federation_peers", 0),
                 ("runtime_federation_invites", 0),
