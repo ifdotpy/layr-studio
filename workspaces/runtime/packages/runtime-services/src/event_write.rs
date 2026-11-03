@@ -981,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_event_with_different_content_is_an_error() {
+    fn duplicate_event_id_keeps_the_first_row() {
         let mut connection = database_with_kind_check();
         let agent = AgentRepository::get(&connection, &AgentId::from("a"))
             .expect("agent reads")
@@ -1008,8 +1008,8 @@ mod tests {
             )
         });
         assert!(
-            changed.is_err(),
-            "same id with new content must be reported"
+            !changed.expect("a repeated id is a no-op"),
+            "a repeated id stores nothing"
         );
         let text: String = connection
             .query_row(
