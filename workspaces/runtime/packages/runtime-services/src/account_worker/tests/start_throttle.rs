@@ -127,6 +127,44 @@ async fn open(state: &State, bridge: StoreBridge, account: &Account) -> (Peer, A
     (peer, worker)
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn held_queued_agent_does_not_consume_a_start_burst() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    let held_agent = agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            scheduler::lifecycle_transaction_with(&store, move |tx| {
+                let mut row =
+                    AgentRepository::get(tx, &AgentId::from(held_agent.as_str()))?.unwrap();
+                row.set_native_failure_hold(true);
+                AgentRepository::put(tx, &row)?;
+                Ok(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let account = Account::new(&state, ProviderKind::Codex);
+    account
+        .driver
+        .set_start_throttle("default", throttle(1, LONG_PAUSE_SECONDS, 8))
+        .unwrap();
+    let (mut peer, mut worker) = open(&state, state.bridge.clone(), &account).await;
+    wake_agent(&state, &worker, &agent).await;
+    worker_barrier(&worker).await;
+    assert!(peer.writes.try_recv().is_err());
+    let diagnostics = state.bridge.start_gates.gate("default").diagnostics();
+    assert_eq!(
+        diagnostics["recentAdmits"].as_array().unwrap().len(),
+        0,
+        "{diagnostics}"
+    );
+    worker.shutdown().await.unwrap();
+}
+
 /// A burst starts at once and the rest waits for the pause; a cap on running
 /// turns holds until a turn settles; settings changes apply to waiting starts
 /// at once; and each input starts exactly once.

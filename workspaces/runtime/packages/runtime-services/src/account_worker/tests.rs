@@ -6526,6 +6526,345 @@ async fn workspace_pending_reuses_reserved_attempt() {
 }
 
 #[tokio::test]
+async fn expired_workspace_preparation_fails_without_replaying_input() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    assert_eq!(state.record().await["status"], "starting");
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.start_attempt.as_mut().unwrap().created = Some(1.0);
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let record = state.record().await;
+    assert_eq!(record["status"], "failed", "{record}");
+    assert_eq!(record["inFlight"], false, "{record}");
+    assert!(
+        record["error"].to_string().contains("timed out"),
+        "{record}"
+    );
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn requeued_workspace_preparation_gets_a_fresh_deadline() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let previous = state.record().await;
+    assert_eq!(previous["status"], "starting");
+    worker.shutdown().await.unwrap();
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.start_attempt.as_mut().unwrap().created = Some(1.0);
+                    AgentRepository::put(tx, &row)?;
+                    SchedulerRepository::recover_unsubmitted_for_account(tx, "default")?;
+                    Ok(())
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let record = state.record().await;
+    assert_eq!(record["status"], "starting", "{record}");
+    assert_ne!(record["startAttempt"]["id"], previous["startAttempt"]["id"]);
+    let created = record["startAttempt"]["created"].as_f64().unwrap();
+    assert!(
+        super::PreparationDeadline::from_created(created).remaining(now())
+            > std::time::Duration::ZERO
+    );
+    assert_ne!(record["nativeFailureHold"], true, "{record}");
+    assert_eq!(state.event_status("input").await, "reserved");
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn nonresumable_preparation_expires_after_an_early_wake() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.start_attempt.as_mut().unwrap().prepare_error =
+                        Some("workspace-readiness/vm-not-ready".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    assert_eq!(state.record().await["status"], "starting");
+    tokio::time::pause();
+    tokio::time::advance(super::PREPARATION_WAIT_TIMEOUT).await;
+    tokio::time::resume();
+    let record = state
+        .wait_record(|record| record["status"] == "failed")
+        .await;
+    assert_eq!(record["status"], "failed", "{record}");
+    assert!(
+        record["error"].to_string().contains("timed out"),
+        "{record}"
+    );
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn stale_wake_does_not_cancel_newer_preparation_deadline() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.start_attempt.as_mut().unwrap().prepare_error =
+                        Some("workspace-readiness/vm-not-ready".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    assert_eq!(state.record().await["status"], "starting");
+    worker
+        .send(AccountCommand::Wake {
+            agent_id: state.agent.clone(),
+            epoch: state.epoch - 1,
+        })
+        .await
+        .unwrap();
+    worker_barrier(&worker).await;
+    tokio::time::pause();
+    tokio::time::advance(super::PREPARATION_WAIT_TIMEOUT).await;
+    tokio::time::resume();
+    let record = state
+        .wait_record(|record| record["status"] == "failed")
+        .await;
+    assert_eq!(record["status"], "failed", "{record}");
+    assert!(
+        record["error"].to_string().contains("timed out"),
+        "{record}"
+    );
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn newer_wake_removes_older_preparation_wait() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.start_attempt.as_mut().unwrap().prepare_error =
+                        Some("workspace-readiness/vm-not-ready".into());
+                    AgentRepository::put(tx, &row)
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    assert_eq!(state.record().await["status"], "starting");
+    worker
+        .send(AccountCommand::Wake {
+            agent_id: state.agent.clone(),
+            epoch: state.epoch + 1,
+        })
+        .await
+        .unwrap();
+    worker_barrier(&worker).await;
+    let (reply, result) = tokio::sync::oneshot::channel();
+    worker
+        .send(AccountCommand::AccountDiagnostics { reply })
+        .await
+        .unwrap();
+    let diagnostics = result.await.unwrap();
+    assert!(
+        diagnostics["preparationWaits"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{diagnostics}"
+    );
+    let (reply, observed) = tokio::sync::oneshot::channel();
+    worker
+        .send(AccountCommand::IdleInspect {
+            sweep_at: None,
+            reply,
+        })
+        .await
+        .unwrap();
+    assert!(
+        observed.await.unwrap().initialized,
+        "idle initialization is not blocked"
+    );
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn preparation_commit_rechecks_workspace_settings_and_input() {
     for mutation in ["workspace", "settings", "input", "retired", "stopped"] {
         let state = State::new().await;
