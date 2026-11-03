@@ -2385,6 +2385,12 @@ fn requeue_unsubmitted(
     agent.start_attempt = None;
     agent.in_flight = Some(false);
     agent.status = AgentStatus::Queued;
+    if matches!(
+        agent.start_wait.as_ref(),
+        Some(studio_runtime_schema::agent_progress::AgentStartWait::WorkspaceCopy { .. })
+    ) {
+        agent.start_wait = None;
+    }
     publish_agent(transaction, &agent)?;
     Ok(Some(count))
 }

@@ -6653,6 +6653,75 @@
               "epoch"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "progress": {
+                "additionalProperties": false,
+                "properties": {
+                  "done": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "phase": {
+                    "enum": [
+                      "sizing",
+                      "staging",
+                      "importing_commits",
+                      "materializing",
+                      "restoring_attributes",
+                      "warming_caches",
+                      "transferring",
+                      "completed",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "total": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "enum": [
+                      "files",
+                      "bytes",
+                      "commits"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "phase",
+                  "done",
+                  "unit"
+                ],
+                "type": "object"
+              },
+              "reason": {
+                "const": "workspace_copy",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "epoch",
+              "progress"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -10491,6 +10560,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AgentStall"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startWait": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentEntityStartWaitDto"
               },
               {
                 "type": "null"
@@ -51070,7 +51149,8 @@
           "dispatch_pending",
           "paused",
           "native_failure",
-          "account_transfer"
+          "account_transfer",
+          "workspace_copy"
         ],
         "type": "string"
       },
@@ -51321,6 +51401,75 @@
             "required": [
               "reason",
               "epoch"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "progress": {
+                "additionalProperties": false,
+                "properties": {
+                  "done": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "phase": {
+                    "enum": [
+                      "sizing",
+                      "staging",
+                      "importing_commits",
+                      "materializing",
+                      "restoring_attributes",
+                      "warming_caches",
+                      "transferring",
+                      "completed",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "total": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "enum": [
+                      "files",
+                      "bytes",
+                      "commits"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "phase",
+                  "done",
+                  "unit"
+                ],
+                "type": "object"
+              },
+              "reason": {
+                "const": "workspace_copy",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "epoch",
+              "progress"
             ],
             "type": "object"
           }

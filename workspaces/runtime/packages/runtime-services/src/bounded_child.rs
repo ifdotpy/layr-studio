@@ -55,6 +55,8 @@ thread_local! {
 }
 
 const MAX_ERROR_CHARS: usize = 1200;
+/// Maximum stderr line delivered to the streaming callback, in bytes.
+const MAX_STREAM_LINE_BYTES: usize = 8192;
 
 #[derive(Debug)]
 pub(crate) enum ChildError {
@@ -97,12 +99,19 @@ pub(crate) struct Request<'a> {
 
 /// Run a child with bounded output retention and one deadline for execution and pipe draining.
 pub(crate) fn run(request: Request<'_>) -> Result<Output, ChildError> {
-    run_with_environment(request, false)
+    run_with_environment(request, false, None)
 }
 
 /// Inherit helper inputs but remove every ambient Git override before applying fixed settings.
 pub(crate) fn run_without_git_environment(request: Request<'_>) -> Result<Output, ChildError> {
-    run_with_environment(request, true)
+    run_with_environment(request, true, None)
+}
+
+pub(crate) fn run_without_git_environment_streaming(
+    request: Request<'_>,
+    on_line: std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>,
+) -> Result<Output, ChildError> {
+    run_with_environment(request, true, Some(on_line))
 }
 
 /// Test fixtures must not use the developer's Git configuration or prompt.
@@ -124,7 +133,11 @@ pub(crate) fn run_with_isolated_git_config(request: Request<'_>) -> Result<Outpu
     clippy::disallowed_methods,
     reason = "bounded child polling executes on the calling labeled blocking worker"
 )]
-fn run_with_environment(request: Request<'_>, remove_git: bool) -> Result<Output, ChildError> {
+fn run_with_environment(
+    request: Request<'_>,
+    remove_git: bool,
+    on_line: Option<std::sync::Arc<dyn Fn(&[u8]) + Send + Sync>>,
+) -> Result<Output, ChildError> {
     studio_runtime_store::debug_assert_outside_sql();
     let Request {
         program,
@@ -181,8 +194,13 @@ fn run_with_environment(request: Request<'_>, remove_git: bool) -> Result<Output
     let (stderr_sender, stderr_receiver) = mpsc::sync_channel(1);
     let stdout_reader =
         thread::spawn(move || drop(stdout_sender.send(read_bounded(stdout, stdout_limit))));
-    let stderr_reader =
-        thread::spawn(move || drop(stderr_sender.send(read_bounded(stderr, stderr_limit))));
+    let stderr_reader = thread::spawn(move || {
+        let output = match on_line {
+            Some(on_line) => read_bounded_streaming(stderr, stderr_limit, &*on_line),
+            None => read_bounded(stderr, stderr_limit),
+        };
+        drop(stderr_sender.send(output));
+    });
 
     if let Some(input) = input
         && let Some(mut stdin) = child.stdin().take()
@@ -352,6 +370,44 @@ fn read_bounded(mut pipe: impl Read, limit: usize) -> std::io::Result<PipeOutput
     Ok(PipeOutput { bytes, truncated })
 }
 
+fn read_bounded_streaming(
+    mut pipe: impl Read,
+    limit: usize,
+    on_line: &dyn Fn(&[u8]),
+) -> std::io::Result<PipeOutput> {
+    let mut bytes = Vec::new();
+    let mut line = Vec::new();
+    let mut truncated = false;
+    let mut oversized = false;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let count = pipe.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        let retained = count.min(limit.saturating_sub(bytes.len()));
+        bytes.extend_from_slice(&buffer[..retained]);
+        truncated |= retained < count;
+        for &byte in &buffer[..count] {
+            if byte == b'\n' {
+                if !oversized {
+                    on_line(&line);
+                }
+                line.clear();
+                oversized = false;
+            } else if line.len() < MAX_STREAM_LINE_BYTES {
+                line.push(byte);
+            } else {
+                oversized = true;
+            }
+        }
+    }
+    if !line.is_empty() && !oversized {
+        on_line(&line);
+    }
+    Ok(PipeOutput { bytes, truncated })
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
@@ -359,6 +415,50 @@ mod tests {
     use std::ffi::OsStr;
     use std::io::Cursor;
     use std::time::Duration;
+
+    #[test]
+    fn streaming_stderr_delivers_lines_and_retains_bounded_output() {
+        let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = lines.clone();
+        let result =
+            super::read_bounded_streaming(Cursor::new(b"first\nsecond\n"), 5, &move |line| {
+                captured.lock().unwrap().push(line.to_vec())
+            })
+            .unwrap();
+        assert_eq!(result.bytes, b"first");
+        assert!(result.truncated);
+        assert_eq!(
+            *lines.lock().unwrap(),
+            vec![b"first".to_vec(), b"second".to_vec()]
+        );
+    }
+
+    #[test]
+    fn streaming_child_forwards_stderr_lines() {
+        let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = lines.clone();
+        super::run_without_git_environment_streaming(
+            Request {
+                program: OsStr::new("/bin/sh"),
+                git_directory: None,
+                args: &[
+                    "-c",
+                    "printf 'layr: imported 50 commits of local/main\\n' >&2",
+                ],
+                environment: &[],
+                input: None,
+                stdout_limit: 1024,
+                stderr_limit: 1024,
+                timeout: Duration::from_secs(5),
+            },
+            std::sync::Arc::new(move |line| captured.lock().unwrap().push(line.to_vec())),
+        )
+        .unwrap();
+        assert_eq!(
+            *lines.lock().unwrap(),
+            vec![b"layr: imported 50 commits of local/main".to_vec()]
+        );
+    }
 
     #[test]
     fn fixture_git_config_does_not_read_the_supplied_hostile_global_file() {

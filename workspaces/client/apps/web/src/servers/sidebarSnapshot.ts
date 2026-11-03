@@ -82,6 +82,8 @@ export function sidebarAgent(agent: Agent): Agent {
     "movedFrom",
     "moveImportPending",
     "status",
+    "epoch",
+    "startWait",
     "inFlight",
     "autoWake",
     "empty",
