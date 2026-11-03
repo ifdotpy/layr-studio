@@ -86,7 +86,7 @@ impl Outbox {
     }
 
     pub fn get<P: DeserializeOwned>(tx: &Connection, id: &str) -> Result<Option<OutboxRow<P>>> {
-        Ok(tx.query_row("SELECT id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created FROM runtime_outbox WHERE id=?1", [id], Self::decode).optional()?)
+        Ok(tx.query_row_cached("SELECT id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created FROM runtime_outbox WHERE id=?1", [id], Self::decode).optional()?)
     }
 
     pub fn pending<P: DeserializeOwned>(
