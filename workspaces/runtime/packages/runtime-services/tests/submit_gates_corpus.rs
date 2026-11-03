@@ -3,8 +3,30 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 use studio_runtime_services::submit_gates::{
     AuthorizationRecords, AuthorizationSnapshot, CatalogIdentity, CatalogObservation,
-    ExecutionSettings, ExecutionSnapshot, authorize_events, select_execution, validate_execution,
+    ExecutionDenial, ExecutionSettings, ExecutionSnapshot, authorize_events, select_execution,
+    validate_execution,
 };
+
+#[test]
+fn catalog_generation_mismatch_still_denies_freeze() {
+    let now = Instant::now();
+    let identity = CatalogIdentity {
+        account_key: "claude-profile".into(),
+        home: "/account".into(),
+        provider: "claude".parse().unwrap(),
+        generation: 1,
+    };
+    let record = json!({"id":"agent", "accountKey":"claude-profile", "executionSettingsAccountKey":"claude-profile", "model":"claude-opus-5-5", "effort":"medium", "workspaceMode":"worktree"});
+    let observed = ExecutionSnapshot::from_record(&record, identity.clone()).unwrap();
+    let mut selection = select_execution(&observed, &observed, None, now, "agent").unwrap();
+    selection.catalog_precondition = Some((identity.clone(), now + Duration::from_secs(60)));
+    let mut refreshed = identity;
+    refreshed.generation = 2;
+    assert_eq!(
+        selection.freeze_record(&record, &refreshed, now),
+        Err(ExecutionDenial::CatalogIdentityMismatch)
+    );
+}
 
 struct CapturedExpectations(crate::turn_fixtures::FrozenResponses);
 impl CapturedExpectations {
@@ -107,7 +129,7 @@ fn rust(case: &Value, records: Option<&Value>) -> Value {
                     .expect("observed snapshot");
             let now = Instant::now();
             let catalog = catalog(case, now);
-            let selected = select_execution(&current, &observed, catalog.as_ref(), now);
+            let selected = select_execution(&current, &observed, catalog.as_ref(), now, "fixture");
             if let Some(expected) = case.get("selection_denial") {
                 assert_eq!(
                     selected.as_ref().err().map(|error| json!(error)),
