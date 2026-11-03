@@ -312,6 +312,7 @@ async fn handle_project_pair(
     let invite_id = body.invite_id;
     let token_hash = studio_runtime_store::sha256_hex(body.token.as_bytes());
     let peer_state = body.state_id;
+    let body_label = body.label.trim().to_owned();
     let peer_key = body.public_key;
     let result = store.transaction_with(move |tx| {
         let current_identity: String = tx.query_row(
@@ -374,6 +375,7 @@ async fn handle_project_pair(
                     capability: project_grants::Capability::LeadMessages,
                     created_at: now as i64,
                     revoked_at: None,
+                    peer_label: body_label.clone(),
                 }])?;
                 crate::sync_policy::publish_peer_teams(tx)?;
             }
