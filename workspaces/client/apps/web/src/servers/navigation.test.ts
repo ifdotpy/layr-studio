@@ -109,6 +109,7 @@ it("shows the active target chat and hides the source move record", () => {
     source: "managed",
     isLead: true,
     cwd: "/project",
+    projectPath: "/source/project",
   };
   const source = navigationSnapshot(
     partialSnapshot({ threads: [{ ...chat, movedTo: { server: "target" } }] }),
@@ -124,6 +125,7 @@ it("shows the active target chat and hides the source move record", () => {
     "",
   );
   assert.equal(target.workspaceId, "workspace-target");
+  assert.equal(target.chats[0]?.path, "/source/project");
   assert.deepEqual(source.chats, []);
   assert.deepEqual(
     navigationSnapshot(

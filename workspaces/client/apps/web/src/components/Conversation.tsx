@@ -1933,10 +1933,12 @@ export default function Conversation(p: {
               <ConversationStart
                 projectName={
                   p.projectName ||
-                  p.agent?.cwd?.split("/").filter(Boolean).at(-1) ||
+                  p.agent?.projectPath?.split("/").filter(Boolean).at(-1) ||
                   "Your project"
                 }
-                location={p.agent?.cwd || "Project location unavailable"}
+                location={
+                  p.agent?.projectPath || "Project location unavailable"
+                }
                 recentChats={p.recentChats}
                 onSelect={p.onSelect}
               />

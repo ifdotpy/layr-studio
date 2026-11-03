@@ -831,11 +831,6 @@ async fn create(
     if !studio_runtime_schema::workspace_modes::accepts_chat(&workspace) {
         return Err(OperationError::Invalid("Unknown workspace mode"));
     }
-    if workspace == "layr-native" && !native_capability(context).await?.is_ready() {
-        return Err(OperationError::Invalid(
-            "Native Layr is not ready on this server. Select WT or configure its store and daemon.",
-        ));
-    }
     if workspace == "layr" && !cfg!(target_os = "macos") {
         return Err(OperationError::Invalid(
             "This server has no Studio Linux VM",
@@ -861,6 +856,34 @@ async fn create(
     } else {
         project_directory_default_async().await?
     };
+    let state = context.store.state_dir().to_path_buf();
+    let requested_project = cwd.clone();
+    let native_workspace = workspace == "layr-native";
+    let (native_store, project_path) = studio_runtime_process::blocking_pool::spawn_blocking(
+        "agents-create/native-store",
+        move || {
+            let root = crate::layr_native::settings::store_for_validation(&state);
+            let project = crate::project_path::ProjectPath::new(requested_project, &root)
+                .map_err(OperationError::Invalid)?;
+            let root = if native_workspace {
+                crate::layr_native::settings::selected_store(&state).map_err(|_| {
+                    OperationError::Invalid(
+                        "Cannot read the native Layr store setting. Inspect native-layr paths.",
+                    )
+                })?
+            } else {
+                root
+            };
+            Ok::<_, OperationError>((root, project))
+        },
+    )
+    .await
+    .map_err(|_| OperationError::Internal)??;
+    if workspace == "layr-native" && !native_capability(context).await?.is_ready() {
+        return Err(OperationError::Invalid(
+            "Native Layr is not ready on this server. Select WT or configure its store and daemon.",
+        ));
+    }
     if crate::projects::refuses_worktree(&context.store, &cwd, &workspace).await? {
         return Err(OperationError::Invalid(
             crate::projects::WORKTREE_REFUSED_BY_LAYR_POLICY,
@@ -1079,20 +1102,13 @@ async fn create(
     record.review_defaults = review_defaults.map(Box::new);
     mode_fields(&mut record);
     if workspace == "layr-native" {
-        let state = context.store.state_dir().to_path_buf();
-        let root = studio_runtime_process::blocking_pool::spawn_blocking(
-            "agents-create/native-store",
-            move || crate::layr_native::settings::selected_store(&state),
-        )
-        .await
-        .map_err(|_| OperationError::Internal)?
-        .map_err(|_| {
-            OperationError::Invalid(
-                "Cannot read the native Layr store setting. Inspect native-layr paths.",
-            )
-        })?;
-        crate::layr_native::configure_new_chat(&mut record, &cwd);
-        record.layr_store_root = Some(root.to_str().ok_or(OperationError::Internal)?.to_owned());
+        crate::layr_native::configure_new_chat(&mut record, &project_path);
+        record.layr_store_root = Some(
+            native_store
+                .to_str()
+                .ok_or(OperationError::Internal)?
+                .to_owned(),
+        );
     }
     if workspace == "layr" {
         set_vm_workspace_fields(&mut record, &cwd);
@@ -1210,7 +1226,7 @@ async fn create(
             if workspace_for_write == "layr" {
                 set_vm_workspace_fields(&mut reused, &cwd);
             } else if workspace_for_write == "layr-native" {
-                crate::layr_native::configure_new_chat(&mut reused, &cwd);
+                crate::layr_native::configure_new_chat(&mut reused, &project_path);
                 if reused.layr_store_root.is_none() {
                     reused.layr_store_root = record.layr_store_root.clone();
                 }
@@ -5217,6 +5233,63 @@ mod tests {
 
     const LAYR_ONLY_REFUSAL: &str =
         "This project allows only Layr workspaces. Use Layr instead of WT.";
+
+    #[tokio::test]
+    async fn create_refuses_line_in_symlinked_default_store() {
+        let state = tempfile::tempdir().expect("state");
+        let actual = tempfile::tempdir().expect("actual store");
+        let line = actual.path().join("projects/id/lines/main");
+        std::fs::create_dir_all(&line).expect("line");
+        let store =
+            std::sync::Arc::new(RuntimeStore::open(Some(state.path())).await.expect("store"));
+        let native = state.path().join("layr-native");
+        std::fs::create_dir_all(&native).expect("native directory");
+        std::os::unix::fs::symlink(actual.path(), native.join("store")).expect("store alias");
+        let context = Context {
+            store,
+            accounts: None,
+            driver: None,
+            catalog: None,
+            managed_creation_environment: None,
+            validate: std::sync::Arc::new(|_, _| true),
+        };
+        for mode in ["layr-native", "worktree"] {
+            let result = lead(
+                &context,
+                Creation {
+                    cwd: Some(line.to_string_lossy().into_owned()),
+                    workspace: Some(mode.into()),
+                    ..Creation::default()
+                },
+            )
+            .await;
+            assert!(
+                matches!(
+                    result,
+                    Err(OperationError::Invalid(
+                        "Select the project folder, not a Layr line"
+                    ))
+                ),
+                "{result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_folder_rejects_a_line_or_its_child() {
+        let store = std::path::Path::new("/studio/store");
+        for path in [
+            "/studio/store/projects/id/lines/main",
+            "/studio/store/projects/id/lines/main/src",
+        ] {
+            assert!(crate::project_path::ProjectPath::new(path.into(), store).is_err());
+        }
+        assert!(crate::project_path::ProjectPath::new("/home/me/project".into(), store).is_ok());
+        assert!(
+            crate::project_path::ProjectPath::new("/studio/store/projects/id/other".into(), store)
+                .is_ok()
+        );
+    }
 
     #[tokio::test]
     async fn layr_only_project_refuses_new_worktree_chat() {

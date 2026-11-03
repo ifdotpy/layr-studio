@@ -176,6 +176,7 @@ export default {
       "src/servers/useServerDiscovery.test.ts",
       "src/servers/sidebarSnapshot.test.ts",
       "src/servers/mergedSidebar.test.ts",
+      "src/components/shell/messages/PeerTeams.peerLeads.test.ts",
       "src/sync/uiPreferenceBridge.test.ts",
       // Reserved preference keys survive profile import.
       "src/chatDeleteScope.test.ts",

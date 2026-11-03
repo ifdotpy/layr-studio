@@ -126,7 +126,10 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
     run(&state, &main, &["protect", "main", "--direct"]).expect("main owner");
     settings::configure(&state, Some(&root)).expect("select existing store");
     let mut lead = fixture_agent("warm-lead", true);
-    configure_new_chat(&mut lead, source.to_str().expect("source"));
+    configure_new_chat(
+        &mut lead,
+        &crate::project_path::ProjectPath::from_stored(source.to_str().expect("source")),
+    );
     let mut lead = lead.value();
     let cold_ready = runtime::prepare_files(&state, &lead).expect("main without saved caches");
     assert!(

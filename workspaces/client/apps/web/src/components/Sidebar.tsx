@@ -101,7 +101,6 @@ import {
   useServerAliases,
 } from "../servers/serverAliases";
 import { serverViewId } from "../servers/environment";
-import { sidebarProjectChat } from "../servers/sidebarSnapshot";
 import { ChatServerLine, keepCompactChat } from "../servers/ProjectChatRows";
 import {
   countProjectChats,
@@ -492,10 +491,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     });
   }, [p.data.threads]);
   const catalogSelector = useMemo(createSidebarCatalogSelector, []);
-  const projectThreads = useMemo(
-    () => p.data.threads.map(sidebarProjectChat),
-    [p.data.threads],
-  );
+  const projectThreads = p.data.threads;
   const catalog = catalogSelector(
     projectThreads,
     overrides,
@@ -556,7 +552,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     ) {
       setQuery("");
       const path =
-        agents.find((a) => a.id === p.opened)?.cwd ||
+        agents.find((a) => a.id === p.opened)?.projectPath ||
         sharedRooms.find((r) => r.id === p.opened)?.projectPath;
       const folders =
         projects.find((project) => project.path === path)?.folders || [];
@@ -616,7 +612,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
           canEdit({ kind: "chat", id: chat.id }) &&
           ownsFolder(project, chat, folder) &&
           source.group === chatGroup(chat) &&
-          chat.cwd === project.path &&
+          chat.projectPath === project.path &&
           ((!folder && !!teamFor(chat.id)) ||
             (chat.projectFolder || null) !== (folder?.id || null))
         );
@@ -673,11 +669,12 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   const filtered = useMemo(() => {
     const archived = orderedAgents.filter((row) => !!row.archived === archive);
     const matching = searchSelector(archived, searchContext, query, (a) => {
-      const project = projectsByPath.get(a.cwd || "");
+      const project = projectsByPath.get(a.projectPath || "");
       const legacyProjectName = "project" in a ? a.project : undefined;
       const team = catalog.byTeam.get(a.id);
-      const teamName = team && team.projectPath === a.cwd ? team.name : "";
-      return `${teamName || ""} ${a.name || ""} ${services.chatPath?.(a.id) || a.cwd || ""} ${projectSearchLabel(project?.name, legacyProjectName)} ${folderLabel(project?.folders || [], a.projectFolder || "")} ${a.tail || ""}`;
+      const teamName =
+        team && team.projectPath === a.projectPath ? team.name : "";
+      return `${teamName || ""} ${a.name || ""} ${services.chatPath?.(a.id) || a.projectPath || ""} ${projectSearchLabel(project?.name, legacyProjectName)} ${folderLabel(project?.folders || [], a.projectFolder || "")} ${a.tail || ""}`;
     });
     // Keep the selected team member visible under a search, as before.
     const selected = catalog.byId.get(p.opened || "");
@@ -737,7 +734,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   const compactIndicatorKey = agents
     .filter(
       (agent) =>
-        isCompactProject(agent.cwd || "") &&
+        isCompactProject(agent.projectPath || "") &&
         p.indicators.get(agent.id)?.kind === "unread",
     )
     .map((agent) => agent.id)
@@ -760,7 +757,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
           byProject.has(project.path) || sharedProjectPaths.has(project.path),
       });
     for (const a of agents) {
-      const path = a.cwd || "";
+      const path = a.projectPath || "";
       if (!groups.has(path))
         groups.set(path, {
           id: path,
@@ -788,11 +785,11 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     for (const a of filtered) {
       if (
         query ||
-        !isCompactProject(a.cwd || "") ||
+        !isCompactProject(a.projectPath || "") ||
         a.id === p.opened ||
         keptInCompact(a)
       )
-        groups.get(a.cwd || "")!.chats.push(a);
+        groups.get(a.projectPath || "")!.chats.push(a);
     }
     return groups;
   }, [
@@ -906,7 +903,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
                 services.serverForChat(row.id) &&
               chat.id !== row.id &&
               teamFor(chat.id) &&
-              chat.cwd === row.cwd &&
+              chat.projectPath === row.projectPath &&
               source.group === chatGroup(chat) &&
               !conversion &&
               !organizationLock.current &&
@@ -919,7 +916,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
             setConversion({
               source: catalog.byId.get(id)!,
               target: row,
-              project: groupMap.get(row.cwd || "")!,
+              project: groupMap.get(row.projectPath || "")!,
             }),
           sorting.bindings(
             chatGroup(row),
@@ -929,7 +926,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
                   .filter((a) => chatGroup(a) === chatGroup(row))
                   .map((a) => a.id)
               : itemIds(
-                  groupMap.get(row.cwd || "")!,
+                  groupMap.get(row.projectPath || "")!,
                   row.projectFolder || null,
                 ),
           ),
@@ -955,7 +952,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
         unread: () => p.markUnread(row),
         move: () => {
           if (!requireProjectSupport()) return;
-          const project = groupMap.get(row.cwd || "")!;
+          const project = groupMap.get(row.projectPath || "")!;
           setDialog({
             title: "Move chat",
             path: project.path,
@@ -1003,7 +1000,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
               services.owner(projectTarget(group.path, undefined, team.id))
                 .ownerId &&
             source.group === chatGroup(chat) &&
-            chat.cwd === group.path &&
+            chat.projectPath === group.path &&
             !teamMembers.includes(chat.id) &&
             !teamMove.blocked() &&
             !organizationLock.current
@@ -1421,8 +1418,8 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
         {projectGroups.map((group) => {
           const oldChatCount = Math.max(
             0,
-            filtered.filter((agent) => agent.cwd === group.path).length -
-              group.chats.length,
+            filtered.filter((agent) => agent.projectPath === group.path)
+              .length - group.chats.length,
           );
           const readinessEntries = activeLayrReadiness(
             services.layrReadiness?.(group.path) ??
@@ -1966,9 +1963,9 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
                     (viewChatCounts.get(group.path) || 0) >=
                       hideOldChatsThreshold &&
                     (isCompactProject(group.path)
-                      ? filtered.filter((a) => a.cwd === group.path).length >
-                        group.chats.length
-                      : filtered.some((a) => a.cwd === group.path)) && (
+                      ? filtered.filter((a) => a.projectPath === group.path)
+                          .length > group.chats.length
+                      : filtered.some((a) => a.projectPath === group.path)) && (
                       <UnstyledButton
                         className="project-show-all"
                         onClick={() =>

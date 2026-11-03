@@ -41,6 +41,7 @@ const agent = (id: string, patch: Partial<Agent> = {}): Agent => ({
   rootId: id,
   created: 1,
   ...patch,
+  projectPath: patch.projectPath ?? patch.cwd ?? path,
 });
 function source(
   id: string,
@@ -160,6 +161,38 @@ function backend(value: SidebarSource) {
 }
 
 describe("complete multi-server sidebar projection", () => {
+  it("groups each server's line-backed chat under its qualified project", () => {
+    const local = source("local");
+    const remote = source("remote");
+    for (const value of [local, remote]) {
+      value.sidebar.threads = [
+        agent("lead", {
+          cwd: "/store/projects/id/lines/main",
+          projectPath: path,
+          projectFolder: "notes",
+        }),
+      ];
+      value.sidebar.projects[0]!.folders = [{ id: "notes", name: "Notes" }];
+    }
+    const model = mergeSidebar([local, remote]);
+    const catalog = createSidebarCatalogSelector()(
+      model.data.threads,
+      {},
+      model.data.runtime.peerTeams,
+      model.order,
+    );
+    for (const owner of ["local", "remote"]) {
+      const key = model.projectKey(owner, path);
+      const chat = catalog.byProject.get(key)?.[0];
+      expect(chat?.id).toBe(model.chatKey(owner, "lead"));
+      expect(chat?.cwd).toBe("/store/projects/id/lines/main");
+      expect(model.chatReferences.get(chat!.id)?.path).toBe(path);
+      expect(model.folderReferences.get(chat!.projectFolder!)?.owner).toBe(
+        owner,
+      );
+    }
+    expect(catalog.byProject.size).toBe(2);
+  });
   it("keeps render identities stable while a paired source is still loading", () => {
     const local = source("local");
     const remote = source("remote");
@@ -421,6 +454,7 @@ describe("complete multi-server sidebar projection", () => {
     remote.sidebar.threads = [
       agent("same", {
         cwd: "/remote/path",
+        projectPath: "/remote/path",
         projectId: "project:shared",
         projectServerId: "home-id",
         projectFolder: "nested",
@@ -455,9 +489,9 @@ describe("complete multi-server sidebar projection", () => {
       (row) => row.id === required(model.data.threads[0]).projectFolder,
     );
     expect(model.folderReferences.get(nested!.parentId!)?.owner).toBe("remote");
-    expect(model.data.threads.every((row) => row.cwd === project.path)).toBe(
-      true,
-    );
+    expect(
+      model.data.threads.every((row) => row.projectPath === project.path),
+    ).toBe(true);
     expect(required(model.data.runtime.peerTeams[0]).projectPath).toBe(
       project.path,
     );
