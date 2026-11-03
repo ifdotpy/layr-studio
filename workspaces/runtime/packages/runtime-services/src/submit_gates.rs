@@ -849,11 +849,15 @@ impl ExecutionSelection {
         account: &CatalogIdentity,
         now: Instant,
     ) -> Result<Value, ExecutionDenial> {
-        if self
-            .catalog_precondition
-            .as_ref()
-            .is_some_and(|(expected, _)| expected != account)
+        if let Some((expected, _)) = &self.catalog_precondition
+            && expected != account
         {
+            log_catalog_mismatch(
+                "freeze",
+                record["id"].as_str().unwrap_or("unknown"),
+                expected,
+                account,
+            );
             return Err(ExecutionDenial::CatalogIdentityMismatch);
         }
         if self
@@ -995,6 +999,7 @@ pub fn select_execution(
     observed: &ExecutionSnapshot,
     catalog: Option<&CatalogObservation>,
     now: Instant,
+    agent_id: &str,
 ) -> Result<ExecutionSelection, ExecutionDenial> {
     use ExecutionDenial as D;
     let mut settings = current.settings.clone();
@@ -1008,6 +1013,12 @@ pub fn select_execution(
     {
         let catalog = catalog.ok_or(D::CatalogRequired)?;
         if catalog.identity != observed.account || current.account != observed.account {
+            let expected = if catalog.identity != observed.account {
+                &catalog.identity
+            } else {
+                &current.account
+            };
+            log_catalog_mismatch("admission", agent_id, expected, &observed.account);
             return Err(D::CatalogIdentityMismatch);
         }
         if catalog.expires_at <= now {
@@ -1060,6 +1071,23 @@ pub fn select_execution(
         freeze,
         catalog_precondition,
     })
+}
+
+fn log_catalog_mismatch(
+    site: &str,
+    agent_id: &str,
+    expected: &CatalogIdentity,
+    observed: &CatalogIdentity,
+) {
+    eprintln!(
+        "catalog_identity_mismatch site={site:?} agent_id={agent_id:?} expected_account={:?} expected_provider={:?} expected_generation={} observed_account={:?} observed_provider={:?} observed_generation={}",
+        expected.account_key,
+        expected.provider,
+        expected.generation,
+        observed.account_key,
+        observed.provider,
+        observed.generation
+    );
 }
 
 #[cfg(test)]

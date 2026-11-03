@@ -647,8 +647,14 @@ fn frozen_selection(
     if !observed.settings_fixed {
         return Err(refusal("execution-settings/not-frozen".into()));
     }
-    let selection = gates::select_execution(&observed, &observed, None, Instant::now())
-        .map_err(|e| refusal(e.to_string()))?;
+    let selection = gates::select_execution(
+        &observed,
+        &observed,
+        None,
+        Instant::now(),
+        record["id"].as_str().unwrap_or("unknown"),
+    )
+    .map_err(|e| refusal(e.to_string()))?;
     if matches!(
         selection.settings.native_effort,
         gates::StoredField::Missing
@@ -867,9 +873,14 @@ async fn admit_for_purpose(
             )?;
             let observed = gates::ExecutionSnapshot::from_record(&record, identity.clone())
                 .map_err(|e| refusal(e.to_string()))?;
-            let mut selected =
-                gates::select_execution(&observed, &observed, observation.as_ref(), Instant::now())
-                    .map_err(catalog_admission_error)?;
+            let mut selected = gates::select_execution(
+                &observed,
+                &observed,
+                observation.as_ref(),
+                Instant::now(),
+                &intent.agent_id,
+            )
+            .map_err(catalog_admission_error)?;
             // Python resolves absent nativeEffort against the account catalog before
             // preparing a thread. Explicit null remains a deliberate provider default.
             if matches!(selected.settings.native_effort, gates::StoredField::Missing) {
