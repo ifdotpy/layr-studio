@@ -199,16 +199,6 @@ pub enum VmPreparationPhase {
     Completed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectImportPhase {
-    Planned,
-    Uploading,
-    Imported,
-    NotSent,
-    Unknown,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectImport {
@@ -218,11 +208,18 @@ pub struct ProjectImport {
     pub operation: String,
     pub upload_id: String,
     pub root: String,
-    pub phase: ProjectImportPhase,
+    /// Read older attempts without writing the superseded display phase again.
+    #[serde(default, rename = "phase", deserialize_with = "discard_legacy_phase", skip_serializing_if = "Option::is_none")]
+    pub legacy_phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_sha256: Option<String>,
+}
+
+fn discard_legacy_phase<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    <Option<String> as Deserialize>::deserialize(deserializer)?;
+    Ok(None)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -458,6 +455,15 @@ pub struct StartInterruptView {
 mod tests {
     use super::{NativeRequest, StartAttemptView};
     use serde::Deserialize;
+
+    #[test]
+    fn project_import_accepts_legacy_phase_without_writing_it() {
+        let value = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/", "phase":"uploading"});
+        let import: super::ProjectImport = serde_json::from_value(value).unwrap();
+        assert!(serde_json::to_value(import).unwrap().get("phase").is_none());
+        let current = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/"});
+        assert!(serde_json::from_value::<super::ProjectImport>(current).is_ok());
+    }
 
     #[test]
     fn direct_and_value_attempt_decodes_accept_provider_payload() {

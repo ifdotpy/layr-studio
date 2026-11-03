@@ -899,7 +899,8 @@
           "type": "string"
         },
         "phase": {
-          "$ref": "#/$defs/ProjectImportPhase"
+          "description": "Read older attempts without writing the superseded display phase again.",
+          "type": ["string", "null"]
         },
         "projectId": {
           "type": "string"
@@ -924,13 +925,8 @@
         "requestId",
         "operation",
         "uploadId",
-        "root",
-        "phase"
+        "root"
       ]
-    },
-    "ProjectImportPhase": {
-      "type": "string",
-      "enum": ["planned", "uploading", "imported", "not_sent", "unknown"]
     },
     "ProviderTicket": {
       "description": "Durable transport identity; response contents alone never authorize mutation.",
