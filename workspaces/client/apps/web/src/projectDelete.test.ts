@@ -155,13 +155,13 @@ describe("project reader suspension", () => {
         projectServerId: "home",
         archived: true,
       },
-      { id: "legacy", cwd: "/project" },
-      { id: "unrelated", cwd: "/project/subdirectory" },
+      { id: "legacy", projectPath: "/project" },
+      { id: "unrelated", projectPath: "/project/subdirectory" },
       {
         id: "different-binding",
         projectId: "another",
         projectServerId: "home",
-        cwd: "/project",
+        projectPath: "/project",
       },
     ] as Agent[];
     const project = { ...target, homeServerId: "home" } as Project;

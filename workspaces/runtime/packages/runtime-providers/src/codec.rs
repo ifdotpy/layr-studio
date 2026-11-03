@@ -154,6 +154,7 @@ define_methods! {
     BrowserWait => "browser.wait",
     ClaudeCommands => "claude/commands",
     ClaudeMoveExport => "claude/moveExport",
+    ClaudeMoveImport => "claude/moveImport",
     ClaudeMoveIdentity => "claude/moveIdentity",
     ClaudeMovePreflight => "claude/movePreflight",
     ClaudeMoveProof => "claude/moveProof",

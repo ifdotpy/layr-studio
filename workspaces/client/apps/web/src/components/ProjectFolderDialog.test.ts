@@ -21,7 +21,13 @@ const VM_CWD = "/var/lib/codex-studio/layr/projects/app/lines/main";
 const STUDIO_PATH = "/Users/me/Studio/app";
 
 const agent = (values: Partial<Agent>) =>
-  ({ id: "chat", isLead: true, cwd: "/Users/me/app", ...values }) as Agent;
+  ({
+    id: "chat",
+    isLead: true,
+    cwd: "/Users/me/app",
+    projectPath: "/Users/me/app",
+    ...values,
+  }) as Agent;
 
 const render = (element: ReactElement) =>
   renderToStaticMarkup(createElement(MantineProvider, { theme }, element));

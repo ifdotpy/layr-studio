@@ -177,7 +177,7 @@ export function navigationSnapshot(
       chat.moveImportPending
     )
       continue;
-    const path = chat.cwd || "";
+    const path = chat.projectPath || "";
     if (
       !projects.has(path) &&
       ![...projects.values()].some(

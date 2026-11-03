@@ -1238,10 +1238,10 @@ export default function App({ active = true }: { active?: boolean }) {
     setSidebar(false);
     if (!retryId && !cwd) {
       cwd =
-        (lead?.cwd ?? undefined) ||
+        lead?.projectPath ||
         (mobileClient
           ? (data?.runtime?.projects?.[0]?.path ?? undefined) ||
-            leads.find((item) => item.cwd)?.cwd ||
+            leads.map((item) => item.projectPath).find(Boolean) ||
             undefined
           : undefined);
       projectFolder = lead?.projectFolder || undefined;
@@ -1292,7 +1292,7 @@ export default function App({ active = true }: { active?: boolean }) {
                   .filter(
                     (chat) =>
                       chat.projectId === project.id ||
-                      chat.cwd === project.path,
+                      chat.projectPath === project.path,
                   )
                   .sort(
                     (a, b) =>
@@ -1358,8 +1358,8 @@ export default function App({ active = true }: { active?: boolean }) {
               (request): request is LeadCreateRequest =>
                 isLeadCreateRequest(request) &&
                 (request.cwd ||
-                  leads.find((item) => item.id === request.previous)?.cwd) ===
-                  cwd &&
+                  leads.find((item) => item.id === request.previous)
+                    ?.projectPath) === cwd &&
                 (request.project_folder || undefined) === projectFolder &&
                 (request.project_id || undefined) ===
                   projectBinding?.projectId &&
@@ -1382,9 +1382,10 @@ export default function App({ active = true }: { active?: boolean }) {
     if (creation.current) cwd = creation.current.cwd;
     if (mobileClient && !cwd) {
       cwd =
-        (lead?.cwd ?? undefined) ||
+        lead?.projectPath ||
         (data?.runtime?.projects?.[0]?.path ?? undefined) ||
-        (leads.find((item) => item.cwd)?.cwd ?? undefined);
+        leads.map((item) => item.projectPath).find(Boolean) ||
+        undefined;
       if (!cwd) {
         setSidebar(false);
         setModal({
@@ -1740,7 +1741,7 @@ export default function App({ active = true }: { active?: boolean }) {
     setTeamOpen(false);
   });
   const newConversation = useCommittedCallback(
-    () => void newChat(agent?.cwd || lead?.cwd || undefined),
+    () => void newChat(lead?.projectPath || agent?.projectPath || undefined),
   );
   const chooseConversation = useCallback(() => {
     setSidebar(true);
@@ -1888,7 +1889,7 @@ export default function App({ active = true }: { active?: boolean }) {
       title: "Choose project folder",
       body: (
         <ProjectDirectoryPicker
-          initialPath={target.cwd ?? undefined}
+          initialPath={target.projectPath ?? undefined}
           serverChoices={[{ id: "local", label: accountServer.label }]}
           showServerSelector={false}
           onSelect={async (cwd) => {
@@ -1902,7 +1903,7 @@ export default function App({ active = true }: { active?: boolean }) {
   };
   const project = () => {
     if (agent?.isLead && !agent.threadId) folders(agent);
-    else if (agent?.cwd)
+    else if (agent?.projectPath)
       setModal({
         title: "Project folder",
         body: (
@@ -2095,8 +2096,8 @@ export default function App({ active = true }: { active?: boolean }) {
     );
   const title = agent?.name || room?.name || legacy?.name || "New conversation";
   const projectName =
-    data.runtime?.projects?.find((item) => item.path === agent?.cwd)?.name ||
-    agent?.cwd?.split("/").filter(Boolean).at(-1);
+    data.runtime?.projects?.find((item) => item.path === agent?.projectPath)
+      ?.name || agent?.projectPath?.split("/").filter(Boolean).at(-1);
   const answerIds = awaitingAnswerIds(chatData?.runtime?.requests || []);
   const deferredIds = new Set<string>(
     (chatData?.runtime?.requests || [])
@@ -2822,7 +2823,7 @@ export default function App({ active = true }: { active?: boolean }) {
                             chat.isLead &&
                             !chat.archived &&
                             !chat.empty &&
-                            chat.cwd === agent.cwd,
+                            chat.projectPath === agent.projectPath,
                         )
                         .sort(
                           (a, b) =>

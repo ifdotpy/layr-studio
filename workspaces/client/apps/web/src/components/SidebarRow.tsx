@@ -312,7 +312,7 @@ const SidebarRowView = memo(function SidebarRowView({
                   {a.pinned ? "Unpin" : "Pin"}
                 </Menu.Item>
                 <Menu.Divider />
-                {a.cwd && (
+                {a.projectPath && (
                   <Menu.Item
                     disabled={disabled}
                     leftSection={<Folder size={14} />}

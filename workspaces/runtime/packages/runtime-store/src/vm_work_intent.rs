@@ -40,7 +40,12 @@ pub struct SubmissionResult {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MergeReceipt {
+<<<<<<< head
     pub from_state: String,
+=======
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_state: Option<String>,
+>>>>>>> origin/main
     pub to_state: String,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -79,9 +84,26 @@ mod tests {
     fn accepted_completion_retains_merge_receipt() {
         let stored = r#"{"status":"completed","requestId":"rpc","owner":"a","revision":"rev","resultId":"r","merge":{"from_state":"old","to_state":"new"}}"#;
         let intent: Intent<Acceptance, AcceptanceResult> = serde_json::from_str(stored).unwrap();
+<<<<<<< head
         assert_eq!(
             serde_json::to_value(intent).unwrap()["merge"],
             serde_json::json!({"from_state":"old","to_state":"new"})
+=======
+        let text = serde_json::to_string(&intent).unwrap();
+        assert!(text.contains(r#""merge":{"from_state":"old","to_state":"new"}"#));
+    }
+    #[test]
+    fn recovered_merge_receipt_omits_unknown_previous_state() {
+        let receipt = MergeReceipt {
+            from_state: None,
+            to_state: "resolved".into(),
+        };
+        let value = serde_json::to_string(&receipt).unwrap();
+        assert_eq!(value, r#"{"to_state":"resolved"}"#);
+        assert_eq!(
+            serde_json::from_str::<MergeReceipt>(&value).unwrap(),
+            receipt
+>>>>>>> origin/main
         );
     }
     #[test]

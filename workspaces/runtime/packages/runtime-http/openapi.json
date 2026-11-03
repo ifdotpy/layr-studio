@@ -9013,6 +9013,10 @@
             "default": null,
             "title": "Hasapproval"
           },
+          "hasBackgroundWork": {
+            "description": "Whether managed commands or monitors are active; no command output is included.",
+            "type": "boolean"
+          },
           "hasQuestion": {
             "anyOf": [
               {
@@ -9838,6 +9842,9 @@
             "default": null,
             "title": "Tail"
           },
+          "taskDefaultGate": {
+            "$ref": "#/components/schemas/TaskAcceptanceGate"
+          },
           "teamCounts": {
             "$ref": "#/components/schemas/TeamCounts"
           },
@@ -9934,6 +9941,16 @@
               }
             ],
             "default": null
+          },
+          "workspaceCleanupIntent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceCleanupSummaryDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "workspaceMode": {
             "anyOf": [
@@ -10445,6 +10462,17 @@
               }
             ],
             "title": "Projectid"
+          },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
           },
           "provider": {
             "anyOf": [

@@ -538,7 +538,7 @@ async fn drive(
                 | ReceiptOutcome::NoLiveAccountWorker
                 | ReceiptOutcome::ExpectedScopeMismatch
                 | ReceiptOutcome::DeadlineExpired
-                | ReceiptOutcome::NotHandedOff => {
+                | ReceiptOutcome::NotHandedOff(_) => {
                     operation.dispatch.state = DispatchState::Ready;
                     persist_operation(&store, &mut operation).await?;
                     return operation_public(&operation);

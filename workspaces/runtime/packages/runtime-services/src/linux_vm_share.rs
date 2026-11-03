@@ -103,7 +103,7 @@ fn run(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     .map_err(|error| match error {
         // `bounded_child` names a failure without standard error text this way.
         ChildError::Failed(message) if message == "Git operation failed" => String::new(),
-        ChildError::Failed(message) => message,
+        ChildError::Failed(message) | ChildError::MergeConflict(message) => message,
         ChildError::TimedOut => {
             format!("{program} did not finish within {MOUNT_TABLE_SECONDS} seconds")
         }

@@ -56,7 +56,7 @@ impl RetainedSessionPort {
             Ok(WriteOutcome::Written) => ReplyOutcome::Written,
             Ok(WriteOutcome::NotSent) => ReplyOutcome::NotSent,
             Ok(WriteOutcome::Unknown) | Err(PortError::Unknown) => ReplyOutcome::Unknown,
-            Err(PortError::Identity | PortError::NotSent | PortError::Deadline) => {
+            Err(PortError::Identity | PortError::NotSent(_) | PortError::Deadline) => {
                 ReplyOutcome::NotSent
             }
             Err(PortError::Capacity) => {
@@ -104,8 +104,8 @@ impl RetainedSessionPort {
                 }))),
         )
         .await
-        .map_err(|_| PortError::NotSent)?
-        .map_err(|_| PortError::NotSent)?;
+        .map_err(|_| PortError::NotSent("send-deadline".into()))?
+        .map_err(|_| PortError::NotSent("worker-send".into()))?;
         tokio::time::timeout_at(at, receipt)
             .await
             .map_err(|_| PortError::Unknown)?

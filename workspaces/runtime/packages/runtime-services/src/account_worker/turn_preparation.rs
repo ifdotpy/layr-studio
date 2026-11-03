@@ -61,7 +61,9 @@ pub(super) enum Unclaimed {
     /// Busy-turn input claimed for the running turn, and that turn's id.
     Steer(Box<TurnIntent>, String, Box<preparation::PreparedSteer>),
     /// The disk is full: the input stays queued at this epoch until the recheck.
-    DiskFull(i64),
+    DiskFull(i64, Option<super::PreparationDeadline>),
+    /// An unsubmitted preparation cannot resume yet, but its deadline remains active.
+    Deferred(i64, String, super::PreparationDeadline),
     /// A queued native review child: its first turn is `review/start`.
     NativeReview,
     /// Nothing to start now.
@@ -206,6 +208,76 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
             Ok(())
         })
         .await?;
+    let (owner, owner_account) = (agent_id.clone(), account.clone());
+    if bridge
+        .worker_run("expire_preparation", move |store| async move {
+            store::expire_preparation(&store, owner, owner_account, epoch, now(), None).await
+        })
+        .await?
+    {
+        return Ok(Err(Unclaimed::Nothing));
+    }
+    // A wake can outlive the state that scheduled it. Do not spend an
+    // account start on a failed or held agent that cannot claim input.
+    let (owner, owner_account) = (agent_id.clone(), account.clone());
+    let (eligible, deferred) = bridge
+        .store
+        .read_async("runtime-services/start-gate-eligibility", move |db| {
+            let Some(agent) = AgentRepository::get(db, &AgentId::from(owner.as_str()))? else {
+                return Ok::<_, WorkerError>((false, None));
+            };
+            let deferred = agent.start_attempt.as_ref().and_then(|attempt| {
+                (agent.epoch == epoch
+                    && agent.account_key == owner_account
+                    && agent.status == studio_runtime_store::AgentStatus::Starting
+                    && attempt.epoch == Some(epoch)
+                    && attempt.submitted == Some(false)
+                    && attempt.prepare_error.is_some())
+                .then(|| {
+                    Some((
+                        attempt.id.clone()?,
+                        super::PreparationDeadline::from_created(attempt.created?),
+                    ))
+                })
+                .flatten()
+            });
+            let receipt_operation = match agent.start_outcome_hold.as_ref() {
+                Some(studio_runtime_store::StoredStartOutcomeHold::Known(
+                    studio_runtime_store::StartOutcomeHold::Held {
+                        reason: Some(reason),
+                        operation_id: Some(operation),
+                        ..
+                    },
+                )) if reason == store::RECEIPT_PENDING_HOLD => Some(operation.as_str()),
+                _ => None,
+            };
+            let receipt_continued = match receipt_operation {
+                Some(operation) => store::thread_calls_can_continue(db, &owner, operation)?,
+                None => false,
+            };
+            Ok::<_, WorkerError>((
+                {
+                    let resuming = agent.status == studio_runtime_store::AgentStatus::Starting
+                        && agent
+                            .start_attempt
+                            .as_ref()
+                            .is_some_and(|attempt| store::reusable_preparation_attempt(attempt));
+                    agent.epoch == epoch
+                        && agent.account_key == owner_account
+                        && (resuming
+                            || (agent.status == studio_runtime_store::AgentStatus::Queued
+                                && agent.in_flight != Some(true)))
+                        && agent.auto_wake == Some(true)
+                        && !agent.native_failure_held()
+                        && (agent.start_outcome_hold.is_none() || receipt_continued)
+                },
+                deferred,
+            ))
+        })
+        .await?;
+    if !eligible && let Some((attempt, deadline)) = deferred.as_ref() {
+        return Ok(Err(Unclaimed::Deferred(epoch, attempt.clone(), *deadline)));
+    }
     let (a, g) = (account.clone(), agent_id.clone());
     let claude_steer_receipts = wake.claude_steer_receipts;
     match bridge
@@ -242,8 +314,16 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
                 }
             }
         }
-        steer::WakeClaim::Busy => return Ok(Err(Unclaimed::Nothing)),
+        steer::WakeClaim::Busy => {
+            if let Some((attempt, deadline)) = deferred {
+                return Ok(Err(Unclaimed::Deferred(epoch, attempt, deadline)));
+            }
+            return Ok(Err(Unclaimed::Nothing));
+        }
         steer::WakeClaim::Idle => {}
+    }
+    if !eligible {
+        return Ok(Err(Unclaimed::Nothing));
     }
     // The claim below refuses an agent that an account transfer holds.
     if !Box::pin(stage(
@@ -252,14 +332,17 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     ))
     .await?
     {
+        if let Some((attempt, deadline)) = deferred {
+            return Ok(Err(Unclaimed::Deferred(epoch, attempt, deadline)));
+        }
         return Ok(Err(Unclaimed::Nothing));
     }
     // A new turn waits for the account's start throttle before its claim, so
     // its input stays queued meanwhile; a slot not claimed below is freed. A
     // host without an account registry (fixtures; production hosts always
     // have one) has no throttle settings, as for the auth gate.
-    let slot = match driver {
-        Some(driver) => Some(
+    let slot = match (driver, deferred.is_some()) {
+        (Some(driver), false) => Some(
             stage(
                 "turn_preparation.start_gate",
                 bridge.start_gates.gate(account).admit(
@@ -276,7 +359,7 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
             .await
             .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?,
         ),
-        None => None,
+        _ => None,
     };
     if crate::disk_space::hold_agent_turn(
         &bridge.store,
@@ -289,7 +372,10 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     {
         // While the disk is full no new turn starts. The input stays queued
         // with its identity; the desktop shows one notice with the free space.
-        return Ok(Err(Unclaimed::DiskFull(epoch)));
+        return Ok(Err(Unclaimed::DiskFull(
+            epoch,
+            deferred.as_ref().map(|(_, deadline)| *deadline),
+        )));
     }
     // Python's dispatcher claims a pending native review before queued input.
     if crate::native_review_turn::candidate(&bridge.store, agent_id, epoch, account).await? {
@@ -309,7 +395,12 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
                 }
                 return Ok(Ok(intent));
             }
-            Ok(None) => return Ok(Err(Unclaimed::Nothing)),
+            Ok(None) => {
+                if let Some((attempt, deadline)) = deferred {
+                    return Ok(Err(Unclaimed::Deferred(epoch, attempt, deadline)));
+                }
+                return Ok(Err(Unclaimed::Nothing));
+            }
             Err(error) if invalid_agent_record_error(&error) => {
                 let (invalid_id, pointer, reason) = invalid_agent_record_details(&error)
                     .expect("guard matches InvalidSyncObjectField");

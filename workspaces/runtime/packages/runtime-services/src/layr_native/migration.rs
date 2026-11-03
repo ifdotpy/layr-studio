@@ -195,9 +195,11 @@ pub fn migrate_with_progress(
     agent.cwd = Some(project.to_string_lossy().into_owned());
     configure_new_chat(
         &mut agent,
-        project
-            .to_str()
-            .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 project path".into()))?,
+        &crate::project_path::ProjectPath::from_stored(
+            project
+                .to_str()
+                .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 project path".into()))?,
+        ),
     );
     let mut record = agent.value();
     let root = settings::selected_store(state_dir)?;

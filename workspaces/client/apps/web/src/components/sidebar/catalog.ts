@@ -67,13 +67,13 @@ export function mostRecentActivity<
 }
 
 export function countProjectChats(
-  agents: Pick<Agent, "cwd" | "archived">[],
+  agents: Pick<Agent, "projectPath" | "archived">[],
   archived: boolean,
 ) {
   const counts = new Map<string, number>();
   for (const agent of agents)
     if (!!agent.archived === archived) {
-      const path = agent.cwd || "";
+      const path = agent.projectPath || "";
       counts.set(path, (counts.get(path) || 0) + 1);
     }
   return counts;
@@ -91,7 +91,7 @@ function teamMap(teams: PeerTeam[]) {
 export function legacyChatGroup(agent: Agent, team?: PeerTeam) {
   return JSON.stringify([
     "chats",
-    agent.cwd,
+    agent.projectPath,
     !!agent.pinned,
     !!agent.archived,
     ...(team ? ["team", team.id] : []),
@@ -100,14 +100,14 @@ export function legacyChatGroup(agent: Agent, team?: PeerTeam) {
 }
 export function chatGroup(agent: Agent, team?: PeerTeam) {
   return !team && !agent.pinned
-    ? itemGroup(agent.cwd || "", agent.projectFolder || null)
+    ? itemGroup(agent.projectPath || "", agent.projectFolder || null)
     : legacyChatGroup(agent, team);
 }
 function orderingChanged(a: Agent, b: Agent) {
   return (
     a.pinned !== b.pinned ||
     a.archived !== b.archived ||
-    a.cwd !== b.cwd ||
+    a.projectPath !== b.projectPath ||
     a.projectFolder !== b.projectFolder ||
     "updated" in a !== "updated" in b ||
     a.updated !== b.updated ||
@@ -250,7 +250,7 @@ export function createSidebarCatalogSelector() {
     );
     const projects = new Map<string, Agent[]>();
     for (const agent of ordered) {
-      const path = agent.cwd || "";
+      const path = agent.projectPath || "";
       const rows = projects.get(path);
       if (rows) rows.push(agent);
       else projects.set(path, [agent]);
@@ -260,7 +260,7 @@ export function createSidebarCatalogSelector() {
     byProject = projects;
     const groupedIds = new Set<string>();
     for (const agent of agents)
-      if (byTeam.get(agent.id)?.projectPath === agent.cwd)
+      if (byTeam.get(agent.id)?.projectPath === agent.projectPath)
         groupedIds.add(agent.id);
     if (
       groupedIds.size !== grouped.size ||

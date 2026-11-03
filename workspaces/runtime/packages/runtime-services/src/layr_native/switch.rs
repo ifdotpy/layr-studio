@@ -126,7 +126,10 @@ fn configure(record: &mut AgentRecord, relatives: Option<&(Box<AgentRecord>, Box
         Some((parent, root)) => configure_child(record, parent, root),
         None => {
             let source = record.cwd.as_deref().unwrap_or_default().to_owned();
-            configure_new_chat(record, &source);
+            configure_new_chat(
+                record,
+                &crate::project_path::ProjectPath::from_stored(&source),
+            );
         }
     }
 }

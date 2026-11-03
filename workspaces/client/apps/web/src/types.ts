@@ -4,6 +4,7 @@ import type { GetResult } from "./api";
 import type { Approval } from "./approvals";
 import type {
   AgentEntityDto,
+  AgentSummaryEntityDto,
   ChatEntityDto,
   ComplaintEntityDto,
   EdgeEntityDto,
@@ -31,7 +32,9 @@ export type {
 import type { JsonInput, TranscriptWireItem } from "./apiTypes";
 import type { DeepReadonly } from "./deepReadonly.ts";
 export type { DeepReadonly };
-export type Agent = DeepReadonly<AgentEntityDto>;
+export type Agent = DeepReadonly<
+  AgentEntityDto & Pick<AgentSummaryEntityDto, "projectPath">
+>;
 export type Chat = ChatEntityDto;
 export type PeerTeam = PeerTeamEntityDto;
 export type Room = RoomEntityDto;

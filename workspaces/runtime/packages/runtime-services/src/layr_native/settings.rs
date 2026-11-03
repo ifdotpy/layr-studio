@@ -14,14 +14,35 @@ fn path(state: &Path) -> PathBuf {
     state.join(NATIVE_LAYR_DIRECTORY).join("settings.json")
 }
 
-pub fn selected_store(state: &Path) -> Result<PathBuf> {
+fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
     let settings = match fs::read(path(state)) {
         Ok(bytes) => serde_json::from_slice::<Settings>(&bytes)
             .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}")))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
         Err(e) => return Err(e.into()),
     };
-    match settings.store_root {
+    if settings
+        .store_root
+        .as_ref()
+        .is_some_and(|root| !root.is_absolute())
+    {
+        return Err(NativeLayrError::Refused(
+            "The native Layr store root must be an existing absolute folder".into(),
+        ));
+    }
+    Ok(settings.store_root)
+}
+
+/// The configured spelling is usable for path validation even while the store is offline.
+pub(crate) fn store_for_validation(state: &Path) -> PathBuf {
+    configured_store(state)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| store_path(state))
+}
+
+pub fn selected_store(state: &Path) -> Result<PathBuf> {
+    match configured_store(state)? {
         Some(root) if root.is_absolute() && root.is_dir() => {
             Ok(CanonicalPath::existing(root)?.into_path_buf())
         }

@@ -333,6 +333,61 @@ async fn project_deletion_receipt_survives_store_restart() {
 }
 
 #[tokio::test]
+async fn worktree_create_succeeds_with_missing_configured_native_store() {
+    worktree_create_with_unavailable_store("missing").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn worktree_create_succeeds_with_dangling_or_inaccessible_native_store() {
+    worktree_create_with_unavailable_store("dangling").await;
+    worktree_create_with_unavailable_store("inaccessible").await;
+}
+
+async fn worktree_create_with_unavailable_store(kind: &str) {
+    let (_root, store, project) = setup().await;
+    let native = store.root().join("layr-native");
+    std::fs::create_dir_all(&native).expect("create native settings folder");
+    let root = store.root().join("unmounted");
+    #[cfg(unix)]
+    if kind == "dangling" {
+        std::os::unix::fs::symlink("missing", &root).expect("create dangling store link");
+    } else if kind == "inaccessible" {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir(&root).expect("create inaccessible store parent");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000))
+            .expect("restrict store parent");
+    }
+    let _ = kind;
+    std::fs::write(
+        native.join("settings.json"),
+        json!({"storeRoot":root.join("store")}).to_string(),
+    )
+    .expect("write native store settings");
+    let accounts = accounts();
+    let context = agents_create::Context {
+        store: store.clone(),
+        accounts: Some(&accounts),
+        driver: Some(driver(store.root())),
+        catalog: None,
+        managed_creation_environment: None,
+        validate: Arc::new(|_, _| true),
+    };
+    let mut request = creation(project["id"].as_str().expect("project id"), false);
+    request.catalog = false;
+    request.intent = Default::default();
+    agents_create::lead(&context, request)
+        .await
+        .expect("worktree creation");
+    #[cfg(unix)]
+    if kind == "inaccessible" {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))
+            .expect("restore store parent permissions");
+    }
+}
+
+#[tokio::test]
 async fn project_deletion_registry_only_remove_allows_fresh_creation() {
     let (_root, store, project) = setup().await;
     let path = project["id"].as_str().expect("id");

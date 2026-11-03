@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "../types";
 import { preferenceMemory } from "./storage";
 import { navigationSnapshot } from "./navigation";
-import { sidebarProjectChat, sidebarSnapshot } from "./sidebarSnapshot";
+import { sidebarSnapshot } from "./sidebarSnapshot";
 
 function snapshot(): Snapshot {
   return {
@@ -315,31 +315,28 @@ describe("server sidebar projection", () => {
     expect(projected.savedOrder).toEqual({ projects: ["/legacy"] });
   });
 
-  it("shows a VM chat in its project on this Mac", () => {
+  it("shows Layr chats in their host project", () => {
     const line = "/var/lib/codex-studio/layr/projects/da54bb40/lines/main";
     const vm = {
       id: "vm-lead",
       cwd: line,
       executionMode: "vm",
-      hostProjectPath: "/Users/me/Projects/attar",
+      projectPath: "/Users/me/Projects/attar",
     } as Snapshot["threads"][number];
     const native = {
       id: "native",
-      cwd: "/Users/me/Projects/attar",
+      cwd: line,
       executionMode: "native",
-      hostProjectPath: "/Users/me/Projects/other",
+      projectPath: "/Users/me/Projects/attar",
     } as Snapshot["threads"][number];
     const data = snapshot();
     data.threads = [vm, native];
     const threads = sidebarSnapshot(data).threads;
-    expect(threads.map((row) => row.cwd)).toEqual([
+    expect(threads.map((row) => row.projectPath)).toEqual([
       "/Users/me/Projects/attar",
       "/Users/me/Projects/attar",
     ]);
-    // The chat record keeps its line; the same view comes back for the same record.
     expect(vm.cwd).toBe(line);
-    expect(sidebarProjectChat(vm)).toBe(sidebarProjectChat(vm));
-    expect(sidebarProjectChat(native)).toBe(native);
   });
 
   it("uses empty saved preferences when keys are missing or invalid", () => {

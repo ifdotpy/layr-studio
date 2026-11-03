@@ -78,7 +78,7 @@ pub fn valid() -> SessionReceipt {
 }
 pub fn before_handoff() -> SessionReceipt {
     SessionReceipt { scope: ConnectionScope, operation: String::new(),
-      outcome: SessionOutcome::NotHandedOff, replayed: false }
+      outcome: SessionOutcome::NotHandedOff("deadline".into()), replayed: false }
 }
 `);
     assert.equal(valid.status, 0, valid.stderr);

@@ -223,6 +223,35 @@ pub struct AccountTransferExecutor {
     pub now: f64,
 }
 
+/// Params for `claude/moveImport`: the source session export and its native history file.
+/// The target bridge repeats the saved prompt and tool proof, so a changed setting refuses
+/// before any native write. The model is checked here because the bridge keeps the source model.
+fn claude_import_params(
+    export: &Value,
+    cwd: &Value,
+    model: &Value,
+) -> Result<Value, TransferError> {
+    let path = export
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or(TransferError::Refused(
+            "Claude move export returned no history path",
+        ))?;
+    let session = export
+        .get("session")
+        .filter(|session| session.is_object())
+        .ok_or(TransferError::Refused(
+            "Claude move export returned no session",
+        ))?;
+    if session.get("model") != Some(model) {
+        return Err(TransferError::Refused(
+            "The destination Claude model differs from the source session",
+        ));
+    }
+    Ok(json!({"session": session, "path": path, "cwd": cwd}))
+}
+
 async fn run_transfer_blocking<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, TransferError> + Send + 'static,
 ) -> Result<T, TransferError> {
@@ -882,6 +911,7 @@ async fn read_catalog(
 
 fn destination_settings(
     agent: &studio_runtime_store::AgentRecord,
+    source_account: &str,
     source_provider: ProviderKind,
     target_provider: ProviderKind,
     catalog: &CatalogObservation,
@@ -937,13 +967,20 @@ fn destination_settings(
         .try_into()
         .map_err(|_| TransferError::Refused("Invalid destination account"))?;
     let mut defaults = worker_defaults(agent)?.value().cloned().unwrap_or_default();
-    defaults.account_key = Field::Value(catalog.identity.account_key.clone());
-    if changed {
-        defaults.model = Field::Null;
-        defaults.effort = Field::Value("medium".into());
-        defaults.fast_mode = Field::Value(false);
-        defaults.daybreak_enabled = Field::Value(false);
-        defaults.cyber_access_program = Field::Value("standard".into());
+    // Defaults naming another account are the owner's own choice: keep them as they are.
+    if defaults
+        .account_key
+        .value()
+        .is_none_or(|key| key == source_account)
+    {
+        defaults.account_key = Field::Value(catalog.identity.account_key.clone());
+        if changed {
+            defaults.model = Field::Null;
+            defaults.effort = Field::Value("medium".into());
+            defaults.fast_mode = Field::Value(false);
+            defaults.daybreak_enabled = Field::Value(false);
+            defaults.cyber_access_program = Field::Value("standard".into());
+        }
     }
     let daybreak = !changed && agent.daybreak_enabled == Some(true);
     let cyber_program = match target_provider {
@@ -1098,11 +1135,18 @@ impl TransferExecutor for AccountTransferExecutor {
                 now: self.now,
             };
             let catalog = read_catalog(&catalog_context, target_provider, &home).await?;
-            let settings = destination_settings(agent, source_provider, target_provider, &catalog)?;
+            let settings = destination_settings(
+                agent,
+                source_account,
+                source_provider,
+                target_provider,
+                &catalog,
+            )?;
 
             let mut portable = None;
             let mut history_text = None;
             let mut copied_history_path = None;
+            let mut claude_export = None;
             let source_thread = member.source_thread_id.value().map(String::as_str);
             if let Some(thread_id) = source_thread {
                 // No other agent may use the source account any more, so its
@@ -1235,10 +1279,30 @@ impl TransferExecutor for AccountTransferExecutor {
                         .await?,
                     );
                 }
+                // A Claude move copies the native file, so it reads no turn pages.
+                let claude_move = source_provider == ProviderKind::Claude
+                    && target_provider == ProviderKind::Claude;
+                claude_export = if claude_move {
+                    Some(
+                        source_transfer_call(
+                            &source_context,
+                            SourceTransferCall {
+                                thread: thread_id,
+                                suffix: "move-export",
+                                method: Method::ClaudeMoveExport,
+                                params: json!({"threadId":thread_id}),
+                            },
+                        )
+                        .await?,
+                    )
+                } else {
+                    None
+                };
+                let pages = if claude_move { 0 } else { 1024 };
                 let mut records = vec![json!({"kind":"native_thread","thread":thread})];
                 let mut cursor: Option<String> = None;
                 let mut cursors = std::collections::HashSet::new();
-                for page in 0..1024 {
+                for page in 0..pages {
                     let mut params = json!({"threadId":thread_id,"limit":20,"sortDirection":"desc","itemsView":"full"});
                     if let Some(value) = &cursor {
                         params["cursor"] = json!(value);
@@ -1276,7 +1340,7 @@ impl TransferExecutor for AccountTransferExecutor {
                         }
                     }
                 }
-                if portable_required {
+                if portable_required && !claude_move {
                     let mut archive_agent = agent.value();
                     if let Some(source_state) = archive_agent
                         .get("lazyAccountTransfer")
@@ -1402,11 +1466,20 @@ impl TransferExecutor for AccountTransferExecutor {
             if let Some(history) = &portable {
                 params["portableHistory"] = history.clone();
             }
-            let method = if source_thread.is_some() && portable.is_none() {
+            let method = if claude_export.is_some() {
+                TransferMethod::ClaudeImport
+            } else if source_thread.is_some() && portable.is_none() {
                 TransferMethod::Fork
             } else {
                 TransferMethod::Start
             };
+            if let Some(export) = &claude_export {
+                params = claude_import_params(
+                    export,
+                    &params["cwd"],
+                    &json!(settings.settings.model.value()),
+                )?;
+            }
             if method == TransferMethod::Fork {
                 if let Some(object) = params.as_object_mut() {
                     drop(object.remove("dynamicTools"));
@@ -1605,9 +1678,14 @@ mod destination_settings_tests {
                 priority: true,
             }],
         };
-        let result =
-            destination_settings(&agent, ProviderKind::Codex, ProviderKind::Codex, &catalog)
-                .unwrap();
+        let result = destination_settings(
+            &agent,
+            "source",
+            ProviderKind::Codex,
+            ProviderKind::Codex,
+            &catalog,
+        )
+        .unwrap();
         assert_eq!(
             result.settings.model.value().map(String::as_str),
             Some("model-a")
@@ -1638,6 +1716,69 @@ mod destination_settings_tests {
                 .as_str(),
             "target"
         );
+    }
+
+    fn claude_target_catalog() -> CatalogObservation {
+        CatalogObservation {
+            identity: CatalogIdentity {
+                account_key: "target".into(),
+                home: "/target".into(),
+                provider: ProviderKind::Claude,
+                generation: 1,
+            },
+            expires_at: Instant::now() + Duration::from_secs(30),
+            models: vec![ModelCapabilities {
+                model: "model-a".into(),
+                resolved_model: None,
+                is_default: true,
+                hidden: false,
+                access_programs: None,
+                supported_efforts: vec!["medium".into()],
+                default_effort: Some("medium".into()),
+                priority: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn transfer_keeps_worker_defaults_naming_another_account() {
+        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"codex-login","model":"gpt-6.1-sol"}}"#).unwrap();
+        let result = destination_settings(
+            &agent,
+            "source",
+            ProviderKind::Claude,
+            ProviderKind::Claude,
+            &claude_target_catalog(),
+        )
+        .unwrap();
+        let defaults = result.settings.worker_defaults.value().unwrap();
+        assert_eq!(
+            defaults.account_key.value().map(String::as_str),
+            Some("codex-login")
+        );
+        assert_eq!(
+            defaults.model.value().map(String::as_str),
+            Some("gpt-6.1-sol")
+        );
+    }
+
+    #[test]
+    fn transfer_moves_worker_defaults_naming_source_account() {
+        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"source","model":"model-a"}}"#).unwrap();
+        let result = destination_settings(
+            &agent,
+            "source",
+            ProviderKind::Claude,
+            ProviderKind::Claude,
+            &claude_target_catalog(),
+        )
+        .unwrap();
+        let defaults = result.settings.worker_defaults.value().unwrap();
+        assert_eq!(
+            defaults.account_key.value().map(String::as_str),
+            Some("target")
+        );
+        assert_eq!(defaults.model.value().map(String::as_str), Some("model-a"));
     }
 
     #[test]
@@ -1686,6 +1827,7 @@ mod destination_settings_tests {
         };
         let settings = destination_settings(
             reading.agent("agent").unwrap(),
+            "source",
             ProviderKind::Codex,
             ProviderKind::Claude,
             &catalog,
@@ -1719,6 +1861,7 @@ mod destination_settings_tests {
         };
         let result = destination_settings(
             &serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"source-model"}"#).unwrap(),
+            "source",
             ProviderKind::Claude,
             ProviderKind::Codex,
             &catalog,
@@ -2227,6 +2370,7 @@ mod retained_executor_tests {
                     | Method::BrowserWait
                     | Method::ClaudeCommands
                     | Method::ClaudeMoveExport
+                    | Method::ClaudeMoveImport
                     | Method::ClaudeMoveIdentity
                     | Method::ClaudeMovePreflight
                     | Method::ClaudeMoveProof
@@ -2440,6 +2584,7 @@ mod retained_executor_tests {
                     | Method::BrowserWait
                     | Method::ClaudeCommands
                     | Method::ClaudeMoveExport
+                    | Method::ClaudeMoveImport
                     | Method::ClaudeMoveIdentity
                     | Method::ClaudeMovePreflight
                     | Method::ClaudeMoveProof
@@ -3284,5 +3429,56 @@ mod retained_executor_tests {
                 "the interrupted copy was not replaced after restart"
             );
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod claude_move_import_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn export() -> Value {
+        json!({
+            "path": "/source/projects/-proj/n1.jsonl",
+            "session": {"id": "t1", "nativeId": "n1", "model": "default", "turns": [],
+                "moveProof": {"snapshotHash": "h"}}
+        })
+    }
+
+    #[test]
+    fn claude_import_keeps_the_exported_session_and_path() {
+        let params =
+            claude_import_params(&export(), &json!("/target/proj"), &json!("default")).unwrap();
+        assert_eq!(params["path"], "/source/projects/-proj/n1.jsonl");
+        assert_eq!(params["cwd"], "/target/proj");
+        assert_eq!(params["session"]["id"], "t1");
+        assert_eq!(params["session"]["nativeId"], "n1");
+        assert_eq!(params["session"]["moveProof"]["snapshotHash"], "h");
+        assert!(params.get("portableHistory").is_none());
+        assert!(params.get("developerInstructions").is_none());
+    }
+
+    #[test]
+    fn claude_import_refuses_a_missing_path_or_another_model() {
+        let mut missing = export();
+        missing.as_object_mut().unwrap().remove("path");
+        assert!(claude_import_params(&missing, &json!("/t"), &json!("default")).is_err());
+        assert!(claude_import_params(&export(), &json!("/t"), &json!("other-model")).is_err());
+    }
+
+    #[test]
+    fn claude_export_is_a_source_read_only_for_its_thread() {
+        let params = json!({"threadId": "t1"});
+        assert!(crate::account_transfer::valid_source_preflight_params(
+            "claude/moveExport",
+            "t1",
+            &params
+        ));
+        assert!(!crate::account_transfer::valid_source_preflight_params(
+            "claude/moveExport",
+            "t2",
+            &params
+        ));
     }
 }

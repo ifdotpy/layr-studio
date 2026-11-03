@@ -187,6 +187,7 @@ pub fn valid_source_preflight_params(method: &str, thread: &str, params: &Value)
     }
     match method {
         "thread/queue/list" | "thread/unsubscribe" => params == &json!({"threadId":thread}),
+        "claude/moveExport" => params == &json!({"threadId":thread}),
         "thread/backgroundTerminals/list" => {
             params
                 == &json!({
@@ -969,7 +970,10 @@ impl Snapshot {
         if !self.pending()
             || member.phase != Phase::Reading
             || operation.is_empty()
-            || !matches!(method, TransferMethod::Start | TransferMethod::Fork)
+            || !matches!(
+                method,
+                TransferMethod::Start | TransferMethod::Fork | TransferMethod::ClaudeImport
+            )
             || !params_value.is_object()
         {
             return Err(TransferError::Refused(
@@ -1039,6 +1043,7 @@ impl Snapshot {
                 | TransferMethod::QueueList
                 | TransferMethod::BackgroundList
                 | TransferMethod::Unsubscribe
+                | TransferMethod::ClaudeExport
         ) {
             return Ok(None);
         }
@@ -1140,6 +1145,7 @@ impl Snapshot {
             TransferMethod::QueueList
                 | TransferMethod::BackgroundList
                 | TransferMethod::Unsubscribe
+                | TransferMethod::ClaudeExport
         ) && member.source_account_key == *account
             && member.source_thread_id.value().map(String::as_str)
                 == params.get("threadId").and_then(Value::as_str)
@@ -1648,8 +1654,10 @@ impl Snapshot {
         }
         let params_value: Value =
             serde_json::from_str(params.get()).map_err(|_| invalid("provider payload", "/"))?;
-        if !matches!(method, TransferMethod::Start | TransferMethod::Fork)
-            || !params_value.is_object()
+        if !matches!(
+            method,
+            TransferMethod::Start | TransferMethod::Fork | TransferMethod::ClaudeImport
+        ) || !params_value.is_object()
         {
             return Err(TransferError::Refused("Invalid native transfer request"));
         }
@@ -2982,6 +2990,7 @@ mod provider_receipt_tests {
             let method = match method {
                 "thread/start" => TransferMethod::Start,
                 "thread/fork" => TransferMethod::Fork,
+                "claude/moveImport" => TransferMethod::ClaudeImport,
                 _ => {
                     return Err(TransferError::Refused(
                         "The transfer is not ready for provider submission",

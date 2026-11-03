@@ -1358,6 +1358,16 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             serde_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
         openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
     }
+    // AgentResponse is closed. Give it every agent view field, so a projected field cannot fail a committed write.
+    let view_fields = openapi["components"]["schemas"]["AgentEntityDto"]["properties"].clone();
+    let response_fields = openapi["components"]["schemas"]["AgentResponse"]["properties"]
+        .as_object_mut()
+        .ok_or("AgentResponse must have properties")?;
+    for (name, schema) in view_fields.as_object().into_iter().flatten() {
+        response_fields
+            .entry(name.clone())
+            .or_insert_with(|| schema.clone());
+    }
     openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
         serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});

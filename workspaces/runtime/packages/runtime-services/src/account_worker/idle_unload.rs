@@ -1098,9 +1098,9 @@ impl Worker {
             && self.vm_notification_waiters.is_empty()
             && self.request_waiters.is_empty()
             && self.restart_recovery.is_none()
-            && !self.connection_recovery_active
+            && self.connection_recovery_active == super::ConnectionRecoveryPhase::Idle
             && self.connection_recovery.is_empty()
-            && !self.resume_preparations
+            && self.resume_preparations == super::PreparationResume::Complete
             && self.preparation_waits.is_empty()
             && self.preparations.is_empty()
     }
@@ -1225,6 +1225,8 @@ mod tests {
         let handle = ProviderHandle::for_account("default");
         let mut status = SessionStatus {
             supervisor_write_deduplication: false,
+            barrier_set: false,
+            held_entries: 0,
             generation,
             initialization: InitializationStatus::Ready,
             initialize_result: None,

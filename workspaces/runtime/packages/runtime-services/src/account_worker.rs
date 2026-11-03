@@ -128,6 +128,22 @@ pub enum PreparationWaitReason {
     Dependency,
 }
 
+/// Maximum lifetime of a deferred start preparation, measured from its durable
+/// attempt creation time; unit: wall time. Recovery that requeues an unsent
+/// attempt starts a new attempt and therefore a fresh deadline.
+const PREPARATION_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+#[derive(Clone, Copy)]
+struct PreparationDeadline(f64);
+impl PreparationDeadline {
+    fn from_created(created: f64) -> Self {
+        Self(created + PREPARATION_WAIT_TIMEOUT.as_secs_f64())
+    }
+    fn remaining(self, now: f64) -> std::time::Duration {
+        std::time::Duration::from_secs_f64((self.0 - now).max(0.0))
+    }
+}
+
 impl PreparationWaitReason {
     fn wait(self, epoch: i64) -> studio_runtime_schema::agent_progress::AgentStartWait {
         use studio_runtime_schema::agent_progress::AgentStartWait;
@@ -565,6 +581,11 @@ pub enum AccountCommand {
         agent_id: String,
         epoch: i64,
     },
+    /// Retire a completed deadline task only if it still owns the registration.
+    PreparationWaitFinished {
+        agent_id: String,
+        task_id: tokio::task::Id,
+    },
     /// The worker's wake and start state, read in its own loop for diagnostics.
     AccountDiagnostics {
         reply: tokio::sync::oneshot::Sender<Value>,
@@ -847,7 +868,7 @@ pub async fn start_account_worker_with_publication_sink(
             stop: stop.clone(),
         },
         queued_commands: VecDeque::new(),
-        resume_preparations: true,
+        resume_preparations: PreparationResume::Pending,
         preparation_waits: BTreeMap::new(),
         preparations: JoinSet::new(),
         preparation_aborts: Vec::new(),
@@ -887,10 +908,10 @@ pub async fn start_account_worker_with_publication_sink(
         publication_drain: None,
         delivered_publications: Vec::new(),
         closing: false,
-        restart_recovery_started: false,
+        restart_recovery_started: RestartRecoveryPhase::Pending,
         restart_recovery: None,
         connection_recovery: tokio::task::JoinSet::new(),
-        connection_recovery_active: false,
+        connection_recovery_active: ConnectionRecoveryPhase::Idle,
         managed_callbacks: JoinSet::new(),
     };
     let mut cancelled_owner = stop.subscribe();
@@ -1024,6 +1045,24 @@ impl Preparing {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreparationResume {
+    Pending,
+    Complete,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RestartRecoveryPhase {
+    Pending,
+    Started,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConnectionRecoveryPhase {
+    Idle,
+    Active,
+}
+
 struct Worker {
     retained_requests: BTreeMap<RequestId, retained::PendingRequest>,
     retained_frames: BTreeMap<String, retained_frame::PendingFrame>,
@@ -1064,9 +1103,9 @@ struct Worker {
     retained_session: retained::RetainedSessionPort,
     queued_commands: VecDeque<AccountCommand>,
     /// Resume durable pending preparations once, after the session is ready.
-    resume_preparations: bool,
+    resume_preparations: PreparationResume,
     /// One event-driven wake per agent whose preparation is pending.
-    preparation_waits: BTreeMap<String, tokio::task::AbortHandle>,
+    preparation_waits: BTreeMap<String, (i64, tokio::task::AbortHandle)>,
     /// Concurrent per-agent turn preparations (see `turn_preparation`).
     preparations: JoinSet<Box<turn_preparation::Done>>,
     /// The preparations in `preparations` that shutdown aborts: claims and
@@ -1122,10 +1161,10 @@ struct Worker {
     /// Whether accepted callback records may be waiting to start: set by a
     /// journal commit, a finished handler or answer, and at startup.
     callback_scan: bool,
-    restart_recovery_started: bool,
+    restart_recovery_started: RestartRecoveryPhase,
     restart_recovery: Option<JoinHandle<()>>,
     connection_recovery: tokio::task::JoinSet<()>,
-    connection_recovery_active: bool,
+    connection_recovery_active: ConnectionRecoveryPhase,
     managed_callbacks: JoinSet<ManagedCallbackResult>,
 }
 
@@ -1320,7 +1359,7 @@ impl Worker {
             let _joined = drain.await;
         }
         self.connection_recovery.abort_all();
-        for wait in std::mem::take(&mut self.preparation_waits).into_values() {
+        for (_, wait) in std::mem::take(&mut self.preparation_waits).into_values() {
             wait.abort();
         }
         // An unsubmitted preparation holds no provider evidence; its claim is
@@ -1427,11 +1466,11 @@ impl Worker {
             if self.closing || *self.stop.borrow() {
                 return Ok(());
             }
-            if !self.restart_recovery_started
+            if self.restart_recovery_started == RestartRecoveryPhase::Pending
                 && self.session.status.borrow().initialization == InitializationStatus::Ready
             {
                 self.restore_existing_vm_sessions().await?;
-                self.restart_recovery_started = true;
+                self.restart_recovery_started = RestartRecoveryPhase::Started;
                 let first_pass = restart_recovery::FirstPass {
                     bridge: self.bridge.clone(),
                     account: self.account.clone(),
@@ -1448,10 +1487,10 @@ impl Worker {
             {
                 self.flush().await?;
             }
-            if self.resume_preparations
+            if self.resume_preparations == PreparationResume::Pending
                 && self.session.status.borrow().initialization == InitializationStatus::Ready
             {
-                self.resume_preparations = false;
+                self.resume_preparations = PreparationResume::Complete;
                 self.resume_pending_preparations().await?;
                 continue;
             }
@@ -1479,7 +1518,7 @@ impl Worker {
                 && self.pending.is_empty()
                 && self.retained_requests.is_empty()
                 && self.effects.is_empty()
-                && !self.resume_preparations
+                && self.resume_preparations == PreparationResume::Complete
                 && self.preparation_waits.is_empty()
                 && self.preparations.is_empty()
                 && self.queued_commands.is_empty()
@@ -1649,7 +1688,9 @@ impl Worker {
             ServeSignal::Event(Some(event)) => self.event(event).await?,
             ServeSignal::VmEvent(Some(event)) => self.handle_vm_message(event).await?,
             ServeSignal::VmEvent(None) => return Ok(false),
-            ServeSignal::ConnectionRecovery => self.connection_recovery_active = false,
+            ServeSignal::ConnectionRecovery => {
+                self.connection_recovery_active = ConnectionRecoveryPhase::Idle
+            }
             ServeSignal::ManagedCallback(callback) => {
                 let (cursor, generation, actor, epoch, handled) = callback
                     .ok_or(WorkerError::TaskFailed)?
@@ -1749,10 +1790,10 @@ impl Worker {
                 authorization,
                 reply,
             } => {
-                if self.connection_recovery_active {
+                if self.connection_recovery_active == ConnectionRecoveryPhase::Active {
                     let _sent = reply.send(Err(retained::PortError::Capacity));
                 } else {
-                    self.connection_recovery_active = true;
+                    self.connection_recovery_active = ConnectionRecoveryPhase::Active;
                     let request = connection_recovery::Command {
                         bridge: self.bridge.clone(),
                         account: self.account.clone(),
@@ -1799,6 +1840,15 @@ impl Worker {
                 let _sent = reply.send(result);
             }
             AccountCommand::Wake { agent_id, epoch } => self.wake(agent_id, epoch).await?,
+            AccountCommand::PreparationWaitFinished { agent_id, task_id } => {
+                if self
+                    .preparation_waits
+                    .get(&agent_id)
+                    .is_some_and(|(_, task)| task.id() == task_id)
+                {
+                    self.preparation_waits.remove(&agent_id);
+                }
+            }
             AccountCommand::AccountDiagnostics { reply } => {
                 let _sent = reply.send(self.diagnostics());
             }
@@ -1969,17 +2019,22 @@ impl Worker {
         let agents = catalog
             .is_none()
             .then(|| self.bridge.agent_wakes.wait(since, pending.rows));
+        let remaining = pending.deadline.remaining(now());
         let task = tokio::spawn(async move {
-            match (catalog, agents) {
-                (Some((catalog, account, home, provider)), _) => {
-                    catalog.refreshed(&account, &home, provider).await;
-                }
-                (None, Some(agents)) => {
-                    if agents.await.is_err() {
-                        return;
+            let change = async move {
+                match (catalog, agents) {
+                    (Some((catalog, account, home, provider)), _) => {
+                        catalog.refreshed(&account, &home, provider).await;
                     }
+                    (None, Some(agents)) => {
+                        drop(agents.await);
+                    }
+                    (None, None) => {}
                 }
-                (None, None) => return,
+            };
+            tokio::select! {
+                () = change => {}
+                () = tokio::time::sleep(remaining) => {}
             }
             let _closed = commands
                 .send(AccountCommand::Wake { agent_id, epoch })
@@ -1987,23 +2042,99 @@ impl Worker {
         });
         if let Some(previous) = self
             .preparation_waits
-            .insert(intent.agent_id.clone(), task.abort_handle())
+            .insert(intent.agent_id.clone(), (epoch, task.abort_handle()))
         {
-            previous.abort();
+            previous.1.abort();
         }
     }
     /// Wake a queued agent again after the disk-full recheck interval.
-    fn wait_for_disk_space(&mut self, agent_id: String, epoch: i64) {
+    fn wait_for_disk_space(
+        &mut self,
+        agent_id: String,
+        epoch: i64,
+        deadline: Option<PreparationDeadline>,
+    ) {
         let commands = self.commands.clone();
         let key = agent_id.clone();
         let task = tokio::spawn(async move {
-            tokio::time::sleep(crate::disk_space::RECHECK).await;
+            let wait = deadline.map_or(crate::disk_space::RECHECK, |deadline| {
+                crate::disk_space::RECHECK.min(deadline.remaining(now()))
+            });
+            tokio::time::sleep(wait).await;
             let _closed = commands
                 .send(AccountCommand::Wake { agent_id, epoch })
                 .await;
         });
-        if let Some(previous) = self.preparation_waits.insert(key, task.abort_handle()) {
-            previous.abort();
+        if let Some(previous) = self
+            .preparation_waits
+            .insert(key, (epoch, task.abort_handle()))
+        {
+            previous.1.abort();
+        }
+    }
+    /// A deferred attempt that cannot be resumed still owns its original deadline.
+    fn wait_for_deferred_deadline(
+        &mut self,
+        agent_id: String,
+        epoch: i64,
+        attempt: String,
+        deadline: PreparationDeadline,
+    ) {
+        let bridge = self.bridge.clone();
+        let account = self.account.clone();
+        let commands = self.commands.clone();
+        let key = agent_id.clone();
+        let wake_agent = agent_id.clone();
+        let remaining = deadline.remaining(now());
+        let task = tokio::spawn(async move {
+            let task_id = tokio::task::id();
+            tokio::time::sleep(remaining).await;
+            match bridge
+                .worker_run("expire_preparation_deadline", move |store| async move {
+                    store::expire_preparation(
+                        &store,
+                        agent_id,
+                        account,
+                        epoch,
+                        deadline.0,
+                        Some((attempt, deadline)),
+                    )
+                    .await
+                })
+                .await
+            {
+                Ok(true) => {
+                    let _closed = commands
+                        .send(AccountCommand::Wake {
+                            agent_id: wake_agent,
+                            epoch,
+                        })
+                        .await;
+                }
+                Ok(false) => {
+                    let _closed = commands
+                        .send(AccountCommand::PreparationWaitFinished {
+                            agent_id: wake_agent,
+                            task_id,
+                        })
+                        .await;
+                }
+                Err(error) => {
+                    eprintln!("deferred preparation deadline failed: {error}");
+                    let _closed = commands
+                        .send(AccountCommand::PreparationWaitFinished {
+                            agent_id: wake_agent,
+                            task_id,
+                        })
+                        .await;
+                }
+            }
+        });
+        if let Some(previous) = self
+            .preparation_waits
+            .insert(key, (epoch, task.abort_handle()))
+        {
+            previous.1.abort();
         }
     }
     async fn refresh_vm_claude_credentials(&mut self) -> Result<(), WorkerError> {
@@ -2081,7 +2212,12 @@ impl Worker {
         })
     }
     async fn wake(&mut self, agent: String, epoch: i64) -> Result<(), WorkerError> {
-        if let Some(wait) = self.preparation_waits.remove(&agent) {
+        if self
+            .preparation_waits
+            .get(&agent)
+            .is_some_and(|(owner, _)| *owner <= epoch)
+            && let Some((_, wait)) = self.preparation_waits.remove(&agent)
+        {
             wait.abort();
         }
         if self.closing {
@@ -2340,8 +2476,18 @@ impl Worker {
                 turn,
                 prepared,
             )) => Box::pin(self.steer(*intent, turn, *prepared)).await?,
-            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskFull(epoch)) => {
-                self.wait_for_disk_space(agent_id.clone(), epoch);
+            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskFull(
+                epoch,
+                deadline,
+            )) => {
+                self.wait_for_disk_space(agent_id.clone(), epoch, deadline);
+            }
+            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::Deferred(
+                epoch,
+                attempt,
+                deadline,
+            )) => {
+                self.wait_for_deferred_deadline(agent_id.clone(), epoch, attempt, deadline);
             }
             turn_preparation::Outcome::Unclaimed(
                 turn_preparation::Unclaimed::Nothing | turn_preparation::Unclaimed::NativeReview,

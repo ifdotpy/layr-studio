@@ -14,6 +14,8 @@ use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, 
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeLayrError {
+    #[error("Native Layr merge conflict: {0}")]
+    Conflict(String),
     #[error("Native Layr: {0}")]
     Refused(String),
     #[error("Native Layr operation has an unknown outcome; inspect its receipt: {0}")]
@@ -107,6 +109,7 @@ enum ReceiptStatus {
     Pending,
     Completed,
     Failed,
+    Conflict,
     #[default]
     #[serde(other)]
     Unknown,
@@ -258,6 +261,7 @@ fn run_with_binary_progress(
             COMMAND_TIMEOUT
         },
     };
+<<<<<<< head
     let output = match progress {
         Some(progress) => bounded_child::run_without_git_environment_streaming(
             request,
@@ -268,8 +272,15 @@ fn run_with_binary_progress(
             }),
         ),
         None => bounded_child::run_without_git_environment(request),
+=======
+    let output = if args.first() == Some(&"merge") {
+        bounded_child::run_layr_merge(request)
+    } else {
+        bounded_child::run_without_git_environment(request)
+>>>>>>> origin/main
     }
     .map_err(|error| match error {
+        ChildError::MergeConflict(detail) => NativeLayrError::Conflict(detail),
         ChildError::Failed(detail) => NativeLayrError::Refused(format!(
             "{}: {detail}",
             args.first().copied().unwrap_or("layr")
@@ -338,6 +349,18 @@ pub(super) fn operation_with_preflight_in_store(
     preflight: impl FnOnce() -> Result<()>,
     effect: impl FnOnce() -> Result<Value>,
 ) -> Result<Value> {
+    operation_with_recovery(state_dir, root, id, intent, preflight, effect, None)
+}
+
+fn operation_with_recovery(
+    state_dir: &Path,
+    root: &Path,
+    id: &str,
+    intent: &Value,
+    preflight: impl FnOnce() -> Result<()>,
+    effect: impl FnOnce() -> Result<Value>,
+    recover: Option<&dyn Fn() -> Result<Option<Value>>>,
+) -> Result<Value> {
     let _lock = lock(state_dir, &format!("{}:{id}", root.display()))?;
     let folder = settings::metadata(state_dir, root).join("receipts");
     fs::create_dir_all(&folder)?;
@@ -376,7 +399,28 @@ pub(super) fn operation_with_preflight_in_store(
             {
                 retry_import = intent["project"].as_str();
             }
-            ReceiptStatus::Failed => {
+            ReceiptStatus::Failed | ReceiptStatus::Conflict => {
+                if let Some(recover) = recover
+                    && let Some(result) = recover()?
+                {
+                    crate::atomic_file::replace(
+                        &path,
+                        &OperationReceipt::completed(id, intent, &result).bytes()?,
+                        Some(0o600),
+                        true,
+                    )?;
+                    return Ok(result);
+                }
+                if matches!(receipt.status, ReceiptStatus::Conflict) {
+                    return Err(NativeLayrError::Conflict(
+                        receipt
+                            .error
+                            .value()
+                            .and_then(Value::as_str)
+                            .unwrap_or("merge conflict")
+                            .into(),
+                    ));
+                }
                 return Err(NativeLayrError::Refused(
                     receipt
                         .error
@@ -438,6 +482,11 @@ pub(super) fn operation_with_preflight_in_store(
     let receipt = match &outcome {
         Ok(result) => OperationReceipt::completed(id, intent, result),
         Err(NativeLayrError::Unknown(_)) => return outcome,
+        Err(NativeLayrError::Conflict(detail)) => {
+            let mut receipt = OperationReceipt::failed(id, intent, detail);
+            receipt.status = ReceiptStatus::Conflict;
+            receipt
+        }
         Err(error) => OperationReceipt::failed(id, intent, &error.to_string()),
     };
     crate::atomic_file::replace(&path, &receipt.bytes()?, Some(0o600), true)?;
@@ -578,7 +627,8 @@ fn create_worker_line(
                     NativeLayrError::Refused(detail) => NativeLayrError::Refused(format!(
                         "Native Layr base revision could not be resolved: {detail}"
                     )),
-                    other @ (NativeLayrError::Unknown(_)
+                    other @ (NativeLayrError::Conflict(_)
+                    | NativeLayrError::Unknown(_)
                     | NativeLayrError::Io(_)
                     | NativeLayrError::Store(_)
                     | NativeLayrError::Worker) => other,
@@ -741,7 +791,8 @@ pub(super) fn prepare_files_reporting(
                         NativeLayrError::Refused(message) => {
                             NativeLayrError::Refused(format!("{message}{retained}"))
                         }
-                        other @ (NativeLayrError::Io(_)
+                        other @ (NativeLayrError::Conflict(_)
+                        | NativeLayrError::Io(_)
                         | NativeLayrError::Store(_)
                         | NativeLayrError::Worker) => {
                             NativeLayrError::Refused(format!("{other}{retained}"))
@@ -1180,11 +1231,16 @@ pub fn merge(
     associated_cwd(state_dir, worker)?;
     let root = settings::record_store(state_dir, lead)?;
     let project = project_id(lead)?;
+<<<<<<< head
     operation_in_store(
+=======
+    operation_with_recovery(
+>>>>>>> origin/main
         state_dir,
         &root,
         request_id,
         &json!({"lead":lead["id"],"worker":worker["id"],"revision":revision}),
+        || Ok(()),
         || {
             let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
             let from_state = run(state_dir, &main, &["rev-parse", "head"])?;
@@ -1194,9 +1250,47 @@ pub fn merge(
                 &["merge", text(worker, "layrLine")?, "--expect", revision],
             )?;
             Ok(
+<<<<<<< head
                 json!({"merge":{"from_state":from_state,"to_state":run(state_dir,&main,&["rev-parse","head"])?}}),
+=======
+                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                    from_state: Some(from_state),
+                    to_state: run(state_dir, &main, &["rev-parse", "head"])?
+                }}),
+>>>>>>> origin/main
             )
         },
+        Some(&|| {
+            let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
+            let status: Value =
+                serde_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
+                    .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
+            if !["staged", "unstaged", "untracked", "conflicts"]
+                .iter()
+                .all(|key| status[*key].as_array().is_some_and(Vec::is_empty))
+            {
+                return Ok(None);
+            }
+            let head = run(state_dir, &main, &["rev-parse", "head"])?;
+            if run(
+                state_dir,
+                &main,
+                &["merge-base", "--is-ancestor", revision, &head],
+            )
+            .is_err()
+            {
+                return Ok(None);
+            }
+            if run(state_dir, &main, &["rev-parse", "head"])? != head {
+                return Ok(None);
+            }
+            Ok(Some(
+                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                    from_state: None,
+                    to_state: head
+                }}),
+            ))
+        }),
     )
 }
 
@@ -1315,7 +1409,10 @@ esac
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
-        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        super::super::configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored(source.to_str().unwrap()),
+        );
         prepare_files(&state, &record.value()).expect("fixture import succeeds");
         assert!(
             fixture.path().join("removed").exists(),
@@ -1348,7 +1445,10 @@ esac
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
-        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        super::super::configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored(source.to_str().unwrap()),
+        );
         let error = prepare_files(&state, &record.value()).unwrap_err();
         let path = fs::read_to_string(fixture.path().join("staging-path")).expect("init reached");
         assert!(
@@ -1745,6 +1845,7 @@ mod worker_base_tests {
         std::fs::create_dir_all(&main).unwrap();
         std::fs::write(root.join("head"), "initial").unwrap();
         for name in ["first", "second", "release"] {
+<<<<<<< head
             assert!(
                 std::process::Command::new("mkfifo")
                     .arg(root.join(name))
@@ -1752,6 +1853,15 @@ mod worker_base_tests {
                     .unwrap()
                     .success()
             );
+=======
+            // rustix has no mknodat on macOS; the fixture runs mkfifo directly.
+            #[allow(clippy::disallowed_methods)]
+            let created = std::process::Command::new("mkfifo")
+                .arg(root.join(name))
+                .status()
+                .unwrap();
+            assert!(created.success());
+>>>>>>> origin/main
         }
         let signal = |name: &str| {
             let file = OpenOptions::new()
@@ -2011,6 +2121,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
 }
 
 #[cfg(test)]
+<<<<<<< head
 mod progress_tests {
     #[tokio::test(start_paused = true)]
     async fn delayed_consumer_publishes_only_the_latest_count_at_the_interval() {
@@ -2133,5 +2244,55 @@ mod progress_tests {
             studio_runtime_schema::layr_progress::CopyUnit::Commits
         );
         assert!(super::parse_import_progress(b"unrelated diagnostic").is_none());
+=======
+mod merge_conflict_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn merge_failure_preserves_conflict_output() {
+        let state = tempfile::tempdir().unwrap();
+        let binary = state.path().join("layr");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nprintf 'CONFLICT (content): Merge conflict in file\\n'\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["merge", "worker"],
+            &binary,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("CONFLICT (content): Merge conflict in file"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn merge_conflict_after_long_output_keeps_its_type_and_message() {
+        let state = tempfile::tempdir().unwrap();
+        let binary = state.path().join("layr");
+        std::fs::write(&binary, "#!/bin/sh\ni=0; while [ $i -lt 100 ]; do echo 'Auto-merging a-very-long-file-name'; i=$((i+1)); done\necho 'CONFLICT (content): Merge conflict in important-file'\nexit 1\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["merge", "worker"],
+            &binary,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, NativeLayrError::Conflict(ref message) if message.contains("CONFLICT (content): Merge conflict in important-file")),
+            "{error}"
+        );
+>>>>>>> origin/main
     }
 }

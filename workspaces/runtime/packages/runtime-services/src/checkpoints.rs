@@ -990,7 +990,7 @@ fn git_with_output_limit(
         timeout: GIT_TIMEOUT,
     })
     .map_err(|error| match error {
-        ChildError::Failed(_) => CheckpointsError::GitFailed,
+        ChildError::Failed(_) | ChildError::MergeConflict(_) => CheckpointsError::GitFailed,
         ChildError::TimedOut => CheckpointsError::GitTimeout,
         ChildError::Launch(detail) => {
             eprintln!("checkpoint Git process could not run: {detail}");
