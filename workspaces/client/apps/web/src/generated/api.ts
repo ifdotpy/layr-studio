@@ -5910,6 +5910,8 @@ export interface components {
        * @default null
        */
       hasApproval?: boolean | null | undefined;
+      /** @description Whether managed commands or monitors are active; no command output is included. */
+      hasBackgroundWork?: boolean | undefined;
       /**
        * Hasquestion
        * @default null
@@ -6237,6 +6239,7 @@ export interface components {
        * @default null
        */
       tail?: null | string | undefined;
+      taskDefaultGate?: components["schemas"]["TaskAcceptanceGate"] | undefined;
       teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /**
        * Threadid
@@ -6270,6 +6273,10 @@ export interface components {
       /** @default null */
       workerDefaults?:
         | components["schemas"]["WorkerDefaultsDto"]
+        | null
+        | undefined;
+      workspaceCleanupIntent?:
+        | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
         | undefined;
       /** Workspacemode */

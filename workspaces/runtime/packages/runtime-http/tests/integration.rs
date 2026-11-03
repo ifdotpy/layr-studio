@@ -1,3 +1,4 @@
+mod agent_response_projection;
 mod catalog_last_good;
 mod checkpoint_rewind;
 mod child_permissions;
