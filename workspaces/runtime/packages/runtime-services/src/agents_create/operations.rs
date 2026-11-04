@@ -4519,10 +4519,7 @@ mod tests {
             resolve_review_defaults(&context, Some(&defaults), "default", &account, None, &[])
                 .await
                 .unwrap();
-        assert_eq!(
-            serde_json::to_value(result).unwrap()["accountKey"],
-            "default"
-        );
+        assert_eq!(result.account_key.as_deref(), Some("default"));
         let invalid: ReviewDefaults =
             serde_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-astra"}"#)
                 .unwrap();
