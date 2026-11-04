@@ -532,11 +532,15 @@ async fn sync_stream(
     } else {
         ResourceChangeEventReason::Initial
     };
+    let samples = Mutex::new(BTreeMap::new());
     let view = match state
         .resource_notifications
-        .changes_since_with_content(&resources, None, |resource| {
-            resource_content(state.clone(), resource)
-        })
+        .changes_since_with_content_and_rejection(
+            &resources,
+            None,
+            |resource| sampled_resource_content(Some(state.clone()), resource, &samples),
+            |resource| discard_sample(&samples, resource),
+        )
         .await
     {
         Ok(view) if !view.cursor.closed => view,
@@ -556,6 +560,9 @@ async fn sync_stream(
         Ok(event) => event,
         Err(error) => return error.into_response(),
     };
+    if let Ok(samples) = samples.lock() {
+        super::subscriptions::attach_sampled_process_snapshots(&mut initial_event, &samples);
+    }
     if let Err(error) = attach_initial_entries(&state, &mut initial_event, &since).await {
         return error.into_response();
     }
@@ -759,6 +766,26 @@ async fn sync_stream(
 /// local-cost scanners, terminal processes, or projection maintenance writes.
 async fn resource_content(state: HttpState, resource: SubscribedResource) -> Option<Vec<u8>> {
     super::subscriptions::resource_content(state, resource.resource).await
+}
+
+async fn sampled_resource_content(
+    state: Option<HttpState>,
+    resource: SubscribedResource,
+    samples: &Mutex<BTreeMap<String, Vec<u8>>>,
+) -> Option<Vec<u8>> {
+    let is_process = matches!(resource.resource, ResourceRef::ProcessesResource(_));
+    let key = resource.key.clone();
+    let bytes = resource_content(state?, resource).await?;
+    if is_process && let Ok(mut samples) = samples.lock() {
+        samples.insert(key, bytes.clone());
+    }
+    Some(bytes)
+}
+
+fn discard_sample(samples: &Mutex<BTreeMap<String, Vec<u8>>>, resource: &SubscribedResource) {
+    if let Ok(mut samples) = samples.lock() {
+        samples.remove(&resource.key);
+    }
 }
 
 /// Only sessions with a live readiness selector own a filesystem source. Dropping
@@ -1078,6 +1105,10 @@ async fn attach_initial_entries(
     since: &BTreeMap<String, SubscriptionCursor>,
 ) -> Result<(), ApiError> {
     for (resource, entry) in event.resources.iter().zip(&mut event.resource_versions) {
+        if matches!(resource, ResourceRef::ProcessesResource(_)) && entry.view_snapshot.is_some() {
+            entry.revision = 0;
+            continue;
+        }
         if entity_transfer::owns(resource) {
             // Scoped transfer delivery owns the baseline read and durable cursor.
             continue;
@@ -1743,11 +1774,15 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
     ));
     if !update.added.is_empty() {
         let http_state = state.http_state.as_ref()?;
+        let samples = Mutex::new(BTreeMap::new());
         let view = state
             .notifications
-            .changes_since_with_content(&update.added, None, |resource| {
-                resource_content(http_state.clone(), resource)
-            })
+            .changes_since_with_content_and_rejection(
+                &update.added,
+                None,
+                |resource| sampled_resource_content(Some(http_state.clone()), resource, &samples),
+                |resource| discard_sample(&samples, resource),
+            )
             .await
             .ok()?;
         if view.cursor.closed {
@@ -1771,6 +1806,9 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             (state.draft_sequence, None),
         )
         .ok()?;
+        if let Ok(samples) = samples.lock() {
+            super::subscriptions::attach_sampled_process_snapshots(&mut event, &samples);
+        }
         attach_initial_entries(http_state, &mut event, &update.since)
             .await
             .ok()?;
@@ -1960,12 +1998,15 @@ async fn next_frame(
                 _ = state.heartbeat.tick() => true,
             }
         };
+        let samples = Mutex::new(BTreeMap::new());
         let mut view = match state
             .notifications
-            .changes_since_with_content(&state.resources, Some(state.last_revision), |resource| {
-                let http_state = state.http_state.clone();
-                async move { resource_content(http_state?, resource).await }
-            })
+            .changes_since_with_content_and_rejection(
+                &state.resources,
+                Some(state.last_revision),
+                |resource| sampled_resource_content(state.http_state.clone(), resource, &samples),
+                |resource| discard_sample(&samples, resource),
+            )
             .await
         {
             Ok(view) if !view.cursor.closed => view,
@@ -2027,6 +2068,9 @@ async fn next_frame(
                 (draft_sequence, draft_changes),
             )
             .ok()?;
+            if let Ok(samples) = samples.lock() {
+                super::subscriptions::attach_sampled_process_snapshots(&mut event, &samples);
+            }
             attach_transcript_changes(&mut event, transcript_updates);
             if let Some(http) = &state.http_state {
                 state.entity_transfers.extend(
@@ -2513,6 +2557,107 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn losing_process_sample_uses_fresh_frame_attachment() {
+        use super::*;
+        use studio_runtime_store::StoreError;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(dir.path())).await.unwrap());
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)", [r#"{"id":"owner","rootId":"owner","provider":"codex","epoch":1,"status":"idle","compactions":0,"accountKey":"default"}"#])?;
+            tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('m',?1)", [r#"{"id":"m","agent":"owner","epoch":1,"status":"running","requestId":"r","created":1,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"echo","cwd":"","interactive":false,"livenessCommand":"","log":"","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"fresh","timeout_ms":3600000,"wakeOn":"exit"}"#])?;
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            dir.path().to_string_lossy().into_owned(),
+            1,
+            None,
+            Some(store),
+            None,
+        );
+        let resource = SubscribedResource::new(
+            serde_json::from_str(r#"{"kind":"processes","agentId":"owner"}"#).unwrap(),
+        )
+        .unwrap();
+        let mut stale = super::super::process_controls::read_listing(state.clone(), "owner".into())
+            .await
+            .unwrap();
+        stale.processes[0].tail = "stale".into();
+        let old_bytes = serde_json::to_vec(&stale).unwrap();
+        let hub = Arc::new(ChangeNotificationHub::new());
+        let notifications = Arc::new(ResourceNotifications::new(hub.clone()));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let samples = Arc::new(Mutex::new(BTreeMap::new()));
+        hub.notify_one();
+        let older = {
+            let (notifications, entered, release, samples, resource) = (
+                notifications.clone(),
+                entered.clone(),
+                release.clone(),
+                samples.clone(),
+                resource.clone(),
+            );
+            tokio::spawn(async move {
+                notifications
+                    .changes_since_with_content_and_rejection(
+                        std::slice::from_ref(&resource),
+                        Some(0),
+                        |resource| {
+                            let (entered, release, samples, old_bytes) = (
+                                entered.clone(),
+                                release.clone(),
+                                samples.clone(),
+                                old_bytes.clone(),
+                            );
+                            async move {
+                                samples
+                                    .lock()
+                                    .unwrap()
+                                    .insert(resource.key, old_bytes.clone());
+                                entered.notify_one();
+                                release.notified().await;
+                                Some(old_bytes)
+                            }
+                        },
+                        |resource| discard_sample(&samples, resource),
+                    )
+                    .await
+                    .unwrap()
+            })
+        };
+        entered.notified().await;
+        hub.notify_one();
+        notifications
+            .changes_since_with_content(std::slice::from_ref(&resource), Some(0), |_| async {
+                Some(b"newer".to_vec())
+            })
+            .await
+            .unwrap();
+        release.notify_one();
+        let view = older.await.unwrap();
+        let mut event = resource_changes_event(
+            "workspace",
+            &view,
+            ResourceChangeEventReason::Change,
+            typed_resources(&view.resources),
+            (0, None),
+            (0, None),
+        )
+        .unwrap();
+        super::super::subscriptions::attach_sampled_process_snapshots(
+            &mut event,
+            &samples.lock().unwrap(),
+        );
+        super::super::subscriptions::attach_view_snapshots(Some(&state), &mut event).await;
+        assert_eq!(
+            serde_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"]
+                ["processes"][0]["tail"],
+            "fresh"
+        );
+    }
     #[test]
     fn stream_query_and_embedded_cursors_are_strict_and_bounded() {
         let valid: axum::http::Uri = "/api/sync/stream?tokenRates=false&after=1".parse().unwrap();
