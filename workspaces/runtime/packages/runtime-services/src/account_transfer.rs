@@ -235,6 +235,32 @@ impl From<crate::account_session_runtime::AccountSessionError> for TransferError
     }
 }
 
+/// Maximum length of a user-visible transfer refusal reason, in Unicode scalar values.
+const TRANSFER_PUBLIC_REASON_MAX_CHARS: usize = 1000;
+
+pub(crate) fn public_preparation_reason(error: &TransferError) -> String {
+    let reason = match error {
+        TransferError::Refused(reason) => (*reason).to_owned(),
+        TransferError::Stored {
+            object: "account session response",
+            pointer,
+        } => {
+            format!("Invalid account session response at {pointer}")
+        }
+        _ => "Transfer preparation failed".to_owned(),
+    };
+    if reason.chars().count() <= TRANSFER_PUBLIC_REASON_MAX_CHARS {
+        reason
+    } else {
+        let mut shortened: String = reason
+            .chars()
+            .take(TRANSFER_PUBLIC_REASON_MAX_CHARS - 1)
+            .collect();
+        shortened.push('…');
+        shortened
+    }
+}
+
 impl From<studio_runtime_store::transfer_record::TransferRecordError> for TransferError {
     fn from(error: studio_runtime_store::transfer_record::TransferRecordError) -> Self {
         use studio_runtime_store::transfer_record::TransferRecordError;
@@ -2733,6 +2759,26 @@ mod provider_receipt_tests {
             decision.operation.members.get("agent").unwrap().error,
             Field::Value("Finish the Claude turn and background tasks before a move".into())
         );
+        let long = "é".repeat(65_537);
+        let reason = super::public_preparation_reason(&super::TransferError::from(
+            crate::account_session_runtime::AccountSessionError::InvalidResponse(long),
+        ));
+        let decision = snapshot
+            .typed_preparation_failed("agent", &reason, &Field::Null)
+            .unwrap();
+        assert!(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .error
+                .value()
+                .unwrap()
+                .chars()
+                .count()
+                <= 1000
+        );
         let absent = raw.replace(",\"source\":null", "");
         let snapshot =
             super::Snapshot::read(&absent, [("agent".into(), agent.to_string())]).unwrap();
@@ -2741,6 +2787,27 @@ mod provider_receipt_tests {
                 .typed_preparation_failed("agent", "reason", &Field::Null)
                 .unwrap()
                 .changed
+        );
+    }
+
+    #[test]
+    fn transfer_public_reason_limit_fits_persisted_transfer_member_error_schema() {
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../runtime-schema/src/schemas/persisted-account-transfer-record.schema.json"
+        ))
+        .unwrap();
+        let storage_limit = schema["$defs"]["TransferMemberRecord"]["properties"]["error"]["anyOf"]
+            [0]["maxLength"]
+            .as_u64()
+            .unwrap();
+        assert!(super::TRANSFER_PUBLIC_REASON_MAX_CHARS as u64 <= storage_limit);
+        let internal = super::TransferError::Stored {
+            object: "private database path",
+            pointer: "secret".into(),
+        };
+        assert_eq!(
+            super::public_preparation_reason(&internal),
+            "Transfer preparation failed"
         );
     }
 

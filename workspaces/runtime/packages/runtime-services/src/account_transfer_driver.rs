@@ -1226,7 +1226,7 @@ pub async fn execute_member(
     if let Err(error) = &result {
         let operation_id = operation.to_owned();
         let failed_agent = agent_id.clone();
-        let reason = error.to_string();
+        let reason = crate::account_transfer::public_preparation_reason(error);
         store
             .transaction_with_error(move |tx| {
                 let snapshot = load(tx, &operation_id)?;
