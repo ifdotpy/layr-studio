@@ -8,9 +8,8 @@ use axum::{Extension, Json, extract::State, http::StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
 use studio_runtime_services::{
-    agent_lifecycle_runtime::{self, LifecyclePorts},
-    agent_management::{Action, ManagementError},
-    agent_management_store,
+    agent_lifecycle_runtime::LifecyclePorts,
+    agent_management::ManagementError,
     message_admission::MessageAdmission,
     native_action_ports,
     native_actions::{self, Admission, NativeError},
@@ -21,29 +20,11 @@ use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
 pub(crate) fn routes() -> RouteGroup {
-    RouteGroup::new(vec![
-        post("/api/action", OperationStatus::Implemented, native_action),
-        post(
-            "/api/conversation/delete",
-            OperationStatus::Implemented,
-            delete,
-        ),
-    ])
-}
-
-async fn delete(
-    State(state): State<HttpState>,
-    ports: Option<Extension<Arc<dyn LifecyclePorts>>>,
-    ApiJson(body): ApiJson<generated::IdRequest>,
-) -> Result<Json<generated::DeletedResponse>, ApiError> {
-    dispatch::<generated::DeletedResponse>(
-        state,
-        Action::Delete {
-            target: body.id.as_str().to_owned(),
-        },
-        ports.map(|Extension(ports)| ports),
-    )
-    .await
+    RouteGroup::new(vec![post(
+        "/api/action",
+        OperationStatus::Implemented,
+        native_action,
+    )])
 }
 
 type NativeActionPorts = (
@@ -674,26 +655,6 @@ fn unix_time() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |duration| duration.as_secs_f64())
 }
-pub(super) async fn dispatch<T: serde::de::DeserializeOwned + serde::Serialize + Send + 'static>(
-    state: HttpState,
-    action: Action,
-    ports: Option<Arc<dyn LifecyclePorts>>,
-) -> Result<Json<T>, ApiError> {
-    let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| ApiError::internal())?
-        .as_secs_f64();
-    let result = match ports {
-        Some(ports) => {
-            agent_lifecycle_runtime::execute(Arc::clone(&store), &action, now, ports).await
-        }
-        None => agent_management_store::execute(Arc::clone(&store), &action, now, None).await,
-    }
-    .map_err(management_error)?;
-    super::generated_json::<T>(result).map(Json)
-}
-
 pub(super) fn management_error(error: ManagementError) -> ApiError {
     match error {
         ManagementError::Expired => ApiError::new(StatusCode::GONE, error.to_string()),

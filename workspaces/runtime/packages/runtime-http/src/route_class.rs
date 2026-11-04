@@ -48,7 +48,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/configure", OwnerOnly),
     ("POST", "/api/connection-recovery", ChatControl),
     ("POST", "/api/conversation", ChatControl),
-    ("POST", "/api/conversation/delete", ChatControl),
     ("POST", "/api/costs/interest", ChatControl),
     ("POST", "/api/federation", OwnerOnly),
     ("POST", "/api/federation/v1/message", Federation),

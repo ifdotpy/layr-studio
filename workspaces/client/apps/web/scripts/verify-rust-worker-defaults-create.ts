@@ -22,7 +22,7 @@ import type {
 } from "./verify-rust-worker-defaults.ts";
 
 type CreateRequest = components["schemas"]["CreateLeadRequest"];
-type DeleteRequest = components["schemas"]["IdRequest"];
+type DeleteRequest = components["schemas"]["CommandRequestDelete"];
 type DesiredAgent = ReturnType<typeof assertDesiredAgent>;
 type Journal = JournalBase & {
   projectPath: string;
@@ -273,7 +273,9 @@ function matchesMutationResponse(
       request.method() === "POST" &&
       url.origin === origin &&
       url.pathname === path &&
-      request.postDataJSON()?.id === id
+      (request.postDataJSON()?.kind === "delete"
+        ? request.postDataJSON()?.target
+        : request.postDataJSON()?.id) === id
     );
   } catch {
     return false;
@@ -352,11 +354,11 @@ function assertDesiredAgent(
 function assertCreateRequest(body: CreateRequest | null, journal: Journal) {
   assert.ok(uuid(body?.id), "New chat request has no UUID identity.");
   assert.ok(
-    !journal.baseline!.chatIds.includes(body.id),
+    !journal.baseline!.chatIds.includes(body.target),
     "Refusing to reuse an existing chat ID.",
   );
   assert.ok(
-    !journal.baseline!.pendingCreationIds.includes(body.id),
+    !journal.baseline!.pendingCreationIds.includes(body.target),
     "Refusing a pending user chat ID.",
   );
   assert.equal(
@@ -567,14 +569,16 @@ async function main() {
       });
     }
   });
-  await page.route("**/api/conversation/delete", async (route) => {
+  await page.route("**/api/commands", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
+    if (route.request().postDataJSON()?.kind !== "delete")
+      return route.continue();
     if (options.resume) {
       blockedWrite = "Resume mode blocks chat deletion.";
       await route.abort();
       journal.blockedOperations ||= [];
       journal.blockedOperations.push({
-        path: "/api/conversation/delete",
+        path: "/api/commands",
         at: new Date().toISOString(),
       });
       saveJournal(journalPath, journal);
@@ -607,16 +611,16 @@ async function main() {
         "Created chat readback is not confirmed.",
       );
       assert.equal(
-        body?.id,
+        body?.target,
         journal.create.id!,
         "Delete targets another chat.",
       );
       assert.ok(
-        !journal.baseline!.chatIds.includes(body.id),
+        !journal.baseline!.chatIds.includes(body.target),
         "Refusing to delete a baseline chat.",
       );
       assert.ok(
-        !journal.baseline!.pendingCreationIds.includes(body.id),
+        !journal.baseline!.pendingCreationIds.includes(body.target),
         "Refusing to delete a pending user chat.",
       );
       if (journal.deletion.state !== "not-sent")
@@ -1086,7 +1090,7 @@ async function main() {
         matchesMutationResponse(
           candidate,
           origin,
-          "/api/conversation/delete",
+          "/api/commands",
           journal.create.id!,
         ),
       { timeout: READBACK_TIMEOUT_MS },
@@ -1095,8 +1099,10 @@ async function main() {
       .getByRole("button", { name: "Delete chat", exact: true })
       .click();
     const deleteResponse = await deleteResponsePromise;
-    const deleteBody: components["schemas"]["DeletedResponse"] | null =
+    const deleteResponseBody: components["schemas"]["CommandResponse"] | null =
       await deleteResponse.json().catch(() => null);
+    const deleteBody =
+      deleteResponseBody?.kind === "delete" ? deleteResponseBody.result : null;
     assert.equal(
       deleteResponse.status(),
       200,

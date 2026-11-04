@@ -671,11 +671,7 @@ async function main() {
       });
     }
   });
-  for (const path of [
-    "/api/commands",
-    "/api/leads",
-    "/api/conversation/delete",
-  ]) {
+  for (const path of ["/api/commands", "/api/leads"]) {
     await page.route(`**${path}`, async (route) => {
       if (route.request().method() !== "POST") return route.continue();
       await route.abort();

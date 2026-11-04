@@ -92,7 +92,7 @@ Use these steps only after the fixed product is available through the normal upd
 4. On the home server, let the next same-ID delivery close the old outbox request as terminal `unknown`.
 5. Verify that the proxy is `paused`, its reservation is clear, and the lead has one error notice.
 6. Keep the home receipt and remote inbox receipt. Never delete or reset their request identities.
-7. If no worker effect exists, remove the unused remote anchor through `POST /api/conversation/delete`.
+7. If no worker effect exists, remove the unused remote anchor through the `delete` command (`POST /api/commands`).
 8. Keep the remote inbox and link records. The old `running` receipt prevents a second spawn with that ID.
 9. Remove the old home proxy through the normal conversation API after the same absence check.
 10. Create a replacement only after those checks, with one new stable request ID.

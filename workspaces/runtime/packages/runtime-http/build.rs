@@ -603,6 +603,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             && !matches!(
                 name.as_str(),
                 "CommandSendBody"
+                    | "CommandDeleteBody"
                     | "CommandWithdrawBody"
                     | "CommandStopBody"
                     | "CommandLeadMessageBody"
@@ -610,6 +611,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     | "CommandResponseApplied"
                     | "CommandResponseAnswer"
                     | "CommandResponseLeadMessage"
+                    | "CommandResponseDelete"
                     | "CommandRow"
             )
     });
