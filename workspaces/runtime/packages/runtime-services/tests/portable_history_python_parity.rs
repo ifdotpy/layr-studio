@@ -385,10 +385,9 @@ fn readable_transcript_keeps_the_whole_studio_history_beyond_the_excerpt() {
         .into_iter()
         .find(|case| case.name == "fulltext-and-context-bound")
         .expect("long Studio item fixture");
-    let descriptor = ArchiveDescriptor::from_value(
-        serde_json::to_value(&case.descriptor).expect("descriptor JSON"),
-    )
-    .expect("Python descriptor");
+    let descriptor =
+        ArchiveDescriptor::from_value(case.descriptor.to_value().expect("descriptor JSON"))
+            .expect("Python descriptor");
     // The bounded excerpt drops the first lines of the 25013-character item.
     assert!(!case.context.contains("older 😀 line"));
     let workspace = root.path().join("workspace");
