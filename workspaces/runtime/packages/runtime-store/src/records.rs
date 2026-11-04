@@ -4158,9 +4158,10 @@ mod tests {
             (json!({"model":"legacy"}), true),
             (
                 json!({"model":"m","effort":null,"fastMode":false,"future":42}),
-                false,
+                true,
             ),
             (json!(false), false),
+            (json!({"model":42,"future":{"nested":true}}), false),
         ] {
             let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
                 "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":value}));
@@ -4183,6 +4184,44 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn forward_worker_defaults_keep_known_settings_and_survive_rollback() {
+        let value = json!({"model":"future-model","fastMode":true,"future":{"nested":[1,true]}});
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":value}));
+        let Some(super::StoredWorkerDefaults::Known(defaults)) = record.worker_defaults.value()
+        else {
+            panic!("forward defaults should remain typed");
+        };
+        assert_eq!(
+            defaults.model.value().map(String::as_str),
+            Some("future-model")
+        );
+        assert_eq!(defaults.fast_mode.value(), Some(&true));
+        let written = record.value();
+        assert_eq!(written["workerDefaults"], value);
+        // An older reader treats unknown defaults as unreadable and passes them through.
+        #[derive(serde::Deserialize, serde::Serialize)]
+        #[serde(untagged)]
+        enum OlderDefaults {
+            Known(OlderKnown),
+            Unreadable(serde_json::Value),
+        }
+        #[derive(serde::Deserialize, serde::Serialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct OlderKnown {
+            model: Option<String>,
+            fast_mode: Option<bool>,
+        }
+        let older: OlderDefaults =
+            serde::Deserialize::deserialize(written["workerDefaults"].clone()).unwrap();
+        assert!(matches!(older, OlderDefaults::Unreadable(_)));
+        assert_eq!(
+            serde::Serialize::serialize(&older, serde_json::value::Serializer).unwrap(),
+            value
+        );
     }
 
     #[test]

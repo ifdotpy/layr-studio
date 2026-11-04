@@ -961,7 +961,7 @@ impl From<AgentTransferSummary>
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub model: Field<String>,
@@ -977,6 +977,8 @@ pub struct TransferWorkerDefaults {
     pub delegation_depth: Field<studio_runtime_schema::agent_entity_nested::WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cyber_access_program: Field<String>,
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// Stable identity of an account transfer, shared with its lazy hold.
