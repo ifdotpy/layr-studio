@@ -999,12 +999,19 @@ fn invalid_entity(collection: &str, id: &str) -> StoreError {
 pub(super) fn draft_document(
     document: studio_runtime_store::SyncDocument,
 ) -> Result<crate::generated::SyncDocument, ApiError> {
+    let payload =
+        studio_json::from_str(&document.payload).map_err(|_| invalid_stored_draft(&document.id))?;
+    draft_document_with_value(document, &payload)
+}
+
+pub(super) fn draft_document_with_value(
+    document: studio_runtime_store::SyncDocument,
+    payload: &Value,
+) -> Result<crate::generated::SyncDocument, ApiError> {
     if sync_policy::contains_unrepresentable_integer(&document.payload) {
         return Err(invalid_stored_draft(&document.id));
     }
-    let payload =
-        studio_json::from_str(&document.payload).map_err(|_| invalid_stored_draft(&document.id))?;
-    validate_draft_value(&document.id, &payload).map_err(|_| invalid_stored_draft(&document.id))?;
+    validate_draft_value(&document.id, payload).map_err(|_| invalid_stored_draft(&document.id))?;
     Ok(crate::generated::SyncDocument {
         id: document.id,
         payload: document.payload,
