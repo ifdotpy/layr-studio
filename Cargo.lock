@@ -6678,9 +6678,9 @@ dependencies = [
 name = "studio-client-wasm"
 version = "0.1.0"
 dependencies = [
- "serde_json",
  "sha2 0.11.1",
  "studio-client-domain",
+ "studio-json",
  "studio-request-signing",
  "wasm-bindgen",
 ]
