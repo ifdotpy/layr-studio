@@ -14,5 +14,5 @@
 #team .token-rate {
   align-self: center;
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--studio-text-meta);
 }

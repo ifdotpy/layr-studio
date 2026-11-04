@@ -50,6 +50,19 @@ const running = (status: string) =>
 const inputUncertaintyNotice =
   "Previous input delivery is uncertain. Check the terminal output before you enter it again. Buffered input was not sent.";
 
+/** xterm paints on a canvas, so it reads the CSS owner in studio-theme.css. */
+function terminalTheme() {
+  const style = getComputedStyle(document.documentElement);
+  const token = (name: string) => style.getPropertyValue(name).trim();
+  return {
+    background: token("--studio-terminal"),
+    foreground: token("--studio-terminal-text"),
+    cursor: token("--studio-terminal-text"),
+    cursorAccent: token("--studio-terminal"),
+    selectionBackground: token("--studio-terminal-selection"),
+  };
+}
+
 export default function TerminalDock({
   data,
   agent,
@@ -806,6 +819,8 @@ export function ShellView({
       import("@xterm/xterm"),
       import("@xterm/addon-fit"),
       import("@xterm/xterm/css/xterm.css"),
+      // xterm measures glyphs once at open, so the bundled face must be ready.
+      document.fonts.load('12px "Geist Mono"').catch(() => []),
     ])
       .then(([{ Terminal }, { FitAddon }]) => {
         if (disposed || !host.current) return;
@@ -813,16 +828,12 @@ export function ShellView({
           cursorBlink: true,
           screenReaderMode: true,
           fontSize: 12,
-          fontFamily: "SFMono-Regular, Menlo, Consolas, monospace",
+          fontFamily:
+            '"Geist Mono", SFMono-Regular, Menlo, Consolas, monospace',
           scrollback: 5000,
           allowProposedApi: false,
           disableStdin: !running(shell.status),
-          theme: {
-            background: "#141519",
-            foreground: "#dadde5",
-            cursor: "#a7a6ff",
-            selectionBackground: "#55547d",
-          },
+          theme: terminalTheme(),
         });
         terminal.current = instance;
         const fit = new FitAddon();

@@ -12,21 +12,21 @@
 [data-mantine-color-scheme="dark"] {
   /* State tint opacity, a percentage mixed over a page or panel surface. */
   --studio-state-tint: 14%;
-  --studio-state-working: var(--mantine-color-signal-4);
+  --studio-state-working: var(--mantine-color-blue-4);
   --studio-state-answer: var(--studio-warning);
-  --studio-state-error: #f0776b;
-  --studio-state-unread: #62c08e;
+  --studio-state-error: var(--mantine-color-red-4);
+  --studio-state-unread: var(--mantine-color-green-4);
   --studio-state-paused: var(--mantine-color-dark-2);
   --studio-state-none: var(--studio-state-paused);
 }
 
 [data-mantine-color-scheme="light"] {
   --studio-state-tint: 5%;
-  --studio-state-working: var(--mantine-color-signal-7);
+  --studio-state-working: var(--mantine-color-blue-7);
   --studio-state-answer: var(--studio-warning);
-  --studio-state-error: #b52e25;
-  --studio-state-unread: #237448;
-  --studio-state-paused: #5b6675;
+  --studio-state-error: var(--mantine-color-red-7);
+  --studio-state-unread: var(--mantine-color-green-7);
+  --studio-state-paused: var(--mantine-color-gray-7);
   --studio-state-none: var(--studio-state-paused);
 }
 

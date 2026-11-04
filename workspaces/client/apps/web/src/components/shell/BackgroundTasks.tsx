@@ -1041,7 +1041,7 @@ export function TaskDetail({
                   aria-pressed={follow}
                   onClick={() => setFollow(!follow)}
                   leftSection={<ChevronDown size={12} />}
-                  color={follow ? "signal" : "gray"}
+                  color={follow ? "ink" : "gray"}
                 >
                   Follow
                 </Button>

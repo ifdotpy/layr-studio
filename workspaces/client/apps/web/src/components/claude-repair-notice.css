@@ -2,7 +2,7 @@
   margin: 12px 0;
   padding: 12px;
   border: 1px solid var(--mantine-color-yellow-7);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   overflow-wrap: anywhere;
   min-width: 0;
 }

@@ -18,8 +18,7 @@
   :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible,
 .fleet-menu
   :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: var(--studio-focus-ring-width) solid
-    var(--mantine-primary-color-filled);
+  outline: var(--studio-focus-ring-width) solid var(--accent);
   outline-offset: calc(
     -1 * (var(--studio-focus-ring-width) + var(--studio-focus-ring-inset))
   );
@@ -52,9 +51,10 @@
 .brand-name strong {
   font: inherit;
 }
+/* The one primary sidebar action takes the ink color, like Geist. */
 .sidebar-new-chat {
   flex: none;
-  color: var(--studio-state-working);
+  color: var(--text);
 }
 #chat-search {
   font-size: var(--mantine-font-size-sm);
@@ -404,7 +404,7 @@
   flex: 1;
   min-inline-size: 0;
   overflow-wrap: anywhere;
-  font-family: var(--mantine-font-family-monospace);
+  font-family: var(--studio-font-mono);
 }
 .desktop-inset-titlebar .sidebar-header {
   -webkit-app-region: drag;

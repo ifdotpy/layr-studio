@@ -5,7 +5,7 @@
   min-height: 24px;
   margin: 8px 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   line-height: 20px;
 }
 

@@ -5,7 +5,7 @@
   color: var(--text);
   padding: 10px 12px;
   margin-bottom: 8px;
-  border-radius: 10px;
+  border-radius: var(--studio-radius-card);
 }
 .request-summary {
   display: flex;
@@ -82,7 +82,7 @@
   width: 100%;
   max-width: 100%;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   padding: 8px 11px;
   font-size: var(--studio-text-meta);
   overflow-wrap: anywhere;
@@ -95,12 +95,12 @@
   background: var(--raised);
 }
 .request-answer-option[aria-pressed="true"] {
-  background: #8075ff25;
-  border-color: var(--accent);
+  background: var(--selected);
+  border-color: var(--text);
 }
 .request-answer-checkbox:has(input:checked) {
-  background: #8075ff25;
-  border-color: var(--accent);
+  background: var(--selected);
+  border-color: var(--text);
 }
 .request-answer-checkbox .mantine-Checkbox-labelWrapper {
   min-width: 0;
@@ -234,7 +234,7 @@
   place-items: center;
   min-width: 20px;
   height: 20px;
-  border-radius: 5px;
+  border-radius: var(--studio-radius-control);
   background: var(--raised);
   color: var(--muted);
   font-size: var(--studio-text-meta);

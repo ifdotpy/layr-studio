@@ -42,7 +42,7 @@
 .studio-settings-navigation .mantine-Tabs-tab[data-active] {
   color: var(--text);
   background: var(--mantine-color-default-hover);
-  box-shadow: inset var(--studio-rail-size) 0 0 var(--studio-state-working);
+  box-shadow: inset var(--studio-rail-size) 0 0 var(--text);
 }
 
 .studio-settings-content {

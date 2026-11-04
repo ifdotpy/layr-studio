@@ -596,6 +596,12 @@ it("terminal hints apply Unicode appends without GET /api/terminals/output", asy
       disconnect() {}
     },
   );
+  // The terminal waits for its bundled font and reads its colors from CSS.
+  vi.stubGlobal("document", {
+    fonts: { load: async () => [] },
+    documentElement: {},
+  });
+  vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
   const shell = {
     id: "shell",
     agent: "lead",

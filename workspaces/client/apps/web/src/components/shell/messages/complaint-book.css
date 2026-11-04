@@ -7,7 +7,7 @@
 }
 .complaint-reply h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--studio-text-body);
   font-weight: 600;
 }
 .complaint-reply > button {
@@ -15,7 +15,7 @@
 }
 .complaint-reply-error {
   color: var(--mantine-color-red-4);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   overflow-wrap: anywhere;
   margin: 0;
 }

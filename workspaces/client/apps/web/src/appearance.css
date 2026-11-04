@@ -12,12 +12,12 @@
 .workspace-mode-badge {
   flex: 0 0 auto;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--studio-radius-pill);
   padding: 1px 6px;
   color: var(--muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
+  font-weight: 400;
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -33,7 +33,7 @@
 }
 .settings-group h2 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   font-weight: 600;
   color: var(--muted);
 }
@@ -48,12 +48,12 @@
 .federation-room-create > p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   line-height: 1.45;
 }
 .federation-identity {
   overflow-wrap: anywhere;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--studio-font-mono);
 }
 .federation-peer,
 .federation-room {
@@ -62,13 +62,13 @@
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--surface);
 }
 .federation-peer > span,
 .federation-room > span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .federation-room-create {
   display: grid;
@@ -77,10 +77,10 @@
 }
 .federation-room-create h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
 }
 .settings-label {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .chat-settings-panel .settings-group .mantine-Button-root {
   width: 100%;
@@ -91,7 +91,7 @@
   padding: 8px 10px;
   justify-content: flex-start;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--surface);
 }
 .chat-settings-panel .settings-group .mantine-Button-inner {
@@ -104,7 +104,7 @@
 }
 .chat-settings-panel .settings-new-chat {
   justify-self: start;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   min-height: 30px;
   padding: 0 8px;
   margin-left: -8px;
@@ -169,7 +169,7 @@
   min-height: 36px;
   padding-inline: 12px;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   font-weight: 400;
   border: 1px solid var(--line);
 }
@@ -258,7 +258,7 @@
     margin: 0;
   }
   .chat-settings-panel .agent-mode-apply {
-    font-size: 13px;
+    font-size: var(--studio-text-body);
     padding-inline: 10px;
   }
   .chat-settings-panel .mantine-Button-label {
@@ -274,7 +274,7 @@
     width: 100%;
   }
   #team .team-filters button {
-    font-size: 12px;
+    font-size: var(--studio-text-meta);
   }
   #team .worker-text {
     min-width: 0;
@@ -416,7 +416,7 @@
 }
 .outbox-controls p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 
 .chat-settings-panel .execution-menu .mantine-Button-label {
@@ -476,7 +476,7 @@
   height: 44px;
   padding-inline: 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
 }
 .chat-settings-panel .execution-menu .mantine-Button-inner {
   justify-content: flex-start;

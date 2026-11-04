@@ -18,11 +18,14 @@ export type StudioErrorItem = GetResult<"/api/studio-errors">["items"][number];
 type Level = components["schemas"]["StudioErrorLevel"];
 export const LEVELS: Level[] = ["critical", "error", "warning", "log"];
 export const LEVEL_COLORS: Record<Level, string> = {
-  critical: "grape",
+  critical: "violet",
   error: "red",
   warning: "orange",
   log: "blue",
 };
+/** Sentence-case level name; labels are never all caps. */
+const levelLabel = (level: Level) =>
+  level.charAt(0).toUpperCase() + level.slice(1);
 const EMPTY_ERRORS: StudioErrorItem[] = [];
 
 export function actionLabel(item: StudioErrorItem) {
@@ -112,7 +115,7 @@ export function StudioErrorList({
             variant={filter === level ? "filled" : "light"}
             onClick={() => setFilter(level)}
           >
-            {level.toUpperCase()} (
+            {levelLabel(level)} (
             {rows.filter((row) => row.level === level).length})
           </Button>
         ))}
@@ -160,7 +163,7 @@ export function StudioErrorList({
             row.type === "local" ? (
               <article className="studio-error-row" key={row.item.id}>
                 <Badge color={LEVEL_COLORS[row.level]}>
-                  {row.level.toUpperCase()}
+                  {levelLabel(row.level)}
                 </Badge>
                 <Text size="sm">{row.item.title}</Text>
                 <Text size="sm">{row.item.reason}</Text>
@@ -180,7 +183,7 @@ export function StudioErrorList({
                 data-kind={row.item.kind}
               >
                 <Badge color={LEVEL_COLORS[row.level]}>
-                  {row.level.toUpperCase()}
+                  {levelLabel(row.level)}
                 </Badge>
                 <Checkbox
                   label={ownerLabel(row.item)}
