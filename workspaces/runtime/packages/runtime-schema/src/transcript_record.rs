@@ -475,6 +475,16 @@ mod tests {
         assert!(encoded.contains(r#"{"z":  1, "a":2}"#), "{encoded}");
     }
     #[test]
+    fn raw_transcript_bytes_survive_round_trip() {
+        let input = r#"{"id":"i","role":"user","text":"hello","inputs":[{"id":"in","kind":"user","text":"hello","assets":[{ "id": "\u0061", "n": 1e400 }],"provider":{ "nested": [1, 2] }}],"assets":[{ "x": 123456789012345678901234567890 }],"provider":{"z": ["\u00e9", { "n": 1e400 }]}}"#;
+        let record: TranscriptItemRecord = serde_json::from_slice(input.as_bytes()).unwrap();
+        assert_eq!(
+            record.extra["provider"].get(),
+            r#"{"z": ["\u00e9", { "n": 1e400 }]}"#
+        );
+        assert_eq!(serde_json::to_vec(&record).unwrap(), input.as_bytes());
+    }
+    #[test]
     fn transcript_hash_projection_keeps_canonical_numbers_and_legacy_text_presence() {
         for raw in [
             r#"{"id":"i","role":"user","inputs":[{"id":"x","kind":"user","text":"x","at":1,"assets":[],"truncated":false}],"provider":{"z": 1,"a":2}}"#,

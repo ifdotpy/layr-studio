@@ -850,6 +850,27 @@ mod tests {
         ));
     }
     #[test]
+    fn pairing_raw_reply_accepts_opaque_large_number_without_normalizing_identity() {
+        let invitation = json!({"serverId":"server", "publicKey":"key", "tailscaleUser":"user"});
+        let draft = Credential::from_value(json!({"clientId":"client"}));
+        let bytes = br#"{ "protocol":1,"paired":true,"serverId":"server","clientId":"client","origin":"https://fixture.tailnet.ts.net","publicKey":"key","tailscaleUser":"user","future":{ "escaped":"\u0061", "large":1e400 }}"#;
+        let PairReply::Accepted(receipt) = pair_reply(
+            bytes,
+            reqwest::StatusCode::OK,
+            &invitation,
+            &draft,
+            "https://fixture.tailnet.ts.net",
+        )
+        .unwrap() else {
+            panic!("unexpected refusal")
+        };
+        assert_eq!(receipt.server_id.as_bytes(), b"server");
+        assert_eq!(
+            serde_json::to_vec(&receipt.public_key).unwrap(),
+            br#""key""#
+        );
+    }
+    #[test]
     fn pairing_ingress_matches_json_field_semantics() {
         // Compare with the former Value indexing path, including duplicate keys.
         for bytes in [
