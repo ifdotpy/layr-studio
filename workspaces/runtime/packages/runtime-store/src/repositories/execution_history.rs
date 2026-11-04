@@ -884,16 +884,33 @@ mod tests {
             id: Some("attempt".into()),
             ..Default::default()
         };
+<<<<<<< head
         let raw = RawValue::from_string(r#"{ "vendor": [1, 2] }"#.into()).unwrap();
         let fields = [("claimResult".to_owned(), raw)].into();
         let record = studio_json::to_string(&AttemptWrite {
+=======
+        let input = r#"{"claimResult":{ "vendor": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }}"#;
+        let fields: std::collections::BTreeMap<String, Box<RawValue>> =
+            serde_json::from_str(input).unwrap();
+        let record = serde_json::to_string(&AttemptWrite {
+>>>>>>> main
             attempt: &attempt,
             receipt_fields: &fields,
         })
         .unwrap();
+<<<<<<< head
         let decoded: std::collections::BTreeMap<String, RawValue> =
             studio_json::from_str(&record).unwrap();
         assert_eq!(decoded["claimResult"].as_str(), r#"{ "vendor": [1, 2] }"#);
+=======
+        assert_eq!(
+            record,
+            r#"{"id":"attempt","claimResult":{ "vendor": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }}"#
+        );
+        let decoded: std::collections::BTreeMap<String, Box<RawValue>> =
+            serde_json::from_str(&record).unwrap();
+        assert_eq!(decoded["claimResult"].get(), fields["claimResult"].get());
+>>>>>>> main
     }
 
     #[test]

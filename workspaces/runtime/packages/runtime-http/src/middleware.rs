@@ -1153,6 +1153,52 @@ mod tests {
         assert_eq!(request_limit("/api/unknown"), 256 * 1024);
     }
 
+    #[tokio::test]
+    async fn accepted_body_reaches_handler_byte_exact() {
+        use axum::{extract::ConnectInfo, routing::post};
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            directory.path().to_string_lossy().into_owned(),
+            49171,
+            None,
+            None,
+            None,
+        );
+        state.validators = crate::validation::Registry::compile(&[(
+            "POST".into(),
+            "/api/servers/orchestration".into(),
+        )])
+        .unwrap();
+        let app = Router::new()
+            .route(
+                "/api/servers/orchestration",
+                post(|body: axum::body::Bytes| async move { body }),
+            )
+            .layer(from_fn_with_state(state, super::boundary));
+        let input = br#"{ "requestId":"r", "action":"event", "operation":[], "payload":{ "escaped":"\u0061", "nested":[{"n": 9007199254740991}] }}"#;
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/servers/orchestration")
+            .header("host", "127.0.0.1:49171")
+            .header("origin", "http://127.0.0.1:49171")
+            .header("content-type", "application/json")
+            .header("x-canvas-token", "token")
+            .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+            .extension(ConnectInfo(
+                "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+            ))
+            .body(Body::from(input.as_slice()))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body(), 4096).await.unwrap().as_ref(),
+            input
+        );
+    }
+
     async fn panic_handler() -> &'static str {
         panic!("test handler panic")
     }

@@ -25,9 +25,27 @@ fn journal_v2_protocol_embeds_raw_json_without_numeric_conversion() {
     drop(db);
     let events = journal.events_v2("raw", 0, generation, 1, 4096).unwrap();
     let event = SupervisorEventV2::from(events.into_iter().next().unwrap());
+<<<<<<< head
     assert_eq!(event.payload.as_str(), raw);
     let frame = studio_json::to_string(&event).unwrap();
     assert!(frame.contains(raw));
+=======
+    assert_eq!(event.payload.get(), raw);
+    let frame = serde_json::to_string(&event).unwrap();
+    assert_eq!(
+        frame,
+        format!(r#"{{"sequence":1,"generation":{generation},"kind":"stdout","payload":{raw}}}"#)
+    );
+    let decoded: SupervisorEventV2 = serde_json::from_str(&frame).unwrap();
+    assert_eq!(decoded.payload.get(), raw);
+    assert_eq!(serde_json::to_string(&decoded).unwrap(), frame);
+    let mut wire = Vec::new();
+    write_frame(&mut wire, &decoded).unwrap();
+    assert_eq!(wire, format!("{frame}\n").as_bytes());
+    let read = read_frame(&mut Cursor::new(wire)).unwrap().unwrap();
+    let decoded: SupervisorEventV2 = serde_json::from_str(&read).unwrap();
+    assert_eq!(decoded.payload.get(), raw);
+>>>>>>> main
 }
 
 #[test]
