@@ -8,7 +8,7 @@ use crate::{
     server_keys::{FileVault, Vault},
     server_transport::RemoteClient,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -85,7 +85,7 @@ async fn answer(stream: UnixStream, client: &RemoteClient) -> std::io::Result<()
     BufReader::new(tokio::io::AsyncReadExt::take(read, MAX_LINE))
         .read_line(&mut line)
         .await?;
-    let reply = match serde_json::from_str::<Value>(&line) {
+    let reply = match studio_json::from_str::<Value>(&line) {
         Ok(request) => handle(
             client,
             request["method"].as_str().unwrap_or(""),
@@ -127,7 +127,7 @@ pub async fn run(directory: &Path, method: &str, params: &Value) -> Result<Value
                 .await
                 .map_err(|e| e.to_string())?;
             let reply: Value =
-                serde_json::from_str(&line).map_err(|_| "The app sent an invalid reply.")?;
+                studio_json::from_str(&line).map_err(|_| "The app sent an invalid reply.")?;
             match reply["error"].as_str() {
                 Some(error) => Err(error.to_owned()),
                 None => Ok(reply["result"].clone()),
@@ -227,7 +227,7 @@ mod tests {
                 .unwrap();
             let mut line = String::new();
             BufReader::new(read).read_line(&mut line).await.unwrap();
-            let reply: Value = serde_json::from_str(&line).unwrap();
+            let reply: Value = studio_json::from_str(&line).unwrap();
             assert!(
                 reply["error"].as_str().unwrap().contains("does not accept"),
                 "{method}"

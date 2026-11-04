@@ -5,7 +5,7 @@
     allow(dead_code, unused_imports, unused_variables)
 )]
 use crate::protocol::{Request, Response};
-use serde_json::Value;
+use studio_json::Value;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
@@ -217,7 +217,7 @@ async fn prepare_sign_in(
         let response = backend.ok_or("The native backend is unavailable.")?.dispatch(Request {
                     id: format!("{}:forward", id),
                     method: "api.request".into(),
-                    params: serde_json::json!({"path":"/api/browser/forward", "method":"POST", "body":forward, "requestId":id, "timeoutMs":20000}),
+                    params: studio_json::json!({"path":"/api/browser/forward", "method":"POST", "body":forward, "requestId":id, "timeoutMs":20000}),
                 }).await;
         if let Some(error) = response.error {
             return Err(error.message);
@@ -395,9 +395,9 @@ fn read_selected_files(paths: Value) -> Result<Value, String> {
             "txt" | "rs" | "py" | "js" | "ts" | "tsx" => "text/plain",
             _ => "application/octet-stream",
         };
-        result.push(serde_json::json!({"name":name,"mime":mime,"base64":base64::engine::general_purpose::STANDARD.encode(bytes)}));
+        result.push(studio_json::json!({"name":name,"mime":mime,"base64":base64::engine::general_purpose::STANDARD.encode(bytes)}));
     }
-    Ok(serde_json::json!(result))
+    Ok(studio_json::json!(result))
 }
 
 #[cfg(target_os = "macos")]
@@ -560,7 +560,7 @@ mod mac {
         panel.setCanChooseFiles(true);
         panel.setAllowsMultipleSelection(true);
         if panel.runModal() != 1 {
-            return Ok(serde_json::json!([]));
+            return Ok(studio_json::json!([]));
         }
         let urls = panel.URLs();
         if urls.len() > 20 {
@@ -571,7 +571,7 @@ mod mac {
             let url = urls.objectAtIndex(index);
             paths.push(url.path().ok_or("The file has no local path.")?.to_string());
         }
-        Ok(serde_json::json!(paths))
+        Ok(studio_json::json!(paths))
     }
     fn pick_directory() -> Result<Value, String> {
         let mtm =
@@ -623,7 +623,7 @@ mod tests {
         let request = Request {
             id: "prepare-sign-in-test".into(),
             method: crate::desktop::SIGN_IN_PREPARE_METHOD.into(),
-            params: serde_json::json!({
+            params: studio_json::json!({
                 "permit":token,
                 "_nativeWindow":"main",
                 "value":{"url":"https://example.com/authorize", "requestId":"card-1"}
@@ -633,7 +633,7 @@ mod tests {
         assert!(response.error.is_none(), "{:?}", response.error);
         let preparation = response.result.unwrap();
         assert!(preparation.as_str().is_some_and(|id| id.len() >= 32));
-        assert_ne!(preparation, serde_json::json!(token));
+        assert_ne!(preparation, studio_json::json!(token));
         assert!(
             permissions()
                 .lock()
@@ -645,7 +645,7 @@ mod tests {
             Request {
                 id: "cancel-sign-in-test".into(),
                 method: crate::desktop::SIGN_IN_CANCEL_METHOD.into(),
-                params: serde_json::json!({"_nativeWindow":"main","value":{"preparation":preparation,"requestId":"card-1"}}),
+                params: studio_json::json!({"_nativeWindow":"main","value":{"preparation":preparation,"requestId":"card-1"}}),
             },
             None,
         ).await;
@@ -653,10 +653,10 @@ mod tests {
     }
     #[tokio::test]
     async fn prepared_sign_in_refuses_forgery_and_consumes_before_forward_failure() {
-        let mut params = serde_json::json!({"_nativeWindow":"main","value":{"url":"https://example.com/authorize","requestId":"forward-failure"}});
+        let mut params = studio_json::json!({"_nativeWindow":"main","value":{"url":"https://example.com/authorize","requestId":"forward-failure"}});
         params["value"]["preparation"] = crate::sign_in::prepare(&params, Instant::now()).unwrap();
         // An invalid forward fails before network or browser access.
-        params["value"]["forward"] = serde_json::json!({"server":"other"});
+        params["value"]["forward"] = studio_json::json!({"server":"other"});
         let make_request = |params| Request {
             id: "prepared-forward-failure".into(),
             method: crate::desktop::SIGN_IN_OPEN_METHOD.into(),
@@ -677,8 +677,8 @@ mod tests {
         );
         for invalid in [
             Value::Null,
-            serde_json::json!(123),
-            serde_json::json!("forged"),
+            studio_json::json!(123),
+            studio_json::json!("forged"),
         ] {
             params["value"]["preparation"] = invalid;
             let response = dispatch(make_request(params.clone()), None).await;
@@ -692,7 +692,7 @@ mod tests {
         }
     }
     fn forward() -> Value {
-        serde_json::json!({"server":"remote", "bridgeId":"a".repeat(32), "host":"127.0.0.1", "port":49152, "path":"/callback", "expiresAt":1900000000, "token":"secret"})
+        studio_json::json!({"server":"remote", "bridgeId":"a".repeat(32), "host":"127.0.0.1", "port":49152, "path":"/callback", "expiresAt":1900000000, "token":"secret"})
     }
     #[tokio::test]
     async fn sign_in_validates_owner_before_network_and_requires_port_confirmation() {
@@ -702,10 +702,10 @@ mod tests {
             assert!(validate_sign_in_forward(&forward, owner).is_err());
         }
         for (key, value) in [
-            ("host", serde_json::json!("example.com")),
-            ("port", serde_json::json!(80)),
-            ("bridgeId", serde_json::json!("invalid")),
-            ("path", serde_json::json!("callback")),
+            ("host", studio_json::json!("example.com")),
+            ("port", studio_json::json!(80)),
+            ("bridgeId", studio_json::json!("invalid")),
+            ("path", studio_json::json!("callback")),
         ] {
             let mut invalid = forward.clone();
             invalid[key] = value;
@@ -751,7 +751,7 @@ mod tests {
                 .await;
             });
             let result = prepare_sign_in(
-                &serde_json::json!({"url":"https://example.com/authorize", "forward":forward}),
+                &studio_json::json!({"url":"https://example.com/authorize", "forward":forward}),
                 Some("remote"),
                 "original-id",
                 Some(&backend),
@@ -795,7 +795,7 @@ mod tests {
                 Request {
                     id: "test".into(),
                     method: method.into(),
-                    params: serde_json::json!({"value":"https://example.com"}),
+                    params: studio_json::json!({"value":"https://example.com"}),
                 },
                 None,
             )
@@ -806,7 +806,7 @@ mod tests {
             Request {
                 id: "retired".into(),
                 method: "desktop.copyText".into(),
-                params: serde_json::json!({"value":"text"}),
+                params: studio_json::json!({"value":"text"}),
             },
             None,
         )
@@ -819,7 +819,7 @@ mod tests {
             Request {
                 id: "retired".into(),
                 method: "desktop.reserveMicrophone".into(),
-                params: serde_json::json!({}),
+                params: studio_json::json!({}),
             },
             None,
         )
@@ -848,7 +848,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("hello.txt");
         std::fs::write(&path, "Привет 🦀").unwrap();
-        let value = read_selected_files(serde_json::json!([path])).unwrap();
+        let value = read_selected_files(studio_json::json!([path])).unwrap();
         assert_eq!(
             base64::engine::general_purpose::STANDARD
                 .decode(value[0]["base64"].as_str().unwrap())
@@ -856,11 +856,11 @@ mod tests {
             "Привет 🦀".as_bytes()
         );
         assert_eq!(value[0]["name"], "hello.txt");
-        assert!(read_selected_files(serde_json::json!([directory.path()])).is_err());
-        assert!(read_selected_files(serde_json::json!(["/dev/null"])).is_err());
+        assert!(read_selected_files(studio_json::json!([directory.path()])).is_err());
+        assert!(read_selected_files(studio_json::json!(["/dev/null"])).is_err());
         let huge = std::fs::File::create(directory.path().join("huge")).unwrap();
         huge.set_len((MAX_SELECTED_ATTACHMENT_BYTES + 1) as u64)
             .unwrap();
-        assert!(read_selected_files(serde_json::json!([directory.path().join("huge")])).is_err());
+        assert!(read_selected_files(studio_json::json!([directory.path().join("huge")])).is_err());
     }
 }

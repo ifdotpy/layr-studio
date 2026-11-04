@@ -1,6 +1,6 @@
 //! A native gesture starts a bounded transfer. Only Save As chooses a path.
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     path::Path,

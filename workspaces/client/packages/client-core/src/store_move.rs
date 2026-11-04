@@ -6,7 +6,7 @@ use crate::protocol::Request;
 use base64::Engine;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -44,8 +44,8 @@ impl Doc {
     }
     fn same(&self, other: &Doc) -> bool {
         self.deleted == other.deleted
-            && serde_json::from_str::<Value>(&self.payload).ok()
-                == serde_json::from_str::<Value>(&other.payload).ok()
+            && studio_json::from_str::<Value>(&self.payload).ok()
+                == studio_json::from_str::<Value>(&other.payload).ok()
     }
 }
 
@@ -266,7 +266,7 @@ fn scope_prefix(scope: &str) -> Result<String, String> {
     if scope == "root" || scope.starts_with("server:") {
         Ok(format!(
             "browser:{}:",
-            serde_json::to_string(scope).map_err(|error| error.to_string())?
+            studio_json::to_string(scope).map_err(|error| error.to_string())?
         ))
     } else {
         Err("Unknown preference scope.".into())
@@ -326,9 +326,9 @@ fn draft_rows(db: &Connection) -> Result<Vec<DraftRow>, String> {
             let (workspace, local, master, dirty) = row.map_err(sql)?;
             rows.push(DraftRow {
                 workspace,
-                local: serde_json::from_str(&local).map_err(|error| error.to_string())?,
+                local: studio_json::from_str(&local).map_err(|error| error.to_string())?,
                 master: master
-                    .map(|text| serde_json::from_str(&text))
+                    .map(|text| studio_json::from_str(&text))
                     .transpose()
                     .map_err(|error| error.to_string())?,
                 pushed: !dirty,
@@ -577,7 +577,7 @@ async fn move_uploads(db: &Connection, server: &impl Server, report: &mut Report
         bytes,
     } in rows
     {
-        let name = serde_json::from_str::<Value>(&document)
+        let name = studio_json::from_str::<Value>(&document)
             .ok()
             .and_then(|value| text(&value, &["name"]).map(str::to_owned))
             .unwrap_or_else(|| id.clone());
@@ -619,7 +619,7 @@ async fn move_recordings(db: &Connection, server: &impl Server, report: &mut Rep
     for (id, document) in recordings {
         let moved = async {
             let workspace = current.clone()?;
-            let value = serde_json::from_str::<Value>(&document).unwrap_or(Value::Null);
+            let value = studio_json::from_str::<Value>(&document).unwrap_or(Value::Null);
             // Fields of the removed dictation writer: chatId, sampleRate, deletedAt.
             if value["deletedAt"].is_number() {
                 return Err("the user deleted the recording".to_owned());
@@ -827,7 +827,7 @@ mod tests {
         fixture(&path);
         // The sent branch was confirmed by the server before the move.
         let server = Fake::default();
-        let sent: Value = serde_json::from_str(&branch("two", "second")).unwrap();
+        let sent: Value = studio_json::from_str(&branch("two", "second")).unwrap();
         server
             .drafts
             .lock()

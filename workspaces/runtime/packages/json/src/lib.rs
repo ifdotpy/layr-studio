@@ -217,3 +217,15 @@ pub fn to_vec_pretty<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
         serde_json::to_vec_pretty(value).map_err(error)
     }
 }
+
+impl From<Error> for std::io::Error {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::Serde(error) => error.into(),
+            #[cfg(feature = "sonic-backend")]
+            Error::Sonic(error) => std::io::Error::other(error),
+            #[cfg(feature = "simd-backend")]
+            Error::Simd(error) => std::io::Error::other(error),
+        }
+    }
+}

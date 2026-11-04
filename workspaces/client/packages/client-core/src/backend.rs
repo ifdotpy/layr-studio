@@ -3,7 +3,7 @@ use crate::protocol::{CommandError, Request, Response};
 use base64::Engine;
 use reqwest::{Client, Url};
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
@@ -346,7 +346,7 @@ impl Backend {
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned)
                 .or(request.etag);
-            return Ok(serde_json::json!({
+            return Ok(studio_json::json!({
                 "_studioApiRead": true,
                 "etag": etag,
                 "notModified": true,
@@ -399,7 +399,7 @@ impl Backend {
                 }
                 bytes.extend_from_slice(&chunk);
             }
-            return Ok(serde_json::json!({
+            return Ok(studio_json::json!({
                 "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
                 "mime": mime,
                 "name": name,
@@ -417,7 +417,7 @@ impl Backend {
             *self.credentials.lock().await = Some(token.into());
         }
         if request.read_metadata {
-            Ok(serde_json::json!({
+            Ok(studio_json::json!({
                 "_studioApiRead": true,
                 "etag": response_etag,
                 "notModified": false,
@@ -433,7 +433,7 @@ impl Backend {
     async fn http_response(mut response: reqwest::Response) -> Result<Value, CommandError> {
         const LIMIT: usize = 20 * 1024 * 1024;
         let status = response.status().as_u16();
-        let mut headers = serde_json::Map::new();
+        let mut headers = studio_json::Map::new();
         for name in [
             "content-type",
             "content-disposition",
@@ -470,14 +470,14 @@ impl Backend {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok(serde_json::json!({
+        Ok(studio_json::json!({
             "status": status, "headers": headers,
             "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
         }))
     }
 
     pub async fn dispatch(&self, request: Request) -> Response {
-        let result = match serde_json::from_value::<ApiRequest>(request.params) {
+        let result = match studio_json::from_value::<ApiRequest>(request.params) {
             Ok(params) => self.request(params).await,
             Err(value) => Err(error("invalid_params", value)),
         };
@@ -502,12 +502,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn native_backend_negotiates_and_decodes_brotli_json() {
         use std::io::Write;
-        let expected = serde_json::json!({"agents": ["agent content ".repeat(512)]});
+        let expected = studio_json::json!({"agents": ["agent content ".repeat(512)]});
         let mut compressed = Vec::new();
         {
             let mut encoder = brotli::CompressorWriter::new(&mut compressed, 4096, 4, 22);
             encoder
-                .write_all(&serde_json::to_vec(&expected).unwrap())
+                .write_all(&studio_json::to_vec(&expected).unwrap())
                 .unwrap();
         }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -533,7 +533,7 @@ pub(crate) mod tests {
             .dispatch(Request {
                 id: "brotli".into(),
                 method: "api.request".into(),
-                params: serde_json::json!({"path": "/api/state"}),
+                params: studio_json::json!({"path": "/api/state"}),
             })
             .await;
         server.await.unwrap();
@@ -639,7 +639,7 @@ pub(crate) mod tests {
             if body.is_empty() {
                 Value::Null
             } else {
-                serde_json::from_slice(&body).unwrap()
+                studio_json::from_slice(&body).unwrap()
             },
         )
     }
@@ -747,7 +747,7 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 body,
-                serde_json::json!({"known":1,"vendor":{"nested":[null,"🦀"]}})
+                studio_json::json!({"known":1,"vendor":{"nested":[null,"🦀"]}})
             );
             let body = r#"{"error":"preferred","message":"fallback","details":{"vendor":true}}"#;
             let response = format!(
@@ -759,7 +759,7 @@ pub(crate) mod tests {
         let response = Backend::new(&origin).unwrap().dispatch(Request {
             id: "transport-id".into(),
             method: "api.request".into(),
-            params: serde_json::json!({"path":"/api/commands","body":{"known":1,"vendor":{"nested":[null,"🦀"]}},"workspaceId":"workspace-one","requestId":"original-operation-id"}),
+            params: studio_json::json!({"path":"/api/commands","body":{"known":1,"vendor":{"nested":[null,"🦀"]}},"workspaceId":"workspace-one","requestId":"original-operation-id"}),
         }).await;
         let failure = response.error.unwrap();
         assert_eq!(failure.code, "http");
@@ -767,7 +767,7 @@ pub(crate) mod tests {
         assert_eq!(failure.message, "preferred");
         assert_eq!(
             failure.details.unwrap(),
-            serde_json::json!({"error":"preferred","message":"fallback","details":{"vendor":true}})
+            studio_json::json!({"error":"preferred","message":"fallback","details":{"vendor":true}})
         );
         server.await.unwrap();
     }
@@ -795,7 +795,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
         });
-        let response = Backend::new(&origin).unwrap().dispatch(Request { id: "null-post".into(), method: "api.request".into(), params: serde_json::json!({"path":"/api/commands", "method":"POST", "body":null, "httpResponse":true}) }).await;
+        let response = Backend::new(&origin).unwrap().dispatch(Request { id: "null-post".into(), method: "api.request".into(), params: studio_json::json!({"path":"/api/commands", "method":"POST", "body":null, "httpResponse":true}) }).await;
         assert!(response.error.is_none());
         assert_eq!(response.result.unwrap()["status"], 204);
         server.await.unwrap();
@@ -869,14 +869,14 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 body,
-                serde_json::json!({"id":"original-message-id","text":"Привет"})
+                studio_json::json!({"id":"original-message-id","text":"Привет"})
             );
             // Simulate a committed server mutation whose response is lost.
             drop(mutation);
             listener
         });
         let backend = Backend::new(&origin).unwrap();
-        let response = backend.dispatch(Request { id: "transport-id".into(), method: "api.request".into(), params: serde_json::json!({
+        let response = backend.dispatch(Request { id: "transport-id".into(), method: "api.request".into(), params: studio_json::json!({
             "path":"/api/commands", "body":{"id":"original-message-id","text":"Привет"}, "workspaceId":"workspace-one", "requestId":"original-operation-id", "apiSchema":"client-schema",
         }) }).await;
         assert_eq!(response.id, "transport-id");
@@ -919,7 +919,7 @@ pub(crate) mod tests {
             (200, &b"a\0\xff"[..]),
             (304, &b""[..]),
         ] {
-            let response = backend.dispatch(Request { id: status.to_string(), method: "api.request".into(), params: serde_json::json!({"path":"/api/state", "apiSchema":"client-schema", "httpResponse":true}) }).await;
+            let response = backend.dispatch(Request { id: status.to_string(), method: "api.request".into(), params: studio_json::json!({"path":"/api/state", "apiSchema":"client-schema", "httpResponse":true}) }).await;
             assert!(response.error.is_none());
             let result = response.result.unwrap();
             assert_eq!(result["status"], status);
@@ -942,7 +942,7 @@ pub(crate) mod tests {
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let backend = Backend::new(&origin).unwrap();
         for field in ["requestId", "apiSchema", "workspaceId"] {
-            let mut params = serde_json::json!({"path":"/api/commands", "body":{"text":"hello"}});
+            let mut params = studio_json::json!({"path":"/api/commands", "body":{"text":"hello"}});
             params[field] = Value::String("injected\r\nX-Extra: value".into());
             let response = backend
                 .dispatch(Request {
@@ -979,7 +979,7 @@ pub(crate) mod tests {
             .dispatch(Request {
                 id: "read".into(),
                 method: "api.request".into(),
-                params: serde_json::json!({"path":"/api/state"}),
+                params: studio_json::json!({"path":"/api/state"}),
             })
             .await;
         assert_eq!(response.error.unwrap().status, Some(302));
@@ -1007,12 +1007,12 @@ pub(crate) mod tests {
         let read = |id: &str, etag: Option<&str>| Request {
             id: id.into(),
             method: "api.request".into(),
-            params: serde_json::json!({"path":"/api/read","readMetadata":true,"etag":etag}),
+            params: studio_json::json!({"path":"/api/read","readMetadata":true,"etag":etag}),
         };
         let first = backend.dispatch(read("first", None)).await.result.unwrap();
         assert_eq!(first["etag"], "\"rev-1\"");
         assert_eq!(first["notModified"], false);
-        assert_eq!(first["value"], serde_json::json!({"value":1}));
+        assert_eq!(first["value"], studio_json::json!({"value":1}));
         let second = backend
             .dispatch(read("second", Some("\"rev-1\"")))
             .await

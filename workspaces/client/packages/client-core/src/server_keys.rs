@@ -11,7 +11,7 @@ use ring::{
     signature::{Ed25519KeyPair, KeyPair},
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use studio_request_signing::SigningInput;
 
@@ -39,8 +39,8 @@ impl FileVault {
 impl Vault for FileVault {
     fn read(&self) -> Result<VaultState, String> {
         match std::fs::read(&self.path) {
-            Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
-                .and_then(VaultState::deserialize)
+            Ok(bytes) => studio_json::from_slice::<Value>(&bytes)
+                .and_then(|value| VaultState::deserialize(value).map_err(Into::into))
                 .map_err(|_| "The server key store is invalid.".into()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Ok(VaultState::from_value(json!({"drafts":{},"servers":{}})))
@@ -51,7 +51,7 @@ impl Vault for FileVault {
     fn write(&self, state: &VaultState) -> Result<(), String> {
         use std::io::Write;
         let bytes =
-            serde_json::to_vec(state).map_err(|_| "The server key store could not be encoded.")?;
+            studio_json::to_vec(state).map_err(|_| "The server key store could not be encoded.")?;
         let directory = self
             .path
             .parent()
@@ -93,8 +93,8 @@ impl Vault for KeychainVault {
             "Codex Studio native server keys",
             &self.account,
         ) {
-            Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
-                .and_then(VaultState::deserialize)
+            Ok(bytes) => studio_json::from_slice::<Value>(&bytes)
+                .and_then(|value| VaultState::deserialize(value).map_err(Into::into))
                 .map_err(|_| "The server key store is invalid.".into()),
             Err(error) if error.code() == -25300 => {
                 Ok(VaultState::from_value(json!({"drafts":{},"servers":{}})))
@@ -104,7 +104,7 @@ impl Vault for KeychainVault {
     }
     fn write(&self, state: &VaultState) -> Result<(), String> {
         let bytes =
-            serde_json::to_vec(state).map_err(|_| "The server key store could not be encoded.")?;
+            studio_json::to_vec(state).map_err(|_| "The server key store could not be encoded.")?;
         security_framework::passwords::set_generic_password(
             "Codex Studio native server keys",
             &self.account,
@@ -264,7 +264,7 @@ pub fn new_pair(
         field(invitation, name)?;
     }
     let body = json!({"protocol":1,"inviteId":invitation["inviteId"],"token":invitation["token"],"clientId":device.id,"label":"Studio UI","kind":"ui","publicKey":device.public_key,"requestId":request_id}).to_string();
-    let mut extra = serde_json::Map::new();
+    let mut extra = studio_json::Map::new();
     extra.insert("publicKey".into(), Value::String(device.public_key.clone()));
     Ok(Credential::Object(Box::new(CredentialObject {
         origin: TextField::Text(origin),
@@ -321,7 +321,7 @@ pub fn signature(
 // conflicting identity; retrying cannot replace keys created after migration.
 pub fn import(vault: &dyn Vault, source: &Value) -> Result<(), String> {
     let fingerprint =
-        Sha256::digest(serde_json::to_vec(source).map_err(|_| "Invalid server key archive.")?)
+        Sha256::digest(studio_json::to_vec(source).map_err(|_| "Invalid server key archive.")?)
             .iter()
             .map(|v| format!("{v:02x}"))
             .collect::<String>();
@@ -424,7 +424,7 @@ mod tests {
             r#"{"drafts":null,"servers":{"a":null,"b":42,"c":{"serverId":"x","serverId":"y","future":[1,null]}} ,"imports":null,"future":{"v":1.0}}"#,
         ] {
             std::fs::write(&path, raw).unwrap();
-            let expected: Value = serde_json::from_str(raw).unwrap();
+            let expected: Value = studio_json::from_str(raw).unwrap();
             let actual = vault.read().unwrap().into_value();
             assert_eq!(actual, expected);
             vault

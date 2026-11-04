@@ -1,6 +1,6 @@
 //! A native gesture reserves one exact sign-in while server approval completes.
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
@@ -204,7 +204,7 @@ pub(crate) fn cancel(params: &Value, now: Instant) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn params() -> Value {
         json!({"_nativeWindow":"main", "value":{"requestId":"card-1", "url":"https://example.com/authorize?state=one"}})

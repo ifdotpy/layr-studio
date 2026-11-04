@@ -2,7 +2,7 @@
 //! never a private key or an arbitrary network authority.
 use crate::server_keys::{self, Credential, Group, TextField, Vault, field};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{
@@ -157,9 +157,9 @@ fn pair_reply(
 ) -> Result<PairReply, String> {
     // Parse JSON syntax independently from HTTP status; even a refusal with
     // invalid JSON has always reported an invalid reply.
-    let raw: Box<serde_json::value::RawValue> = serde_json::from_slice(bytes)
+    let raw: studio_json::OwnedRawJson = studio_json::from_slice(bytes)
         .map_err(|_| "Invalid pairing reply. Retry the same invitation.")?;
-    let ingress: Option<PairIngress> = serde_json::from_str(raw.get()).ok();
+    let ingress: Option<PairIngress> = studio_json::from_str(raw.as_str()).ok();
     if status.as_u16() == 403
         && ingress.as_ref().and_then(|reply| reply.code.as_deref()) == Some("invite_unavailable")
     {
@@ -469,7 +469,7 @@ impl RemoteClient {
                     Ok(Ok(Some(bytes))) => {
                         if body.response.status().is_client_error()
                             && bytes.len() < 4096
-                            && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+                            && let Ok(value) = studio_json::from_slice::<Value>(&bytes)
                         {
                             let code = rejection_kind(&value);
                             transport_diagnostic(
@@ -729,7 +729,7 @@ mod tests {
             (r#"{"code":"unknown","error":null}"#, "other-rejection"),
             (r#""Invalid request""#, "other-rejection"),
         ] {
-            let value: Value = serde_json::from_str(raw).unwrap();
+            let value: Value = studio_json::from_str(raw).unwrap();
             assert_eq!(rejection_kind(&value), expected);
         }
     }
@@ -857,8 +857,8 @@ mod tests {
             br#"{"protocol":1,"protocol":"1","paired":true,"paired":null,"code":"invite_unavailable","code":false}"#,
             br#"{"protocol":2,"protocol":1,"paired":false,"paired":true,"serverId":7,"clientId":[1],"origin":null,"publicKey":{"x":1},"tailscaleUser":[true],"label":[],"label":"last"}"#,
         ] {
-            let old: Value = serde_json::from_slice(bytes).unwrap();
-            let ingress: PairIngress = serde_json::from_slice(bytes).unwrap();
+            let old: Value = studio_json::from_slice(bytes).unwrap();
+            let ingress: PairIngress = studio_json::from_slice(bytes).unwrap();
             assert_eq!(ingress.code.as_deref(), old["code"].as_str());
             assert_eq!(ingress.protocol, old["protocol"].as_u64());
             assert_eq!(ingress.paired, old["paired"].as_bool());
@@ -987,7 +987,7 @@ mod tests {
                     .iter()
                     .map(|byte| format!("{byte:02x}"))
                     .collect::<String>();
-                let body: Value = serde_json::from_slice(&body).unwrap();
+                let body: Value = studio_json::from_slice(&body).unwrap();
                 assert_eq!(body["requestId"], "pair-request");
                 assert_eq!(
                     headers["x-studio-client"],

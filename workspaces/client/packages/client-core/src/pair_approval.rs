@@ -1,6 +1,6 @@
 //! Checks the approved server snapshot and invitation before native pairing.
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_client_domain::json_object::optional_field;
 
 pub struct Approval {

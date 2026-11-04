@@ -2,7 +2,7 @@
 //! Speech framework program that the Electron app packages.
 use crate::protocol::{Request, Response};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -187,7 +187,7 @@ enum HelperProgress {
 }
 
 fn parse_progress(line: &str) -> Option<HelperProgress> {
-    serde_json::from_str(line).ok()
+    studio_json::from_str(line).ok()
 }
 
 #[derive(serde::Deserialize)]
@@ -243,7 +243,7 @@ fn helper_outcome(bytes: &[u8], success: bool) -> HelperOutcome {
     const FAILED: &str =
         "Native transcription failed. Your recording is saved; retry transcription.";
     const EMPTY: &str = "No speech was recognized. Your recording is saved.";
-    let parsed = serde_json::from_slice::<HelperOutput>(bytes);
+    let parsed = studio_json::from_slice::<HelperOutput>(bytes);
     let fields = match parsed {
         Ok(HelperOutput::Object(fields)) => fields,
         Ok(HelperOutput::Other(_)) => {

@@ -1,7 +1,7 @@
 //! Resolve file identities through the verified backend before any desktop action.
 use crate::{backend::Backend, protocol::Request};
 use serde::{Deserialize, de::IgnoredAny};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 use studio_client_domain::json_object::JsonObject as ObjectOnly;
 
@@ -105,7 +105,7 @@ pub struct ResolvedFile {
 
 fn selection(value: Value) -> Result<(Action, String), String> {
     let ObjectOnly(selected): ObjectOnly<Selection> =
-        serde_json::from_value(value).map_err(|e| e.to_string())?;
+        studio_json::from_value(value).map_err(|e| e.to_string())?;
     Ok((
         selected.action,
         target_path(selected.target.0.try_into()?, "/api/file-info")?,
@@ -114,7 +114,7 @@ fn selection(value: Value) -> Result<(Action, String), String> {
 
 pub fn content_path(value: Value) -> Result<String, String> {
     let ObjectOnly(target): ObjectOnly<TargetWire> =
-        serde_json::from_value(value).map_err(|e| e.to_string())?;
+        studio_json::from_value(value).map_err(|e| e.to_string())?;
     target_path(target.try_into()?, "/api/file")
 }
 
@@ -201,7 +201,7 @@ pub async fn resolve(backend: &Backend, value: Value) -> Result<ResolvedFile, St
             .unwrap_or("Cannot resolve the selected file.".into())
     })?;
     let ObjectOnly(info): ObjectOnly<FileInfo> =
-        serde_json::from_value(info).map_err(|_| "Invalid resolved file path.".to_owned())?;
+        studio_json::from_value(info).map_err(|_| "Invalid resolved file path.".to_owned())?;
     tokio::task::spawn_blocking(move || validate_file(action, info))
         .await
         .map_err(|e| e.to_string())?
@@ -212,7 +212,7 @@ mod tests {
     use super::*;
 
     fn info(value: Value) -> FileInfo {
-        serde_json::from_value::<ObjectOnly<FileInfo>>(value)
+        studio_json::from_value::<ObjectOnly<FileInfo>>(value)
             .unwrap()
             .0
     }
