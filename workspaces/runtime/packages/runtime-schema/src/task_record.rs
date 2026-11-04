@@ -411,12 +411,12 @@ mod tests {
     #[test]
     fn raw_task_recovery_bytes_survive_round_trip() {
         let input = r#"{"id":"t","agent":"a","created":1,"itemId":"i","kind":"command","status":"running","turnId":"u","type":"commandExecution","name":"run","reattachRecovery":{ "nested": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }}"#;
-        let record: TaskRecord = serde_json::from_slice(input.as_bytes()).unwrap();
+        let record: TaskRecord = studio_json::from_slice(input.as_bytes()).unwrap();
         assert_eq!(
             record.reattach_recovery.as_ref().unwrap().0.get(),
             r#"{ "nested": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }"#
         );
-        assert_eq!(serde_json::to_vec(&record).unwrap(), input.as_bytes());
+        assert_eq!(studio_json::to_vec(&record).unwrap(), input.as_bytes());
     }
 
     #[test]
