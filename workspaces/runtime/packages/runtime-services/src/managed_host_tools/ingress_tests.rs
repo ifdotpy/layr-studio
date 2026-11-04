@@ -4463,6 +4463,12 @@ async fn null_and_absent_model_select_the_same_provider_default() {
             root["model"] = Value::Null;
             spec.model = studio_runtime_schema::queue_command::Field::Null;
         }
+        root["id"] = json!("root");
+        root["rootId"] = json!("root");
+        root["epoch"] = json!(0);
+        root["status"] = json!("idle");
+        root["compactions"] = json!(0);
+        let root = studio_runtime_store::AgentRecord::from_value(root).unwrap();
         let settings = crate::managed_child_create::resolve_worker_settings(
             &store,
             &CreationEnvironment,
@@ -4498,7 +4504,14 @@ async fn reviewer_account_selection_respects_precedence() {
         (None, None, "default"),
         (Some("alternate"), Some("default"), "default"),
     ] {
-        let root = json!({"accountKey":"default", "model":"gpt-6-astra", "workerDefaults":{"accountKey":"default"}, "reviewDefaults":{"model":"gpt-6-astra", "accountKey":review}});
+        let review_json = if review.is_some() {
+            "\"alternate\""
+        } else {
+            "null"
+        };
+        let root: AgentRecord = serde_json::from_str(&format!(
+            r#"{{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","workerDefaults":{{"accountKey":"default"}},"reviewDefaults":{{"model":"gpt-6-astra","accountKey":{review_json}}}}}"#
+        )).expect("typed reviewer fixture");
         let settings = crate::managed_child_create::resolve_worker_settings(
             &store,
             &CreationEnvironment,

@@ -1391,8 +1391,8 @@ async fn create_child(
         &context.store,
         environment,
         crate::managed_child_create::WorkerSettingsRequest {
-            parent: &parent,
-            root: &root,
+            parent: &parent_record,
+            root: &root_record,
             spec: creation_intent,
             profile,
             role,
@@ -3072,6 +3072,7 @@ async fn resolve_worker_defaults(
             } else {
                 Field::Missing
             },
+            ..Default::default()
         },
     )
 }
