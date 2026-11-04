@@ -1213,15 +1213,16 @@ pub(super) async fn draft_initial_snapshot(
                 rows.truncate(SYNC_DRAFT_STREAM_MAX_DOCUMENTS as usize);
                 let mut documents = Vec::with_capacity(rows.len());
                 for row in rows {
-                    let oversized = studio_json::from_str::<Value>(&row.payload)
-                        .ok()
-                        .is_some_and(|payload| payload.get("text").and_then(Value::as_str)
+                    let payload = studio_json::from_str::<Value>(&row.payload);
+                    let oversized = payload.as_ref()
+                        .is_ok_and(|payload| payload.get("text").and_then(Value::as_str)
                             .is_some_and(|text| text.chars().count() > studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS));
                     if oversized {
                         complete = false;
                         continue;
                     }
-                    documents.push(super::sync_documents::draft_document(row)?);
+                    let payload = payload.map_err(|_| ApiError::invalid_stored("drafts", &row.id))?;
+                    documents.push(super::sync_documents::draft_document_with_value(row, &payload)?);
                 }
                 Ok::<_, ApiError>((
                     revision,
@@ -5506,6 +5507,35 @@ mod tests {
                     .1
                     .is_none()
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn draft_snapshot_preserves_legacy_payload_decisions() {
+        for (payload, expected) in [
+            (r#" { "device":"phone", "session":"chat", "text":"saved", "updated":1, "extra":{"x":1} } "#.to_owned(), Some(true)),
+            ("broken".to_owned(), None),
+            (r#"{"text":42}"#.to_owned(), None),
+            (format!(r#"{{"text":"{}","other":true}}"#, "x".repeat(studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS + 1)), Some(false)),
+        ] {
+            let root = tempfile::tempdir().expect("isolated state");
+            let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+            let saved = payload.clone();
+            store.transaction(move |tx| {
+                SyncDocumentsRepository::put_draft(tx, "phone:chat", &saved, false).map(|_| ())
+            }).await.expect("draft");
+            let state = HttpState::new("token".into(), "workspace".into(), root.path().display().to_string(), 4321, None, Some(store), None);
+            let resource = ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
+            let result = draft_initial_snapshot(state, resource).await;
+            match expected {
+                None => assert!(result.is_err()),
+                Some(complete) => {
+                    let snapshot = result.expect("snapshot").draft_snapshot.expect("drafts");
+                    assert_eq!(snapshot.complete, complete);
+                    if complete { assert_eq!(snapshot.documents[0].payload, payload); }
+                    else { assert!(snapshot.documents.is_empty()); }
+                }
+            }
         }
     }
 
