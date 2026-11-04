@@ -436,7 +436,7 @@ mod tests {
         // Requests come from approval rows, as in production.
         for value in [base, permission, deferred, answering] {
             let row: studio_runtime_schema::approvals::Approval =
-                serde_json::from_value(value).unwrap();
+                serde::Deserialize::deserialize(&value).unwrap();
             studio_runtime_store::approvals::put(&tx, &row).unwrap();
         }
         let summary = ui_summary(&tx, None).unwrap();
