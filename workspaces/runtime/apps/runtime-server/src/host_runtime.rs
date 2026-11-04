@@ -386,6 +386,47 @@ impl HostRuntime {
             claude_bridge_dir: claude_bridge_dir.clone(),
             vm: vm_runtime,
         }));
+        // Limits of an idle account are read only after its turns. Read them
+        // again once a window resets after the last read.
+        if let Some(session) = state.account_session.clone() {
+            let store = store.clone();
+            tokio::spawn(async move {
+                use studio_runtime_services::account_session_runtime::{
+                    LIMITS_RESET_CHECK_SECONDS, limits_reset_passed,
+                };
+                let period = std::time::Duration::from_secs(LIMITS_RESET_CHECK_SECONDS);
+                let mut ticks =
+                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    ticks.tick().await;
+                    let accounts = store
+                        .read_async("limits/reset-check", |tx| {
+                            let mut rows = tx.prepare(
+                                "SELECT id FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+                            )?;
+                            let ids = rows
+                                .query_map([], |row| row.get::<_, String>(0))?
+                                .collect::<rusqlite::Result<Vec<_>>>()?;
+                            Ok::<_, studio_runtime_store::StoreError>(ids)
+                        })
+                        .await
+                        .unwrap_or_default();
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+                    for account in accounts {
+                        if session
+                            .limits_snapshot(&account)
+                            .is_ok_and(|snapshot| limits_reset_passed(&snapshot, now))
+                            && let Err(error) = session.refresh_limits(&account).await
+                        {
+                            eprintln!("limits refresh after reset for {account} failed: {error}");
+                        }
+                    }
+                }
+            });
+        }
         let resources = resources.with_account_session(state.account_session.clone());
         let preparation_resources = Arc::new(resources.clone());
         if let Some(managed_tool_runtime) = &managed_tool_runtime {

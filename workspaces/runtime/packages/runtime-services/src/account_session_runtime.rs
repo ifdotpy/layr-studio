@@ -366,6 +366,29 @@ pub async fn limits(
     }
 }
 
+/// Seconds between checks for limit windows that reset after their last read.
+pub const LIMITS_RESET_CHECK_SECONDS: u64 = 300;
+
+/// Whether a saved limits observation shows a window whose reset time passed
+/// after the observation was read. Such an idle account needs a new read.
+pub fn limits_reset_passed(observation: &Value, now: f64) -> bool {
+    let Some(at) = observation.get("at").and_then(Value::as_f64) else {
+        return false;
+    };
+    let data = &observation["data"];
+    let mut groups = vec![&data["rateLimits"]];
+    if let Some(by_id) = data["rateLimitsByLimitId"].as_object() {
+        groups.extend(by_id.values());
+    }
+    groups.into_iter().any(|group| {
+        ["primary", "secondary"].iter().any(|window| {
+            group[*window]["resetsAt"]
+                .as_f64()
+                .is_some_and(|reset| reset <= now && at < reset)
+        })
+    })
+}
+
 #[cfg(test)]
 mod limits_freshness_tests {
     #![allow(clippy::unwrap_used)]
@@ -380,6 +403,20 @@ mod limits_freshness_tests {
     };
 
     const NOW: f64 = 1_000.0;
+
+    #[test]
+    fn a_reset_after_the_last_read_needs_a_new_read() {
+        let observation = json!({"accountKey":"default","at":NOW - 500.0,"data":{
+            "rateLimits":{"secondary":{"resetsAt":NOW - 100.0,"usedPercent":100.0}}}});
+        assert!(super::limits_reset_passed(&observation, NOW));
+        // A reset still ahead, or one read after the reset, needs nothing.
+        assert!(!super::limits_reset_passed(&observation, NOW - 200.0));
+        let read_after =
+            json!({"at":NOW - 50.0,"data":{"rateLimits":{"secondary":{"resetsAt":NOW - 100.0}}}});
+        assert!(!super::limits_reset_passed(&read_after, NOW));
+        let by_id = json!({"at":NOW - 500.0,"data":{"rateLimitsByLimitId":{"x":{"primary":{"resetsAt":NOW - 1.0}}}}});
+        assert!(super::limits_reset_passed(&by_id, NOW));
+    }
 
     #[test]
     fn limits_ingress_normalizes_unread_fields_and_rejects_invalid_consumed_fields() {

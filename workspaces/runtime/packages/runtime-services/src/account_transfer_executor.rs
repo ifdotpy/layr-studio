@@ -801,7 +801,16 @@ async fn session_reply(
         }
         let response = match receipt.response().cloned() {
             Some(ProviderResponse::Reply(value)) => value,
-            Some(ProviderResponse::Rejected(_)) | None => {
+            Some(ProviderResponse::Rejected(rejection)) => {
+                eprintln!(
+                    "account transfer read {} rejected by the provider: {rejection:?}",
+                    call.operation
+                );
+                return Err(TransferError::Refused(
+                    "The provider rejected a transfer read",
+                ));
+            }
+            None => {
                 return Err(TransferError::Refused(
                     "The provider rejected a transfer read",
                 ));
