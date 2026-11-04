@@ -1059,7 +1059,9 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
     {
         let table = "runtime_tasks";
         let sql = format!(
-            "SELECT EXISTS(SELECT 1 FROM {table} WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('running','starting','approval','pending','unknown'))"
+            // A tool item left open by a turn that already ended belongs to no live work.
+            "SELECT EXISTS(SELECT 1 FROM {table} WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('running','starting','approval','pending','unknown')
+             AND NOT EXISTS(SELECT 1 FROM turns WHERE chat=?1 AND provider_turn=json_extract({table}.record,'$.turnId') AND state IN ('completed','failed','interrupted')))"
         );
         let busy: bool = tx
             .query_row(&sql, [agent], |r| r.get(0))
@@ -1339,6 +1341,36 @@ mod request_tests {
         run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
             .expect("a dead epoch approval cannot hold the chat");
         add_unknown_approval(&store, "live", 1);
+        assert!(
+            run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_running_task_of_a_completed_turn_does_not_block_a_transfer() {
+        let (_root, store) = store_with_agents();
+        let seed = |task: &'static str, turn: &'static str, ended: bool| {
+            run_async(store.transaction(move |tx| {
+                if ended {
+                    tx.execute(
+                        "INSERT INTO turns(id,chat,state,provider_turn) VALUES(?1,'lead','completed',?2)",
+                        rusqlite::params![format!("row-{turn}"), turn],
+                    )?;
+                }
+                tx.execute(
+                    "INSERT INTO runtime_tasks(id,record) VALUES(?1,json_object('id',?1,'agent','lead','status','running','turnId',?2))",
+                    rusqlite::params![task, turn],
+                )?;
+                Ok(())
+            }))
+            .expect("seed task");
+        };
+        // A tool item that was never closed before its turn completed.
+        seed("stale", "turn-done", true);
+        run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+            .expect("a task of a completed turn cannot hold the chat");
+        seed("live", "turn-live", false);
         assert!(
             run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
                 .is_err()
