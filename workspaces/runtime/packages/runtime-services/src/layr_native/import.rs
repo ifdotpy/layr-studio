@@ -499,7 +499,15 @@ impl Plan {
     }
 
     pub fn stage_open(&self, destination: &Directory) -> Result<()> {
-        self.stage_entries(destination, false, None)?;
+        self.stage_open_with_progress(destination, None)
+    }
+
+    pub(super) fn stage_open_with_progress(
+        &self,
+        destination: &Directory,
+        progress: Option<&dyn Fn(u64, u64)>,
+    ) -> Result<()> {
+        self.stage_entries(destination, false, progress)?;
         self.directory_modes(destination, false)
     }
 

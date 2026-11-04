@@ -3,6 +3,21 @@ use super::Result;
 use std::{path::PathBuf, process::ExitCode};
 use studio_runtime_store::path_identity::CanonicalPath;
 
+fn should_print_progress(
+    last: Option<&(
+        std::time::Instant,
+        studio_runtime_schema::layr_progress::CopyPhase,
+    )>,
+    value: &studio_runtime_schema::layr_progress::CopyProgress,
+) -> bool {
+    value.total == Some(value.done)
+        || !last.is_some_and(|(at, phase)| {
+            *phase == value.phase
+                && at.elapsed()
+                    < studio_runtime_services::layr_native::migration::PROGRESS_PUBLICATION_INTERVAL
+        })
+}
+
 pub(super) fn run(args: &[String]) -> Result<ExitCode> {
     let mut args = args.iter();
     let command = args
@@ -161,11 +176,35 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
                     worktrees,
                     skip_worktrees: skip_worktrees.clone(),
                 };
+                let last = std::sync::Mutex::new(
+                    None::<(
+                        std::time::Instant,
+                        studio_runtime_schema::layr_progress::CopyPhase,
+                    )>,
+                );
+                let progress: studio_runtime_services::layr_native::migration::ProgressSink =
+                    std::sync::Arc::new(
+                        move |value: studio_runtime_schema::layr_progress::CopyProgress| {
+                            let mut last = last.lock().expect("progress lock");
+                            if !should_print_progress(last.as_ref(), &value) {
+                                return;
+                            }
+                            eprintln!(
+                                "{}",
+                                serde_json::to_string(&value).expect("progress serialization")
+                            );
+                            *last = Some((std::time::Instant::now(), value.phase));
+                        },
+                    );
                 println!(
                     "{}",
                     serde_json::to_string_pretty(
-                        &studio_runtime_services::layr_native::migration::migrate_with_options(
-                            &state, &project, dry_run, options
+                        &studio_runtime_services::layr_native::migration::migrate_with_progress(
+                            &state,
+                            &project,
+                            dry_run,
+                            options,
+                            Some(&progress)
                         )?
                     )?
                 );
@@ -176,4 +215,28 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+
+    #[test]
+    fn final_count_is_printed_inside_throttle_interval() {
+        let mut value = CopyProgress {
+            phase: CopyPhase::Staging,
+            done: 0,
+            total: Some(1),
+            unit: CopyUnit::Files,
+        };
+        assert!(should_print_progress(None, &value));
+        let last = Some((std::time::Instant::now(), value.phase.clone()));
+        assert!(!should_print_progress(last.as_ref(), &value));
+        value.done = 1;
+        assert!(should_print_progress(last.as_ref(), &value));
+        value.phase = CopyPhase::CreatingLine;
+        value.total = None;
+        assert!(should_print_progress(last.as_ref(), &value));
+    }
 }

@@ -406,6 +406,9 @@ The import includes uncommitted files and omits Git-ignored data.
 It excludes the worktree's `.git` pointer. Build output becomes warm caches.
 Prunable worktrees are reported and skipped.
 Completed receipts make a repeated migration idempotent.
+The migration writes typed copy progress as JSON lines on standard error; its
+normal report stays on standard output. Line creation and cache preparation
+are indeterminate because Layr does not expose counts for those operations.
 
 For a project with running WT chats:
 
@@ -473,6 +476,9 @@ An implementer can switch only when its parent is a ready Layr chat.
 Its worktree must have no uncommitted or untracked files, and its HEAD must be on a remote-tracking branch.
 Studio does not fetch. Push the branch first.
 A running turn, monitor, task, queued input, or workspace operation refuses the switch.
+Switching requires an idle chat, so its copy progress is not displayed in the
+client. The existing start progress carrier applies only to queued or starting
+agents.
 New workers of a switched lead use Layr.
 Existing WT workers keep WT until you switch them.
 A switched lead cannot accept Git results from a WT worker. Switch each implementer after the lead.

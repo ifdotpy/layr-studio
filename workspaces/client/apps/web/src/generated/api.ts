@@ -4513,6 +4513,10 @@ export interface components {
               | "restoring_attributes"
               | "warming_caches"
               | "transferring"
+              | "creating_line"
+              | "archiving"
+              | "uploading"
+              | "importing_project"
               | "completed"
               | "failed";
             /** Format: uint64 */
@@ -22772,6 +22776,10 @@ export interface components {
               | "restoring_attributes"
               | "warming_caches"
               | "transferring"
+              | "creating_line"
+              | "archiving"
+              | "uploading"
+              | "importing_project"
               | "completed"
               | "failed";
             /** Format: uint64 */
