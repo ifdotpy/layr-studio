@@ -502,7 +502,7 @@ null"#;
         fs::create_dir_all(&db).expect("metadata");
         let connection = Connection::open(db.join("layr.sqlite")).expect("db");
         connection.execute_batch("CREATE TABLE config(key TEXT, value TEXT); INSERT INTO config VALUES('remote.origin.url','\"https://example.test/org/repo.git\"');").expect("origin config");
-        settings::configure(&state, Some(&root)).expect("configure");
+        settings::fixture_select(&state, &root);
         let root = settings::selected_store(&state).expect("root");
         let record = json!({"hostProjectPath":source});
         assert_eq!(

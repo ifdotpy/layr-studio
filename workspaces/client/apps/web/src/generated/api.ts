@@ -1406,7 +1406,7 @@ export interface paths {
     /** Native Layr Settings */
     get: operations["native_layr_settings_get"];
     put?: never | undefined;
-    post?: never | undefined;
+    post: operations["native_layr_settings_post"];
     delete?: never | undefined;
     options?: never | undefined;
     head?: never | undefined;
@@ -11060,7 +11060,7 @@ export interface components {
       [key: string]: unknown;
     };
     /** @enum {string} */
-    CommandErrorCode: "receipt_expired";
+    CommandErrorCode: "receipt_expired" | "native_layr_store";
     /** @description Identity of the outbox command that delivers an answer. */
     CommandId: string;
     CommandLeadMessageBody: {
@@ -12376,6 +12376,7 @@ export interface components {
        * @default null
        */
       id?: string | null | undefined;
+      layrStoreRoot?: string | undefined;
       /**
        * Model
        * @default null
@@ -15963,9 +15964,22 @@ export interface components {
           /** @constant */
           status: "notReady";
         };
+    /** NativeLayrSettingsRequest */
+    NativeLayrSettingsRequest: {
+      storeRoot?: string | undefined;
+    };
+    /** NativeLayrSettingsResource */
+    NativeLayrSettingsResource: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "native-layr-settings";
+    };
     /** NativeLayrSettingsResponse */
     NativeLayrSettingsResponse: {
       error?: string | undefined;
+      readiness?: components["schemas"]["NativeLayrCapability"] | undefined;
       storeRoot: string | null;
       version: {
         build: string;
@@ -20064,7 +20078,8 @@ export interface components {
       | components["schemas"]["ProcessesResource"]
       | components["schemas"]["WorkResource"]
       | components["schemas"]["ComplaintResource"]
-      | components["schemas"]["TerminalOutputResource"];
+      | components["schemas"]["TerminalOutputResource"]
+      | components["schemas"]["NativeLayrSettingsResource"];
     /**
      * ResourceRevisionEntry
      * @description Per-resource revision; StateResource uses the entity sequence.
@@ -20089,6 +20104,10 @@ export interface components {
       entitySequenceReset?: boolean | null | undefined;
       /** Entitysequences */
       entitySequences?: number[] | null | undefined;
+      nativeLayrSettings?:
+        | components["schemas"]["NativeLayrSettingsResponse"]
+        | null
+        | undefined;
       replyKind?: components["schemas"]["SubscriptionReplyKind"] | undefined;
       resource?: components["schemas"]["ResourceRef"] | null | undefined;
       /** Revision */
@@ -23084,6 +23103,7 @@ export interface components {
       models: components["schemas"]["SyncEntityPayload"][];
       monitors: components["schemas"]["MonitorEntityDto"][];
       "multi-server": components["schemas"]["AccessSnapshot"];
+      "native-layr-settings": components["schemas"]["NativeLayrSettingsResponse"];
       processes: components["schemas"]["ProcessList"];
       queue: components["schemas"]["SyncEntityPayload"][];
       receipts: components["schemas"]["SyncEntityPayload"][];
@@ -34592,6 +34612,55 @@ export interface operations {
       503: components["responses"]["ApiError503"];
     };
   };
+  native_layr_settings_post: {
+    parameters: {
+      query?: never | undefined;
+      header?: never | undefined;
+      path?: never | undefined;
+      cookie?: never | undefined;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NativeLayrSettingsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
+          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
+          "Cache-Control": components["headers"]["CacheControl"];
+          "Content-Encoding": components["headers"]["ContentEncoding"];
+          "Content-Length": components["headers"]["ContentLength"];
+          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
+          "Content-Type": components["headers"]["ContentType"];
+          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
+          "Server-Timing": components["headers"]["ServerTiming"];
+          Vary: components["headers"]["Vary"];
+          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
+          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
+          "X-Studio-Server": components["headers"]["StudioServer"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NativeLayrSettingsResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: components["responses"]["ApiError400"];
+      /** @description Unauthorized */
+      401: components["responses"]["ApiError401"];
+      /** @description Forbidden */
+      403: components["responses"]["ApiError403"];
+      /** @description Too Many Requests */
+      429: components["responses"]["ApiError429"];
+      /** @description Internal Server Error */
+      500: components["responses"]["ApiError500"];
+      /** @description Service Unavailable */
+      503: components["responses"]["ApiError503"];
+    };
+  };
   orchestration_settings_read_api_orchestration_settings_get: {
     parameters: {
       query?: never | undefined;
@@ -39163,7 +39232,10 @@ export const ClaudeRateType = {
   overage: "overage",
 } as const;
 export type ClaudeRateType = components["schemas"]["ClaudeRateType"];
-export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
+export const CommandErrorCode = {
+  receipt_expired: "receipt_expired",
+  native_layr_store: "native_layr_store",
+} as const;
 export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {
   in_progress: "in_progress",

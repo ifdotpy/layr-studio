@@ -168,6 +168,8 @@ pub enum ResourceRef {
     LimitsResource(AccountResource),
     #[serde(rename = "models")]
     ModelsResource(EmptyResource),
+    #[serde(rename = "native-layr-settings")]
+    NativeLayrSettingsResource(EmptyResource),
     #[serde(rename = "multi-server")]
     MultiServerResource(EmptyResource),
     #[serde(rename = "queue")]
@@ -244,6 +246,7 @@ impl Serialize for ResourceRef {
             }
             Self::ModelsResource(_) => kind!("models"),
             Self::MultiServerResource(_) => kind!("multi-server"),
+            Self::NativeLayrSettingsResource(_) => kind!("native-layr-settings"),
             Self::QueueResource(v) => agent!(v, "queue"),
             Self::ReceiptsResource(v) => agent!(v, "receipts"),
             Self::RoomResource(v) => {

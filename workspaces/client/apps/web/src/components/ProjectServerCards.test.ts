@@ -52,7 +52,7 @@ describe("new chat actions", () => {
   });
 });
 
-it("disables unavailable native Layr on Linux and explains the fallback", () => {
+it("allows a store override when the default store is unavailable", () => {
   const markup = renderToStaticMarkup(
     createElement(
       MantineProvider,
@@ -92,7 +92,7 @@ it("disables unavailable native Layr on Linux and explains the fallback", () => 
   );
   expect(
     markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
-  ).toContain('disabled=""');
+  ).not.toContain('disabled=""');
   expect(markup.match(/<input(?=[^>]*value="worktree")[^>]*>/)?.[0]).toContain(
     'checked=""',
   );
@@ -154,4 +154,5 @@ it("selects the server's default when Layr is ready", () => {
   const option = markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0];
   expect(option).toContain('checked=""');
   expect(option).not.toContain('disabled=""');
+  expect(markup).toContain("Store directory (optional)");
 });

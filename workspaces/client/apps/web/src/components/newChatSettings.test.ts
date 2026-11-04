@@ -212,3 +212,15 @@ test("a project without a policy keeps the chosen workspace", () => {
   expect(projectAllowsWorktree(undefined)).toBe(true);
   expect(projectAllowsWorktree({ workspacePolicy: null })).toBe(true);
 });
+
+test("new chat accepts a native Layr store override", () => {
+  expect(
+    isNewChatSettings({
+      workspaceMode: "layr-native",
+      layrStoreRoot: "/store",
+    }),
+  ).toBe(true);
+  expect(
+    isNewChatSettings({ workspaceMode: "layr-native", layrStoreRoot: 42 }),
+  ).toBe(false);
+});

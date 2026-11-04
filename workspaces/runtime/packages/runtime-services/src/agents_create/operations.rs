@@ -63,6 +63,8 @@ pub enum OperationError {
     #[error("{0}")]
     Invalid(&'static str),
     #[error("{0}")]
+    InvalidStore(String),
+    #[error("{0}")]
     Forbidden(&'static str),
     #[error("Not implemented: requires {0}")]
     Unavailable(&'static str),
@@ -859,31 +861,48 @@ async fn create(
     let state = context.store.state_dir().to_path_buf();
     let requested_project = cwd.clone();
     let native_workspace = workspace == "layr-native";
+    let requested_store = request.intent.layr_store_root.clone();
+    if requested_store.is_some() && !native_workspace {
+        return Err(OperationError::Invalid(
+            "A store override requires Layr workspace mode",
+        ));
+    }
     let (native_store, project_path) = studio_runtime_process::blocking_pool::spawn_blocking(
         "agents-create/native-store",
         move || {
-            let root = crate::layr_native::settings::store_for_validation(&state);
-            let project = crate::project_path::ProjectPath::new(requested_project, &root)
-                .map_err(OperationError::Invalid)?;
-            let root = if native_workspace {
-                crate::layr_native::settings::selected_store(&state).map_err(|_| {
-                    OperationError::Invalid(
-                        "Cannot read the native Layr store setting. Inspect native-layr paths.",
-                    )
-                })?
+            let canonical = if native_workspace {
+                let root = crate::layr_native::settings::resolve_for_new_chat(
+                    &state,
+                    requested_store.as_deref().map(std::path::Path::new),
+                )
+                .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+                Some(
+                    crate::layr_native::settings::resolve_root(&root)
+                        .map_err(|e| OperationError::InvalidStore(e.to_string()))?,
+                )
             } else {
-                root
+                None
             };
+            let root = canonical
+                .as_ref()
+                .map(|root| root.as_path().to_owned())
+                .unwrap_or_else(|| crate::layr_native::settings::store_for_validation(&state));
+            let project = crate::project_path::ProjectPath::new(requested_project.clone(), &root)
+                .map_err(OperationError::Invalid)?;
+            if let Some(canonical) = &canonical {
+                crate::layr_native::settings::check_project_overlap(
+                    &root,
+                    std::path::Path::new(&requested_project),
+                )
+                .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+                crate::layr_native::settings::validate_resolved_root(&state, canonical)
+                    .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+            }
             Ok::<_, OperationError>((root, project))
         },
     )
     .await
     .map_err(|_| OperationError::Internal)??;
-    if workspace == "layr-native" && !native_capability(context).await?.is_ready() {
-        return Err(OperationError::Invalid(
-            "Native Layr is not ready on this server. Select WT or configure its store and daemon.",
-        ));
-    }
     if crate::projects::refuses_worktree(&context.store, &cwd, &workspace).await? {
         return Err(OperationError::Invalid(
             crate::projects::WORKTREE_REFUSED_BY_LAYR_POLICY,
@@ -1167,7 +1186,12 @@ async fn create(
             && draft
             && !reuse_execution_fields
             && !request.worker_catalog
-            && reusable_previous_workspace(&prior, &workspace_for_write, &cwd)
+            && reusable_previous_workspace(
+                &prior,
+                &workspace_for_write,
+                &cwd,
+                record.layr_store_root.as_deref(),
+            )
             && prior.layr_ready != Some(true)
             && prior
                 .workspace_mode
@@ -3314,8 +3338,15 @@ fn lead_signature(
     studio_json::to_string(&settings).map_err(|_| OperationError::Internal)
 }
 
-fn reusable_previous_workspace(prior: &AgentRecord, _workspace: &str, _cwd: &str) -> bool {
-    prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
+fn reusable_previous_workspace(
+    prior: &AgentRecord,
+    workspace: &str,
+    _cwd: &str,
+    store_root: Option<&str>,
+) -> bool {
+    (workspace != "layr-native"
+        || (store_root.is_some() && prior.layr_store_root.as_deref() == store_root))
+        && prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
         && prior.image_workspace.value() != Some(&true)
 }
 
@@ -3456,6 +3487,23 @@ async fn mutate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_reuse_requires_the_same_store() {
+        let mut prior = studio_runtime_store::AgentRecord::test_defaults();
+        prior.layr_store_root = Some("/store-a".into());
+        assert!(!super::reusable_previous_workspace(
+            &prior,
+            "layr-native",
+            "/project",
+            Some("/store-b")
+        ));
+        assert!(super::reusable_previous_workspace(
+            &prior,
+            "layr-native",
+            "/project",
+            Some("/store-a")
+        ));
+    }
     use super::*;
     use crate::host_worker_create::CreationCatalog as _;
 

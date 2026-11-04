@@ -2202,8 +2202,7 @@ mod resource_tests {
         let custom = tempfile::tempdir().expect("custom store");
         let alias = directory.path().join("alias");
         std::os::unix::fs::symlink(&default_root, &alias).expect("default alias");
-        crate::layr_native::settings::configure(&state_root, Some(custom.path()))
-            .expect("selection");
+        crate::layr_native::settings::fixture_select(&state_root, custom.path());
         let resources = PreparationResources::bundled(String::new(), ModelCatalogService::new())
             .expect("resources");
         // A selected store is canonicalized by settings::configure; a recorded root is kept as given.

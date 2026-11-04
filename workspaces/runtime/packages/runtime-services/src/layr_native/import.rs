@@ -2,6 +2,8 @@
 use super::{NativeLayrError, private_tree::Directory};
 mod filesystem_ffi;
 use crate::vm_preparation::vm_archive_identity;
+#[cfg(target_os = "macos")]
+pub(super) use filesystem_ffi::is_copy_on_write;
 use filesystem_ffi::{case_sensitive, clone_file};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{

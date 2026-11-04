@@ -292,6 +292,8 @@ describe("shared resource event transport", () => {
     const transport = await loadTransport();
     const discovery = vi.fn();
     const voice = vi.fn();
+    const layr = vi.fn();
+    transport.watchResourceChanges({ kind: "native-layr-settings" }, layr);
     transport.watchResourceChanges({ kind: "multi-server" }, discovery);
     transport.watchResourceChanges({ kind: "voice", agentId: "chat" }, voice);
     await vi.advanceTimersByTimeAsync(20);
@@ -315,13 +317,25 @@ describe("shared resource event transport", () => {
       epoch: "transient",
       revision: 1,
       reason: "initial",
-      resources: [{ kind: "multi-server" }, { kind: "voice", agentId: "chat" }],
+      resources: [
+        { kind: "multi-server" },
+        { kind: "voice", agentId: "chat" },
+        { kind: "native-layr-settings" },
+      ],
       resourceVersions: [
         { revision: 1, discoverySnapshot: snapshot },
         { revision: 1, voiceRecords: batch },
+        {
+          revision: 1,
+          nativeLayrSettings: { storeRoot: "/store", version: null },
+        },
       ],
     });
     await vi.advanceTimersByTimeAsync(20);
+    expect(layr.mock.calls[0]?.[0].nativeLayrSettings).toEqual({
+      storeRoot: "/store",
+      version: null,
+    });
     expect(voice).toHaveBeenCalledOnce();
     assert.ok(discovery.mock.calls[0] != null);
     expect(discovery.mock.calls[0][0].discoverySnapshot).toEqual(snapshot);
