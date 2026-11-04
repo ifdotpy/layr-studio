@@ -104,7 +104,8 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 };
 
 /// Collections of the work documents. Their rows come from the main tables
-/// (`runtime_work` and the history tables), not from `sync_entities`.
+/// (`runtime_work` and the history tables), never from `sync_entities`; the readers
+/// here skip them, and `entity_scope` in runtime-services builds them.
 pub const WORK_COLLECTIONS: &[&str] = &[
     "work",
     "workDetail",
@@ -408,7 +409,6 @@ impl SyncDocumentsRepository {
             agent,
             include_team_members,
             limit + 1,
-            false,
         )?;
         let checkpoint = if rows.len() as i64 > limit {
             rows.truncate(limit as usize);
@@ -427,11 +427,10 @@ impl SyncDocumentsRepository {
     }
 
     /// Raw scoped rows of `sync_entities` in `(after, through]`, at most `fetch` rows, in
-    /// `seq` order. `exclude_work` drops [`WORK_COLLECTIONS`] for readers that build them
-    /// from the main tables. Shared by every scoped reader.
+    /// `seq` order, without [`WORK_COLLECTIONS`]. Shared by every scoped reader.
     #[allow(clippy::too_many_arguments)]
     pub fn scope_rows(
-        transaction: &Transaction<'_>,
+        transaction: &Connection,
         after: i64,
         through: i64,
         snapshot: bool,
@@ -440,7 +439,6 @@ impl SyncDocumentsRepository {
         agent: Option<&str>,
         include_team_members: bool,
         fetch: i64,
-        exclude_work: bool,
     ) -> StoreResult<Vec<EntityRow>> {
         let collections = if collections_json.is_some() {
             "collection IN (SELECT value FROM json_each(:collections))"
@@ -457,17 +455,13 @@ impl SyncDocumentsRepository {
         } else {
             ""
         };
-        let work = WORK_COLLECTIONS
-            .iter()
-            .map(|c| format!("'{c}'"))
-            .collect::<Vec<_>>()
-            .join(",");
+        let work = work_collection_list();
         let mut statement = transaction.prepare_cached(&format!(
             "SELECT collection,id,seq,payload,deleted FROM sync_entities AS entity{index} \
              WHERE collection NOT LIKE 'transcript:%' AND {collections} AND {identity} \
                AND {ENTITY_SCOPE_AGENT_PREDICATE} AND seq>:after AND seq<=:through \
                AND (:snapshot=0 OR deleted=0) \
-               AND (:exclude_work=0 OR collection NOT IN ({work})) ORDER BY seq LIMIT :limit"
+               AND collection NOT IN ({work}) ORDER BY seq LIMIT :limit"
         ))?;
         let rows = statement
             .query_map(
@@ -477,7 +471,6 @@ impl SyncDocumentsRepository {
                     ":collections": collections_json,
                     ":id": id,
                     ":snapshot": i64::from(snapshot),
-                    ":exclude_work": i64::from(exclude_work),
                     ":limit": fetch,
                     ":agent": agent,
                     ":include_team_members": include_team_members,
@@ -574,13 +567,11 @@ impl SyncDocumentsRepository {
         Self::put_entity_payload(transaction, collection, id, &payload, deleted)
     }
 
+    /// The highest change number of the shared counter. Entities built at read time
+    /// (work documents) carry numbers of `durable_rows`, so this is not the highest
+    /// `sync_entities` row.
     pub fn entity_sequence(connection: &Connection) -> StoreResult<i64> {
-        connection
-            .query_row_cached(
-                "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection NOT LIKE 'transcript:%'",
-                [], |row| row.get(0),
-            )
-            .map_err(StoreError::from)
+        crate::durable_seq::high(connection)
     }
 
     pub fn entities_after(
@@ -588,10 +579,12 @@ impl SyncDocumentsRepository {
         after: i64,
         limit: i64,
     ) -> StoreResult<Vec<EntityRow>> {
-        let mut statement = connection.prepare_cached(
+        let mut statement = connection.prepare_cached(&format!(
             "SELECT collection,id,seq,payload,deleted FROM sync_entities \
-             WHERE seq>?1 AND collection NOT LIKE 'transcript:%' ORDER BY seq LIMIT ?2",
-        )?;
+             WHERE seq>?1 AND collection NOT LIKE 'transcript:%' AND collection NOT IN ({}) \
+             ORDER BY seq LIMIT ?2",
+            work_collection_list()
+        ))?;
         let rows = statement.query_map(
             params![
                 after,
@@ -871,8 +864,44 @@ impl SyncDocumentsRepository {
     }
 }
 
+impl SyncDocumentsRepository {
+    /// Rows of a fresh global pull from `sync_entities`, without [`WORK_COLLECTIONS`]:
+    /// live rows above `after`, and deletes above both `tombstone_floor` and
+    /// `initial_high`. The summary of `priority_id` comes first.
+    pub fn global_rows(
+        connection: &Connection,
+        after: i64,
+        tombstone_floor: i64,
+        initial_high: i64,
+        collections_json: &str,
+        priority_id: Option<&str>,
+        limit: i64,
+    ) -> StoreResult<Vec<EntityRow>> {
+        read_entity_page(
+            connection,
+            after,
+            tombstone_floor,
+            true,
+            initial_high,
+            limit,
+            EntityPageScope {
+                collections: Some(collections_json),
+                priority_id,
+            },
+        )
+    }
+}
+
+fn work_collection_list() -> String {
+    WORK_COLLECTIONS
+        .iter()
+        .map(|collection| format!("'{collection}'"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn read_entity_page(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     after: i64,
     tombstone_floor: i64,
     fresh: bool,
@@ -887,9 +916,11 @@ fn read_entity_page(
     };
     let mut statement = transaction.prepare_cached(&format!(
         "SELECT collection,id,seq,payload,deleted FROM sync_entities \
-         WHERE collection NOT LIKE 'transcript:%' AND (?7 IS NULL OR collection IN (SELECT value FROM json_each(?7))) AND seq>?1 \
+         WHERE collection NOT LIKE 'transcript:%' AND collection NOT IN ({work}) \
+           AND (?7 IS NULL OR collection IN (SELECT value FROM json_each(?7))) AND seq>?1 \
            AND (deleted=0 OR seq>?2) AND (?3=0 OR deleted=0 OR seq>?4) \
          ORDER BY {order} LIMIT ?6",
+        work = work_collection_list(),
     ))?;
     statement
         .query_map(
@@ -997,7 +1028,13 @@ mod tests {
         db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
             CREATE INDEX sync_entities_non_transcript_seq ON sync_entities(seq) WHERE collection NOT LIKE 'transcript:%';
             CREATE INDEX sync_entities_collection_seq ON sync_entities(collection,seq);
+            CREATE INDEX sync_entities_seq ON sync_entities(seq);
             CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
+            CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
+            CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER);
+            CREATE INDEX durable_rows_seq ON durable_rows(seq);
+            CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0);
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
             INSERT INTO sync_entities SELECT 'other',printf('other-%d',x),x,'{}',0 FROM n;
             INSERT INTO sync_entities VALUES('task','selected',2001,'{}',0);").expect("page fixture");
@@ -1262,7 +1299,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_visibility_retains_deleted_owner_until_restore_and_ignores_team_for_root_only_work() {
+    fn scope_visibility_retains_deleted_owner_until_restore() {
         use serde_json::json;
         let mut connection = Connection::open_in_memory().expect("SQLite");
         connection
@@ -1304,64 +1341,6 @@ mod tests {
         assert!(
             fence() > baseline,
             "coalesced delete/restore must retain old ownership"
-        );
-        SyncDocumentsRepository::put_entity(
-            &tx,
-            "workDetail",
-            "work",
-            json!({"rootId":"alpha"}),
-            false,
-        )
-        .expect("publish root-only work record");
-        let work_fence = || {
-            SyncDocumentsRepository::entity_scope_visibility_revision(
-                &tx,
-                r#"["workDetail"]"#,
-                "alpha",
-                false,
-            )
-            .expect("read root-only work fence")
-        };
-        let baseline = work_fence();
-        SyncDocumentsRepository::put_entity(
-            &tx,
-            "agentSummary",
-            "new-child",
-            json!({"rootId":"alpha"}),
-            false,
-        )
-        .expect("publish new team child");
-        assert_eq!(
-            work_fence(),
-            baseline,
-            "root-only Work cannot replay history after a new child"
-        );
-        SyncDocumentsRepository::put_entity(
-            &tx,
-            "workDetail",
-            "outside",
-            json!({"rootId":"beta","agent":"alpha"}),
-            false,
-        )
-        .expect("publish out-of-scope work record");
-        let selected = SyncDocumentsRepository::resume_entity_scope(
-            &tx,
-            None,
-            Some(r#"["workDetail"]"#),
-            None,
-            Some("alpha"),
-            false,
-            512,
-        )
-        .expect("read root-only work selection");
-        assert_eq!(
-            selected
-                .rows
-                .iter()
-                .map(|r| r.id.as_str())
-                .collect::<Vec<_>>(),
-            ["work"],
-            "root-only capability is enforced in SQL even with arbitrary agent properties"
         );
         let provenance_count = || {
             tx.query_row(
@@ -1439,6 +1418,10 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("memory SQLite");
         connection.execute_batch(
             "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
+             CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
+             CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER);
+             CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0);
              CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
              INSERT INTO sync_entities VALUES('agent','a',2,'a','{}',0),('agent','b',4,'b','{}',0),('agent','gone',5,'g','{}',1),('transcript:a','item:x',6,'x',NULL,0);
              INSERT INTO sync_entity_meta VALUES('entity_tombstone_floor','1');",
@@ -1449,7 +1432,8 @@ mod tests {
                 .expect("current");
         assert!(!current.reset);
         assert!(current.rows.is_empty());
-        assert_eq!(current.checkpoint, 5);
+        // The transcript row holds the highest number of the shared counter.
+        assert_eq!(current.checkpoint, 6);
         let old = SyncDocumentsRepository::resume_entities(&transaction, Some(2), None, None, 100)
             .expect("older");
         assert!(!old.reset);
@@ -1460,7 +1444,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["b", "gone"]
         );
-        for since in [None, Some(0), Some(6), Some(-1)] {
+        for since in [None, Some(0), Some(7), Some(-1)] {
             let expired =
                 SyncDocumentsRepository::resume_entities(&transaction, since, None, None, 100)
                     .expect("expired");
@@ -1473,7 +1457,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 ["a", "b"]
             );
-            assert_eq!(expired.checkpoint, 5);
+            assert_eq!(expired.checkpoint, 6);
         }
         let scoped = SyncDocumentsRepository::resume_entities(
             &transaction,

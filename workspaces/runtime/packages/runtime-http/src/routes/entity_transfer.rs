@@ -125,7 +125,7 @@ async fn prepare(
         // Ordinary writes and tombstones retain indexed sequence deltas.
         let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose()?.unwrap_or(0);
         let after = after.filter(|after| *after >= visibility);
-        let mut page = studio_runtime_services::work_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+        let mut page = studio_runtime_services::entity_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         let through = page.max_sequence;
         let snapshot = page.reset;
         let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
@@ -161,7 +161,7 @@ async fn prepare(
             }
             if final_sql_page { break; }
             after = checkpoint;
-            page = studio_runtime_services::work_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+            page = studio_runtime_services::entity_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         }
         let mut file = spool.ok_or_else(data_error)?;
         file.rewind().map_err(|_| io_error())?;
@@ -185,7 +185,16 @@ fn byte_pages(
     let mut bytes = 0;
     for document in documents {
         let size = serde_json::to_vec(&document).map_err(ApiError::json)?.len();
-        if !batch.documents.is_empty() && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2 {
+        // Documents built from one main-table change share its number. A batch ends
+        // only between numbers, so the next batch never repeats its `after`.
+        let same_change = batch
+            .documents
+            .last()
+            .is_some_and(|last| last.seq == document.seq);
+        if !batch.documents.is_empty()
+            && !same_change
+            && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2
+        {
             batch.through = batch.documents.last().ok_or_else(data_error)?.seq;
             let next = EntityChangeBatch {
                 after: batch.through,
@@ -272,6 +281,43 @@ mod tests {
     use axum::response::{IntoResponse, Sse};
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
+
+    #[test]
+    fn a_batch_never_splits_documents_of_one_change() {
+        let text = "x".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 3);
+        let document = |id: &str, seq: i64| {
+            super::super::sync_documents::entity_document(&studio_runtime_store::EntityRow {
+                collection: "workspace".into(),
+                id: id.into(),
+                sequence: seq,
+                payload: Some(
+                    json!({"collection":"workspace","id":id,"value":{"stateDir":text}}).to_string(),
+                ),
+                deleted: false,
+            })
+            .expect("document")
+        };
+        let batches = byte_pages(
+            0,
+            3,
+            vec![
+                document("a", 2),
+                document("b", 2),
+                document("c", 2),
+                document("d", 3),
+            ],
+        )
+        .expect("batches");
+        assert_eq!(
+            batches.len(),
+            2,
+            "the byte limit cuts once, between numbers"
+        );
+        assert_eq!(batches[0].documents.len(), 3);
+        assert_eq!(batches[0].through, 2);
+        assert_eq!(batches[1].after, 2);
+        assert_eq!(batches[1].documents[0].seq, 3);
+    }
 
     async fn fixture() -> (tempfile::TempDir, HttpState) {
         let directory = tempfile::tempdir().expect("isolated source");

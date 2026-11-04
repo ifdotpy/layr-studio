@@ -82,8 +82,8 @@ const NEXT: &str = "(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+
     (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),
     (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows))";
 
-/// Derived view collections that the publisher builds from `runtime_agents`,
-/// `runtime_requests` and `runtime_work`. Owner of the list. `durable_view_log` mirrors
+/// Derived view collections that the publisher builds from `runtime_agents` and
+/// `runtime_requests`. Owner of the list. `durable_view_log` mirrors
 /// their `sync_entities` rows (collection, id, seq, deleted) without the payload, so a
 /// reader can learn which views changed after a cursor from the same cursor space.
 pub const VIEW_COLLECTIONS: &[&str] = &[
@@ -93,11 +93,6 @@ pub const VIEW_COLLECTIONS: &[&str] = &[
     "retainedWorktree",
     "questionHistory",
     "request",
-    "work",
-    "workDetail",
-    "workResult",
-    "workDecision",
-    "workRelease",
 ];
 
 /// `VIEW_COLLECTIONS` as an SQL list: `'agent','agentSummary',...`.
@@ -245,9 +240,14 @@ pub enum DurableChanges {
     },
 }
 
+/// The highest change number of any sync table.
+pub fn high(connection: &Connection) -> StoreResult<i64> {
+    Ok(connection.query_row(&format!("SELECT {NEXT}-1"), [], |row| row.get(0))?)
+}
+
 /// The highest change number of any sync table, and the durable tombstone floor.
 pub fn high_and_floor(connection: &Connection) -> StoreResult<(i64, i64)> {
-    let high: i64 = connection.query_row(&format!("SELECT {NEXT}-1"), [], |row| row.get(0))?;
+    let high = high(connection)?;
     let floor: i64 =
         connection.query_row("SELECT floor FROM durable_floor WHERE id=1", [], |row| {
             row.get(0)

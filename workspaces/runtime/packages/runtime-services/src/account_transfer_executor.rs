@@ -3061,7 +3061,7 @@ mod retained_executor_tests {
 
     #[tokio::test]
     async fn a_background_command_does_not_block_a_transfer() {
-        assert_history_transfer(false, true).await;
+        Box::pin(assert_history_transfer(false, true)).await;
     }
 
     #[tokio::test]
@@ -3070,7 +3070,7 @@ mod retained_executor_tests {
     }
 
     async fn assert_history_transfer_without_duplicate_fork(cold_catalog: bool) {
-        assert_history_transfer(cold_catalog, false).await;
+        Box::pin(assert_history_transfer(cold_catalog, false)).await;
     }
 
     async fn assert_history_transfer(cold_catalog: bool, background: bool) {

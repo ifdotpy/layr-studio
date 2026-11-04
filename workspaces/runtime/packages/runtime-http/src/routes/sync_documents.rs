@@ -783,17 +783,20 @@ fn pull_entities(
         )?;
     }
     let mut page = if fresh {
-        SyncDocumentsRepository::pull_global_entities(
+        studio_runtime_services::entity_scope::pull_global_fresh(
             transaction,
             after,
             limit,
-            fresh,
             initial_high,
-            reset_support,
             priority_id,
         )?
     } else {
-        studio_runtime_services::work_scope::pull_global(transaction, after, limit, reset_support)?
+        studio_runtime_services::entity_scope::pull_global(
+            transaction,
+            after,
+            limit,
+            reset_support,
+        )?
     };
     let workspace_id = SyncDocumentsRepository::workspace_id(transaction)?;
     if page.reset {
@@ -831,9 +834,16 @@ fn pull_entities(
     loop {
         let raw_count = page.rows.len();
         let mut reached_limit = false;
-        for row in &page.rows {
+        for (index, row) in page.rows.iter().enumerate() {
+            // The limit cuts only between change numbers: the rest of a unit that shares
+            // the number of the last document is still sent, or the checkpoint would skip it.
+            if reached_limit && page.rows[index - 1].sequence != row.sequence {
+                break;
+            }
             checkpoint = row.sequence;
-            if !seen_sequences.insert(row.sequence) {
+            // Rows built from one main-table change share its number, so the key is
+            // the document and its number, not the number alone.
+            if !seen_sequences.insert((row.collection.clone(), row.id.clone(), row.sequence)) {
                 continue;
             }
             let Some(document) = entity_document(row) else {
@@ -841,9 +851,8 @@ fn pull_entities(
             };
             documents
                 .push(crate::generated::SyncPullResponseDocumentsItemUnion::SyncEntity(document));
-            if documents.len() == page_limit {
+            if documents.len() >= page_limit {
                 reached_limit = true;
-                break;
             }
         }
         if reached_limit {
@@ -860,17 +869,15 @@ fn pull_entities(
         }
         scan_after = next_after;
         page = if fresh {
-            SyncDocumentsRepository::pull_global_entities(
+            studio_runtime_services::entity_scope::pull_global_fresh(
                 transaction,
                 next_after,
                 limit,
-                fresh,
                 initial_high,
-                reset_support,
                 None,
             )?
         } else {
-            studio_runtime_services::work_scope::pull_global(
+            studio_runtime_services::entity_scope::pull_global(
                 transaction,
                 next_after,
                 limit,

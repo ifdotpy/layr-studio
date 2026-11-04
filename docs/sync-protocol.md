@@ -205,13 +205,18 @@ Tombstones live `TOMBSTONE_RETENTION_SECONDS` (90 days); a delete prunes older o
 
 `durable_view_log` mirrors, without payload, the `sync_entities` rows of the derived
 view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree,
-questionHistory, request, work, workDetail, workResult, workDecision, workRelease).
+questionHistory, request).
 `view_changes_since(cursor)` lists the view ids that changed after a cursor. A parity
 test compares it with the published views.
 
-Status: the source, the shared cursor space and the view log exist. The stream still
-reads `sync_entities`, and entity publication still writes it. Old `sync_entities` rows
-are deleted by a later migration.
+Status: every entity reader (stream, scoped subscription, REST pull, mutation reply)
+reads through [`entity_scope`](../workspaces/runtime/packages/runtime-services/src/entity_scope.rs).
+It builds the work documents (`WORK_COLLECTIONS`: work, workDetail, workResult,
+workDecision, workRelease) from `runtime_work`, its history tables and `durable_rows` at
+read time. They have no copy in `sync_entities`; migration `2026-11-04-work-read-time`
+deleted the old copies. A document built from one main-table change carries that row's
+number, so several documents can share a number; a page is cut only between numbers.
+The other collections still come from `sync_entities`.
 
 ### Transcript pages at read time
 
@@ -240,8 +245,8 @@ snapshots. They are not subscribed. A client that opens one of them already has 
 
 The renderer reads chats and cards only from their `sync_entities` rows, and a
 pull does not rebuild a complete projection. Every writer transaction therefore
-publishes the `runtime_agents`, `runtime_requests`, and `runtime_work` rows it changed before it
-commits. The [store journal](../workspaces/runtime/packages/runtime-store/src/entity_publication.rs)
+publishes the views of the `runtime_agents` and `approvals` rows it changed before it
+commits. A changed `runtime_work` row refreshes only its owner agent's views. The [store journal](../workspaces/runtime/packages/runtime-store/src/entity_publication.rs)
 records each changed row, and the services publisher projects it through
 `sync_policy::publish_entity_changes`. A write path needs no publish call of its
 own. A path that publishes after its last write is not published twice.
@@ -256,11 +261,9 @@ The assignment Tasks view subscribes to its team's existing `work` resource
 and the root agent's detail for `taskDefaultGate`. Its scoped `workDetail` metadata
 and `workResult`, `workDecision`, and `workRelease` history records reconstruct the
 canonical OpenAPI `WorkItem`. The global `work` summary excludes histories.
-Unchanged history records keep their durable sequences, and unrelated cached
-updates do not notify the Tasks consumer. The source transaction compares its
-old and new history fields and publishes only changed indices; metadata writes
-do not enumerate or serialize history entries. Existing databases seed these
-projections once when the publisher starts, before accepting subscriptions.
+Each history record is a row of its history table with its own change number, so an
+unchanged record keeps its number. A change of the owner agent, its execution run or a
+dependency gives the affected `workDetail` documents the number of that change.
 Visible single-agent detail observers select that entity before decoding rows.
 Task actions retain their existing
 request identities and receive their resulting view through the stream.

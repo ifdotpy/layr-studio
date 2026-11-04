@@ -176,6 +176,31 @@ async fn task_review_projects_default_and_current_refusals_through_http() {
 }
 
 fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
+    if studio_runtime_store::WORK_COLLECTIONS.contains(&collection) {
+        // Work documents are built from the main tables at read time.
+        return store
+            .test_read_transaction(|tx| {
+                let page = studio_runtime_services::entity_scope::resume(
+                    tx,
+                    None,
+                    Some(&serde_json::json!([collection]).to_string()),
+                    None,
+                    None,
+                    true,
+                    512,
+                )?;
+                let raw = page
+                    .rows
+                    .into_iter()
+                    .find(|row| row.id == id && !row.deleted)
+                    .and_then(|row| row.payload)
+                    .ok_or(studio_runtime_store::StoreError::RecordContract(
+                        "no work document",
+                    ))?;
+                Ok(serde_json::from_str::<Value>(&raw)?["value"].clone())
+            })
+            .unwrap();
+    }
     store
         .test_read_transaction(|tx| {
             let raw: String = tx.query_row(

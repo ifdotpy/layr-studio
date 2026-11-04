@@ -1,13 +1,15 @@
-//! Scoped entity pages for every reader. Work documents (`work`, `workDetail`, and the
-//! history collections) are built here from the main tables: `runtime_work`, its history
-//! child tables, and the rows that change a `workDetail` (owner agent, execution run,
-//! dependency). All other collections come from `sync_entities`. One merge by change
-//! number keeps the paging rules of `SyncDocumentsRepository`: a page is cut at a whole
-//! unit, and `checkpoint` is the last unit taken.
+//! Entity pages for every reader: the stream, scoped subscriptions, the REST pull and
+//! mutation replies. Collections listed in [`WORK_COLLECTIONS`] (`work`, `workDetail`,
+//! and the history collections) are built here from the main tables at read time:
+//! `runtime_work`, its history child tables, and the rows that change a `workDetail`
+//! (owner agent, execution run, dependency). They have no copy in `sync_entities`. The
+//! other collections still come from `sync_entities`. One merge by change number keeps
+//! the paging rules of `SyncDocumentsRepository`: a page is cut at a whole unit, and
+//! `checkpoint` is the last unit taken.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
@@ -39,7 +41,7 @@ struct Unit {
 /// Start a scoped read: resolve the reset decision over both sources, then read the
 /// first page. `since` is the client cursor; None or an out-of-range cursor resets.
 pub fn resume(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     since: Option<i64>,
     collections_json: Option<&str>,
     id: Option<&str>,
@@ -76,7 +78,7 @@ pub fn resume(
 /// `SyncDocumentsRepository::pull_global_entities`: a cursor above zero that is
 /// outside the range gets an empty reset page; zero reads from the beginning.
 pub fn pull_global(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     after: i64,
     limit: i64,
     reset_support: bool,
@@ -118,10 +120,125 @@ pub fn pull_global(
     )
 }
 
+/// Fresh REST pull of the global list: every live row, and the deletes above
+/// `initial_high` (zero takes the current high). On the first page the summary of
+/// `priority_id` comes first. Same rules as `SyncDocumentsRepository::pull_global_entities`.
+pub fn pull_global_fresh(
+    transaction: &Connection,
+    after: i64,
+    limit: i64,
+    initial_high: i64,
+    priority_id: Option<&str>,
+) -> StoreResult<EntityPage> {
+    let entity_floor = SyncDocumentsRepository::entity_tombstone_floor(transaction)?;
+    let (high, durable_floor) = durable_seq::high_and_floor(transaction)?;
+    let floor = entity_floor.max(durable_floor);
+    let max_sequence = high.max(floor);
+    let initial_high = if initial_high > 0 {
+        max_sequence.min(initial_high)
+    } else {
+        max_sequence
+    };
+    let after = after.max(0);
+    let limit = limit.clamp(
+        1,
+        studio_runtime_schema::shared_values::SYNC_ENTITY_PAGE_LIMIT,
+    );
+    let collections = studio_runtime_schema::sync_protocol::global_entity_collections_json();
+    let priority_id = if after == 0 { priority_id } else { None };
+    let mut rows = SyncDocumentsRepository::global_rows(
+        transaction,
+        after,
+        floor,
+        initial_high,
+        collections,
+        priority_id,
+        limit + 1,
+    )?;
+    let head = match (priority_id, rows.first()) {
+        (Some(priority), Some(first))
+            if first.collection == "agentSummary" && first.id == priority =>
+        {
+            vec![rows.remove(0)]
+        }
+        _ => Vec::new(),
+    };
+    let mut units: Vec<Unit> = rows
+        .into_iter()
+        .map(|row| Unit {
+            seq: row.sequence,
+            rows: vec![row],
+        })
+        .collect();
+    let wanted = wanted(Some(collections))?;
+    if !wanted.is_empty() {
+        units.extend(work_units(
+            transaction,
+            after,
+            max_sequence,
+            initial_high,
+            &wanted,
+            None,
+            limit + 1,
+        )?);
+    }
+    units.sort_by_key(|unit| unit.seq);
+    let room = limit as usize - head.len();
+    let truncated = units.len() > room;
+    units.truncate(room);
+    let mut rows = head;
+    rows.extend(units.into_iter().flat_map(|unit| unit.rows));
+    let checkpoint = if truncated {
+        rows.last().map_or(after, |row| row.sequence)
+    } else {
+        max_sequence
+    };
+    Ok(EntityPage {
+        rows: dedupe(rows),
+        max_sequence,
+        tombstone_floor: floor,
+        initial_high,
+        checkpoint,
+        reset: false,
+    })
+}
+
+/// Every entity change after `after`, for a mutation reply. `complete` is false when the
+/// page was cut or a delete may be missing, so the reply must not claim a watermark.
+pub fn delta_after(
+    transaction: &Connection,
+    after: i64,
+    limit: i64,
+) -> StoreResult<(Vec<EntityRow>, bool)> {
+    let entity_floor = SyncDocumentsRepository::entity_tombstone_floor(transaction)?;
+    let (high, durable_floor) = durable_seq::high_and_floor(transaction)?;
+    let floor = entity_floor.max(durable_floor);
+    let interval = EntityPage {
+        rows: Vec::new(),
+        max_sequence: high.max(floor),
+        tombstone_floor: floor,
+        initial_high: 0,
+        checkpoint: after,
+        reset: false,
+    };
+    let page = continue_page(transaction, &interval, None, None, None, true, limit)?;
+    let complete = page.checkpoint == page.max_sequence && floor <= after;
+    Ok((page.rows, complete))
+}
+
+/// One document per key: the highest change number wins (a fan-out may repeat a row).
+fn dedupe(mut rows: Vec<EntityRow>) -> Vec<EntityRow> {
+    let mut seen = HashSet::new();
+    rows.reverse();
+    rows.retain(|row| seen.insert((row.collection.clone(), row.id.clone())));
+    rows.reverse();
+    rows
+}
+
 /// Continue inside the caller's read transaction with the same scope. The snapshot
 /// flag and the high mark come from `interval`, as in `SyncDocumentsRepository`.
 pub fn continue_page(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     interval: &EntityPage,
     collections_json: Option<&str>,
     id: Option<&str>,
@@ -144,7 +261,6 @@ pub fn continue_page(
         agent,
         include_team_members,
         fetch,
-        true,
     )?
     .into_iter()
     .map(|row| Unit {
@@ -155,11 +271,12 @@ pub fn continue_page(
     let wanted = wanted(collections_json)?;
     // Work rows are not addressed by id; an id-scoped reader gets no work documents.
     if id.is_none() && !wanted.is_empty() {
+        let deletes_after = if snapshot { i64::MAX } else { after };
         units.extend(work_units(
             transaction,
             after,
             through,
-            snapshot,
+            deletes_after,
             &wanted,
             agent,
             fetch,
@@ -173,12 +290,7 @@ pub fn continue_page(
     } else {
         through
     };
-    let mut rows: Vec<EntityRow> = units.into_iter().flat_map(|unit| unit.rows).collect();
-    // One document per key: the highest change number wins (a fan-out may repeat a row).
-    let mut seen = HashSet::new();
-    rows.reverse();
-    rows.retain(|row| seen.insert((row.collection.clone(), row.id.clone())));
-    rows.reverse();
+    let rows = dedupe(units.into_iter().flat_map(|unit| unit.rows).collect());
     Ok(EntityPage {
         rows,
         max_sequence: through,
@@ -202,13 +314,14 @@ fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>>
         .collect())
 }
 
-/// Work units in `(after, through]`, at most `fetch` per source. Snapshots need no
-/// fan-out: every live work row is already in the snapshot range.
+/// Work units in `(after, through]`, at most `fetch` per source. A delete is taken only
+/// above `deletes_after`; `i64::MAX` reads a snapshot. Snapshots need no fan-out: every
+/// live work row is already in the snapshot range.
 fn work_units(
     transaction: &Connection,
     after: i64,
     through: i64,
-    snapshot: bool,
+    deletes_after: i64,
     wanted: &BTreeSet<&'static str>,
     agent: Option<&str>,
     fetch: i64,
@@ -218,12 +331,12 @@ fn work_units(
     let changed: Vec<(String, i64, bool)> = transaction
         .prepare(
             "SELECT d.id,d.seq,d.deleted FROM durable_rows d LEFT JOIN runtime_work w ON w.id=d.id
-             WHERE d.tbl='runtime_work' AND d.seq>?1 AND d.seq<=?2 AND (?3=0 OR d.deleted=0)
+             WHERE d.tbl='runtime_work' AND d.seq>?1 AND d.seq<=?2 AND (d.deleted=0 OR d.seq>?3)
                AND (?4 IS NULL OR d.deleted=1 OR json_extract(w.record,'$.rootId')=?4)
              ORDER BY d.seq LIMIT ?5",
         )?
         .query_map(
-            params![after, through, i64::from(snapshot), agent, fetch],
+            params![after, through, deletes_after, agent, fetch],
             |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
         )?
         .collect::<Result<_, _>>()?;
@@ -250,12 +363,12 @@ fn work_units(
                     "SELECT d.id,d.seq,d.deleted,c.record,c.work,c.idx,json_extract(w.record,'$.rootId')
                      FROM durable_rows d LEFT JOIN {table} c ON c.id=d.id
                      LEFT JOIN runtime_work w ON w.id=c.work
-                     WHERE d.tbl='{table}' AND d.seq>?1 AND d.seq<=?2 AND (?3=0 OR d.deleted=0)
+                     WHERE d.tbl='{table}' AND d.seq>?1 AND d.seq<=?2 AND (d.deleted=0 OR d.seq>?3)
                        AND (?4 IS NULL OR d.deleted=1 OR json_extract(w.record,'$.rootId')=?4)
                      ORDER BY d.seq LIMIT ?5"
                 ))?
                 .query_map(
-                    params![after, through, i64::from(snapshot), agent, fetch],
+                    params![after, through, deletes_after, agent, fetch],
                     |row| {
                         Ok((
                             row.get(0)?,
@@ -289,7 +402,7 @@ fn work_units(
             }
         }
     }
-    if snapshot || !wanted.contains("workDetail") {
+    if deletes_after == i64::MAX || !wanted.contains("workDetail") {
         return Ok(units);
     }
     // Fan-out: a changed owner agent, execution run or dependency refreshes the

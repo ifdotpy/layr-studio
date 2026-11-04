@@ -65,7 +65,7 @@ async fn read_page(
         .as_ref()
         .ok_or_else(ApiError::internal)?
         .read_async("runtime-http/subscription-entities", move |tx| {
-            studio_runtime_services::work_scope::resume(
+            studio_runtime_services::entity_scope::resume(
                 tx,
                 since,
                 Some(&collections),
