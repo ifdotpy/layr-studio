@@ -60,8 +60,8 @@ fn store(state: &HttpState) -> Result<Arc<RuntimeStore>, ApiError> {
     state.store.clone().ok_or_else(ApiError::internal)
 }
 fn provider(state: &HttpState, owner: &Value) -> Result<Arc<dyn AccountSessionPort>, ApiError> {
-    let agent: AgentRecord =
-        serde_json::from_value(owner.clone()).map_err(|_| ApiError::internal())?;
+    let agent = <AgentRecord as serde::Deserialize>::deserialize(owner)
+        .map_err(|_| ApiError::internal())?;
     Ok(super::agent_management::native_action_provider(
         store(state)?.as_ref(),
         &agent,
@@ -830,6 +830,35 @@ inventory::submit! {crate::routes::manifest::RouteModuleRegistration {name:"proc
 mod typed_query_tests {
     use axum::extract::Query;
     use serde::de::DeserializeOwned;
+
+    #[test]
+    fn provider_rejects_malformed_agent_fields() {
+        use serde_json::json;
+        let valid = json!({"compactions":0,"provider":"codex","id":"owner","rootId":"owner","epoch":1,"status":"idle","accountKey":"default"});
+        assert!(serde_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok());
+        assert!(
+            <studio_runtime_store::AgentRecord as serde::Deserialize>::deserialize(&valid).is_ok()
+        );
+        for (field, value) in [
+            ("compactions", json!("bad")),
+            ("epoch", json!("bad")),
+            ("executionMode", json!("bad")),
+            ("id", json!(42)),
+        ] {
+            let mut malformed = valid.clone();
+            malformed[field] = value;
+            assert!(
+                serde_json::from_value::<studio_runtime_store::AgentRecord>(malformed.clone())
+                    .is_err(),
+                "owned {field}"
+            );
+            assert!(
+                <studio_runtime_store::AgentRecord as serde::Deserialize>::deserialize(&malformed)
+                    .is_err(),
+                "borrowed {field}"
+            );
+        }
+    }
 
     fn accepts<T: DeserializeOwned>(query: &str) -> bool {
         let uri = format!("/?{query}").parse().unwrap();
