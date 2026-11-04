@@ -218,6 +218,18 @@
   flex: 1;
   min-inline-size: 0;
 }
+
+.layr-copy-progress {
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+}
+
+.layr-copy-progress progress {
+  --layr-copy-progress-height: 4px;
+  width: 100%;
+  height: var(--layr-copy-progress-height);
+}
 .row-copy strong {
   display: block;
   min-inline-size: 0;
