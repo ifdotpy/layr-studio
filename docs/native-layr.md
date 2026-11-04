@@ -7,7 +7,7 @@ The chat selector calls this mode **Layr**.
 
 ## Store and installation
 
-Studio defaults to the host store at `<Studio state>/layr-native/store`.
+Studio defaults to the host store at `<Studio state>/layr-native/store`. The built-in default resolves at use time.
 An operator can select an existing host store with `native-layr configure --store-root`.
 Studio saves this setting in `<Studio state>/layr-native/settings.json`.
 The general Studio settings can select the same default, and the new-chat dialog offers an optional store override when Layr is selected. The override wins over the default. Each prepared chat records its store in `layrStoreRoot`.

@@ -52,36 +52,32 @@ async fn set_settings(
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/native_layr_settings/write",
         move || {
-            let root = match body.store_root.as_deref().filter(|s| !s.is_empty()) {
-                Some(value) => studio_runtime_store::path_identity::CanonicalPath::existing(value)
-                    .map(studio_runtime_store::path_identity::CanonicalPath::into_path_buf)
-                    .unwrap_or_else(|_| std::path::PathBuf::from(value)),
-                None => store_path(&state_dir),
-            };
+            let requested = body.store_root.as_deref().filter(|s| !s.is_empty());
+            let default_root = store_path(&state_dir);
+            let root = settings::validate_root(
+                &state_dir,
+                requested.map(std::path::Path::new).unwrap_or(&default_root),
+            )
+            .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
             for (_, project) in &projects {
                 let project_path = std::path::Path::new(&project.path);
                 if project_path.is_absolute() {
-                    settings::check_project_overlap(&root, project_path)
+                    settings::check_project_overlap(root.as_path(), project_path)
                         .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
                 }
             }
-            settings::configure(
-                &state_dir,
-                body.store_root
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .map(std::path::Path::new),
-            )
-            .map_err(|e| match e {
-                studio_runtime_services::layr_native::NativeLayrError::Refused(_) => {
-                    ApiError::native_layr_store(e.to_string())
-                }
-                studio_runtime_services::layr_native::NativeLayrError::Conflict(_)
-                | studio_runtime_services::layr_native::NativeLayrError::Unknown(_)
-                | studio_runtime_services::layr_native::NativeLayrError::Io(_)
-                | studio_runtime_services::layr_native::NativeLayrError::Store(_)
-                | studio_runtime_services::layr_native::NativeLayrError::Worker => {
-                    ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            settings::configure_resolved(&state_dir, &root, requested.is_none()).map_err(|e| {
+                match e {
+                    studio_runtime_services::layr_native::NativeLayrError::Refused(_) => {
+                        ApiError::native_layr_store(e.to_string())
+                    }
+                    studio_runtime_services::layr_native::NativeLayrError::Conflict(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Unknown(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Io(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Store(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Worker => {
+                        ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                    }
                 }
             })?;
             Ok::<_, ApiError>(Json(settings_response(

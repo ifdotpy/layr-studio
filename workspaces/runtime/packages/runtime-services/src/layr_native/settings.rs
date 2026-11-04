@@ -72,15 +72,15 @@ pub fn check_project_overlap(root: &Path, project: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_root(state: &Path, root: &Path) -> Result<PathBuf> {
+pub fn validate_root(state: &Path, root: &Path) -> Result<CanonicalPath> {
     if !root.is_absolute() || !root.is_dir() {
         return Err(NativeLayrError::Refused(
             "The native Layr store root must be an existing absolute folder".into(),
         ));
     }
-    let root = CanonicalPath::existing(root)?.into_path_buf();
+    let root = CanonicalPath::existing(root)?;
     let state = CanonicalPath::existing(state)?.into_path_buf();
-    if (root.starts_with(&state) || state.starts_with(&root))
+    if (root.starts_with(&state) || state.starts_with(root.as_path()))
         && !same_root(&root, &store_path(&state))
     {
         return Err(NativeLayrError::Refused(
@@ -102,8 +102,13 @@ pub fn validate_root(state: &Path, root: &Path) -> Result<PathBuf> {
 /// Change only the destination for new imports and mappings. Existing roots stay intact.
 pub fn configure(state: &Path, root: Option<&Path>) -> Result<Value> {
     let validated = validate_root(state, root.unwrap_or(&store_path(state)))?;
+    configure_resolved(state, &validated, root.is_none())
+}
+
+/// Persist the same canonical root that passed validation and overlap checks.
+pub fn configure_resolved(state: &Path, root: &CanonicalPath, use_default: bool) -> Result<Value> {
     let settings = Settings {
-        store_root: root.map(|_| validated.clone()),
+        store_root: (!use_default).then(|| root.as_path().to_owned()),
     };
     let folder = state.join(NATIVE_LAYR_DIRECTORY);
     fs::create_dir_all(&folder)?;
@@ -115,11 +120,11 @@ pub fn configure(state: &Path, root: Option<&Path>) -> Result<Value> {
         Some(0o600),
         true,
     )?;
-    Ok(json!({"storeRoot":validated}))
+    Ok(json!({"storeRoot":root}))
 }
 
 #[cfg(test)]
-pub(super) fn fixture_select(state: &Path, root: &Path) {
+pub(crate) fn fixture_select(state: &Path, root: &Path) {
     fs::create_dir_all(state.join(NATIVE_LAYR_DIRECTORY)).expect("settings folder");
     fs::write(
         path(state),
@@ -230,6 +235,39 @@ pub fn record_store(state: &Path, record: &Value) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configure_resolved_reset_retains_the_builtin_default() {
+        let state = tempfile::tempdir().unwrap();
+        let selected = tempfile::tempdir().unwrap();
+        let root = CanonicalPath::existing(selected.path()).unwrap();
+        configure_resolved(state.path(), &root, true).unwrap();
+        assert!(configured_store(state.path()).unwrap().is_none());
+        assert_eq!(
+            selected_store(state.path()).unwrap(),
+            store_path(state.path())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configure_persists_the_checked_canonical_root_after_link_changes() {
+        let state = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let link = state.path().join("store-link");
+        std::os::unix::fs::symlink(first.path(), &link).unwrap();
+        let checked = CanonicalPath::existing(&link).unwrap();
+        let project = tempfile::tempdir().unwrap();
+        check_project_overlap(checked.as_path(), project.path()).unwrap();
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(second.path(), &link).unwrap();
+        configure_resolved(state.path(), &checked, false).unwrap();
+        assert_eq!(
+            configured_store(state.path()).unwrap().unwrap(),
+            checked.into_path_buf()
+        );
+    }
 
     #[test]
     fn native_layr_rejects_project_store_overlap() {

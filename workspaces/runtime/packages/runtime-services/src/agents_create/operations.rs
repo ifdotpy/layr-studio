@@ -878,6 +878,7 @@ async fn create(
                 .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
                 crate::layr_native::settings::validate_root(&state, &root)
                     .map_err(|e| OperationError::InvalidStore(e.to_string()))?
+                    .into_path_buf()
             } else {
                 crate::layr_native::settings::store_for_validation(&state)
             };
@@ -1178,7 +1179,12 @@ async fn create(
             && draft
             && !reuse_execution_fields
             && !request.worker_catalog
-            && reusable_previous_workspace(&prior, &workspace_for_write, &cwd)
+            && reusable_previous_workspace(
+                &prior,
+                &workspace_for_write,
+                &cwd,
+                record.layr_store_root.as_deref(),
+            )
             && prior.layr_ready != Some(true)
             && prior
                 .workspace_mode
@@ -3325,8 +3331,15 @@ fn lead_signature(
     studio_json::to_string(&settings).map_err(|_| OperationError::Internal)
 }
 
-fn reusable_previous_workspace(prior: &AgentRecord, _workspace: &str, _cwd: &str) -> bool {
-    prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
+fn reusable_previous_workspace(
+    prior: &AgentRecord,
+    workspace: &str,
+    _cwd: &str,
+    store_root: Option<&str>,
+) -> bool {
+    (workspace != "layr-native"
+        || (store_root.is_some() && prior.layr_store_root.as_deref() == store_root))
+        && prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
         && prior.image_workspace.value() != Some(&true)
 }
 
@@ -3467,6 +3480,23 @@ async fn mutate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_reuse_requires_the_same_store() {
+        let mut prior = studio_runtime_store::AgentRecord::test_defaults();
+        prior.layr_store_root = Some("/store-a".into());
+        assert!(!super::reusable_previous_workspace(
+            &prior,
+            "layr-native",
+            "/project",
+            Some("/store-b")
+        ));
+        assert!(super::reusable_previous_workspace(
+            &prior,
+            "layr-native",
+            "/project",
+            Some("/store-a")
+        ));
+    }
     use super::*;
     use crate::host_worker_create::CreationCatalog as _;
 
