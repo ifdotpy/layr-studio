@@ -975,6 +975,59 @@ async fn closing_worker_does_not_invent_a_transfer_deadline_expiry() {
 }
 
 #[tokio::test]
+async fn source_move_export_is_admitted_to_the_live_source_worker() {
+    use studio_runtime_services::account_session_runtime::TransferProviderRequest;
+
+    let fixture = Fixture::new().await;
+    let (launcher, _writes) = scripted();
+    let _initialize_release = launcher.hold_initialize("account:default");
+    let broker = AccountSessionBroker::new();
+    let mut registry = AccountRegistry::new_with_broker(
+        fixture.store.clone(),
+        launcher.clone(),
+        Arc::new(Notify::new()),
+        broker.clone(),
+        test_registry_config(),
+        None,
+    )
+    .await
+    .unwrap();
+    registry.start("default").await.unwrap();
+    let scope = broker.current_scope("default").unwrap();
+    let deadline = std::time::Instant::now() + TEST_HANG_GUARD;
+    // The source worker is live but uninitialized, so an admitted move export
+    // waits for it. A refused one resolves at once with an error instead.
+    let mut request = broker.transfer_request(TransferProviderRequest {
+        root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+        admitted_request: None,
+        transfer_id: "move-transfer".into(),
+        member: "member".into(),
+        source_account: "default".into(),
+        thread_id: "source-thread".into(),
+        operation: "transfer:move-transfer:member:move-export".into(),
+        expected_scope: scope.clone(),
+        method: Method::ClaudeMoveExport,
+        params: json!({"threadId":"source-thread"}),
+        deadline,
+    });
+    std::future::poll_fn(|context| {
+        assert!(
+            request.as_mut().poll(context).is_pending(),
+            "claude/moveExport must reach the source worker, not fail at the registry"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+    registry.close_worker_for_test("default").await.unwrap();
+    // Whatever the closed worker answers, the registry must not refuse the move export.
+    assert!(!matches!(
+        request.await,
+        Err(studio_runtime_services::account_session_runtime::AccountSessionError::Refused(_))
+    ));
+    drop(registry);
+}
+
+#[tokio::test]
 async fn concurrent_ensure_session_starts_one_cold_account_worker() {
     let fixture = Fixture::new().await;
     let (launcher, _writes) = scripted();
