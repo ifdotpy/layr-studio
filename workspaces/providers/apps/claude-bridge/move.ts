@@ -552,3 +552,11 @@ export async function carryNativeHistory(
   const destination = await nativeDestination(id, cwd);
   if (source !== destination) await publishNative(source, destination, true);
 }
+
+/** A session export waits only for a running turn. Background tasks keep
+ * running on the source session after the chat moves. */
+export function moveExportBlocked(
+  active: { turn?: unknown; tasks: Map<string, unknown> } | undefined,
+): boolean {
+  return Boolean(active?.turn);
+}
