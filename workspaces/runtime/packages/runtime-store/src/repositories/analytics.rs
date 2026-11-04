@@ -1644,6 +1644,18 @@ pub fn cost_root(db: &Connection, agent: &str) -> Result<String, SessionCostErro
 }
 fn table_exists(db: &Connection, name: &str) -> Result<bool, rusqlite::Error> {
     let (schema, table) = name.split_once('.').unwrap_or(("main", name));
+    let sql = match schema {
+        "main" => {
+            Some("SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?1)")
+        }
+        "canvas" => {
+            Some("SELECT EXISTS(SELECT 1 FROM canvas.sqlite_master WHERE type='table' AND name=?1)")
+        }
+        _ => None,
+    };
+    if let Some(sql) = sql {
+        return db.query_row_cached(sql, [table], |r| r.get(0));
+    }
     db.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM {schema}.sqlite_master WHERE type='table' AND name=?1)"

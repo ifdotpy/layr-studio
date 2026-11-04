@@ -1,5 +1,6 @@
 //! Persisted project metadata and its renderer sync projection.
 
+use crate::CachedSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
 use studio_json::{Value, json};
@@ -254,7 +255,7 @@ impl ProjectsRepository {
     }
 
     pub fn agents(connection: &Connection) -> StoreResult<Vec<(String, Value)>> {
-        let exists: bool = connection.query_row(
+        let exists: bool = connection.query_row_cached(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_agents')",
             [], |row| row.get(0),
         )?;
@@ -404,7 +405,7 @@ impl ProjectsRepository {
                     true,
                 )?;
             }
-            let room_table: bool = transaction.query_row(
+            let room_table: bool = transaction.query_row_cached(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_rooms')",
                 [], |row| row.get(0),
             )?;
