@@ -349,8 +349,11 @@ revision, no `Last-Event-ID`, and no replay.
 - Fields (`ResourceLiveDeltaEvent` in OpenAPI): `agentId`, `itemId` (the durable
   transcript item id), `offset` (item text length in Unicode scalars before `text`),
   and `text`.
-- Each stream has a bounded receiver (256 deltas). A slow stream skips the deltas it
-  missed. The durable item carries that text; a lost delta is harmless.
+- Each stream has a bounded queue (256 events, `LIVE_DELTA_CAPACITY`). Queued deltas
+  that continue each other are sent as one delta. A full queue is merged: the runs of
+  each item join and equal progress events become one. The stream stays open. Only a
+  queue that is still full after the merge drops its oldest event; the durable item
+  carries that text.
 - The renderer keeps live text in memory only. It shows `durable.slice(0, offset)` plus
   the live run while the durable item is shorter than the run and at least `offset`
   long. The durable item wins when it is at least as long. A gap in `offset` starts a
