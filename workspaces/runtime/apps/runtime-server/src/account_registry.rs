@@ -676,11 +676,8 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                     &request.thread_id,
                     &request.params,
                 );
+            // `valid_source_preflight_params` owns the allowed source methods.
             if !allowed_params
-                || !matches!(
-                    request.method.as_str(),
-                    "thread/queue/list" | "thread/backgroundTerminals/list" | "thread/unsubscribe"
-                )
                 || !request.operation.starts_with(&format!(
                     "transfer:{}:{}:",
                     request.transfer_id, request.member
