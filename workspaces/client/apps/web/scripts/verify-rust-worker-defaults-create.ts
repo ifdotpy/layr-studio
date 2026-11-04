@@ -354,11 +354,11 @@ function assertDesiredAgent(
 function assertCreateRequest(body: CreateRequest | null, journal: Journal) {
   assert.ok(uuid(body?.id), "New chat request has no UUID identity.");
   assert.ok(
-    !journal.baseline!.chatIds.includes(body.target),
+    !journal.baseline!.chatIds.includes(body.id),
     "Refusing to reuse an existing chat ID.",
   );
   assert.ok(
-    !journal.baseline!.pendingCreationIds.includes(body.target),
+    !journal.baseline!.pendingCreationIds.includes(body.id),
     "Refusing a pending user chat ID.",
   );
   assert.equal(
