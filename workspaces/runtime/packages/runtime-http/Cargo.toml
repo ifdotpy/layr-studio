@@ -32,6 +32,7 @@ subtle = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 tower-http = { workspace = true, features = ["compression-br"] }
+tracing = "=0.1.44"
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [build-dependencies]

@@ -372,7 +372,13 @@ async fn delete_project(
         Error::Workspace => (StatusCode::CONFLICT, Code::ProjectWorkspaceConflict),
         Error::Sequence => (StatusCode::CONFLICT, Code::ProjectSequenceConflict),
         Error::Remote => (StatusCode::CONFLICT, Code::ProjectRemoteScope),
-        Error::Membership => (StatusCode::CONFLICT, Code::ProjectMembershipConflict),
+        Error::ProjectLocationConflict { .. }
+        | Error::InvalidBinding { .. }
+        | Error::AmbiguousAgent { .. }
+        | Error::AgentProjectConflict { .. }
+        | Error::InvalidAncestry { .. }
+        | Error::InvalidLocation { .. }
+        | Error::InvalidSidebar { .. } => (StatusCode::CONFLICT, Code::ProjectMembershipConflict),
         Error::Lifecycle(
             studio_runtime_services::agent_management::ManagementError::Unavailable(_),
         ) => (
@@ -391,8 +397,14 @@ async fn delete_project(
             return Err(ApiError::internal());
         }
     };
+    let message = if matches!(code, Code::ProjectMembershipConflict) {
+        tracing::warn!(%error, "Project deletion membership conflict");
+        "This project shares chats with another project and can't be deleted yet.".to_owned()
+    } else {
+        error.to_string()
+    };
     let body = super::generated_json::<crate::generated::ProjectDeleteErrorResponse>(
-        json!({"error":error.to_string(),"code":code,"outcome":"not_applied"}),
+        json!({"error":message,"code":code,"outcome":"not_applied"}),
     )?;
     Ok((status, Json(body)).into_response())
 }

@@ -953,3 +953,48 @@ async fn project_deletion_refuses_an_unbound_orphan_associated_by_project_folder
     assert_eq!(f.agent("lead")["epoch"], 1);
     assert_eq!(f.agent("orphan")["epoch"], 1);
 }
+
+#[tokio::test]
+async fn deletion_ignores_unrelated_legacy_records() {
+    let f = Fixture::new(vec![agent("unrelated", None, "/else")], vec![], false).await;
+    let db = rusqlite::Connection::open(f.store.root().join("canvas.sqlite3")).expect("fixture db");
+    db.execute(
+        "INSERT INTO runtime_projects(id,record) VALUES(?1,?2)",
+        rusqlite::params![
+            "/legacy",
+            json!({"id":"/legacy","path":"/legacy","unknown":true}).to_string()
+        ],
+    )
+    .unwrap();
+    db.create_scalar_function(
+        "sync_work_identity_change",
+        2,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+        |_| Ok(0),
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE runtime_agents SET record=json_set(record,'$.rootId',42) WHERE id='unrelated'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let (status, body) = f.call(f.body.clone()).await;
+    assert_eq!(status, 200, "{body}");
+}
+
+#[tokio::test]
+async fn membership_conflict_response_hides_identifiers() {
+    let f = Fixture::new(
+        vec![agent("private-agent", Some("missing-parent"), "/p")],
+        vec![],
+        false,
+    )
+    .await;
+    let (status, body) = f.call(f.body.clone()).await;
+    assert_eq!(status, 409, "{body}");
+    let body = body.to_string();
+    assert!(!body.contains("private-agent"), "{body}");
+    assert!(!body.contains("/p"), "{body}");
+    assert!(!body.contains("missing-parent"), "{body}");
+}

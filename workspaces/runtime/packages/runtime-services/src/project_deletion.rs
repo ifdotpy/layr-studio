@@ -12,7 +12,7 @@ use std::{
 };
 use studio_json::{Value, json};
 use studio_runtime_store::{
-    ProjectsRepository, RuntimeStore, StoreError, SyncDocumentsRepository, Transaction,
+    AgentRecord, ProjectsRepository, RuntimeStore, StoreError, SyncDocumentsRepository, Transaction,
 };
 use thiserror::Error;
 
@@ -49,8 +49,24 @@ pub enum Error {
     Sequence,
     #[error("Project deletion requires one resolved owning server")]
     Remote,
-    #[error("Project membership is ambiguous or malformed")]
-    Membership,
+    #[error("Project {project} conflicts with project {other} at the same location")]
+    ProjectLocationConflict { project: String, other: String },
+    #[error("Agent {agent} has incomplete or invalid project binding")]
+    InvalidBinding { agent: String },
+    #[error("Agent {agent} has ambiguous membership in project {project}")]
+    AmbiguousAgent { agent: String, project: String },
+    #[error("Agent {agent} has conflicting membership in projects {project} and {other}")]
+    AgentProjectConflict {
+        agent: String,
+        project: String,
+        other: String,
+    },
+    #[error("Agent {agent} has invalid ancestry: {reason}")]
+    InvalidAncestry { agent: String, reason: &'static str },
+    #[error("Project {project} has an invalid location")]
+    InvalidLocation { project: String },
+    #[error("Sidebar order for project {project} has an invalid revision")]
+    InvalidSidebar { project: String },
     #[error(transparent)]
     Lifecycle(#[from] ManagementError),
     #[error(transparent)]
@@ -118,10 +134,8 @@ fn delete_in_transaction(
             crate::event_write::CallerAdmission::Replay(reply) => return Ok((reply, false)),
             crate::event_write::CallerAdmission::Fresh(admitted) => admitted,
         };
-    let (_, project) = ProjectsRepository::get(tx, &request.id)?.ok_or(Error::NotFound)?;
-    if project.get("id").and_then(Value::as_str) != Some(request.id.as_str()) {
-        return Err(Error::Membership);
-    }
+    let (_, raw_project) = ProjectsRepository::get(tx, &request.id)?.ok_or(Error::NotFound)?;
+    let project = decode_project(&request.id, &raw_project)?;
     let seq: Option<i64> = tx
         .query_row(
             "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
@@ -132,11 +146,27 @@ fn delete_in_transaction(
     if seq != Some(request.expected_project_seq) {
         return Err(Error::Sequence);
     }
-    let (project_ids, paths) = project_scope(tx, &project, &server)?;
-    let agents = ProjectsRepository::agents(tx)?
-        .into_iter()
-        .collect::<BTreeMap<_, _>>();
-    let selected = membership(&agents, &project_ids, &server, &paths)?;
+    let (project_ids, paths, overlaps) = project_scope(tx, &project, &server)?;
+    let agents = associated_agents(
+        ProjectsRepository::agents(tx)?,
+        &project_ids,
+        &server,
+        &paths,
+    )?;
+    let selected = membership(
+        &agents,
+        &project.id,
+        &project_ids,
+        &server,
+        &paths,
+        &overlaps,
+    )?;
+    if let Some(other) = overlaps.keys().next() {
+        return Err(Error::ProjectLocationConflict {
+            project: project.id,
+            other: other.clone(),
+        });
+    }
     refuse_pending_remote(tx, &project_ids, &paths, &selected)?;
     if studio_runtime_store::AgentMoveRepository::retains_agent_ownership(tx, &selected)? {
         return Err(Error::Remote);
@@ -145,8 +175,8 @@ fn delete_in_transaction(
         .iter()
         .filter(|id| {
             agents[*id]
-                .get("parentId")
-                .and_then(Value::as_str)
+                .parent_id
+                .as_deref()
                 .is_none_or(|parent| !selected.contains(parent))
         })
         .cloned()
@@ -180,16 +210,49 @@ fn delete_in_transaction(
     crate::event_write::settle_request(tx, &admitted, None, &reply)?;
     Ok((reply, true))
 }
+// Alias names were not required by historical records. Their identity is
+// inspected separately; all other fields use the shared stored record type.
+fn decode_project(
+    id: &str,
+    raw: &Value,
+) -> Result<studio_runtime_schema::project_record::ProjectLive, Error> {
+    let mut value = raw.clone();
+    let fields = value
+        .as_object_mut()
+        .ok_or_else(|| Error::InvalidLocation {
+            project: id.to_owned(),
+        })?;
+    fields.remove("projectAliases");
+    fields.entry("recordKind").or_insert(json!("live"));
+    let parsed =
+        studio_runtime_schema::project_record::ProjectRecord::deserialize(value).map_err(|_| {
+            Error::InvalidLocation {
+                project: id.to_owned(),
+            }
+        })?;
+    match parsed {
+        studio_runtime_schema::project_record::ProjectRecord::Live(project) if project.id == id => {
+            Ok(*project)
+        }
+        studio_runtime_schema::project_record::ProjectRecord::Live(_)
+        | studio_runtime_schema::project_record::ProjectRecord::Removal(_) => {
+            Err(Error::InvalidLocation {
+                project: id.to_owned(),
+            })
+        }
+    }
+}
+type ProjectScope = (
+    BTreeSet<String>,
+    BTreeSet<String>,
+    BTreeMap<String, BTreeSet<String>>,
+);
 fn project_scope(
     tx: &Transaction<'_>,
-    project: &Value,
+    project: &studio_runtime_schema::project_record::ProjectLive,
     server: &str,
-) -> Result<(BTreeSet<String>, BTreeSet<String>), Error> {
-    let mut ids = BTreeSet::from([project
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or(Error::Membership)?
-        .to_owned()]);
+) -> Result<ProjectScope, Error> {
+    let mut ids = BTreeSet::from([project.id.clone()]);
     let records = ProjectsRepository::owned(tx)?;
     let mut paths = BTreeSet::new();
     loop {
@@ -211,105 +274,83 @@ fn project_scope(
             if !linked {
                 continue;
             }
-            paths.extend(project_paths(record, server)?);
+            let typed = decode_project(id, record)?;
+            paths.extend(project_paths(&typed, server)?);
             ids.insert(id.clone());
-            for alias in record
+            if let Some(aliases) = record
                 .get("projectAliases")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+                .filter(|value| !value.is_null())
             {
-                ids.insert(
-                    alias
+                let aliases = aliases.as_array().ok_or_else(|| Error::InvalidLocation {
+                    project: id.clone(),
+                })?;
+                for alias in aliases {
+                    let alias_server = alias.get("serverId").and_then(Value::as_str);
+                    let alias_id = alias
                         .get("projectId")
                         .and_then(Value::as_str)
-                        .ok_or(Error::Membership)?
-                        .to_owned(),
-                );
-            }
-            for location in record
-                .get("locations")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                if let Some(id) = location.get("projectId").and_then(Value::as_str) {
-                    ids.insert(id.to_owned());
+                        .filter(|id| !id.is_empty());
+                    if alias_server != Some(server) || alias_id.is_none() {
+                        return Err(Error::Remote);
+                    }
+                    ids.insert(alias_id.expect("checked alias").to_owned());
                 }
+            }
+            let record = typed;
+            if let Some(locations) = record.locations.value() {
+                ids.extend(locations.iter().map(|location| location.project_id.clone()));
             }
         }
         if count == ids.len() {
             break;
         }
     }
-    // Exact path fallback is only safe when no other registered lifetime owns
-    // the same saved local location without the explicit alias relationship.
+    let mut overlaps = BTreeMap::new();
     for (id, record) in &records {
-        if !ids.contains(id)
-            && record
+        if !ids.contains(id) {
+            let shared: BTreeSet<_> = record
                 .get("locations")
                 .and_then(Value::as_array)
-                .is_some_and(|locations| {
-                    locations.iter().any(|location| {
-                        location.get("serverId").and_then(Value::as_str) == Some(server)
-                            && location
-                                .get("path")
-                                .and_then(Value::as_str)
-                                .is_some_and(|path| paths.contains(path))
-                    })
-                })
-        {
-            return Err(Error::Membership);
-        }
-    }
-    Ok((ids, paths))
-}
-fn project_paths(project: &Value, server: &str) -> Result<BTreeSet<String>, Error> {
-    if project
-        .get("locationIntents")
-        .and_then(Value::as_object)
-        .is_some_and(|intents| !intents.is_empty())
-    {
-        return Err(Error::Remote);
-    }
-    if project.get("homeServerId").and_then(Value::as_str) != Some(server) {
-        return Err(Error::Remote);
-    }
-    let mut paths = BTreeSet::new();
-    let locations = project
-        .get("locations")
-        .and_then(Value::as_array)
-        .ok_or(Error::Remote)?;
-    for location in locations {
-        if location.get("serverId").and_then(Value::as_str) != Some(server) {
-            return Err(Error::Remote);
-        }
-        let path = location
-            .get("path")
-            .and_then(Value::as_str)
-            .filter(|p| !p.is_empty())
-            .ok_or(Error::Membership)?;
-        paths.insert(path.to_owned());
-    }
-    if paths.is_empty() {
-        return Err(Error::Remote);
-    }
-    if let Some(aliases) = project.get("projectAliases").filter(|a| !a.is_null()) {
-        for alias in aliases.as_array().ok_or(Error::Membership)? {
-            if alias.get("serverId").and_then(Value::as_str) != Some(server)
-                || alias
-                    .get("projectId")
-                    .and_then(Value::as_str)
-                    .is_none_or(str::is_empty)
-            {
-                return Err(Error::Remote);
+                .into_iter()
+                .flatten()
+                .filter(|location| location.get("serverId").and_then(Value::as_str) == Some(server))
+                .filter_map(|location| location.get("path").and_then(Value::as_str))
+                .filter(|path| paths.contains(*path))
+                .map(str::to_owned)
+                .collect();
+            if !shared.is_empty() {
+                overlaps.insert(id.clone(), shared);
             }
         }
     }
-    if ["relocation", "relocationPending", "movedTo"]
-        .iter()
-        .any(|key| studio_runtime_store::truthy(project.get(*key)))
+    Ok((ids, paths, overlaps))
+}
+fn project_paths(
+    project: &studio_runtime_schema::project_record::ProjectLive,
+    server: &str,
+) -> Result<BTreeSet<String>, Error> {
+    if project
+        .location_intents
+        .value()
+        .is_some_and(|intents| !intents.is_empty())
+        || project.home_server_id.value().map(String::as_str) != Some(server)
     {
+        return Err(Error::Remote);
+    }
+    let locations = project.locations.value().ok_or(Error::Remote)?;
+    let mut paths = BTreeSet::new();
+    for location in locations {
+        if location.server_id != server {
+            return Err(Error::Remote);
+        }
+        if location.path.is_empty() {
+            return Err(Error::InvalidLocation {
+                project: project.id.clone(),
+            });
+        }
+        paths.insert(location.path.clone());
+    }
+    if paths.is_empty() {
         return Err(Error::Remote);
     }
     Ok(paths)
@@ -357,56 +398,127 @@ fn refuse_pending_remote(
     }
     Ok(())
 }
-fn binding(agent: &Value) -> Result<Option<(&str, &str)>, Error> {
-    let project = agent.get("projectId").filter(|v| !v.is_null());
-    let server = agent.get("projectServerId").filter(|v| !v.is_null());
-    match (project, server) {
-        (None, None) => Ok(None),
-        (Some(project), Some(server)) => Ok(Some((
-            project
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .ok_or(Error::Membership)?,
-            server
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .ok_or(Error::Membership)?,
-        ))),
-        _ => Err(Error::Membership),
-    }
-}
-fn membership(
-    agents: &BTreeMap<String, Value>,
+// Tolerant inspection determines relevance before strict record decoding. A
+// malformed unrelated record must not prevent deletion of another project.
+fn associated_agents(
+    records: Vec<(String, Value)>,
     projects: &BTreeSet<String>,
     server: &str,
     paths: &BTreeSet<String>,
+) -> Result<BTreeMap<String, AgentRecord>, Error> {
+    let records: BTreeMap<_, _> = records.into_iter().collect();
+    let mut relevant = BTreeSet::new();
+    for (id, value) in &records {
+        let project = value
+            .get("projectId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
+        let owner = value
+            .get("projectServerId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
+        let other =
+            matches!((project, owner), (Some(p), Some(s)) if !projects.contains(p) || s != server);
+        if project.is_some_and(|p| projects.contains(p)) && !other
+            || !other
+                && ["hostProjectPath", "cwd"].iter().any(|key| {
+                    value
+                        .get(*key)
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| paths.contains(path))
+                })
+        {
+            relevant.insert(id.clone());
+        }
+    }
+    loop {
+        let count = relevant.len();
+        for (id, value) in &records {
+            let parent = value.get("parentId").and_then(Value::as_str);
+            let root = value.get("rootId").and_then(Value::as_str);
+            if parent.is_some_and(|p| relevant.contains(p))
+                || root.is_some_and(|r| relevant.contains(r))
+            {
+                relevant.insert(id.clone());
+            }
+            if relevant.contains(id) {
+                for relative in [parent, root].into_iter().flatten() {
+                    if records.contains_key(relative) {
+                        relevant.insert(relative.to_owned());
+                    }
+                }
+            }
+        }
+        if relevant.len() == count {
+            break;
+        }
+    }
+    records
+        .into_iter()
+        .filter(|(id, _)| relevant.contains(id))
+        .map(|(id, value)| {
+            AgentRecord::from_value(value)
+                .map(|record| (id.clone(), record))
+                .map_err(|_| {
+                    Error::Store(StoreError::InvalidStoredRecord {
+                        object: "runtime_agents",
+                        id,
+                    })
+                })
+        })
+        .collect()
+}
+fn binding(agent: &AgentRecord) -> Result<Option<(&str, &str)>, Error> {
+    match (
+        agent.project_id.as_deref(),
+        agent.project_server_id.as_deref(),
+    ) {
+        (None, None) => Ok(None),
+        (Some(project), Some(server)) if !project.is_empty() && !server.is_empty() => {
+            Ok(Some((project, server)))
+        }
+        _ => Err(Error::InvalidBinding {
+            agent: agent.id.0.clone(),
+        }),
+    }
+}
+fn membership(
+    agents: &BTreeMap<String, AgentRecord>,
+    project: &str,
+    projects: &BTreeSet<String>,
+    server: &str,
+    paths: &BTreeSet<String>,
+    overlaps: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<BTreeSet<String>, Error> {
     let mut selected = BTreeSet::new();
     for (id, agent) in agents {
+        let path = agent.host_project_path.value().or(agent.cwd.as_ref());
         let owned = match binding(agent) {
             Ok(Some((p, s))) => projects.contains(p) && s == server,
             Ok(None) => {
-                agent.get("parentId").is_none_or(Value::is_null)
-                    && agent
-                        .get("hostProjectPath")
-                        .filter(|v| !v.is_null())
-                        .or_else(|| agent.get("cwd"))
-                        .and_then(Value::as_str)
-                        .is_some_and(|p| paths.contains(p))
+                if let Some(other) = overlaps.iter().find_map(|(other, shared)| {
+                    path.filter(|path| shared.contains(*path)).map(|_| other)
+                }) {
+                    return Err(Error::AgentProjectConflict {
+                        agent: id.clone(),
+                        project: project.to_owned(),
+                        other: other.clone(),
+                    });
+                }
+                agent.parent_id.is_none() && path.is_some_and(|p| paths.contains(p))
             }
-            Err(_) => {
-                // Refuse malformed records that can belong to this project;
-                // unrelated projects do not become a global deletion blocker.
+            Err(error) => {
                 if agent
-                    .get("projectId")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| projects.contains(id))
+                    .project_id
+                    .as_ref()
+                    .is_some_and(|p| projects.contains(p))
+                    || agent.cwd.as_ref().is_some_and(|p| paths.contains(p))
                     || agent
-                        .get("cwd")
-                        .and_then(Value::as_str)
+                        .host_project_path
+                        .value()
                         .is_some_and(|p| paths.contains(p))
                 {
-                    return Err(Error::Membership);
+                    return Err(error);
                 }
                 false
             }
@@ -419,8 +531,8 @@ fn membership(
         let count = selected.len();
         for (id, agent) in agents {
             if agent
-                .get("parentId")
-                .and_then(Value::as_str)
+                .parent_id
+                .as_ref()
                 .is_some_and(|p| selected.contains(p))
             {
                 selected.insert(id.clone());
@@ -430,51 +542,50 @@ fn membership(
             break;
         }
     }
-    // Association is enough to block an ambiguous operation, never enough to
-    // select a chat. Otherwise its surviving folder/path could recreate the
-    // deleted navigation group. Only explicit binding or parent ancestry owns
-    // an orphan; exact-path legacy fallback applies to actual roots only.
     for (id, agent) in agents {
+        let explicitly_other =
+            matches!(binding(agent), Ok(Some((p, s))) if !projects.contains(p) || s != server);
         let associated = selected.contains(id)
-            || agent
-                .get("rootId")
-                .and_then(Value::as_str)
-                .is_some_and(|root| selected.contains(root))
-            || ["hostProjectPath", "cwd"].iter().any(|field| {
-                agent
-                    .get(*field)
-                    .and_then(Value::as_str)
-                    .is_some_and(|path| paths.contains(path))
-            })
-            || agent
-                .get("projectId")
-                .and_then(Value::as_str)
-                .is_some_and(|project| projects.contains(project));
+            || selected.contains(agent.root_id.as_ref())
+            || (!explicitly_other
+                && (agent
+                    .host_project_path
+                    .value()
+                    .is_some_and(|p| paths.contains(p))
+                    || agent.cwd.as_ref().is_some_and(|p| paths.contains(p))))
+            || (!explicitly_other
+                && agent
+                    .project_id
+                    .as_ref()
+                    .is_some_and(|p| projects.contains(p)));
         if associated && !selected.contains(id) {
-            return Err(Error::Membership);
+            return Err(Error::AmbiguousAgent {
+                agent: id.clone(),
+                project: project.to_owned(),
+            });
         }
     }
     for id in &selected {
         let agent = &agents[id];
-        if agent.get("id").and_then(Value::as_str) != Some(id.as_str())
-            || agent
-                .get("rootId")
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
-        {
-            return Err(Error::Membership);
+        let invalid = |reason| Error::InvalidAncestry {
+            agent: id.clone(),
+            reason,
+        };
+        if agent.id.as_ref() != id || agent.root_id.as_ref().is_empty() {
+            return Err(invalid("invalid identity or root"));
         }
-        if agent
-            .get("rootId")
-            .and_then(Value::as_str)
-            .is_some_and(|root| agents.contains_key(root) && !selected.contains(root))
+        if agents.contains_key(agent.root_id.as_ref()) && !selected.contains(agent.root_id.as_ref())
         {
-            return Err(Error::Membership);
+            return Err(invalid("root belongs to another project"));
         }
         if let Some((p, s)) = binding(agent)?
             && (!projects.contains(p) || s != server)
         {
-            return Err(Error::Membership);
+            return Err(Error::AgentProjectConflict {
+                agent: id.clone(),
+                project: project.to_owned(),
+                other: p.to_owned(),
+            });
         }
         if [
             "movedTo",
@@ -485,12 +596,13 @@ fn membership(
             "teleportPending",
         ]
         .iter()
-        .any(|key| studio_runtime_store::truthy(agent.get(*key)))
+        .any(|key| studio_runtime_store::truthy(agent.extra.get(*key)))
         {
             return Err(Error::Remote);
         }
         for field in ["serverId", "localServerId"] {
             if agent
+                .extra
                 .get(field)
                 .filter(|v| !v.is_null())
                 .is_some_and(|v| v.as_str() != Some(server))
@@ -502,18 +614,18 @@ fn membership(
         let mut current = id.as_str();
         while let Some(record) = agents.get(current) {
             if !chain.insert(current) {
-                return Err(Error::Membership);
+                return Err(invalid("parent cycle"));
             }
             if current != id && !selected.contains(current) {
-                return Err(Error::Membership);
+                return Err(invalid("parent belongs to another project"));
             }
-            let Some(parent) = record.get("parentId").filter(|v| !v.is_null()) else {
+            let Some(parent) = record.parent_id.as_deref() else {
                 break;
             };
-            current = parent
-                .as_str()
-                .filter(|p| !p.is_empty())
-                .ok_or(Error::Membership)?;
+            if parent.is_empty() {
+                return Err(invalid("empty parent"));
+            }
+            current = parent;
         }
     }
     Ok(selected)
@@ -587,7 +699,9 @@ fn prune_sidebar(
             let revision = order
                 .get("revision")
                 .and_then(Value::as_u64)
-                .ok_or(Error::Membership)?;
+                .ok_or_else(|| Error::InvalidSidebar {
+                    project: project.to_owned(),
+                })?;
             order["revision"] = json!(revision.saturating_add(1));
             ProjectsRepository::put_sidebar_order(tx, &order)?;
         }
@@ -616,4 +730,43 @@ pub(crate) fn admission_version(
             ))
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod membership_tests {
+    use super::*;
+
+    #[test]
+    fn explicitly_owned_agents_in_another_project_line_are_not_members() {
+        let line = "/store/projects/fixture/lines/main";
+        let agents = ["first", "second"].into_iter().map(|id| {
+            (id.to_owned(), AgentRecord::from_value(json!({"id": id, "rootId": id, "epoch": 1, "status": "paused", "accountKey": "default", "projectId": "/source/project", "projectServerId": "owner", "cwd": line, "hostProjectPath": "/source/project"})).expect("agent"))
+        }).collect();
+        let selected = membership(
+            &agents,
+            line,
+            &BTreeSet::from([line.to_owned()]),
+            "owner",
+            &BTreeSet::from([line.to_owned()]),
+            &BTreeMap::new(),
+        )
+        .expect("other project owns both agents");
+        assert!(selected.is_empty());
+    }
+    #[test]
+    fn unbound_agent_at_shared_location_names_both_projects() {
+        let agent = AgentRecord::from_value(json!({"id":"legacy","rootId":"legacy","epoch":1,"status":"paused","accountKey":"default","cwd":"/shared"})).expect("agent");
+        let error = membership(
+            &BTreeMap::from([("legacy".into(), agent)]),
+            "project-a",
+            &BTreeSet::from(["project-a".into()]),
+            "owner",
+            &BTreeSet::from(["/shared".into()]),
+            &BTreeMap::from([("project-b".into(), BTreeSet::from(["/shared".into()]))]),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, Error::AgentProjectConflict { agent, project, other } if agent == "legacy" && project == "project-a" && other == "project-b")
+        );
+    }
 }
