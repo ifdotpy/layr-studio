@@ -204,7 +204,15 @@ tombstones above it, or a snapshot when the cursor is absent, in the future, or 
 Tombstones live `TOMBSTONE_RETENTION_SECONDS` (90 days); a delete prunes older ones.
 
 `durable_view_log` mirrors, without payload, the `sync_entities` rows of the derived
+<<<<<<< head
 view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree).
+||||||| base
+view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree,
+questionHistory, request, work, workDetail, workResult, workDecision, workRelease).
+=======
+view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree,
+questionHistory, request).
+>>>>>>> https/main
 `view_changes_since(cursor)` lists the view ids that changed after a cursor. A parity
 test compares it with the published views.
 
@@ -213,6 +221,7 @@ reads through [`entity_scope`](../workspaces/runtime/packages/runtime-services/s
 It builds the work documents (`WORK_COLLECTIONS`: work, workDetail, workResult,
 workDecision, workRelease) from `runtime_work`, its history tables and `durable_rows` at
 read time. They have no copy in `sync_entities`; migration `2026-11-04-work-read-time`
+<<<<<<< head
 deleted the old copies. The direct collections (`DIRECT_COLLECTIONS`) have one document
 per row of a main table: `plan` (`runtime_plans`), `annotation` (`runtime_annotations`),
 `rule` (`runtime_rules`), and `request` and `questionHistory` (`approvals`). They are built
@@ -222,6 +231,15 @@ absent from a snapshot. An update that leaves a record-only row unchanged takes 
 number. A document built from one main-table change carries that row's number, so
 several documents can share a number; a page is cut only between numbers. The other
 collections still come from `sync_entities`.
+||||||| base
+Status: the source, the shared cursor space and the view log exist. The stream still
+reads `sync_entities`, and entity publication still writes it. Old `sync_entities` rows
+are deleted by a later migration.
+=======
+deleted the old copies. A document built from one main-table change carries that row's
+number, so several documents can share a number; a page is cut only between numbers.
+The other collections still come from `sync_entities`.
+>>>>>>> https/main
 
 ### Transcript pages at read time
 

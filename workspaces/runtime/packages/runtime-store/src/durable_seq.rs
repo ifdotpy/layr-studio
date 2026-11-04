@@ -102,10 +102,43 @@ const NEXT: &str = "(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+
     (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),
     (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows))";
 
+<<<<<<< head
 /// Derived view collections that the publisher builds from `runtime_agents`. Owner of the list. `durable_view_log` mirrors
+||||||| base
+/// Derived view collections that the publisher builds from `runtime_agents`,
+/// `runtime_requests` and `runtime_work`. Owner of the list. `durable_view_log` mirrors
+=======
+/// Derived view collections that the publisher builds from `runtime_agents` and
+/// `runtime_requests`. Owner of the list. `durable_view_log` mirrors
+>>>>>>> https/main
 /// their `sync_entities` rows (collection, id, seq, deleted) without the payload, so a
 /// reader can learn which views changed after a cursor from the same cursor space.
+<<<<<<< head
 pub const VIEW_COLLECTIONS: &[&str] = &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
+||||||| base
+pub const VIEW_COLLECTIONS: &[&str] = &[
+    "agent",
+    "agentSummary",
+    "agentDetail",
+    "retainedWorktree",
+    "questionHistory",
+    "request",
+    "work",
+    "workDetail",
+    "workResult",
+    "workDecision",
+    "workRelease",
+];
+=======
+pub const VIEW_COLLECTIONS: &[&str] = &[
+    "agent",
+    "agentSummary",
+    "agentDetail",
+    "retainedWorktree",
+    "questionHistory",
+    "request",
+];
+>>>>>>> https/main
 
 /// `VIEW_COLLECTIONS` as an SQL list: `'agent','agentSummary',...`.
 pub(crate) fn view_collection_list() -> String {
