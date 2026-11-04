@@ -18,7 +18,6 @@ fn database() -> Connection {
                 &crate::agent_columns::fixture_sql("CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,account TEXT,epoch INTEGER,thread TEXT,turn TEXT,created REAL,record TEXT);
                  CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT,record TEXT);
                  CREATE TABLE runtime_execution_inputs(run TEXT,event TEXT,PRIMARY KEY(run,event));
-                 CREATE TABLE runtime_completed_turns(id TEXT PRIMARY KEY);
                  CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_events(
                    id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,

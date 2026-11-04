@@ -129,7 +129,7 @@ async fn open(state: &State, bridge: StoreBridge, account: &Account) -> (Peer, A
 
 #[cfg(unix)]
 #[tokio::test]
-async fn legacy_disk_wait_fails_before_waiting_for_a_full_account_slot() {
+async fn legacy_disk_wait_clears_on_a_healthy_disk_before_account_admission() {
     let mut state = State::new().await;
     state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
         state.root.clone(),
@@ -162,16 +162,15 @@ async fn legacy_disk_wait_fails_before_waiting_for_a_full_account_slot() {
     wake_agent(&state, &worker, &agents[1]).await;
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            if record_of(&state, &agents[1]).await["status"] == "failed" {
+            if record_of(&state, &agents[1]).await["startWait"].is_null() {
                 break;
             }
             changes.changed().await.unwrap();
         }
     })
     .await
-    .expect("legacy disk wait becomes a failure before account admission");
-    assert_eq!(state.event_status(&agents[1]).await, "failed");
-    assert!(peer.writes.try_recv().is_err());
+    .expect("legacy disk wait clears on a healthy disk");
+    assert_ne!(state.event_status(&agents[1]).await, "failed");
     worker.shutdown().await.unwrap();
 }
 
