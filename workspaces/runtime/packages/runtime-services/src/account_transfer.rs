@@ -247,7 +247,10 @@ pub(crate) fn public_preparation_reason(error: &TransferError) -> String {
         } => {
             format!("Invalid account session response at {pointer}")
         }
-        _ => "Transfer preparation failed".to_owned(),
+        TransferError::Expired
+        | TransferError::Stored { .. }
+        | TransferError::Requires(_)
+        | TransferError::Store(_) => "Transfer preparation failed".to_owned(),
     };
     if reason.chars().count() <= TRANSFER_PUBLIC_REASON_MAX_CHARS {
         reason
