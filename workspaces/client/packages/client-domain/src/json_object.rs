@@ -62,13 +62,13 @@ mod tests {
     fn requires_object_and_preserves_borrowed_fields_and_serialization() {
         let input = r#"{"value":"hello"}"#;
         let JsonObject(value): JsonObject<Borrowed<'_>> =
-            serde_json::from_str(input).expect("object");
+            studio_json::from_str(input).expect("object");
         assert_eq!(value.value, "hello");
         assert_eq!(value.value.as_ptr(), input[10..].as_ptr());
         assert_eq!(
-            serde_json::to_string(&JsonObject(value)).expect("serialize"),
+            studio_json::to_string(&JsonObject(value)).expect("serialize"),
             input
         );
-        assert!(serde_json::from_str::<JsonObject<Borrowed<'_>>>(r#"["hello"]"#).is_err());
+        assert!(studio_json::from_str::<JsonObject<Borrowed<'_>>>(r#"["hello"]"#).is_err());
     }
 }

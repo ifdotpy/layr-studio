@@ -2,7 +2,7 @@
 use std::io;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 /// Events emitted by the native voice peer to its subscribing view.
 #[derive(Serialize, schemars::JsonSchema)]
@@ -138,7 +138,7 @@ enum WireFrame {
     Event {
         event: String,
         #[serde(flatten)]
-        fields: serde_json::Map<String, Value>,
+        fields: studio_json::Map<String, Value>,
     },
     Response(WireResponse),
 }
@@ -226,24 +226,24 @@ impl Response {
 mod tests {
     #[test]
     fn native_frames_prioritize_events_and_validate_response_shapes() {
-        use serde_json::json;
+        use studio_json::json;
         let event = json!({"event":"changed", "id":"also-a-response", "result":null, "error":{"bad":true}, "payload":{"nested":[null,1]}});
-        let decoded: super::NativeFrame = serde_json::from_value(event.clone()).unwrap();
+        let decoded: super::NativeFrame = studio_json::from_value(event.clone()).unwrap();
         match decoded {
             super::NativeFrame::Event(value) => assert_eq!(value, event),
             super::NativeFrame::Response(_) => panic!("event must take priority"),
         }
         let success: super::NativeFrame =
-            serde_json::from_str(r#"{"id":"void","result":null}"#).unwrap();
+            studio_json::from_str(r#"{"id":"void","result":null}"#).unwrap();
         assert!(matches!(
             success,
             super::NativeFrame::Response(super::NativeResponse {
-                outcome: super::NativeOutcome::Success(serde_json::Value::Null),
+                outcome: super::NativeOutcome::Success(studio_json::Value::Null),
                 ..
             })
         ));
         let failure: super::NativeFrame =
-            serde_json::from_str(r#"{"id":"bad","error":{"code":"denied","message":"Denied"}}"#)
+            studio_json::from_str(r#"{"id":"bad","error":{"code":"denied","message":"Denied"}}"#)
                 .unwrap();
         assert!(matches!(
             failure,
@@ -257,14 +257,14 @@ mod tests {
             json!({"id":"both","result":null,"error":{"code":"x","message":"x"}}),
             json!({"id":"null","error":null}),
         ] {
-            assert!(serde_json::from_value::<super::NativeFrame>(value).is_err());
+            assert!(studio_json::from_value::<super::NativeFrame>(value).is_err());
         }
         let explicit_null_error: super::NativeFrame =
-            serde_json::from_str(r#"{"id":"reply","result":null,"error":null}"#).unwrap();
+            studio_json::from_str(r#"{"id":"reply","result":null,"error":null}"#).unwrap();
         assert!(matches!(
             explicit_null_error,
             super::NativeFrame::Response(super::NativeResponse {
-                outcome: super::NativeOutcome::Success(serde_json::Value::Null),
+                outcome: super::NativeOutcome::Success(studio_json::Value::Null),
                 ..
             })
         ));
@@ -272,30 +272,30 @@ mod tests {
             super::Response::success("ok".into(), json!(null)),
             super::Response::failure("failed".into(), "denied", "Denied"),
         ] {
-            let original = serde_json::to_value(&response).unwrap();
+            let original = studio_json::to_value(&response).unwrap();
             let super::NativeFrame::Response(decoded) =
-                serde_json::from_value(original.clone()).unwrap()
+                studio_json::from_value(original.clone()).unwrap()
             else {
                 panic!("response")
             };
             assert_eq!(
-                serde_json::to_value(super::Response::from(decoded)).unwrap(),
+                studio_json::to_value(super::Response::from(decoded)).unwrap(),
                 original
             );
         }
         let non_string_event: super::NativeFrame =
-            serde_json::from_str(r#"{"event":null,"id":"reply","result":false}"#).unwrap();
+            studio_json::from_str(r#"{"event":null,"id":"reply","result":false}"#).unwrap();
         assert!(matches!(non_string_event, super::NativeFrame::Response(_)));
     }
 
     #[test]
     fn void_success_round_trips_without_becoming_a_missing_result() {
-        let response = super::Response::success("void".into(), serde_json::Value::Null);
+        let response = super::Response::success("void".into(), studio_json::Value::Null);
         let decoded: super::Response =
-            serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
-        assert_eq!(decoded.result, Some(serde_json::Value::Null));
+            studio_json::from_slice(&studio_json::to_vec(&response).unwrap()).unwrap();
+        assert_eq!(decoded.result, Some(studio_json::Value::Null));
         assert!(decoded.error.is_none());
-        let failed: super::Response = serde_json::from_value(serde_json::json!({
+        let failed: super::Response = studio_json::from_value(studio_json::json!({
             "id":"failed", "error":{"code":"denied","message":"Denied"}
         }))
         .unwrap();

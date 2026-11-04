@@ -6670,7 +6670,7 @@ dependencies = [
  "pulldown-cmark",
  "schemars 1.2.3",
  "serde",
- "serde_json",
+ "studio-json",
  "unicode-segmentation",
 ]
 
