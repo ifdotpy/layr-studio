@@ -703,8 +703,8 @@ fn frozen_archives(root: &Path) -> Vec<FrozenCase> {
                     .expect("UTF-8 case filename"),
             )
             .expect("case archive fixture");
-        let descriptor: RelocatedDescriptor = serde_json::from_value(
-            serde_json::to_value(&case.descriptor).expect("descriptor JSON"),
+        let descriptor: RelocatedDescriptor = serde_json::from_slice(
+            &serde_json::to_vec(&case.descriptor).expect("descriptor JSON"),
         )
         .expect("typed relocated descriptor");
         case.context = case
