@@ -811,9 +811,8 @@ async fn a_new_host_card_is_published_to_clients_and_pushed_to_the_phone() {
 
     // Published: the clients read requests as sync entities.
     let connection = store.test_reader().expect("test step");
-    let entities =
-        studio_runtime_store::SyncDocumentsRepository::entities_after(&connection, 0, 100)
-            .expect("test step");
+    let (entities, _) =
+        studio_runtime_services::entity_scope::delta_after(&connection, 0, 100).expect("test step");
     assert!(
         entities
             .iter()

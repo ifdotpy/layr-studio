@@ -1,9 +1,15 @@
 //! Entity pages for every reader: the stream, scoped subscriptions, the REST pull and
-//! mutation replies. Collections listed in [`WORK_COLLECTIONS`] (`work`, `workDetail`,
-//! and the history collections) are built here from the main tables at read time:
-//! `runtime_work`, its history child tables, and the rows that change a `workDetail`
-//! (owner agent, execution run, dependency). They have no copy in `sync_entities`. The
-//! other collections still come from `sync_entities`. One merge by change number keeps
+//! mutation replies. Two groups of collections are built here from the main tables at
+//! read time and have no copy in `sync_entities`:
+//!
+//! - [`WORK_COLLECTIONS`] (`work`, `workDetail`, and the history collections), from
+//!   `runtime_work`, its history child tables, and the rows that change a `workDetail`
+//!   (owner agent, execution run, dependency).
+//! - [`DIRECT_COLLECTIONS`], one document per row of a main table: `plan`
+//!   (`runtime_plans`), `annotation` (`runtime_annotations`), `rule` (`runtime_rules`),
+//!   and `request` and `questionHistory` (`approvals`).
+//!
+//! The other collections still come from `sync_entities`. One merge by change number keeps
 //! the paging rules of `SyncDocumentsRepository`: a page is cut at a whole unit, and
 //! `checkpoint` is the last unit taken.
 
@@ -14,8 +20,8 @@ use serde_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
-    EntityPage, EntityRow, StoreError, StoreResult, SyncDocumentsRepository, WORK_COLLECTIONS,
-    WorkItemRecord, WorkItemsRepository, WorkStatus, durable_seq, work_history,
+    DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult, SyncDocumentsRepository,
+    WORK_COLLECTIONS, WorkItemRecord, WorkItemsRepository, WorkStatus, durable_seq, work_history,
 };
 
 use crate::work_write::{WorkWriteError, current_submission_refusal};
@@ -181,6 +187,16 @@ pub fn pull_global_fresh(
             None,
             limit + 1,
         )?);
+        units.extend(direct_units(
+            transaction,
+            after,
+            max_sequence,
+            initial_high,
+            &wanted,
+            None,
+            None,
+            limit + 1,
+        )?);
     }
     units.sort_by_key(|unit| unit.seq);
     let room = limit as usize - head.len();
@@ -269,15 +285,27 @@ pub fn continue_page(
     })
     .collect();
     let wanted = wanted(collections_json)?;
-    // Work rows are not addressed by id; an id-scoped reader gets no work documents.
-    if id.is_none() && !wanted.is_empty() {
+    if !wanted.is_empty() {
         let deletes_after = if snapshot { i64::MAX } else { after };
-        units.extend(work_units(
+        // Work rows are not addressed by id; an id-scoped reader gets no work documents.
+        if id.is_none() {
+            units.extend(work_units(
+                transaction,
+                after,
+                through,
+                deletes_after,
+                &wanted,
+                agent,
+                fetch,
+            )?);
+        }
+        units.extend(direct_units(
             transaction,
             after,
             through,
             deletes_after,
             &wanted,
+            id,
             agent,
             fetch,
         )?);
@@ -301,17 +329,183 @@ pub fn continue_page(
     })
 }
 
-/// Work collections the reader selected. None selects all of them.
+/// Read-time collections the reader selected. None selects all of them.
 fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>> {
+    let all = WORK_COLLECTIONS.iter().chain(DIRECT_COLLECTIONS).copied();
     let Some(raw) = collections_json else {
-        return Ok(WORK_COLLECTIONS.iter().copied().collect());
+        return Ok(all.collect());
     };
     let selected: Vec<String> = serde_json::from_str(raw)?;
-    Ok(WORK_COLLECTIONS
-        .iter()
-        .copied()
+    Ok(all
         .filter(|collection| selected.iter().any(|name| name == collection))
         .collect())
+}
+
+/// A main table with one document per row in each of `collections`.
+struct DirectSource {
+    table: &'static str,
+    collections: &'static [&'static str],
+}
+
+/// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
+const DIRECT_SOURCES: [DirectSource; 4] = [
+    DirectSource {
+        table: "runtime_plans",
+        collections: &["plan"],
+    },
+    DirectSource {
+        table: "runtime_annotations",
+        collections: &["annotation"],
+    },
+    DirectSource {
+        table: "runtime_rules",
+        collections: &["rule"],
+    },
+    DirectSource {
+        table: "approvals",
+        collections: &["request", "questionHistory"],
+    },
+];
+
+/// Units of the direct sources in `(after, through]`, at most `fetch` per source, with
+/// the delete rule of [`work_units`]. `id` selects one row. These collections belong
+/// only to the global list, so an agent-scoped reader gets none of them.
+#[allow(clippy::too_many_arguments)]
+fn direct_units(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+    deletes_after: i64,
+    wanted: &BTreeSet<&'static str>,
+    id: Option<&str>,
+    agent: Option<&str>,
+    fetch: i64,
+) -> StoreResult<Vec<Unit>> {
+    let mut units = Vec::new();
+    if agent.is_some() {
+        return Ok(units);
+    }
+    for source in &DIRECT_SOURCES {
+        if !source.collections.iter().any(|c| wanted.contains(c))
+            || !crate::sync_policy::table_exists(connection, source.table)?
+        {
+            continue;
+        }
+        let changed: Vec<(String, i64, bool)> = connection
+            .prepare_cached(
+                "SELECT id,seq,deleted FROM durable_rows
+                 WHERE tbl=?1 AND seq>?2 AND seq<=?3 AND (deleted=0 OR seq>?4)
+                   AND (?5 IS NULL OR id=?5)
+                 ORDER BY seq LIMIT ?6",
+            )?
+            .query_map(
+                params![source.table, after, through, deletes_after, id, fetch],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
+            )?
+            .collect::<Result<_, _>>()?;
+        let snapshot = deletes_after == i64::MAX;
+        for (row_id, seq, deleted) in changed {
+            let rows = if deleted {
+                tombstones(source.collections, wanted, &row_id, seq)
+            } else {
+                direct_docs(connection, source.table, &row_id, seq, wanted, snapshot)?
+            };
+            if !rows.is_empty() {
+                units.push(Unit { seq, rows });
+            }
+        }
+    }
+    Ok(units)
+}
+
+/// The documents of one live row of a direct source at `seq`. A snapshot leaves out a
+/// document that the row's state hides; a delta sends it as a delete.
+fn direct_docs(
+    connection: &Connection,
+    table: &str,
+    id: &str,
+    seq: i64,
+    wanted: &BTreeSet<&'static str>,
+    snapshot: bool,
+) -> StoreResult<Vec<EntityRow>> {
+    let mut rows = Vec::new();
+    if table == "approvals" {
+        let Some(row) = studio_runtime_store::approvals::get(
+            connection,
+            &studio_runtime_schema::approvals::ApprovalId(id.to_owned()),
+        )?
+        else {
+            return Ok(rows);
+        };
+        let view = crate::approval_sync::view(&row)?;
+        for (collection, shown) in [("request", view.open), ("questionHistory", view.asked)] {
+            if !wanted.contains(collection) {
+                continue;
+            }
+            if shown {
+                rows.push(upsert(collection, id, seq, &view.value)?);
+            } else if !snapshot {
+                rows.extend(tombstones(&[collection], wanted, id, seq));
+            }
+        }
+        return Ok(rows);
+    }
+    let raw: Option<String> = connection
+        .prepare_cached(&format!("SELECT record FROM {table} WHERE id=?1"))?
+        .query_row([id], |row| row.get(0))
+        .optional()?;
+    let Some(raw) = raw else {
+        return Ok(rows);
+    };
+    let (collection, view) = match table {
+        "runtime_plans" => ("plan", crate::sync_policy::plan_view(id, &raw)),
+        "runtime_annotations" => ("annotation", crate::sync_policy::annotation_view(id, &raw)),
+        "runtime_rules" => ("rule", crate::sync_policy::rule_view(id, &raw).map(Some)),
+        _ => return Err(StoreError::RecordContract("unknown direct source")),
+    };
+    // A row that does not decode has no document: the stream skips it and reports it here.
+    match view {
+        Ok(Some(value)) if wanted.contains(collection) => {
+            rows.push(upsert(collection, id, seq, value)?);
+        }
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!(
+                "{table} row {id} does not decode, no {collection} document is streamed: {error}"
+            );
+        }
+    }
+    Ok(rows)
+}
+
+/// The current document of a direct collection, as a reader at the current high mark
+/// sees it; None when the row is gone or hidden.
+pub fn direct_document(
+    connection: &Connection,
+    collection: &str,
+    id: &str,
+) -> StoreResult<Option<EntityRow>> {
+    let source = DIRECT_SOURCES
+        .iter()
+        .find(|source| source.collections.contains(&collection))
+        .ok_or(StoreError::RecordContract("not a direct collection"))?;
+    let seq: Option<i64> = connection
+        .prepare_cached("SELECT seq FROM durable_rows WHERE tbl=?1 AND id=?2 AND deleted=0")?
+        .query_row(params![source.table, id], |row| row.get(0))
+        .optional()?;
+    let Some(seq) = seq else {
+        return Ok(None);
+    };
+    let wanted = BTreeSet::from([*source
+        .collections
+        .iter()
+        .find(|name| **name == collection)
+        .ok_or(StoreError::RecordContract("not a direct collection"))?]);
+    Ok(
+        direct_docs(connection, source.table, id, seq, &wanted, true)?
+            .into_iter()
+            .next(),
+    )
 }
 
 /// Work units in `(after, through]`, at most `fetch` per source. A delete is taken only

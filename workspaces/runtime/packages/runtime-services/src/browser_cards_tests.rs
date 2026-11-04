@@ -91,16 +91,22 @@ fn request_entity(
     store: &studio_runtime_store::RuntimeStore,
     bridge: &str,
 ) -> Option<(bool, Value)> {
-    use rusqlite::OptionalExtension;
     store
         .test_read_transaction(|tx| {
-            Ok(tx
-                .query_row(
-                    "SELECT deleted,payload FROM sync_entities WHERE collection='request' AND id=?1",
-                    [card_id(bridge)],
-                    |row| Ok((row.get::<_, bool>(0)?, row.get::<_, String>(1)?)),
-                )
-                .optional()?)
+            // The request document is built from the approval row at read time; a
+            // closed card has a row and no live document.
+            let id = card_id(bridge);
+            let live = crate::entity_scope::direct_document(tx, "request", &id)?;
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM approvals WHERE id=?1)",
+                [&id],
+                |row| row.get(0),
+            )?;
+            Ok(match live {
+                Some(row) => Some((false, row.payload.unwrap_or_default())),
+                None if exists => Some((true, json!({"value":{}}).to_string())),
+                None => None,
+            })
         })
         .expect("request entity reads")
         .map(|(deleted, payload)| {

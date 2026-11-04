@@ -145,7 +145,6 @@ pub(crate) fn save(
 ) -> Result<(), BrowserCardError> {
     row.request = Request::BrowserOpen(card);
     approvals::put(tx, &row)?;
-    crate::approval_sync::publish(tx, &row)?;
     Ok(())
 }
 
@@ -426,7 +425,7 @@ pub async fn apply(
                     if applied.refused.is_none() {
                         match new_card(&source, &item, &bridge_id) {
                             Some((agent, card)) => {
-                                let row = approvals::create(
+                                approvals::create(
                                     tx,
                                     NewApproval {
                                         id: ApprovalId(key.clone()),
@@ -445,7 +444,6 @@ pub async fn apply(
                                     },
                                     Timestamp(now),
                                 )?;
-                                crate::approval_sync::publish(tx, &row)?;
                             }
                             None => applied.refused = Some("The card is invalid".into()),
                         }

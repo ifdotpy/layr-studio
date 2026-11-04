@@ -39,6 +39,9 @@ pub struct DurableTable {
     /// True for a table too large to number in one transaction: the installer adds the
     /// triggers, and an online migration gives the old rows their entries later.
     pub online_backfill: bool,
+    /// True for a table whose only data is `id` and the payload column: an update that
+    /// leaves both unchanged takes no new number.
+    pub record_only: bool,
 }
 
 impl DurableTable {
@@ -47,6 +50,17 @@ impl DurableTable {
             name,
             payload,
             online_backfill: false,
+            record_only: false,
+        }
+    }
+
+    /// A table of `id` and `record` only; see [`DurableTable::record_only`].
+    pub const fn record(name: &'static str) -> Self {
+        Self {
+            name,
+            payload: "record",
+            online_backfill: false,
+            record_only: true,
         }
     }
 
@@ -55,6 +69,7 @@ impl DurableTable {
             name,
             payload,
             online_backfill: true,
+            record_only: false,
         }
     }
 }
@@ -72,6 +87,11 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::new("runtime_work_releases", "record"),
     // Execution runs: a failure refusal of a work document depends on the owner's run.
     DurableTable::new("runtime_execution_runs", "record"),
+    // Sources of documents built at read time, one document per row.
+    DurableTable::record("runtime_plans"),
+    DurableTable::record("runtime_annotations"),
+    DurableTable::record("runtime_rules"),
+    DurableTable::new("approvals", "request"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -82,18 +102,10 @@ const NEXT: &str = "(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+
     (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),
     (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows))";
 
-/// Derived view collections that the publisher builds from `runtime_agents` and
-/// `runtime_requests`. Owner of the list. `durable_view_log` mirrors
+/// Derived view collections that the publisher builds from `runtime_agents`. Owner of the list. `durable_view_log` mirrors
 /// their `sync_entities` rows (collection, id, seq, deleted) without the payload, so a
 /// reader can learn which views changed after a cursor from the same cursor space.
-pub const VIEW_COLLECTIONS: &[&str] = &[
-    "agent",
-    "agentSummary",
-    "agentDetail",
-    "retainedWorktree",
-    "questionHistory",
-    "request",
-];
+pub const VIEW_COLLECTIONS: &[&str] = &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
 
 /// `VIEW_COLLECTIONS` as an SQL list: `'agent','agentSummary',...`.
 pub(crate) fn view_collection_list() -> String {
@@ -128,7 +140,7 @@ pub(crate) fn view_log_sql() -> String {
 }
 
 /// The generator: SQL for the three triggers of one table.
-fn trigger_sql(table: &str) -> String {
+fn trigger_sql(table: &str, record_only: bool) -> String {
     let now = "CAST(strftime('%s','now') AS INTEGER)";
     let cutoff = format!("{now}-{TOMBSTONE_RETENTION_SECONDS}");
     let put = |id: &str, deleted: u8, at: &str| {
@@ -139,12 +151,17 @@ fn trigger_sql(table: &str) -> String {
     };
     let live = put("NEW.id", 0, "0");
     let tombstone = put("OLD.id", 1, now);
+    let changed = if record_only {
+        " WHEN OLD.id IS NOT NEW.id OR OLD.record IS NOT NEW.record"
+    } else {
+        ""
+    };
     format!(
         "
 CREATE TRIGGER IF NOT EXISTS durable_{table}_insert AFTER INSERT ON {table} BEGIN
   {live}
 END;
-CREATE TRIGGER IF NOT EXISTS durable_{table}_update AFTER UPDATE ON {table} BEGIN
+CREATE TRIGGER IF NOT EXISTS durable_{table}_update AFTER UPDATE ON {table}{changed} BEGIN
   {live}
   INSERT INTO durable_rows(tbl,id,seq,deleted,at)
     SELECT '{table}',OLD.id,{NEXT},1,{now} WHERE OLD.id IS NOT NEW.id
@@ -179,7 +196,7 @@ pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
                    WHERE NOT EXISTS (SELECT 1 FROM durable_rows d WHERE d.tbl='{name}' AND d.id=t.id);"
             ))?;
         }
-        tx.execute_batch(&trigger_sql(name))?;
+        tx.execute_batch(&trigger_sql(name, table.record_only))?;
     }
     Ok(())
 }
@@ -636,12 +653,40 @@ mod tests {
     }
 
     #[test]
+    fn an_unchanged_record_only_row_keeps_its_number() {
+        let db = canvas();
+        db.execute(
+            "INSERT INTO runtime_rules(id,record) VALUES('r','{\"id\":\"r\"}')",
+            [],
+        )
+        .expect("rule");
+        let seq = || -> i64 {
+            db.query_row(
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_rules' AND id='r'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("entry")
+        };
+        let first = seq();
+        db.execute("UPDATE runtime_rules SET record=record WHERE id='r'", [])
+            .expect("no-op update");
+        assert_eq!(seq(), first, "a no-op update takes no number");
+        db.execute(
+            "UPDATE runtime_rules SET record='{\"id\":\"r\",\"name\":\"n\"}' WHERE id='r'",
+            [],
+        )
+        .expect("real update");
+        assert!(seq() > first, "a real update takes a new number");
+    }
+
+    #[test]
     fn install_backfills_the_view_log() {
         let mut db = canvas();
         db.execute_batch(
             "DROP TRIGGER durable_view_log_insert; DROP TABLE durable_view_log;
              INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
-             VALUES('request','r',900,'h','{}',0),('event','e',901,'h','{}',0);",
+             VALUES('agent','r',900,'h','{}',0),('event','e',901,'h','{}',0);",
         )
         .expect("old state");
         let tx = db.transaction().expect("transaction");
@@ -649,7 +694,7 @@ mod tests {
         tx.commit().expect("commit");
         let log = view_changes_since(&db, 0).expect("log");
         assert_eq!(log.len(), 1);
-        assert_eq!((log[0].collection.as_str(), log[0].seq), ("request", 900));
+        assert_eq!((log[0].collection.as_str(), log[0].seq), ("agent", 900));
     }
 
     #[test]

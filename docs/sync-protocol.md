@@ -204,8 +204,7 @@ tombstones above it, or a snapshot when the cursor is absent, in the future, or 
 Tombstones live `TOMBSTONE_RETENTION_SECONDS` (90 days); a delete prunes older ones.
 
 `durable_view_log` mirrors, without payload, the `sync_entities` rows of the derived
-view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree,
-questionHistory, request).
+view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree).
 `view_changes_since(cursor)` lists the view ids that changed after a cursor. A parity
 test compares it with the published views.
 
@@ -214,9 +213,15 @@ reads through [`entity_scope`](../workspaces/runtime/packages/runtime-services/s
 It builds the work documents (`WORK_COLLECTIONS`: work, workDetail, workResult,
 workDecision, workRelease) from `runtime_work`, its history tables and `durable_rows` at
 read time. They have no copy in `sync_entities`; migration `2026-11-04-work-read-time`
-deleted the old copies. A document built from one main-table change carries that row's
-number, so several documents can share a number; a page is cut only between numbers.
-The other collections still come from `sync_entities`.
+deleted the old copies. The direct collections (`DIRECT_COLLECTIONS`) have one document
+per row of a main table: `plan` (`runtime_plans`), `annotation` (`runtime_annotations`),
+`rule` (`runtime_rules`), and `request` and `questionHistory` (`approvals`). They are built
+at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
+their copies. An approval that is not open (or not a question) is a delete in a delta and
+absent from a snapshot. An update that leaves a record-only row unchanged takes no new
+number. A document built from one main-table change carries that row's number, so
+several documents can share a number; a page is cut only between numbers. The other
+collections still come from `sync_entities`.
 
 ### Transcript pages at read time
 
