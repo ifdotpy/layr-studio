@@ -156,6 +156,7 @@ pub enum AgentStartWait {
         #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
         epoch: i64,
     },
+    // Legacy read-only wait; a storage admission pass settles it as an error.
     Disk {
         #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
         epoch: i64,

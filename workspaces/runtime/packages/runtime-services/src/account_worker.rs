@@ -2047,31 +2047,6 @@ impl Worker {
             previous.1.abort();
         }
     }
-    /// Wake a queued agent again after the disk-full recheck interval.
-    fn wait_for_disk_space(
-        &mut self,
-        agent_id: String,
-        epoch: i64,
-        deadline: Option<PreparationDeadline>,
-    ) {
-        let commands = self.commands.clone();
-        let key = agent_id.clone();
-        let task = tokio::spawn(async move {
-            let wait = deadline.map_or(crate::disk_space::RECHECK, |deadline| {
-                crate::disk_space::RECHECK.min(deadline.remaining(now()))
-            });
-            tokio::time::sleep(wait).await;
-            let _closed = commands
-                .send(AccountCommand::Wake { agent_id, epoch })
-                .await;
-        });
-        if let Some(previous) = self
-            .preparation_waits
-            .insert(key, (epoch, task.abort_handle()))
-        {
-            previous.1.abort();
-        }
-    }
     /// A deferred attempt that cannot be resumed still owns its original deadline.
     fn wait_for_deferred_deadline(
         &mut self,
@@ -2476,12 +2451,6 @@ impl Worker {
                 turn,
                 prepared,
             )) => Box::pin(self.steer(*intent, turn, *prepared)).await?,
-            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskFull(
-                epoch,
-                deadline,
-            )) => {
-                self.wait_for_disk_space(agent_id.clone(), epoch, deadline);
-            }
             turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::Deferred(
                 epoch,
                 attempt,

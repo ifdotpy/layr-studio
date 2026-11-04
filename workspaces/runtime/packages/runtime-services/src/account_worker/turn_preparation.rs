@@ -60,8 +60,6 @@ pub(super) struct Prepared {
 pub(super) enum Unclaimed {
     /// Busy-turn input claimed for the running turn, and that turn's id.
     Steer(Box<TurnIntent>, String, Box<preparation::PreparedSteer>),
-    /// The disk is full: the input stays queued at this epoch until the recheck.
-    DiskFull(i64, Option<super::PreparationDeadline>),
     /// An unsubmitted preparation cannot resume yet, but its deadline remains active.
     Deferred(i64, String, super::PreparationDeadline),
     /// A queued native review child: its first turn is `review/start`.
@@ -220,11 +218,11 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     // A wake can outlive the state that scheduled it. Do not spend an
     // account start on a failed or held agent that cannot claim input.
     let (owner, owner_account) = (agent_id.clone(), account.clone());
-    let (eligible, deferred) = bridge
+    let (eligible, deferred, legacy_disk) = bridge
         .store
         .read_async("runtime-services/start-gate-eligibility", move |db| {
             let Some(agent) = AgentRepository::get(db, &AgentId::from(owner.as_str()))? else {
-                return Ok::<_, WorkerError>((false, None));
+                return Ok::<_, WorkerError>((false, None, None));
             };
             let deferred = agent.start_attempt.as_ref().and_then(|attempt| {
                 (agent.epoch == epoch
@@ -269,6 +267,12 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
                         && (agent.start_outcome_hold.is_none() || receipt_continued)
                 },
                 deferred,
+                match agent.start_wait {
+                    Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk {
+                        epoch: wait_epoch,
+                    }) if wait_epoch == epoch => Some(wait_epoch),
+                    _ => None,
+                },
             ))
         })
         .await?;
@@ -334,6 +338,22 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
         }
         return Ok(Err(Unclaimed::Nothing));
     }
+    // Account admission replaces startWait, so settle a legacy disk wait first.
+    if legacy_disk.is_some() {
+        match crate::disk_space::hold_agent_turn(
+            &bridge.store,
+            agent_id,
+            epoch,
+            #[cfg(test)]
+            bridge.disk_gate.as_deref(),
+        )
+        .await?
+        {
+            crate::disk_space::TurnStorageAdmission::Ready => {}
+            crate::disk_space::TurnStorageAdmission::Failed
+            | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
+        }
+    }
     // A new turn waits for the account's start throttle before its claim, so
     // its input stays queued meanwhile; a slot not claimed below is freed. A
     // host without an account registry (fixtures; production hosts always
@@ -358,7 +378,7 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
         ),
         _ => None,
     };
-    if crate::disk_space::hold_agent_turn(
+    match crate::disk_space::hold_agent_turn(
         &bridge.store,
         agent_id,
         epoch,
@@ -367,12 +387,9 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     )
     .await?
     {
-        // While the disk is full no new turn starts. The input stays queued
-        // with its identity; the desktop shows one notice with the free space.
-        return Ok(Err(Unclaimed::DiskFull(
-            epoch,
-            deferred.as_ref().map(|(_, deadline)| *deadline),
-        )));
+        crate::disk_space::TurnStorageAdmission::Ready => {}
+        crate::disk_space::TurnStorageAdmission::Failed
+        | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
     }
     // Python's dispatcher claims a pending native review before queued input.
     if crate::native_review_turn::candidate(&bridge.store, agent_id, epoch, account).await? {
