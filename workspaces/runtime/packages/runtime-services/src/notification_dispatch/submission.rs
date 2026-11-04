@@ -8,9 +8,8 @@ use studio_runtime_store::{
 };
 
 use super::{
-    DispatchOutcome, NotificationDispatchError, PreparedSubmission,
-    SubmissionAuthorization, checked_outcome, in_savepoint, saved_text, sha256_json, stored,
-    validate_agent_write_fields,
+    DispatchOutcome, NotificationDispatchError, PreparedSubmission, SubmissionAuthorization,
+    checked_outcome, in_savepoint, saved_text, sha256_json, stored, validate_agent_write_fields,
 };
 
 /// The input owner keeps the publication fence independently of response expiry.

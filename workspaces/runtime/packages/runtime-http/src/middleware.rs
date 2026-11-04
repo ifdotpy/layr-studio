@@ -377,7 +377,11 @@ async fn own_link_refusal(
             )?)
         })
         .await;
-    if matches!(owned, Ok(true)) { None } else { refused() }
+    if matches!(owned, Ok(true)) {
+        None
+    } else {
+        refused()
+    }
 }
 
 /// Capture value-free HTTP timing under Axum's matched route template. This

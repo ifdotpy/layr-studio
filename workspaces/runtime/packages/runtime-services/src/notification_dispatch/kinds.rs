@@ -487,7 +487,8 @@ fn write_item(
     let (role, title) = presentation;
     let id = format!("{agent}:{key}");
     let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(text);
-    let mut record = json!({"id":id,"role":role,"title":title,"text":preview,"truncated":truncated,"at":at});
+    let mut record =
+        json!({"id":id,"role":role,"title":title,"text":preview,"truncated":truncated,"at":at});
     record
         .as_object_mut()
         .ok_or(NotificationDispatchError::invalid())?

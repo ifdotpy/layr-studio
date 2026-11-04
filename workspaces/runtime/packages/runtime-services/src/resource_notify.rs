@@ -234,10 +234,9 @@ fn merge_live_events(events: &mut VecDeque<LiveEvent>) {
                 }
             }
             LiveEvent::Progress(selector) => {
-                if merged
-                    .iter()
-                    .any(|queued| matches!(queued, LiveEvent::Progress(queued) if queued == selector))
-                {
+                if merged.iter().any(
+                    |queued| matches!(queued, LiveEvent::Progress(queued) if queued == selector),
+                ) {
                     continue;
                 }
             }
@@ -299,17 +298,17 @@ impl ResourceNotifications {
 
     /// Send a committed text delta to every stream, without a store write or a timer.
     pub fn publish_live(&self, delta: LiveDelta) {
-        self.send_live(LiveEvent::Delta(delta));
+        self.send_live(&LiveEvent::Delta(delta));
     }
 
     pub fn publish_progress(
         &self,
         selector: studio_runtime_schema::progress_selector::ProgressSelector,
     ) {
-        self.send_live(LiveEvent::Progress(selector));
+        self.send_live(&LiveEvent::Progress(selector));
     }
 
-    fn send_live(&self, event: LiveEvent) {
+    fn send_live(&self, event: &LiveEvent) {
         let Ok(mut subscribers) = self.live.lock() else {
             return;
         };
@@ -607,7 +606,9 @@ mod tests {
         use studio_runtime_schema::progress_selector::ProgressSelector;
         let notifications = ResourceNotifications::new(Arc::new(ChangeNotificationHub::new()));
         let mut slow = notifications.subscribe_live();
-        let auth = ProgressSelector::Auth { request_id: "login".into() };
+        let auth = ProgressSelector::Auth {
+            request_id: "login".into(),
+        };
         // Two items interleave with progress, so only the merge of the full queue
         // joins their runs. The loop fills the queue exactly.
         for index in 0..(LIVE_DELTA_CAPACITY / 2) as u64 {

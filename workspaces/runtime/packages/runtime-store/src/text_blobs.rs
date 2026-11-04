@@ -70,8 +70,7 @@ pub fn item_preview(text: &str) -> (String, bool) {
 /// use it; a repeated character compresses to a few bytes and stays inline.
 #[cfg(any(test, feature = "test-support"))]
 pub fn incompressible_text(len: usize) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .";
+    const ALPHABET: &[u8; 64] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .";
     let mut state: u64 = 0x2545_F491;
     (0..len)
         .map(|_| {
@@ -86,7 +85,11 @@ pub fn incompressible_text(len: usize) -> String {
 /// Character budget for the input excerpts of an item whose text is `text`:
 /// the preview length for long text, no limit otherwise.
 pub fn input_budget(text: &str) -> usize {
-    if is_long(text) { TEXT_PREVIEW_CHARS } else { usize::MAX }
+    if is_long(text) {
+        TEXT_PREVIEW_CHARS
+    } else {
+        usize::MAX
+    }
 }
 
 /// An unreferenced text blob younger than this is never collected. Unit: seconds.

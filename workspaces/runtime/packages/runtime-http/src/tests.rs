@@ -184,21 +184,48 @@ fn a_federation_route_gets_no_principal_from_the_edge() {
     use studio_runtime_services::principal::{CommandClass, Grant, Principal};
     // A forged peer header is not read at the edge: the handler builds `Federated`
     // only after the signature check.
-    assert_eq!(edge_check(None, CommandClass::Federation, "POST", "/api/federation/v1/pair"), Ok(None));
+    assert_eq!(
+        edge_check(
+            None,
+            CommandClass::Federation,
+            "POST",
+            "/api/federation/v1/pair"
+        ),
+        Ok(None)
+    );
     // A signed device or server cannot use a federation route.
     let device = Principal::Device {
         id: "d".into(),
         grant: Grant::Full,
     };
     let peer = Principal::Peer { server: "s".into() };
-    assert_eq!(edge_check(Some(&device), CommandClass::Federation, "POST", "/api/federation/v1/pair"), Err(()));
-    assert_eq!(edge_check(Some(&peer), CommandClass::Federation, "POST", "/api/federation/v1/pair"), Err(()));
+    assert_eq!(
+        edge_check(
+            Some(&device),
+            CommandClass::Federation,
+            "POST",
+            "/api/federation/v1/pair"
+        ),
+        Err(())
+    );
+    assert_eq!(
+        edge_check(
+            Some(&peer),
+            CommandClass::Federation,
+            "POST",
+            "/api/federation/v1/pair"
+        ),
+        Err(())
+    );
     // Other routes: no principal means the owner, which the table checks.
     assert_eq!(
         edge_check(None, CommandClass::OwnerOnly, "POST", "/api/rules"),
         Ok(Some(Principal::Owner))
     );
-    assert_eq!(edge_check(Some(&peer), CommandClass::OwnerOnly, "POST", "/api/rules"), Err(()));
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::OwnerOnly, "POST", "/api/rules"),
+        Err(())
+    );
 }
 
 #[test]
@@ -208,12 +235,37 @@ fn a_scoped_answer_passes_the_edge_only_on_a_route_that_settles_it() {
     let peer = Principal::Peer { server: "s".into() };
     let ok = Ok(Some(peer.clone()));
     // `/api/commands` checks the link worker row; `/api/action` has no row check.
-    assert_eq!(edge_check(Some(&peer), CommandClass::ChatControl, "POST", "/api/commands"), ok);
-    assert_eq!(edge_check(Some(&peer), CommandClass::ChatControl, "POST", "/api/action"), Err(()));
+    assert_eq!(
+        edge_check(
+            Some(&peer),
+            CommandClass::ChatControl,
+            "POST",
+            "/api/commands"
+        ),
+        ok
+    );
+    assert_eq!(
+        edge_check(
+            Some(&peer),
+            CommandClass::ChatControl,
+            "POST",
+            "/api/action"
+        ),
+        Err(())
+    );
     // A spawn passes only where the edge checks the peer's own link.
-    assert_eq!(edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/agents"), ok);
-    assert_eq!(edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/leads"), Err(()));
-    assert_eq!(edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/peer-teams"), Err(()));
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/agents"),
+        ok
+    );
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/leads"),
+        Err(())
+    );
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/peer-teams"),
+        Err(())
+    );
     // An unscoped answer does not depend on the route.
     assert_eq!(
         edge_check(None, CommandClass::ChatControl, "POST", "/api/action"),
@@ -392,7 +444,9 @@ async fn a_peer_spawns_only_under_the_parent_of_its_own_home_link() {
     };
     let refused = |response: axum::response::Response| async move {
         let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         status == StatusCode::FORBIDDEN
             && String::from_utf8_lossy(&body).contains("may not run this command")
     };
@@ -403,10 +457,25 @@ async fn a_peer_spawns_only_under_the_parent_of_its_own_home_link() {
         }
         body
     };
-    for (server, parent) in [("peer-a", None), ("peer-a", Some("lead-2")), ("peer-b", Some("lead-1"))] {
-        let response = app.clone().oneshot(spawn(server, body(parent))).await.expect("response");
+    for (server, parent) in [
+        ("peer-a", None),
+        ("peer-a", Some("lead-2")),
+        ("peer-b", Some("lead-1")),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(spawn(server, body(parent)))
+            .await
+            .expect("response");
         assert!(refused(response).await, "{server} {parent:?}");
     }
-    let response = app.clone().oneshot(spawn("peer-a", body(Some("lead-1")))).await.expect("response");
-    assert!(!refused(response).await, "the peer's own link parent passes the edge");
+    let response = app
+        .clone()
+        .oneshot(spawn("peer-a", body(Some("lead-1"))))
+        .await
+        .expect("response");
+    assert!(
+        !refused(response).await,
+        "the peer's own link parent passes the edge"
+    );
 }
