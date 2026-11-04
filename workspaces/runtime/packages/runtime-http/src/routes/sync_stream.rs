@@ -22,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream;
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     MAX_SYNC_RESOURCE_COUNT, MAX_SYNC_RESOURCE_QUERY_BYTES, SYNC_DRAFT_STREAM_MAX_DOCUMENTS,
     SYNC_ENTITY_STREAM_MAX_DOCUMENTS, SYNC_RESOURCE_HEARTBEAT_SECONDS, SYNC_STREAM_EVENT_MAX_BYTES,
@@ -90,7 +90,7 @@ pub(super) struct SubscribedResource {
 
 impl SubscribedResource {
     pub(super) fn new(resource: ResourceRef) -> Result<Self, ApiError> {
-        let key = serde_json::to_string(&resource).map_err(|_| ApiError::internal())?;
+        let key = studio_json::to_string(&resource).map_err(|_| ApiError::internal())?;
         Ok(Self { resource, key })
     }
 }
@@ -281,7 +281,7 @@ async fn sync_subscriptions(
 ) -> Result<Json<crate::generated::SyncSubscriptionAck>, ApiError> {
     fn check_size<T: Serialize>(resources: &[T]) -> Result<(), ApiError> {
         if resources.len() > MAX_SYNC_RESOURCE_COUNT
-            || serde_json::to_vec(resources)
+            || studio_json::to_vec(resources)
                 .map_err(|_| ApiError::internal())?
                 .len()
                 > MAX_SYNC_RESOURCE_QUERY_BYTES
@@ -345,7 +345,7 @@ async fn sync_subscriptions(
         }
     }
     if resources.len() > MAX_SYNC_RESOURCE_COUNT
-        || serde_json::to_vec(&resources)
+        || studio_json::to_vec(&resources)
             .map_err(|_| ApiError::internal())?
             .len()
             > MAX_SYNC_RESOURCE_QUERY_BYTES
@@ -810,7 +810,7 @@ pub(super) async fn append_progress_frames(
                 let Some(bytes) = resource_content(state.clone(), resource.clone()).await else {
                     continue;
                 };
-                let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+                let Ok(value) = studio_json::from_slice::<Value>(&bytes) else {
                     continue;
                 };
                 value
@@ -894,7 +894,7 @@ async fn append_auth_baseline(
         .map_err(|_| ApiError::internal())?;
         for receipt in snapshot {
             let id = receipt.request_id.clone();
-            let value = serde_json::to_value(receipt).map_err(|_| ApiError::internal())?;
+            let value = studio_json::to_value(receipt).map_err(|_| ApiError::internal())?;
             let resource = progress_resource(ProgressSelector::Auth {
                 request_id: id.clone(),
             })?;
@@ -954,14 +954,14 @@ pub(super) async fn transcript_initial_snapshot(
             after,
         )
     };
-    let mut response: TranscriptSyncPage = serde_json::from_value(
+    let mut response: TranscriptSyncPage = studio_json::from_value(
         read(after.unwrap_or(0))
             .await
             .map_err(|_| ApiError::internal())?,
     )
     .map_err(|_| ApiError::internal())?;
     if after.is_some_and(|after| after > response.checkpoint.seq) {
-        response = serde_json::from_value(read(0).await.map_err(|_| ApiError::internal())?)
+        response = studio_json::from_value(read(0).await.map_err(|_| ApiError::internal())?)
             .map_err(|_| ApiError::internal())?;
     }
     let through = response.checkpoint.seq;
@@ -977,7 +977,7 @@ pub(super) async fn transcript_initial_snapshot(
         if document.deleted {
             return Ok(entry);
         }
-        let page = serde_json::from_str::<TranscriptPageResponse>(&document.payload)
+        let page = studio_json::from_str::<TranscriptPageResponse>(&document.payload)
             .map_err(|_| ApiError::internal())?;
         entry.transcript_snapshot = Some(Some(page));
         entry.reply_kind = Some(crate::generated::SubscriptionReplyKind::Snapshot);
@@ -1003,7 +1003,7 @@ fn parse_since(
         return Err(invalid());
     }
     let values: Vec<studio_runtime_schema::http_ingress::Object<StreamSubscriptionAdd>> =
-        serde_json::from_str(raw).map_err(|_| invalid())?;
+        studio_json::from_str(raw).map_err(|_| invalid())?;
     if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
@@ -1055,7 +1055,7 @@ async fn attach_recent_transcripts(state: &HttpState, event: &mut ResourceChange
     };
     for agent in recent {
         let Ok(resource) =
-            serde_json::from_value::<ResourceRef>(json!({"kind":"transcript","agentId":agent}))
+            studio_json::from_value::<ResourceRef>(json!({"kind":"transcript","agentId":agent}))
         else {
             continue;
         };
@@ -1082,7 +1082,7 @@ async fn attach_initial_entries(
             // Scoped transfer delivery owns the baseline read and durable cursor.
             continue;
         }
-        let key = serde_json::to_string(resource).map_err(|_| ApiError::internal())?;
+        let key = studio_json::to_string(resource).map_err(|_| ApiError::internal())?;
         let cursor = since.get(&key).cloned();
         let mut initial =
             super::subscriptions::initial_snapshot(state.clone(), resource.clone(), cursor).await?;
@@ -1114,7 +1114,7 @@ fn parse_resources(query: &SyncStreamQuery) -> Result<Vec<SubscribedResource>, A
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
     }
-    let values: Vec<ResourceRef> = serde_json::from_str(raw).map_err(|_| invalid())?;
+    let values: Vec<ResourceRef> = studio_json::from_str(raw).map_err(|_| invalid())?;
     if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
@@ -1182,7 +1182,7 @@ pub(super) async fn draft_initial_snapshot(
                 rows.truncate(SYNC_DRAFT_STREAM_MAX_DOCUMENTS as usize);
                 let mut documents = Vec::with_capacity(rows.len());
                 for row in rows {
-                    let oversized = serde_json::from_str::<Value>(&row.payload)
+                    let oversized = studio_json::from_str::<Value>(&row.payload)
                         .ok()
                         .is_some_and(|payload| payload.get("text").and_then(Value::as_str)
                             .is_some_and(|text| text.chars().count() > studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS));
@@ -1233,7 +1233,7 @@ async fn read_transcript_changes(
         &resources
             .iter()
             .cloned()
-            .map(|value| serde_json::from_value(value).expect("resource fixture"))
+            .map(|value| studio_json::from_value(value).expect("resource fixture"))
             .collect::<Vec<_>>(),
         sequences,
         complete,
@@ -1354,7 +1354,7 @@ async fn read_transcript_changes_typed(
         .await;
         let response = match result
             .ok()
-            .and_then(|value| serde_json::from_value::<TranscriptSyncPage>(value).ok())
+            .and_then(|value| studio_json::from_value::<TranscriptSyncPage>(value).ok())
         {
             Some(response) => response,
             None => {
@@ -1382,7 +1382,7 @@ async fn read_transcript_changes_typed(
                         && document.seq == through
                 })
                 .and_then(|document| {
-                    serde_json::from_str::<TranscriptPageResponse>(&document.payload)
+                    studio_json::from_str::<TranscriptPageResponse>(&document.payload)
                         .ok()
                         .map(|page| {
                             super::transcript::window_snapshot(
@@ -1462,11 +1462,11 @@ fn transcript_change_batch(
     if document.id != scope || document.seq != through || document.deleted {
         return None;
     }
-    let payload: Value = serde_json::from_str(&document.payload).ok()?;
+    let payload: Value = studio_json::from_str(&document.payload).ok()?;
     if !studio_runtime_schema::validate("TranscriptStreamDelta", &payload).ok()? {
         return None;
     }
-    let delta: TranscriptStreamDelta = serde_json::from_value(payload).ok()?;
+    let delta: TranscriptStreamDelta = studio_json::from_value(payload).ok()?;
     if delta.items.len() + delta.removed.len() > SYNC_TRANSCRIPT_STREAM_MAX_ITEMS {
         return None;
     }
@@ -1615,7 +1615,7 @@ async fn attach_transient_snapshots(
                 {
                     voice_sequences.insert(resource.agent_id.as_str().to_owned(), cursor);
                     entry.voice_records = payload
-                        .and_then(|payload| serde_json::from_value(payload).ok())
+                        .and_then(|payload| studio_json::from_value(payload).ok())
                         .map(Some);
                 }
             }
@@ -2208,7 +2208,7 @@ fn resource_changes_event(
 /// once-serialized text; only the small cursor members are written per subscriber.
 fn token_rate_event(workspace_id: &str, snapshot: &ChangeSnapshot, rates: &TokenRates) -> Event {
     let wire = rates.wire();
-    let text = |value: &str| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned());
+    let text = |value: &str| studio_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned());
     let data = format!(
         r#"{{"protocol":{},"workspaceId":{},"epoch":{},"revision":{},"snapshot":true,"removed":[],"records":{}}}"#,
         SYNC_PROTOCOL_VERSION,
@@ -2229,7 +2229,7 @@ fn fixture_resources(values: &[Value]) -> Vec<SubscribedResource> {
         .iter()
         .cloned()
         .map(|value| {
-            SubscribedResource::new(serde_json::from_value(value).expect("fixture resource"))
+            SubscribedResource::new(studio_json::from_value(value).expect("fixture resource"))
                 .expect("resource identity")
         })
         .collect()
@@ -2245,7 +2245,7 @@ fn resource_event(
     entity_sequence: i64,
     entity_reset: bool,
 ) -> Value {
-    serde_json::to_value(
+    studio_json::to_value(
         resource_changes_event(
             workspace_id,
             &ResourceChanges {
@@ -2260,7 +2260,7 @@ fn resource_event(
                 entity_reset,
                 overflow: false,
             },
-            serde_json::from_value(json!(reason)).expect("fixture reason"),
+            studio_json::from_value(json!(reason)).expect("fixture reason"),
             typed_resources(&fixture_resources(resources)),
             (entity_sequence, None),
             (0, None),
@@ -2341,7 +2341,7 @@ fn resource_sse_event(revision: i64, mut payload: ResourceChangeEvent) -> Event 
             remaining: SYNC_STREAM_EVENT_MAX_BYTES - envelope_bytes,
             exceeded: false,
         };
-        let result = serde_json::to_writer(&mut bounded, &payload);
+        let result = studio_json::to_writer(&mut bounded, &payload);
         if !bounded.exceeded {
             // The generated DTO has only JSON-compatible fields and string map keys.
             result.expect("resource stream DTO serializes");
@@ -2404,7 +2404,7 @@ impl Write for BoundedEventWriter<'_> {
             self.exceeded = true;
             return Err(io::Error::other("resource event exceeds stream byte limit"));
         }
-        // serde_json emits complete UTF-8 string fragments (and ASCII syntax).
+        // studio_json emits complete UTF-8 string fragments (and ASCII syntax).
         let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
         std::fmt::Write::write_str(self.writer, text).map_err(io::Error::other)?;
         self.remaining -= bytes.len();
@@ -2519,7 +2519,7 @@ mod tests {
         assert!(axum::extract::Query::<super::SyncStreamQuery>::try_from_uri(&valid).is_ok());
         let invalid: axum::http::Uri = "/api/sync/stream?after=-1".parse().unwrap();
         assert!(axum::extract::Query::<super::SyncStreamQuery>::try_from_uri(&invalid).is_err());
-        assert!(serde_json::from_str::<studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>>(r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":1,"terminalGeneration":0}}"#).is_ok());
+        assert!(studio_json::from_str::<studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>>(r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":1,"terminalGeneration":0}}"#).is_ok());
         for raw in [
             r#"{"resource":{"kind":"state"},"since":null}"#,
             r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":-1}}"#,
@@ -2529,7 +2529,7 @@ mod tests {
             r#"{"resource":{"kind":"state"},"extra":true}"#,
         ] {
             assert!(
-                serde_json::from_str::<
+                studio_json::from_str::<
                     studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>,
                 >(raw)
                 .is_err()
@@ -2538,12 +2538,12 @@ mod tests {
     }
     fn fixture_notification(
         id: &str,
-        resources: &[serde_json::Value],
+        resources: &[studio_json::Value],
     ) -> studio_runtime_schema::resource_notification::ResourceNotifyRequest {
         let resources = resources
             .iter()
             .cloned()
-            .map(|value| serde_json::from_value(value).expect("resource fixture"))
+            .map(|value| studio_json::from_value(value).expect("resource fixture"))
             .collect();
         studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
             id.to_owned(),
@@ -2553,7 +2553,7 @@ mod tests {
     }
 
     async fn fixture_resource_content(state: HttpState, value: Value) -> Option<Vec<u8>> {
-        crate::routes::subscriptions::resource_content(state, serde_json::from_value(value).ok()?)
+        crate::routes::subscriptions::resource_content(state, studio_json::from_value(value).ok()?)
             .await
     }
     use super::*;
@@ -2572,7 +2572,7 @@ mod tests {
             None,
         );
         let body: studio_runtime_schema::resource_notification::ResourceNotifyRequest =
-            serde_json::from_str(r#"{"requestId":"request","resources":[{"kind":"models"}]}"#)
+            studio_json::from_str(r#"{"requestId":"request","resources":[{"kind":"models"}]}"#)
                 .unwrap();
         for _ in 0..2 {
             let Json(ack) = notify_resources(state.clone(), body.clone()).await.unwrap();
@@ -2582,7 +2582,7 @@ mod tests {
         assert!(
             notify_resources(
                 state,
-                serde_json::from_str(
+                studio_json::from_str(
                     r#"{"requestId":"request","resources":[{"kind":"accounts"}]}"#
                 )
                 .unwrap()
@@ -2659,7 +2659,7 @@ mod tests {
                 .expect("independent live interval")
                 .expect("bytes");
             assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
-            let frame: Value = serde_json::from_str(
+            let frame: Value = studio_json::from_str(
                 std::str::from_utf8(&bytes)
                     .expect("UTF8")
                     .lines()
@@ -2715,7 +2715,7 @@ mod tests {
         let mut body = response.into_body().into_data_stream();
         let document = |bytes: &[u8]| -> Value {
             let text = std::str::from_utf8(bytes).expect("UTF8 SSE");
-            serde_json::from_str(
+            studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -2824,7 +2824,7 @@ mod tests {
             .await
             .expect("receipt");
         assert_eq!(
-            serde_json::from_slice::<Value>(&body).expect("JSON")["status"],
+            studio_json::from_slice::<Value>(&body).expect("JSON")["status"],
             "pending"
         );
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -2861,7 +2861,7 @@ mod tests {
             .await
             .expect("missing scoped receipt");
         assert_eq!(
-            serde_json::from_slice::<Value>(&bytes).expect("JSON"),
+            studio_json::from_slice::<Value>(&bytes).expect("JSON"),
             Value::Null
         );
     }
@@ -2917,7 +2917,7 @@ mod tests {
             }
             fn register(
                 &self,
-                _: serde_json::Map<String, Value>,
+                _: studio_json::Map<String, Value>,
                 _: &str,
                 _: &std::path::Path,
                 _: &studio_runtime_services::account_driver::AuthMetadata,
@@ -3168,12 +3168,12 @@ mod tests {
 
     #[test]
     fn state_stream_moves_owned_batch_allocations() {
-        let changes: EntityChangeBatch = serde_json::from_value(json!({
+        let changes: EntityChangeBatch = studio_json::from_value(json!({
             "after": 1, "through": 2,
             "documents": [{"op":"delete", "collection":"agent", "id":"agent", "seq":2}]
         }))
         .expect("entity batch");
-        let drafts: DraftChangeBatch = serde_json::from_value(json!({
+        let drafts: DraftChangeBatch = studio_json::from_value(json!({
             "after": 1, "through": 2,
             "documents": [{"id":"draft", "payload":"{}", "seq":2, "_deleted":true}]
         }))
@@ -3245,7 +3245,7 @@ mod tests {
                 "removed":[],"truncated":false
             }});
         }
-        serde_json::from_value(value).expect("combined fixture")
+        studio_json::from_value(value).expect("combined fixture")
     }
 
     #[tokio::test]
@@ -3256,7 +3256,7 @@ mod tests {
             .await
             .len();
         for target in [limit - 1, limit, limit + 1] {
-            let mut value = serde_json::to_value(&empty).expect("fixture");
+            let mut value = studio_json::to_value(&empty).expect("fixture");
             let added = target - overhead;
             for (index, entry) in value["resourceVersions"]
                 .as_array_mut()
@@ -3275,7 +3275,7 @@ mod tests {
                     "x".repeat(count % 2)
                 ));
             }
-            let payload: ResourceChangeEvent = serde_json::from_value(value).expect("typed event");
+            let payload: ResourceChangeEvent = studio_json::from_value(value).expect("typed event");
             assert_eq!(
                 frame_bytes(sse_event("resources", Some(99999), &payload))
                     .await
@@ -3289,7 +3289,7 @@ mod tests {
                 bytes.len()
             );
             let wire = String::from_utf8(bytes.to_vec()).expect("UTF8");
-            let body: Value = serde_json::from_str(
+            let body: Value = studio_json::from_str(
                 wire.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -3322,10 +3322,10 @@ mod tests {
             documents: Vec::new(),
         }));
         entry.entity_sequence_reset = Some(Some(true));
-        let mut value = serde_json::to_value(event).expect("event");
+        let mut value = studio_json::to_value(event).expect("event");
         value["resourceVersions"][0]["transcriptChanges"]["delta"]["items"][0]["text"] =
             json!("x".repeat(SYNC_STREAM_EVENT_MAX_BYTES));
-        let event = serde_json::from_value(value).expect("event");
+        let event = studio_json::from_value(value).expect("event");
         let document = event_document(Ok(resource_sse_event(99999, event))).await;
         let entry = &document["resourceVersions"][0];
         assert_eq!(entry["revision"], 99999);
@@ -3568,7 +3568,7 @@ mod tests {
                 .expect("session")
                 .expect("bytes");
             let text = String::from_utf8_lossy(&frame);
-            let session: Value = serde_json::from_str(
+            let session: Value = studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -3867,7 +3867,7 @@ mod tests {
             let mut stream = response.into_body().into_data_stream();
             let frame = stream.next().await.expect("session").expect("bytes");
             let text = String::from_utf8_lossy(&frame);
-            let session: Value = serde_json::from_str(
+            let session: Value = studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -3947,7 +3947,7 @@ mod tests {
         let frame = stream.next().await.expect("session").expect("bytes");
         let frame = String::from_utf8_lossy(&frame);
         assert!(frame.starts_with("event: session\n"), "{frame}");
-        let session: Value = serde_json::from_str(
+        let session: Value = studio_json::from_str(
             frame
                 .lines()
                 .find_map(|line| line.strip_prefix("data: "))
@@ -4110,7 +4110,7 @@ mod tests {
         state
             .resource_notifications
             .publish_once(
-                &serde_json::from_str(
+                &studio_json::from_str(
                     r#"{"requestId":"interest-draft","resources":[{"kind":"drafts"}]}"#,
                 )
                 .expect("notification fixture"),
@@ -4147,7 +4147,7 @@ mod tests {
             default: Option<bool>,
         }
         let api: Api =
-            serde_json::from_str(include_str!("../../openapi.json")).expect("OpenAPI owner");
+            studio_json::from_str(include_str!("../../openapi.json")).expect("OpenAPI owner");
         let selector = api
             .paths
             .stream
@@ -4228,7 +4228,7 @@ mod tests {
         let first = body.next().await.expect("first frame").expect("bytes");
         let text = std::str::from_utf8(&first).expect("UTF8");
         assert!(text.starts_with("event: api-schema\n"), "{text}");
-        let data: Value = serde_json::from_str(
+        let data: Value = studio_json::from_str(
             text.lines()
                 .find_map(|line| line.strip_prefix("data: "))
                 .expect("data"),
@@ -4277,7 +4277,7 @@ mod tests {
             let mut body = response.into_body().into_data_stream();
             let bytes = body.next().await.expect("session").expect("bytes");
             let text = std::str::from_utf8(&bytes).expect("UTF8");
-            let session: Value = serde_json::from_str(
+            let session: Value = studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -4292,7 +4292,7 @@ mod tests {
     async fn state_stream_subscription_post_token_interest_reenable_starts_full() {
         fn document_bytes(bytes: &[u8]) -> Value {
             let text = std::str::from_utf8(bytes).expect("UTF8");
-            serde_json::from_str(
+            studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -4522,7 +4522,7 @@ mod tests {
             None,
         );
         let resource: ResourceRef =
-            serde_json::from_value(json!({"kind":"transcript","agentId":"recent"})).expect("ref");
+            studio_json::from_value(json!({"kind":"transcript","agentId":"recent"})).expect("ref");
         let snapshot =
             super::super::subscriptions::initial_snapshot(http.clone(), resource.clone(), None)
                 .await
@@ -4548,8 +4548,8 @@ mod tests {
             current.cursor.as_ref().map(|cursor| cursor.seq),
             Some(cursor.seq)
         );
-        let snapshot_bytes = serde_json::to_vec(&snapshot).expect("snapshot bytes").len();
-        let current_bytes = serde_json::to_vec(&current).expect("resume bytes").len();
+        let snapshot_bytes = studio_json::to_vec(&snapshot).expect("snapshot bytes").len();
+        let current_bytes = studio_json::to_vec(&current).expect("resume bytes").len();
         assert!(current_bytes * 10 < snapshot_bytes);
         store.transaction(|tx| {
             tx.execute("UPDATE runtime_items SET record=json_set(record,'$.text','changed recent message') WHERE id='recent:19'", [])?;
@@ -4606,7 +4606,7 @@ mod tests {
         ));
         eprintln!(
             "V4 recent-chat JSON bytes: snapshot={snapshot_bytes}, current-cursor={current_bytes}, old-cursor={}",
-            serde_json::to_vec(&old).expect("delta bytes").len()
+            studio_json::to_vec(&old).expect("delta bytes").len()
         );
     }
 
@@ -4769,7 +4769,7 @@ mod tests {
                 let before = full["documents"][0]["payload"]
                     .as_str()
                     .expect("full payload");
-                let after = serde_json::to_vec(snapshot).expect("window JSON");
+                let after = studio_json::to_vec(snapshot).expect("window JSON");
                 println!(
                     "transcript window fixture bytes: full120_json={}, window40_json={}, full120_brotli_shared={}, window40_brotli_shared={}",
                     before.len(),
@@ -4796,7 +4796,7 @@ mod tests {
                     .await
                     .expect("older page");
                 assert_eq!(response.status(), StatusCode::OK);
-                let page: Value = serde_json::from_slice(
+                let page: Value = studio_json::from_slice(
                     &axum::body::to_bytes(response.into_body(), SYNC_STREAM_EVENT_MAX_BYTES)
                         .await
                         .expect("bounded page"),
@@ -4823,7 +4823,7 @@ mod tests {
 
     #[tokio::test]
     async fn state_stream_oversized_view_snapshot_releases_cursor_for_scoped_recovery() {
-        let mut event: ResourceChangeEvent = serde_json::from_value(resource_event(
+        let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
             "workspace",
             "epoch",
             1,
@@ -4833,7 +4833,7 @@ mod tests {
             false,
         ))
         .expect("event");
-        event.resource_versions[0].view_snapshot = Some(serde_json::from_value(json!({"complaint":{"id":"message","version":1,"text":"x".repeat(SYNC_STREAM_EVENT_MAX_BYTES),"responses":[]}})).expect("snapshot"));
+        event.resource_versions[0].view_snapshot = Some(studio_json::from_value(json!({"complaint":{"id":"message","version":1,"text":"x".repeat(SYNC_STREAM_EVENT_MAX_BYTES),"responses":[]}})).expect("snapshot"));
         event.resource_versions[0].cursor = Some(SubscriptionCursor {
             terminal_generation: None,
             workspace_id: "workspace".into(),
@@ -4842,7 +4842,7 @@ mod tests {
         let bytes = frame_bytes(resource_sse_event(1, event)).await;
         assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
         let text = std::str::from_utf8(&bytes).expect("UTF8");
-        let value: Value = serde_json::from_str(
+        let value: Value = studio_json::from_str(
             text.lines()
                 .find_map(|line| line.strip_prefix("data: "))
                 .expect("data"),
@@ -4862,13 +4862,13 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let page: TranscriptPageResponse =
-            serde_json::from_str(&format!(r#"{{"items":[{items}],"truncated":false}}"#))
+            studio_json::from_str(&format!(r#"{{"items":[{items}],"truncated":false}}"#))
                 .expect("page");
         assert!(
-            serde_json::to_vec(&page).expect("page bytes").len() > SYNC_STREAM_EVENT_MAX_BYTES,
+            studio_json::to_vec(&page).expect("page bytes").len() > SYNC_STREAM_EVENT_MAX_BYTES,
             "fixture must exceed the event limit"
         );
-        let mut event: ResourceChangeEvent = serde_json::from_value(resource_event(
+        let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
             "workspace",
             "epoch",
             1,
@@ -4882,7 +4882,7 @@ mod tests {
         let bytes = frame_bytes(resource_sse_event(1, event)).await;
         assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
         let frame = std::str::from_utf8(&bytes).expect("UTF8");
-        let value: Value = serde_json::from_str(
+        let value: Value = studio_json::from_str(
             frame
                 .lines()
                 .find_map(|line| line.strip_prefix("data: "))
@@ -4903,7 +4903,7 @@ mod tests {
     async fn state_stream_subscription_added_oversized_initial_data_stays_revisions_only() {
         fn document_bytes(bytes: &[u8]) -> Value {
             let text = std::str::from_utf8(bytes).expect("UTF8");
-            serde_json::from_str(
+            studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -4960,7 +4960,7 @@ mod tests {
         .await
         .expect("source data");
         assert!(
-            serde_json::to_vec(&full).expect("source JSON").len() > SYNC_STREAM_EVENT_MAX_BYTES
+            studio_json::to_vec(&full).expect("source JSON").len() > SYNC_STREAM_EVENT_MAX_BYTES
         );
         let before = full["checkpoint"]["seq"].as_i64().expect("baseline cursor");
         store.transaction(|tx| {
@@ -5080,7 +5080,7 @@ mod tests {
         assert!(batch["delta"].get("itemRevisions").is_none());
         assert_eq!(batch["through"], event["resourceVersions"][0]["revision"]);
         state.next_resources_frame_at = None;
-        http.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"preflush-empty","resources":[{"kind":"transcript","agentId":"open"}]}"#).expect("notification fixture")).expect("scoped preflush hint");
+        http.resource_notifications.publish_once(&studio_json::from_str(r#"{"requestId":"preflush-empty","resources":[{"kind":"transcript","agentId":"open"}]}"#).expect("notification fixture")).expect("scoped preflush hint");
         let updates = read_transcript_changes_typed(
             Some(store.clone()),
             &typed_resources(&state.resources),
@@ -5090,7 +5090,7 @@ mod tests {
         .await;
         assert!(matches!(updates["open"], TranscriptStreamUpdate::Unchanged));
         let mut unchanged_event: ResourceChangeEvent =
-            serde_json::from_value(event).expect("event DTO");
+            studio_json::from_value(event).expect("event DTO");
         attach_transcript_changes(&mut unchanged_event, updates);
         assert!(
             unchanged_event.resources.is_empty(),
@@ -5197,8 +5197,8 @@ mod tests {
             panic!("complete right delta");
         };
         assert_eq!(
-            serde_json::to_value(left).expect("left"),
-            serde_json::to_value(right).expect("right")
+            studio_json::to_value(left).expect("left"),
+            studio_json::to_value(right).expect("right")
         );
         let unrelated = read_transcript_changes(
             Some(store.clone()),
@@ -5268,7 +5268,7 @@ mod tests {
                 !validator.is_valid(&payload),
                 "{scenario} must be rejected by the stream schema"
             );
-            let response: TranscriptSyncPage = serde_json::from_value(json!({"workspaceId":"workspace", "checkpoint":{"seq":2}, "documents":[{"id":"transcript:open","seq":2,"payload":payload.to_string(),"_deleted":false}]})).expect("projection response");
+            let response: TranscriptSyncPage = studio_json::from_value(json!({"workspaceId":"workspace", "checkpoint":{"seq":2}, "documents":[{"id":"transcript:open","seq":2,"payload":payload.to_string(),"_deleted":false}]})).expect("projection response");
             assert!(
                 transcript_change_batch(&response, "transcript:open", 1).is_none(),
                 "{scenario} must preserve pull recovery"
@@ -5298,7 +5298,7 @@ mod tests {
                 "unknown" => payload["unexpected"] = json!(true),
                 _ => {}
             }
-            let response: TranscriptSyncPage = serde_json::from_value(json!({
+            let response: TranscriptSyncPage = studio_json::from_value(json!({
                 "workspaceId":"workspace","checkpoint":{"seq":2},"documents":[{
                     "id":"transcript:open","seq":if scenario=="cursor" {3} else {2},
                     "payload":payload.to_string(),"_deleted":scenario=="deleted",
@@ -5438,7 +5438,7 @@ mod tests {
         let entry = draft_initial_snapshot(state, resource)
             .await
             .expect("snapshot");
-        let mut event: ResourceChangeEvent = serde_json::from_value(resource_event(
+        let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
             "workspace",
             "epoch",
             1,
@@ -5456,7 +5456,7 @@ mod tests {
             .lines()
             .find_map(|line| line.strip_prefix("data: "))
             .expect("data");
-        let event: Value = serde_json::from_str(data).expect("event JSON");
+        let event: Value = studio_json::from_str(data).expect("event JSON");
         assert_eq!(
             event["resourceVersions"][0]["draftSnapshot"]["documents"][0]["payload"],
             payload
@@ -5797,7 +5797,7 @@ mod tests {
             }).await.expect("interval");
             if scenario == "payload" || scenario == "envelope" {
                 store.test_read_transaction(|tx| {
-                    let collections:Vec<String>=serde_json::from_str(studio_runtime_schema::sync_protocol::global_entity_collections_json()).expect("global collection owner");
+                    let collections:Vec<String>=studio_json::from_str(studio_runtime_schema::sync_protocol::global_entity_collections_json()).expect("global collection owner");
                     assert!(collections.iter().any(|collection|collection=="workspace"));
                     let rows=SyncDocumentsRepository::entities_after(tx,0,SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
                     let corrupt=rows.iter().find(|row|row.collection=="workspace" && row.id=="corrupt-import").expect("stored corruption in the selected collection and sequence interval");
@@ -5923,7 +5923,7 @@ mod tests {
             replay.resources.is_empty(),
             "a retried publication must not cause a repeated pull"
         );
-        state.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"other-chat-delta","resources":[{"kind":"transcript","agentId":"other"}]}"#).expect("notification fixture")).expect("other stream");
+        state.resource_notifications.publish_once(&studio_json::from_str(r#"{"requestId":"other-chat-delta","resources":[{"kind":"transcript","agentId":"other"}]}"#).expect("notification fixture")).expect("other stream");
         let unrelated = state
             .resource_notifications
             .changes_since_with_content(&resources, Some(replay.cursor.revision), |resource| {
@@ -6026,7 +6026,7 @@ mod tests {
             .find(|operation| operation.key() == ("GET".to_owned(), "/api/sync/stream".to_owned()))
             .expect("sync stream operation is registered");
         assert_eq!(
-            serde_json::to_value(operation).expect("operation serializes")["status"],
+            studio_json::to_value(operation).expect("operation serializes")["status"],
             "implemented"
         );
     }
@@ -6067,7 +6067,7 @@ mod tests {
 
         let root = tempfile::tempdir().expect("isolated state");
         let policy = AccountPolicyState::from_startup(
-            Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"first","accounts":{},"logins":{}}).to_string().as_bytes()),
+            Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"first","accounts":{},"logins":{}}).to_string().as_bytes()),
             [],
         )
         .expect("policy");
@@ -6214,14 +6214,14 @@ mod tests {
             );
             after = progress.cursor.revision;
             assert_eq!(
-                serde_json::to_value(
+                studio_json::to_value(
                     super::super::catalog::accounts(State(state.clone()))
                         .await
                         .expect("account list")
                         .0
                 )
                 .expect("JSON"),
-                serde_json::to_value(&accounts).expect("JSON"),
+                studio_json::to_value(&accounts).expect("JSON"),
                 "a pending login does not publish an account or its private URL"
             );
         }
@@ -6263,7 +6263,7 @@ mod tests {
             {"resources":[{"kind":"state"}],"sequence":42,"reconnect":true,"rates":{"records":[rate]}}
         ]);
         let expected: Vec<Value> =
-            serde_json::from_str(include_str!("fixtures/sync_stream_documents.json"))
+            studio_json::from_str(include_str!("fixtures/sync_stream_documents.json"))
                 .expect("frozen reference documents");
         assert_eq!(expected.len(), cases.as_array().expect("cases").len());
         for (case, expected) in cases.as_array().expect("cases").iter().zip(expected) {
@@ -6307,7 +6307,7 @@ mod tests {
                 .expect("data");
             token_rate_difference::assert_token_rate_documents_equal(
                 &expected["rates"],
-                &serde_json::from_str::<Value>(data).expect("JSON"),
+                &studio_json::from_str::<Value>(data).expect("JSON"),
                 &[],
                 "frozen stream document",
             );
@@ -6549,7 +6549,7 @@ mod tests {
             tx.execute("INSERT INTO runtime_access_settings(id,auto_pair) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET auto_pair=0", [])?;
             Ok(())
         }).await.expect("settings change");
-        http.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]}"#).expect("notification fixture")).expect("committed discovery hint");
+        http.resource_notifications.publish_once(&studio_json::from_str(r#"{"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]}"#).expect("notification fixture")).expect("committed discovery hint");
         let (frame, _) = next_frame(state).await.expect("discovery update");
         let event = event_document(frame).await;
         assert_eq!(
@@ -6572,10 +6572,10 @@ mod tests {
         value["resourceVersions"][0]["voiceRecords"] = json!({"after":0,"cursor":1,"session":null,"records":[{
             "id":"large","agent":"chat","session":"session","kind":"user","seq":1,"text":"x".repeat(SYNC_STREAM_EVENT_MAX_BYTES),"item_id":"","previous_item_id":"","payload":"{}","created":1.0
         }]});
-        let event = serde_json::from_value(value).expect("typed transient payload");
+        let event = studio_json::from_value(value).expect("typed transient payload");
         let bytes = frame_bytes(resource_sse_event(1, event)).await;
         assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
-        let event: Value = serde_json::from_str(
+        let event: Value = studio_json::from_str(
             std::str::from_utf8(&bytes)
                 .expect("UTF8")
                 .lines()
@@ -6785,7 +6785,7 @@ mod tests {
         .await
         .expect("frame");
         let frame = String::from_utf8(body.to_vec()).expect("UTF8");
-        serde_json::from_str(
+        studio_json::from_str(
             frame
                 .lines()
                 .find_map(|line| line.strip_prefix("data: "))
@@ -7054,7 +7054,7 @@ mod tests {
         );
         notifications
             .publish_once(
-                &serde_json::from_str(
+                &studio_json::from_str(
                     r#"{"requestId":"account-change","resources":[{"kind":"accounts"}]}"#,
                 )
                 .expect("notification fixture"),
@@ -7085,7 +7085,7 @@ mod tests {
             ]}
         ]);
         let expected: Vec<Vec<Value>> =
-            serde_json::from_str(include_str!("fixtures/sync_stream_stream.json"))
+            studio_json::from_str(include_str!("fixtures/sync_stream_stream.json"))
                 .expect("frozen reference documents");
         assert_eq!(expected.len(), cases.as_array().expect("cases").len());
         for (case, expected) in cases.as_array().expect("cases").iter().zip(expected) {
@@ -7229,7 +7229,7 @@ mod tests {
         assert_eq!(removed["removed"], json!(["active"]));
         // The borrowed frame must remain aligned with the generated OpenAPI DTO.
         for frame in [first, delta, unchanged, full, removed] {
-            serde_json::from_value::<crate::generated::ResourceTokenRatesEvent>(frame)
+            studio_json::from_value::<crate::generated::ResourceTokenRatesEvent>(frame)
                 .expect("generated token-rate frame contract");
         }
     }
@@ -7271,7 +7271,7 @@ mod tests {
         // The previous wire protocol sent this complete once-serialized list every time.
         let old = Event::default().event("token-rates").id(cursor.revision.to_string()).data(format!(
             r#"{{"protocol":{},"workspaceId":"workspace","epoch":{},"revision":{},"records":{}}}"#,
-            SYNC_PROTOCOL_VERSION, serde_json::to_string(&cursor.epoch).expect("epoch"), cursor.revision, rates.wire().records));
+            SYNC_PROTOCOL_VERSION, studio_json::to_string(&cursor.epoch).expect("epoch"), cursor.revision, rates.wire().records));
         let old = bytes(old).await;
         let delta = bytes(token_rate_sse_frame(&mut state).expect("delta")).await;
         assert!(delta.len() * 10 < old.len());
@@ -7293,7 +7293,7 @@ mod tests {
         use tower::ServiceExt;
         fn document(bytes: &[u8]) -> Value {
             let text = std::str::from_utf8(bytes).expect("UTF8");
-            serde_json::from_str(
+            studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),

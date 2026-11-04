@@ -6,7 +6,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -117,7 +117,7 @@ async fn connection_recovery_http_returns_the_synchronous_worker_status() {
     assert_eq!(response.status(), 200);
     let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
+        studio_json::from_slice::<Value>(&body).unwrap(),
         json!({"status":"reconciled","turnId":"turn-0","outcome":"completed"})
     );
     assert_eq!(port.0.load(Ordering::SeqCst), 1);
@@ -147,7 +147,7 @@ async fn connection_recovery_superseded_outcome_is_successful_http_result() {
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
+        studio_json::from_slice::<Value>(&body).unwrap(),
         json!({"status":"superseded"})
     );
 }

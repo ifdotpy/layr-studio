@@ -1,7 +1,7 @@
 //! Mac folder sync configuration and conflict resolution routes.
 
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_services::{linux_vm_guest::UnixGuestRpc, mac_sync};
 use studio_runtime_store::{AgentId, AgentRepository, Transaction};
@@ -305,7 +305,7 @@ inventory::submit! {
 mod tests {
     use super::*;
     use axum::body::Body;
-    use serde_json::json;
+    use studio_json::json;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
     use tokio_util::task::AbortOnDropHandle;
@@ -437,7 +437,7 @@ mod tests {
                 let mut reader = BufReader::new(stream);
                 let mut line = String::new();
                 reader.read_line(&mut line).await.expect("guest frame");
-                let request: Value = serde_json::from_str(&line).expect("guest request JSON");
+                let request: Value = studio_json::from_str(&line).expect("guest request JSON");
                 assert_eq!(
                     request["method"], method,
                     "retry must never repeat sync.mac.handoff"
@@ -573,7 +573,7 @@ mod tests {
                     .await
                     .expect("fixture operation succeeds");
                 let request: Value =
-                    serde_json::from_str(&line).expect("fixture operation succeeds");
+                    studio_json::from_str(&line).expect("fixture operation succeeds");
                 assert_eq!(request["method"], method);
                 let result = match method {
                     "sync.mac.head" => json!({"mainStateId":"main-1"}),
@@ -629,7 +629,7 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("fixture operation succeeds");
-        let value = serde_json::from_slice::<Value>(&bytes).expect("fixture operation succeeds");
+        let value = studio_json::from_slice::<Value>(&bytes).expect("fixture operation succeeds");
         assert_eq!(value["mainStateId"], "main-1");
         assert_eq!(value["status"]["state"], "synced");
         assert_eq!(
@@ -719,7 +719,7 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("fixture operation succeeds");
-        let value: Value = serde_json::from_slice(&bytes).expect("fixture operation succeeds");
+        let value: Value = studio_json::from_slice(&bytes).expect("fixture operation succeeds");
         assert_eq!(value["state"], "paused");
         assert_eq!(value["enabled"], false);
         assert!(project.join("sync/config.json").is_file());

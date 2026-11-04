@@ -1,7 +1,7 @@
 //! A committed conversation change must decode as the agent response it returns.
 #![allow(clippy::disallowed_methods)]
 
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_http::generated::AgentResponse;
 use studio_runtime_schema::agent_progress::AgentCommandProgress;
 use studio_runtime_services::sync_views::{AgentViewContext, agent_entity_view};
@@ -29,7 +29,7 @@ fn lead_with_a_running_command_projects_to_the_agent_response() {
         ..AgentViewContext::default()
     };
     let view = agent_entity_view(&record, &context).expect("agent view");
-    let decoded = serde_json::from_value::<AgentResponse>(view);
+    let decoded = studio_json::from_value::<AgentResponse>(view);
     assert!(
         decoded.is_ok(),
         "a running command must not make the committed response fail: {:?}",

@@ -2,7 +2,7 @@
 
 use axum::Json;
 use axum::extract::State;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::panels::{self, ProfileField};
 use studio_runtime_store::{ProfileRepository, ProfileRole, ReasoningEffort, StoreError};
@@ -119,7 +119,7 @@ async fn update_profiles(
                 .map_or("", |value| value.as_str()),
         )
         .map_err(profile_field_error)?;
-        let response = serde_json::to_value(&profile).map_err(|_| ApiError::internal())?;
+        let response = studio_json::to_value(&profile).map_err(|_| ApiError::internal())?;
         store
             .transaction_with(move |transaction| ProfileRepository::save(transaction, &profile))
             .await
@@ -254,23 +254,23 @@ mod strict_profile_tests {
 
     #[test]
     fn profile_input_is_closed_and_bounded() {
-        assert!(serde_json::from_str::<super::ProfileInput>(r#"{"name":"n","model":"m"}"#).is_ok());
-        assert!(serde_json::from_str::<super::ProfileInput>(r#"{"action":null}"#).is_err());
-        assert!(serde_json::from_str::<super::ProfileInput>(r#"{"role":null}"#).is_err());
-        assert!(serde_json::from_str::<super::ProfileInput>(r#"{"instructions":null}"#).is_err());
+        assert!(studio_json::from_str::<super::ProfileInput>(r#"{"name":"n","model":"m"}"#).is_ok());
+        assert!(studio_json::from_str::<super::ProfileInput>(r#"{"action":null}"#).is_err());
+        assert!(studio_json::from_str::<super::ProfileInput>(r#"{"role":null}"#).is_err());
+        assert!(studio_json::from_str::<super::ProfileInput>(r#"{"instructions":null}"#).is_err());
         assert!(
-            serde_json::from_str::<super::ProfileInput>(
+            studio_json::from_str::<super::ProfileInput>(
                 r#"{"action":"delete","role":"reviewer","instructions":""}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<super::ProfileInput>(&format!(
+            studio_json::from_str::<super::ProfileInput>(&format!(
                 r#"{{"name":"{}"}}"#,
                 "a".repeat(101)
             ))
             .is_err()
         );
-        assert!(serde_json::from_str::<super::ProfileInput>(r#"{"extra":1}"#).is_err());
+        assert!(studio_json::from_str::<super::ProfileInput>(r#"{"extra":1}"#).is_err());
     }
 }

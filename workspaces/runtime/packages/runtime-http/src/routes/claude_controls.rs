@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::claude_controls::{ClaudeControlCommand, ClaudeSessionRead};
@@ -173,31 +173,31 @@ mod session_request_tests {
     #[test]
     fn session_request_rejects_extra_fields_and_unbounded_stop_identity() {
         assert!(
-            serde_json::from_str::<SessionRequest>(
+            studio_json::from_str::<SessionRequest>(
                 r#"{"id":"agent","action":"command","command":"/help","request_id":"id"}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<SessionRequest>(
+            studio_json::from_str::<SessionRequest>(
                 r#"{"id":"agent","action":"command","command":"/help","request_id":""}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<super::BackupsRequest>(
+            studio_json::from_str::<super::BackupsRequest>(
                 r#"{"id":"a","release":true,"request_id":"r"}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<super::BackupsRequest>(
+            studio_json::from_str::<super::BackupsRequest>(
                 r#"{"id":"a","release":true,"request_id":"r","extra":1}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<super::BackupsRequest>(
+            studio_json::from_str::<super::BackupsRequest>(
                 r#"{"id":"a","release":true,"request_id":""}"#
             )
             .is_err()
@@ -212,7 +212,7 @@ mod session_request_tests {
             ),
         ] {
             assert!(
-                serde_json::from_str::<SessionRequest>(&body).is_err(),
+                studio_json::from_str::<SessionRequest>(&body).is_err(),
                 "{body}"
             );
         }
@@ -482,7 +482,7 @@ async fn command(state: HttpState, body: SessionCommand) -> Result<Json<Value>, 
         delivery: Some(studio_runtime_schema::DeliveryMoment::CurrentTurn),
     };
     let receipt = super::messages::send_message(state, message).await?;
-    serde_json::to_value(receipt.0)
+    studio_json::to_value(receipt.0)
         .map(Json)
         .map_err(|_| ApiError::internal())
 }

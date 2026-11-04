@@ -7,7 +7,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use studio_runtime_schema::{SYNC_ENTITY_SCOPE, SYNC_PROTOCOL_VERSION};
@@ -581,7 +581,7 @@ enum EntityPullResult {
 pub(crate) struct PreferencePushRequest {
     scope: String,
     #[serde(default)]
-    fields: serde_json::Map<String, Value>,
+    fields: studio_json::Map<String, Value>,
 }
 
 /// Maximum documents in one draft push. Unit: documents.
@@ -630,7 +630,7 @@ pub(crate) async fn push_drafts(
         if sync_policy::contains_unrepresentable_integer(&row.new_document_state.payload) {
             return Err(draft_validation_error(index, "newDocumentState", "payload"));
         }
-        let payload: Value = serde_json::from_str(&row.new_document_state.payload)
+        let payload: Value = studio_json::from_str(&row.new_document_state.payload)
             .map_err(|_| draft_validation_error(index, "newDocumentState", "payload"))?;
         if !validators.validate_stored("DraftPayload", &payload) {
             return Err(draft_validation_error(index, "newDocumentState", "payload"));
@@ -651,7 +651,7 @@ pub(crate) async fn push_drafts(
                         "payload",
                     ));
                 }
-                let payload: Value = serde_json::from_str(&assumed.payload)
+                let payload: Value = studio_json::from_str(&assumed.payload)
                     .map_err(|_| draft_validation_error(index, "assumedMasterState", "payload"))?;
                 if validate_draft_value(row.new_document_state.id.as_str(), &payload).is_err() {
                     return Err(draft_validation_error(
@@ -938,7 +938,7 @@ fn validate_generated<T: serde::Serialize>(
     validators: &crate::validation::Registry,
 ) -> bool {
     !cfg!(debug_assertions)
-        || serde_json::to_value(response)
+        || studio_json::to_value(response)
             .is_ok_and(|value| validators.validate_stored(schema, &value))
 }
 
@@ -1003,7 +1003,7 @@ pub(super) fn draft_document(
         return Err(invalid_stored_draft(&document.id));
     }
     let payload =
-        serde_json::from_str(&document.payload).map_err(|_| invalid_stored_draft(&document.id))?;
+        studio_json::from_str(&document.payload).map_err(|_| invalid_stored_draft(&document.id))?;
     validate_draft_value(&document.id, &payload).map_err(|_| invalid_stored_draft(&document.id))?;
     Ok(crate::generated::SyncDocument {
         id: document.id,
@@ -1034,7 +1034,7 @@ mod vault_maintenance_tests {
     };
     use axum::Json;
     use axum::response::IntoResponse;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_store::{ProjectsRepository, RuntimeStore, SyncDocumentsRepository};
 
@@ -1092,13 +1092,13 @@ mod vault_maintenance_tests {
             .push(json!({"rows":vec![json!({"newDocumentState":{"id":"x","payload":"{}"}}); 101]}));
         for case in cases {
             let schema = validator.is_valid(&case);
-            let typed = serde_json::from_str::<super::DraftPushRequest>(&case.to_string()).is_ok();
+            let typed = studio_json::from_str::<super::DraftPushRequest>(&case.to_string()).is_ok();
             assert_eq!(typed, schema, "{case}");
         }
     }
 
     fn response_value(response: &SyncPullResponseBody) -> Value {
-        serde_json::to_value(response).expect("generated sync response serializes")
+        studio_json::to_value(response).expect("generated sync response serializes")
     }
 
     #[tokio::test]
@@ -1157,7 +1157,7 @@ mod vault_maintenance_tests {
             .unwrap();
         let status = response.status();
         let body: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+            studio_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["documents"][0]["payload"], original);
@@ -1174,7 +1174,7 @@ mod vault_maintenance_tests {
             .unwrap();
         assert_eq!(conflict.status(), StatusCode::OK);
         let conflict: Value =
-            serde_json::from_slice(&to_bytes(conflict.into_body(), usize::MAX).await.unwrap())
+            studio_json::from_slice(&to_bytes(conflict.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(conflict.as_array().unwrap().len(), 1);
         assert_eq!(conflict[0]["payload"], original);
@@ -1187,7 +1187,7 @@ mod vault_maintenance_tests {
             .unwrap();
         let status = response.status();
         let body: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+            studio_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body, json!([]));
@@ -1197,7 +1197,7 @@ mod vault_maintenance_tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&stored.payload).unwrap(),
+            studio_json::from_str::<Value>(&stored.payload).unwrap(),
             canonical
         );
         #[derive(serde::Deserialize)]
@@ -1205,7 +1205,7 @@ mod vault_maintenance_tests {
             name: String,
             payload: Value,
         }
-        let fixtures: Vec<DraftFixture> = serde_json::from_str(include_str!(
+        let fixtures: Vec<DraftFixture> = studio_json::from_str(include_str!(
             "../../../../../client/contracts/draft-compatibility.json"
         ))
         .unwrap();
@@ -1226,7 +1226,7 @@ mod vault_maintenance_tests {
                 .unwrap();
             let status = response.status();
             let body: Value =
-                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                studio_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                     .unwrap();
             assert_eq!(status, StatusCode::OK, "{attempt}: {body}");
             assert_eq!(body, json!([]), "{attempt}");
@@ -1236,7 +1236,7 @@ mod vault_maintenance_tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(
-                serde_json::from_str::<Value>(&current.payload).unwrap(),
+                studio_json::from_str::<Value>(&current.payload).unwrap(),
                 native.payload,
                 "{attempt}: preserve all historical fields"
             );
@@ -1301,7 +1301,7 @@ mod vault_maintenance_tests {
             "initialHigh":9
         });
         let page: crate::generated::SyncPullResponse =
-            serde_json::from_value(page_json.clone()).expect("legacy page projects to DTO");
+            studio_json::from_value(page_json.clone()).expect("legacy page projects to DTO");
         let direct_page = crate::generated::SyncPullResponse {
             checkpoint: crate::generated::SyncCheckpoint { seq: 8 },
             documents: vec![
@@ -1323,7 +1323,7 @@ mod vault_maintenance_tests {
         };
         for value in [&page, &direct_page] {
             assert_eq!(
-                serde_json::to_value(value).expect("page serializes"),
+                studio_json::to_value(value).expect("page serializes"),
                 page_json
             );
         }
@@ -1333,7 +1333,7 @@ mod vault_maintenance_tests {
             "reset":true, "floor":3, "maxSeq":10
         });
         let reset: crate::generated::SyncPullResetResponse =
-            serde_json::from_value(reset_json.clone()).expect("legacy reset projects to DTO");
+            studio_json::from_value(reset_json.clone()).expect("legacy reset projects to DTO");
         let direct_reset = crate::generated::SyncPullResetResponse {
             floor: 3,
             generation: 7,
@@ -1343,7 +1343,7 @@ mod vault_maintenance_tests {
         };
         for value in [&reset, &direct_reset] {
             assert_eq!(
-                serde_json::to_value(value).expect("reset serializes"),
+                studio_json::to_value(value).expect("reset serializes"),
                 reset_json
             );
         }
@@ -1512,7 +1512,7 @@ mod vault_maintenance_tests {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("conflict response body is readable");
-        let body: Value = serde_json::from_slice(&body).expect("conflict response is JSON");
+        let body: Value = studio_json::from_slice(&body).expect("conflict response is JSON");
         assert_eq!(body["error"], super::ENTITY_PROJECTION_PREPARATION_CONFLICT);
         assert_eq!(
             interleavings.load(std::sync::atomic::Ordering::Relaxed),
@@ -1732,7 +1732,7 @@ mod vault_maintenance_tests {
                 |row| row.get(0),
             )
             .expect("project projection exists");
-        let first_payload: Value = serde_json::from_str(&first_payload).expect("JSON payload");
+        let first_payload: Value = studio_json::from_str(&first_payload).expect("JSON payload");
         assert_eq!(
             first_payload["value"]["vault"]["site"],
             "https://before.example/"
@@ -1755,7 +1755,7 @@ mod vault_maintenance_tests {
                 |row| row.get(0),
             )
             .expect("updated project projection exists");
-        let second_payload: Value = serde_json::from_str(&second_payload).expect("JSON payload");
+        let second_payload: Value = studio_json::from_str(&second_payload).expect("JSON payload");
         assert_eq!(
             second_payload["value"]["vault"]["site"],
             "https://after.example/"
@@ -1905,7 +1905,7 @@ mod vault_maintenance_tests {
         stream.next().await.unwrap().unwrap();
         let frame = stream.next().await.unwrap().unwrap();
         let frame = std::str::from_utf8(&frame).unwrap();
-        let body: Value = serde_json::from_str(
+        let body: Value = studio_json::from_str(
             frame
                 .lines()
                 .find_map(|line| line.strip_prefix("data: "))

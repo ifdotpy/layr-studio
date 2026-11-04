@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{error::ApiError, generated, router::HttpState};
 use axum::{Extension, Json, extract::State, http::StatusCode};
-use serde_json::Value;
+use studio_json::Value;
 use std::sync::Arc;
 use studio_runtime_services::{
     agent_lifecycle_runtime::{self, LifecyclePorts},
@@ -137,7 +137,7 @@ async fn native_action(
                     .filter(|value| !value.is_null())
                     .cloned()
                     .map(
-                        serde_json::from_value::<studio_runtime_services::idle_compaction::Episode>,
+                        studio_json::from_value::<studio_runtime_services::idle_compaction::Episode>,
                     )
                     .transpose()
                     .map_err(ApiError::json)?;
@@ -180,7 +180,7 @@ async fn run_native_action(
         studio_runtime_schema::usage_limits::UsageLimitsResponse,
     )>,
 ) -> Result<Json<Value>, ApiError> {
-    let value = serde_json::to_value(body).map_err(|_| ApiError::internal())?;
+    let value = studio_json::to_value(body).map_err(|_| ApiError::internal())?;
     let Some(action) = value.get("action").and_then(Value::as_str) else {
         let port = state.account_session.clone().ok_or_else(|| {
             ApiError::new(
@@ -283,7 +283,7 @@ async fn run_native_action(
         .get("context")
         .filter(|value| !value.is_null())
         .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
+        .unwrap_or_else(|| studio_json::json!({}));
     let request = native_actions::Request {
         request_id: request_id.to_owned(),
         agent: value["id"].as_str().unwrap_or_default().to_owned(),
@@ -733,7 +733,7 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
         limits: studio_runtime_schema::usage_limits::UsageLimitsResponse,
     ) -> studio_runtime_services::idle_compaction::HostFuture<'a> {
         Box::pin(async move {
-            let body = serde_json::from_value(serde_json::json!({
+            let body = studio_json::from_value(studio_json::json!({
                 "id":agent, "action":"compact", "request_id":episode.id, "context":episode.identity,
             }))
             .map_err(|error| error.to_string())?;
@@ -772,7 +772,7 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
 mod native_review_preflight_tests {
     use super::*;
     use base64::Engine;
-    use serde_json::json;
+    use studio_json::json;
     use std::{
         fs::File,
         io::Read,
@@ -1106,7 +1106,7 @@ mod native_review_preflight_tests {
             }
             if method == "project.import" {
                 return Ok(
-                    serde_json::json!({"projectId":params["projectId"],"stateId":"imported-state"}),
+                    studio_json::json!({"projectId":params["projectId"],"stateId":"imported-state"}),
                 );
             }
             if method == "provider.rpc" {

@@ -6,7 +6,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_store::{
@@ -33,7 +33,7 @@ async fn post(app: &axum::Router, body: Value) -> (u16, Value) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 
 fn owner_held_rule() -> Value {
@@ -65,7 +65,7 @@ async fn a_manual_pause_or_resume_replaces_the_owner_hold_pause() {
                 )?;
                 RulesRepository::put(
                     tx,
-                    &serde_json::from_value::<RuleRecord>(owner_held_rule())?,
+                    &studio_json::from_value::<RuleRecord>(owner_held_rule())?,
                 )?;
                 Ok::<_, studio_runtime_store::StoreError>(())
             })
@@ -83,7 +83,7 @@ async fn a_manual_pause_or_resume_replaces_the_owner_hold_pause() {
         let app = router(state).unwrap();
         let (code, body) = post(&app, json!({"action":action,"id":"rule","agent":"owner"})).await;
         assert_eq!(code, 200, "{action}: {body}");
-        let stored = serde_json::to_value(
+        let stored = studio_json::to_value(
             RulesRepository::get(&store.test_reader().unwrap(), "rule")
                 .unwrap()
                 .unwrap(),

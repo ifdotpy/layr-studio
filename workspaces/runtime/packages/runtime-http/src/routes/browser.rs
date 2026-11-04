@@ -5,7 +5,7 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     future::Future,
     net::SocketAddr,
@@ -59,7 +59,7 @@ impl PairedExchange for SignedBrowserExchange {
                 .unwrap_or(DeliveryOutcome::Unknown);
             Ok(match outcome {
                 DeliveryOutcome::Applied(value) => ExchangeOutcome::Applied(
-                    serde_json::from_str(value.value.get()).map_err(|_| BrowserError::Exchange)?,
+                    studio_json::from_str(value.value.as_str()).map_err(|_| BrowserError::Exchange)?,
                 ),
                 DeliveryOutcome::NotApplied(error) => ExchangeOutcome::NotApplied(error),
                 DeliveryOutcome::Unknown => ExchangeOutcome::Unknown,
@@ -208,7 +208,7 @@ inventory::submit! {
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tower::ServiceExt;
 
@@ -291,7 +291,7 @@ mod tests {
         let bytes = axum::body::to_bytes(refused.into_body(), 4096)
             .await
             .expect("refusal body");
-        let refusal: Value = serde_json::from_slice(&bytes).expect("refusal envelope");
+        let refusal: Value = studio_json::from_slice(&bytes).expect("refusal envelope");
         assert_eq!(
             refusal["error"],
             "Only a window on this computer can hold a sign-in port here."
@@ -392,7 +392,7 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("response body reads");
-        let body: Value = serde_json::from_slice(&bytes).expect("error envelope parses");
+        let body: Value = studio_json::from_slice(&bytes).expect("error envelope parses");
         assert_eq!(body, json!({"status":"forwarding"}));
         assert_eq!(store.committed_change_generation(), generation);
         assert!(
@@ -409,12 +409,12 @@ mod strict_forward_tests {
     #[test]
     fn forwarding_input_is_closed_and_bounded() {
         let valid = r#"{"server":"s","bridgeId":"0123456789abcdef0123456789abcdef","token":"0123456789abcdef","host":"localhost","port":1024,"path":"/","expiresAt":1}"#;
-        assert!(serde_json::from_str::<super::ForwardInput>(valid).is_ok());
+        assert!(studio_json::from_str::<super::ForwardInput>(valid).is_ok());
         assert!(
-            serde_json::from_str::<super::ForwardInput>(&valid.replace("1024", "1023")).is_err()
+            studio_json::from_str::<super::ForwardInput>(&valid.replace("1024", "1023")).is_err()
         );
         assert!(
-            serde_json::from_str::<super::ForwardInput>(
+            studio_json::from_str::<super::ForwardInput>(
                 &valid.replace(r#""expiresAt""#, r#""extra":1,"expiresAt""#)
             )
             .is_err()

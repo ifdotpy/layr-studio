@@ -6,7 +6,7 @@ use crate::error::ApiError;
 use crate::router::HttpState;
 use axum::{Json, extract::State, http::StatusCode};
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -57,8 +57,8 @@ enum DeskProjectOrOther {
     Other(serde::de::IgnoredAny),
 }
 
-fn desk_service_status(raw: &str) -> Result<DeskServiceStatus, serde_json::Error> {
-    serde_json::from_str::<JsonObject<DeskServiceStatus>>(raw).map(|view| view.0)
+fn desk_service_status(raw: &str) -> Result<DeskServiceStatus, studio_json::Error> {
+    studio_json::from_str::<JsonObject<DeskServiceStatus>>(raw).map(|view| view.0)
 }
 
 use studio_runtime_schema::progress_selector::VaultJob as VaultJobKind;
@@ -397,7 +397,7 @@ async fn aws_login(
         .vault_host_command
         .clone()
         .ok_or_else(ApiError::internal)?;
-    let initial = serde_json::json!({"requestId":request_id,"state":"running"});
+    let initial = studio_json::json!({"requestId":request_id,"state":"running"});
     let (job, started) =
         reserve_job(&job_client, VaultJobKind::Login, &request_id, initial).await?;
     if started {
@@ -456,7 +456,7 @@ async fn pull(
         .ok_or_else(ApiError::internal)?;
     let desk_program = host_command.desk_program().map_err(vault_error)?;
     let host_command = host_command.with_desk_program(desk_program);
-    let initial = serde_json::json!({"requestId":request_id,"state":"running","folder":target});
+    let initial = studio_json::json!({"requestId":request_id,"state":"running","folder":target});
     let (job, started) = reserve_job(&job_client, VaultJobKind::Pull, &request_id, initial).await?;
     if started {
         let args = vec![
@@ -505,7 +505,7 @@ async fn setup(
     let writer = host_command
         .writer(&source, &vm_state_dir)
         .map_err(vault_error)?;
-    let initial = serde_json::json!({"requestId":request_id,"state":"running","prefix":prefix});
+    let initial = studio_json::json!({"requestId":request_id,"state":"running","prefix":prefix});
     let (job, started) =
         reserve_job(&job_client, VaultJobKind::Setup, &request_id, initial).await?;
     if started {
@@ -567,7 +567,7 @@ async fn setup_facts(
             format!("layr-desk aws-profiles: {reason}"),
         ));
     }
-    let profiles: Value = serde_json::from_str(&output.stdout).map_err(|_| {
+    let profiles: Value = studio_json::from_str(&output.stdout).map_err(|_| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
             "layr-desk aws-profiles returned invalid JSON",
@@ -721,7 +721,7 @@ fn login_progress(
     request_id: &str,
     line: &str,
 ) -> Result<(), &'static str> {
-    let view = serde_json::from_str::<
+    let view = studio_json::from_str::<
         Option<studio_runtime_schema::json_object::JsonObject<DeskLogin>>,
     >(line)
     .map_err(|_| INVALID_LOGIN_JSON)?;
@@ -734,7 +734,7 @@ fn login_progress(
             client,
             VaultJobKind::Login,
             request_id,
-            serde_json::json!({"page":page,"code":code.chars().take(40).collect::<String>()}),
+            studio_json::json!({"page":page,"code":code.chars().take(40).collect::<String>()}),
             false,
         );
     }
@@ -747,7 +747,7 @@ fn setup_progress(client: &VaultJobClient, request_id: &str, line: &str) {
             client,
             VaultJobKind::Setup,
             request_id,
-            serde_json::json!({"progress":progress.trim().chars().take(200).collect::<String>()}),
+            studio_json::json!({"progress":progress.trim().chars().take(200).collect::<String>()}),
             false,
         );
     }
@@ -800,7 +800,7 @@ async fn run_login_job(
             &job_client,
             VaultJobKind::Login,
             &request_id,
-            serde_json::json!({"state":"failed","error":error}),
+            studio_json::json!({"state":"failed","error":error}),
         )
         .await;
         return;
@@ -811,7 +811,7 @@ async fn run_login_job(
                 &job_client,
                 VaultJobKind::Login,
                 &request_id,
-                serde_json::json!(crate::generated::VaultLoginDone {
+                studio_json::json!(crate::generated::VaultLoginDone {
                     state: crate::generated::VaultLoginDoneState::Done
                 }),
             )
@@ -823,7 +823,7 @@ async fn run_login_job(
                 &job_client,
                 VaultJobKind::Login,
                 &request_id,
-                serde_json::json!({"state":"failed","error":error}),
+                studio_json::json!({"state":"failed","error":error}),
             )
             .await;
         }
@@ -832,7 +832,7 @@ async fn run_login_job(
                 &job_client,
                 VaultJobKind::Login,
                 &request_id,
-                serde_json::json!({"state":"failed","error":error.to_string()}),
+                studio_json::json!({"state":"failed","error":error.to_string()}),
             )
             .await;
         }
@@ -901,7 +901,7 @@ async fn run_setup_job(job: SetupJob) {
             &job_client,
             VaultJobKind::Setup,
             &request_id,
-            serde_json::json!({"state":"failed","error":error}),
+            studio_json::json!({"state":"failed","error":error}),
         )
         .await;
         return;
@@ -913,7 +913,7 @@ async fn run_setup_job(job: SetupJob) {
                 .lines()
                 .rfind(|line| !line.trim().is_empty())
                 .and_then(|line| {
-                    serde_json::from_str::<
+                    studio_json::from_str::<
                         studio_runtime_schema::json_object::JsonObject<DeskDeployment>,
                     >(line.trim())
                     .ok()
@@ -931,7 +931,7 @@ async fn run_setup_job(job: SetupJob) {
                         &job_client,
                         VaultJobKind::Setup,
                         &request_id,
-                        serde_json::json!(crate::generated::VaultSetupDone {
+                        studio_json::json!(crate::generated::VaultSetupDone {
                             state: crate::generated::VaultSetupDoneState::Done,
                             site
                         }),
@@ -942,7 +942,7 @@ async fn run_setup_job(job: SetupJob) {
                     &job_client,
                     VaultJobKind::Setup,
                     &request_id,
-                    serde_json::json!({"state":"failed","error":"layr-desk returned invalid JSON"}),
+                    studio_json::json!({"state":"failed","error":"layr-desk returned invalid JSON"}),
                 )
                 .await,
             }
@@ -953,7 +953,7 @@ async fn run_setup_job(job: SetupJob) {
                 &job_client,
                 VaultJobKind::Setup,
                 &request_id,
-                serde_json::json!({"state":"signin","error":error}),
+                studio_json::json!({"state":"signin","error":error}),
             )
             .await;
         }
@@ -963,7 +963,7 @@ async fn run_setup_job(job: SetupJob) {
                 &job_client,
                 VaultJobKind::Setup,
                 &request_id,
-                serde_json::json!({"state":"failed","error":error}),
+                studio_json::json!({"state":"failed","error":error}),
             )
             .await;
         }
@@ -972,7 +972,7 @@ async fn run_setup_job(job: SetupJob) {
                 &job_client,
                 VaultJobKind::Setup,
                 &request_id,
-                serde_json::json!({"state":"failed","error":error.to_string()}),
+                studio_json::json!({"state":"failed","error":error.to_string()}),
             )
             .await
         }
@@ -1082,7 +1082,7 @@ async fn unlock(
         .await
         .map_err(vault_error)?;
     state.sync_changes.notify_one();
-    Ok(Json(serde_json::json!({"unlocked":true})))
+    Ok(Json(studio_json::json!({"unlocked":true})))
 }
 
 async fn run_pull_job(
@@ -1101,31 +1101,31 @@ async fn run_pull_job(
         .await;
     let fields = match result {
         Ok(result) if result.timed_out => {
-            serde_json::json!({"state":"failed","error":"layr-desk pull timed out"})
+            studio_json::json!({"state":"failed","error":"layr-desk pull timed out"})
         }
         Ok(result) if result.code == Some(0) => {
-            let outcome = serde_json::from_str::<Value>(&result.stdout)
+            let outcome = studio_json::from_str::<Value>(&result.stdout)
                 .ok()
                 .filter(|value| {
                     studio_runtime_schema::validate("VaultPullOutcome", value).unwrap_or(false)
                 })
                 .and_then(|value| {
-                    serde_json::from_value::<crate::generated::VaultPullOutcome>(value).ok()
+                    studio_json::from_value::<crate::generated::VaultPullOutcome>(value).ok()
                 });
             match outcome {
-                Some(outcome) => serde_json::json!(crate::generated::VaultPullDone {
+                Some(outcome) => studio_json::json!(crate::generated::VaultPullDone {
                     state: crate::generated::VaultPullDoneState::Done,
                     seq: outcome.seq,
                     files: outcome.files,
                     bytes: outcome.bytes,
                 }),
-                None => serde_json::json!({"state":"failed","error":"KeyError: 'seq'"}),
+                None => studio_json::json!({"state":"failed","error":"KeyError: 'seq'"}),
             }
         }
         Ok(result) => {
-            serde_json::json!({"state":"failed","error":desk_reason(&result.stderr,&result.stdout)})
+            studio_json::json!({"state":"failed","error":desk_reason(&result.stderr,&result.stdout)})
         }
-        Err(error) => serde_json::json!({"state":"failed","error":error.to_string()}),
+        Err(error) => studio_json::json!({"state":"failed","error":error.to_string()}),
     };
     finish_job(&job_client, VaultJobKind::Pull, &request_id, fields).await;
 }
@@ -1274,7 +1274,7 @@ async fn refresh_mac_views(
             return Err(studio_runtime_services::vault::VaultError::DeskFailed);
         }
         let JsonObject(DeskProjects { projects }): JsonObject<DeskProjects> =
-            serde_json::from_str(&result.stdout)
+            studio_json::from_str(&result.stdout)
                 .map_err(|_| studio_runtime_services::vault::VaultError::DeskFailed)?;
         let unlocked = projects
             .into_iter()
@@ -1364,7 +1364,7 @@ mod tests {
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use axum::http::{Method, Request, StatusCode};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -1434,10 +1434,10 @@ mod tests {
         );
         assert!(!desk_producer_fields_match(main, service, &changed_setup));
         let view: JsonObject<super::DeskLogin> =
-            serde_json::from_str(r#"{"page":"https://x","code":null}"#).unwrap();
+            studio_json::from_str(r#"{"page":"https://x","code":null}"#).unwrap();
         assert_eq!(view.0.page.as_deref(), Some("https://x"));
         assert_eq!(view.0.code, None);
-        assert!(serde_json::from_str::<JsonObject<super::DeskLogin>>(r#"{"page":42}"#).is_err());
+        assert!(studio_json::from_str::<JsonObject<super::DeskLogin>>(r#"{"page":42}"#).is_err());
         let view =
             super::desk_service_status(r#"{"installed":true,"site":"s","program":null}"#).unwrap();
         assert_eq!(view.installed, Some(true));
@@ -1632,7 +1632,7 @@ mod tests {
                     cursor: state.sync_changes.snapshot(),
                     resources: vec![
                         crate::routes::sync_stream::SubscribedResource::new(
-                            serde_json::from_value(resource.clone()).expect("resource fixture"),
+                            studio_json::from_value(resource.clone()).expect("resource fixture"),
                         )
                         .expect("resource identity"),
                     ],
@@ -1855,7 +1855,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let response: Value = serde_json::from_slice(&body).unwrap();
+        let response: Value = studio_json::from_slice(&body).unwrap();
         assert_eq!(
             response,
             json!({
@@ -1931,7 +1931,7 @@ mod tests {
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(
             project.join("project.json"),
-            serde_json::to_vec(&json!({
+            studio_json::to_vec(&json!({
                 "projectId":"p1",
                 "source":source.to_string_lossy()
             }))
@@ -1975,7 +1975,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let initial: Value = serde_json::from_slice(&body).unwrap();
+        let initial: Value = studio_json::from_slice(&body).unwrap();
         assert_eq!(initial["requestId"], request_id);
         assert_eq!(initial["state"], "running");
         assert_eq!(initial["prefix"], prefix);
@@ -2022,7 +2022,7 @@ mod tests {
             .unwrap();
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
         assert_eq!(
-            serde_json::from_slice::<Value>(&body).unwrap(),
+            studio_json::from_slice::<Value>(&body).unwrap(),
             json!({"unlocked":true})
         );
         assert!(
@@ -2030,7 +2030,7 @@ mod tests {
                 .windows(b"fixture paper words".len())
                 .any(|window| window == b"fixture paper words")
         );
-        let mac: Value = serde_json::from_slice(
+        let mac: Value = studio_json::from_slice(
             &std::fs::read(
                 state
                     .path()
@@ -2081,7 +2081,7 @@ mod tests {
             .unwrap();
         assert_eq!(job["state"], "done");
         assert_eq!(job["site"], "https://desk.example/");
-        let mac: Value = serde_json::from_slice(
+        let mac: Value = studio_json::from_slice(
             &std::fs::read(
                 state
                     .path()
@@ -2140,7 +2140,7 @@ else exit 94; fi"#;
             .unwrap();
         assert_eq!(job["site"], "https://desk.example/");
         assert_eq!(job["state"], "done");
-        let mac: Value = serde_json::from_slice(
+        let mac: Value = studio_json::from_slice(
             &std::fs::read(
                 state
                     .path()
@@ -2319,7 +2319,7 @@ else exit 94; fi"#;
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let initial: Value = serde_json::from_slice(&body).unwrap();
+        let initial: Value = studio_json::from_slice(&body).unwrap();
         assert_eq!(initial["state"], "running");
         let result = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -2345,7 +2345,7 @@ else exit 94; fi"#;
             .await
             .unwrap();
         assert_eq!(
-            serde_json::from_slice::<Value>(&replay_body).unwrap(),
+            studio_json::from_slice::<Value>(&replay_body).unwrap(),
             result
         );
         let replay = super::pull(
@@ -2380,7 +2380,7 @@ else exit 94; fi"#;
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let response: Value = serde_json::from_slice(&body).unwrap();
+        let response: Value = studio_json::from_slice(&body).unwrap();
 
         assert!(!response.to_string().contains("secret value"));
         assert!(
@@ -2406,7 +2406,7 @@ else exit 94; fi"#;
             .await
             .unwrap();
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let response: Value = serde_json::from_slice(&body).unwrap();
+        let response: Value = studio_json::from_slice(&body).unwrap();
         assert_eq!(response, json!({"projectId":"p1","names":["TOKEN"]}));
         assert!(!response.to_string().contains("generated-test-value"));
         assert_eq!(

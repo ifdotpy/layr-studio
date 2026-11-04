@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::extract::State;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::io::{self, Read};
 use studio_runtime_schema::desktop::DiskSpaceStatus;
@@ -181,7 +181,7 @@ inventory::submit! {
 mod tests {
     use super::{backend_build_from, is_sha256_hex, sha256_reader};
     use axum::{body::to_bytes, extract::ConnectInfo, http::Request};
-    use serde_json::Value;
+    use studio_json::Value;
     use std::{io::Cursor, sync::Arc, time::Instant};
     use studio_runtime_services::provider_versions::{
         ActiveProviderConnections, Clock, ProviderPortError, ProviderProfile,
@@ -408,7 +408,7 @@ mod tests {
             Arc::new(move |_| Some(free.load(Ordering::SeqCst)))
         });
         let first =
-            serde_json::to_vec(&super::status(&state, gate.status())).expect("served desktop");
+            studio_json::to_vec(&super::status(&state, gate.status())).expect("served desktop");
         let baseline = published_interval(&state, gate.status(), None).await;
         let mut cursor = baseline.cursor;
         let start = Instant::now();
@@ -436,7 +436,7 @@ mod tests {
             let disk = gate.status();
             assert_eq!(disk.level, expected_level);
             let content =
-                serde_json::to_vec(&super::status(&state, disk.clone())).expect("served desktop");
+                studio_json::to_vec(&super::status(&state, disk.clone())).expect("served desktop");
             if expected_level.is_none() {
                 assert_eq!(content, first, "the entire served identity stays stable");
             }
@@ -525,13 +525,13 @@ mod tests {
         let body = to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("bounded response body");
-        let value: Value = serde_json::from_slice(&body).expect("JSON response");
+        let value: Value = studio_json::from_slice(&body).expect("JSON response");
         assert!(is_sha256_hex(
             value["backendBuild"].as_str().expect("build ID")
         ));
         assert_eq!(
             value["providerVersions"],
-            serde_json::json!({"checkedAt":null,"providers":[],"warnings":[]})
+            studio_json::json!({"checkedAt":null,"providers":[],"warnings":[]})
         );
     }
 
@@ -591,9 +591,9 @@ mod tests {
         let body = to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("bounded response body");
-        let actual: Value = serde_json::from_slice(&body).expect("JSON response");
+        let actual: Value = studio_json::from_slice(&body).expect("JSON response");
 
-        let expected: Value = serde_json::from_str(include_str!(
+        let expected: Value = studio_json::from_str(include_str!(
             "../../../runtime-services/tests/provider_versions/projection.json"
         ))
         .expect("frozen provider projection");

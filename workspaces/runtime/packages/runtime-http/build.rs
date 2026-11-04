@@ -116,7 +116,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=openapi.json");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let document: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
+    let document: studio_json::Value = studio_json::from_slice(&fs::read(&spec_path)?)?;
     let mut analyzer = SchemaAnalyzer::new(document.clone())?;
     let mut analysis = analyzer.analyze()?;
     analysis
@@ -464,9 +464,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "TeamCounts",
             "studio_runtime_schema::agent_progress::TeamCounts",
         ),
-        ("VaultPullSequence", "serde_json::Number"),
-        ("VaultPullFiles", "serde_json::Number"),
-        ("VaultPullBytes", "serde_json::Number"),
+        ("VaultPullSequence", "studio_json::Number"),
+        ("VaultPullFiles", "studio_json::Number"),
+        ("VaultPullBytes", "studio_json::Number"),
         (
             "ProviderModel",
             "studio_runtime_schema::model_catalog::ProviderModel",
@@ -682,7 +682,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or("missing entity value")?
         .clone();
     value_property.schema_type = SchemaType::Primitive {
-        rust_type: "serde_json::Value".to_owned(),
+        rust_type: "studio_json::Value".to_owned(),
         serde_with: None,
     };
     let SchemaType::Object {
@@ -729,7 +729,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     return Err(format!("unsupported nullable constraint in {name}.{field}").into());
                 }
                 let details: openapi_to_rust::openapi::SchemaDetails =
-                    serde_json::from_value(non_null[0].clone())?;
+                    studio_json::from_value(non_null[0].clone())?;
                 property.constraints = PropertyConstraints::from_schema_details(&details);
             }
             let constraints = &property.constraints;
@@ -858,7 +858,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         module_lines.push(format!(
             "{attributes}pub mod {module} {{ include!(concat!(env!(\"OUT_DIR\"), \"/generated/{module}.rs\")); }}"
         ));
-        fs::write(path, body)?;
+        fs::write(path, body.replace("serde_json::", "studio_json::"))?;
     }
     if modules.iter().any(|module| module == "types") {
         module_lines.push("pub use types::*;".to_owned());

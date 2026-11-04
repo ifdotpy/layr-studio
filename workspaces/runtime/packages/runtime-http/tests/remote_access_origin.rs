@@ -6,7 +6,7 @@
 use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
-use serde_json::Value;
+use studio_json::Value;
 use std::path::Path;
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
@@ -20,7 +20,7 @@ const ORIGIN: &str = "https://studio.example.ts.net";
 fn configure(root: &Path, enabled: bool) {
     std::fs::write(
         root.join(REMOTE_ACCESS_FILE),
-        serde_json::json!({"enabled": enabled, "origin": ORIGIN}).to_string(),
+        studio_json::json!({"enabled": enabled, "origin": ORIGIN}).to_string(),
     )
     .unwrap();
 }
@@ -46,7 +46,7 @@ async fn send(app: &axum::Router, path: &str) -> (StatusCode, Value) {
     let response = app.clone().oneshot(forwarded(path)).await.unwrap();
     let status = response.status();
     let body = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+    (status, studio_json::from_slice(&body).unwrap_or(Value::Null))
 }
 
 #[tokio::test]

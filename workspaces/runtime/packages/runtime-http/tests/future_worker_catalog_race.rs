@@ -6,7 +6,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
@@ -154,7 +154,7 @@ impl Fixture {
             TARGET:{"id":TARGET,"home":target_home,"provider":"codex","label":"Future","source":"Fixture","status":"ready"},
             OLD:{"id":OLD,"home":old_home,"provider":"codex","label":"Existing","source":"Fixture","status":"ready"}
         },"logins":{},"deleteReceipts":{}});
-        let registry_bytes = serde_json::to_vec(&registry).expect("registry bytes");
+        let registry_bytes = studio_json::to_vec(&registry).expect("registry bytes");
         let registry_path = cwd.join("accounts.json");
         std::fs::write(&registry_path, &registry_bytes).expect("fixture registry");
         let driver = Arc::new(AccountDriver::open(&registry_path).expect("real account driver"));
@@ -250,7 +250,7 @@ async fn call(app: &axum::Router, method: &str, uri: &str, body: Option<Value>) 
         .expect("response body");
     (
         status,
-        serde_json::from_slice(&bytes).expect("response JSON"),
+        studio_json::from_slice(&bytes).expect("response JSON"),
     )
 }
 
@@ -264,7 +264,7 @@ fn actor(store: &RuntimeStore, id: &str) -> Value {
             |row| row.get(0),
         )
         .expect("fixture actor");
-    serde_json::from_str(&raw).expect("actor JSON")
+    studio_json::from_str(&raw).expect("actor JSON")
 }
 
 #[tokio::test]

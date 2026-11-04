@@ -5,7 +5,7 @@ use super::manifest::{OperationStatus, RouteGroup, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use serde_json::Value;
+use studio_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use studio_runtime_schema::http_bounded_ingress as bounds;
@@ -688,18 +688,18 @@ inventory::submit! {
 mod strict_question_tests {
     #[test]
     fn question_requests_are_closed() {
-        assert!(serde_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":"t"}"#).is_ok());
-        assert!(serde_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":""}"#).is_err());
+        assert!(studio_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":"t"}"#).is_ok());
+        assert!(studio_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":""}"#).is_err());
         assert!(
-            serde_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":"t","extra":1}"#)
+            studio_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":"t","extra":1}"#)
                 .is_err()
         );
-        assert!(serde_json::from_str::<super::DeferBody>(r#"{"id":"a","deferred":true}"#).is_ok());
+        assert!(studio_json::from_str::<super::DeferBody>(r#"{"id":"a","deferred":true}"#).is_ok());
         assert!(
-            serde_json::from_str::<super::DeferBody>(r#"{"id":"a","deferred":true,"extra":1}"#)
+            studio_json::from_str::<super::DeferBody>(r#"{"id":"a","deferred":true,"extra":1}"#)
                 .is_err()
         );
-        assert!(serde_json::from_str::<super::DeleteBody>(r#"{"id":"a","deferred":null}"#).is_ok());
-        assert!(serde_json::from_str::<super::DeleteBody>(r#"{"id":"a","extra":1}"#).is_err());
+        assert!(studio_json::from_str::<super::DeleteBody>(r#"{"id":"a","deferred":null}"#).is_ok());
+        assert!(studio_json::from_str::<super::DeleteBody>(r#"{"id":"a","extra":1}"#).is_err());
     }
 }

@@ -7,7 +7,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::work_write::{
     self, AcceptWork, SubmitWork, WorkWrite, WorkWriteError,
 };
@@ -268,7 +268,7 @@ async fn perform(
     body: Value,
     actor_id: Option<String>,
 ) -> Result<Value, ApiError> {
-    let body: WorkRequest = serde_json::from_value(body)
+    let body: WorkRequest = studio_json::from_value(body)
         .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "Invalid task arguments"))?;
     perform_typed(state, runtime, body, actor_id).await
 }
@@ -295,7 +295,7 @@ async fn prepare_vm_accept(
         VmAcceptPreparation::NotVm => {}
         VmAcceptPreparation::Merged(result_id) => input.merged_result_id = Some(result_id),
         VmAcceptPreparation::Call(call) => {
-            let params = serde_json::json!({
+            let params = studio_json::json!({
                 "agentId": call.lead_id,
                 "sourceAgentId": call.owner_id,
                 "expectedStateId": call.revision,
@@ -342,7 +342,7 @@ async fn prepare_vm_accept(
                     let request = call.request_id;
                     let merge = response
                         .get("merge")
-                        .map(|value| serde_json::from_value(value.clone()))
+                        .map(|value| studio_json::from_value(value.clone()))
                         .transpose()
                         .map_err(|_| ApiError::internal())?;
                     finish_vm_accept(&store, &task_id, &request, None, merge)
@@ -404,7 +404,7 @@ async fn prepare_vm_submission(
             input.vm_evidence_request_id = Some(request_id);
         }
         VmSubmissionPreparation::Call(call) => {
-            let params = serde_json::json!({
+            let params = studio_json::json!({
                 "agentId": call.owner_id,
                 "stateId": call.revision,
             });
@@ -562,7 +562,7 @@ async fn commit(
                     let root = result.record["rootId"].as_str().unwrap_or_default();
                     let result_id = submission["id"].as_str().unwrap_or_default();
                     let key = format!("work-result:{result_id}");
-                    let text = serde_json::to_string(&serde_json::json!({
+                    let text = studio_json::to_string(&studio_json::json!({
                         "task": result.record["id"],
                         "title": result.record["title"],
                         "result": submission,
@@ -670,16 +670,16 @@ const REVIEW_RESULT_REQUIRED: &str = studio_runtime_schema::task_command::REVIEW
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::task_command::Version;
 
     #[test]
     fn typed_work_signature_is_stable() {
         let first: super::WorkRequest =
-            serde_json::from_str(r#"{"action":"claim","task_id":"task","version":1.0}"#)
+            studio_json::from_str(r#"{"action":"claim","task_id":"task","version":1.0}"#)
                 .expect("first");
         let second: super::WorkRequest =
-            serde_json::from_str(r#"{"version":1,"task_id":"task","action":"claim"}"#)
+            studio_json::from_str(r#"{"version":1,"task_id":"task","action":"claim"}"#)
                 .expect("retry");
         let first = super::work_items::work_request_signature("agent", None, &first)
             .expect("first signature");
@@ -691,16 +691,16 @@ mod tests {
     #[test]
     fn typed_work_requires_nullable_gate_and_rejects_unknown_fields() {
         assert!(
-            serde_json::from_str::<super::WorkRequest>(r#"{"action":"set_default_gate"}"#).is_err()
+            studio_json::from_str::<super::WorkRequest>(r#"{"action":"set_default_gate"}"#).is_err()
         );
         assert!(
-            serde_json::from_str::<super::WorkRequest>(
+            studio_json::from_str::<super::WorkRequest>(
                 r#"{"action":"set_default_gate","gate":null}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<super::WorkRequest>(r#"{"action":"list","extra":true}"#)
+            studio_json::from_str::<super::WorkRequest>(r#"{"action":"list","extra":true}"#)
                 .is_err()
         );
     }
@@ -708,19 +708,19 @@ mod tests {
     #[test]
     fn integral_decimal_version_keeps_its_stale_value() {
         assert_eq!(
-            serde_json::from_value::<Version>(json!(0.0))
+            studio_json::from_value::<Version>(json!(0.0))
                 .expect("integral version")
                 .get(),
             0
         );
-        assert!(serde_json::from_value::<Version>(json!(1.5)).is_err());
+        assert!(studio_json::from_value::<Version>(json!(1.5)).is_err());
     }
 }
 #[cfg(test)]
 mod managed_work_port_tests {
     use super::managed_work_port;
     use crate::router::HttpState;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_services::provider_callbacks::WorkActionOutcome;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
@@ -891,7 +891,7 @@ mod managed_work_port_tests {
                 .expect("exact saved receipt");
             assert_eq!(actual_signature, signature);
             assert_eq!(
-                serde_json::from_str::<Value>(&actual_result).expect("envelope")["reply"],
+                studio_json::from_str::<Value>(&actual_result).expect("envelope")["reply"],
                 created
             );
             assert_eq!(task_count, 1, "replay creates no additional task");
@@ -966,7 +966,7 @@ mod managed_work_port_tests {
         };
         let before = snapshot();
         assert_eq!(
-            serde_json::from_str::<Value>(&before.0).expect("stored task")["status"],
+            studio_json::from_str::<Value>(&before.0).expect("stored task")["status"],
             "running"
         );
         store.transaction(|tx| {
@@ -1178,7 +1178,7 @@ mod managed_work_port_tests {
     async fn read_task_tool(store: Arc<RuntimeStore>, task: &str, action: &str) -> Value {
         let body = task_tool_reply(store, action, json!({"action":action,"task_id":task})).await;
         assert_eq!(body["success"], true, "{body}");
-        serde_json::from_str(body["contentItems"][0]["text"].as_str().expect("text"))
+        studio_json::from_str(body["contentItems"][0]["text"].as_str().expect("text"))
             .expect("JSON tool output")
     }
 
@@ -1243,7 +1243,7 @@ mod managed_work_port_tests {
             port.act("worker", &args, &request_id("invalid-submit"))
                 .await,
         );
-        let error: Value = serde_json::from_str(&message).expect("structured refusal");
+        let error: Value = studio_json::from_str(&message).expect("structured refusal");
         assert_eq!(error["errors"][0]["path"], "/count");
         assert_eq!(error["failedSubmits"], 1);
         assert_eq!(
@@ -1262,7 +1262,7 @@ mod managed_work_port_tests {
             .expect("read")
             .expect("task");
         assert_eq!(saved.value()["version"], before["version"]);
-        assert_eq!(serde_json::json!(saved.status()), before["status"]);
+        assert_eq!(studio_json::json!(saved.status()), before["status"]);
         assert_eq!(saved.value()["results"], before["results"]);
         assert!(saved.extension("submissionRefusal").is_none());
         let mut valid = args;
@@ -1309,7 +1309,7 @@ mod managed_work_port_tests {
                 port.act("worker", &args, &request_id(&format!("invalid-{index}")))
                     .await,
             );
-            let refusal: Value = serde_json::from_str(&message).expect("refusal");
+            let refusal: Value = studio_json::from_str(&message).expect("refusal");
             assert_eq!(refusal["failedSubmits"], index + 1);
         }
         args["result"] = json!({"count":2});
@@ -1411,7 +1411,7 @@ mod managed_work_port_tests {
         let args = json!({"action":"submit", "task_id":task,
             "result":{"count":"invalid"}, "checks":"checked",
             "revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"});
-        let refusal: Value = serde_json::from_str(&refused(
+        let refusal: Value = studio_json::from_str(&refused(
             port.act("worker", &args, &request_id("schema-gate-invalid"))
                 .await,
         ))
@@ -1756,7 +1756,7 @@ mod managed_work_port_tests {
                 "{action}"
             );
             assert_eq!(
-                serde_json::json!(unchanged.status()),
+                studio_json::json!(unchanged.status()),
                 submitted["status"],
                 "{action}"
             );

@@ -6,8 +6,8 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
-use serde_json::Value;
-use serde_json::json;
+use studio_json::Value;
+use studio_json::json;
 use std::time::{Duration, Instant};
 use studio_runtime_schema::{
     queue_command::Field,
@@ -240,8 +240,8 @@ async fn restore_owned(
                     "expectedTree":expected_tree,"signature":signature,"source":source,
                     "phase":"provider_pending","created":now_seconds(),
                     "rootRequestId":studio_runtime_schema::persistence::RequestIdentity::issue_root()
-                })).map_err(ApiError::json)?;
-                tx.execute("INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)", rusqlite::params![operation_id, serde_json::to_string(&operation).map_err(ApiError::json)?]).map_err(|error| ApiError::stored(error.into()))?;
+                })).map_err(|error| ApiError::json(error.into()))?;
+                tx.execute("INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)", rusqlite::params![operation_id, studio_json::to_string(&operation).map_err(|error| ApiError::json(error.into()))?]).map_err(|error| ApiError::stored(error.into()))?;
                 let mut actor = AgentRepository::get(tx, &snapshot.agent.id).map_err(ApiError::stored)?
                     .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Unknown managed agent"))?.value();
                 actor["workspaceOperation"] = json!("restore");
@@ -295,7 +295,7 @@ async fn restore_owned(
         port.provider_request(
             studio_runtime_services::account_session_runtime::ProviderRequest {
                 root_request_id: operation_state.extensions().get("rootRequestId").and_then(Value::as_str).or_else(|| operation_state.extensions().get("providerAdmission").map(|_| "")).ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "The restore request identity is unavailable; inspect workspace recovery"))?.to_owned(),
-                admitted_request: operation_state.extensions().get("providerAdmission").map(Deserialize::deserialize).transpose().map_err(ApiError::json)?,
+                admitted_request: operation_state.extensions().get("providerAdmission").map(Deserialize::deserialize).transpose().map_err(|error| ApiError::json(error.into()))?,
                 account,
                 operation: provider_operation.clone(),
                 actor: Some(actor),

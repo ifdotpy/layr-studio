@@ -8,7 +8,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_providers::{Method, RequestId, RequestTicket};
@@ -52,7 +52,7 @@ impl AccountSessionPort for InterruptBroker {
                 |row| row.get(0),
             )
             .expect("stopped agent exists");
-        let agent: Value = serde_json::from_str(&raw).expect("agent record");
+        let agent: Value = studio_json::from_str(&raw).expect("agent record");
         assert_eq!(agent["status"], self.status);
         let interrupt = &agent["startAttempt"]["interrupt"];
         if request.method == Method::TurnInterrupt {
@@ -107,7 +107,7 @@ async fn call(app: &axum::Router, path: &str, body: Value) -> (u16, Value) {
     let bytes = to_bytes(response.into_body(), 1024 * 1024)
         .await
         .expect("response");
-    (status, serde_json::from_slice(&bytes).expect("JSON"))
+    (status, studio_json::from_slice(&bytes).expect("JSON"))
 }
 
 #[tokio::test]
@@ -218,7 +218,7 @@ async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route()
             |row| row.get(0),
         )
         .expect("final agent row");
-    let agent: Value = serde_json::from_str(&raw).expect("final agent");
+    let agent: Value = studio_json::from_str(&raw).expect("final agent");
     assert_eq!(agent["startAttempt"]["interrupt"]["outcome"], "accepted");
 }
 
@@ -336,7 +336,7 @@ async fn production_delete_route_interrupts_and_settles_active_turn() {
             |row| row.get(0),
         )
         .expect("tombstoned agent row");
-    let agent: Value = serde_json::from_str(&raw).expect("agent record");
+    let agent: Value = studio_json::from_str(&raw).expect("agent record");
     assert_eq!(status, 200, "response={response}; agent={raw}");
     assert_eq!(response["deleted"], json!(["agent"]));
     assert_eq!(

@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::model_catalog::ModelCatalog;
 
@@ -90,7 +90,7 @@ async fn models(
             // HTTP envelope metadata uses its generated contract; the validated
             // provider models move directly into the response without reparsing.
             let mut response: crate::generated::ModelCatalogResponse =
-                serde_json::from_value(Value::Object(catalog.extra))
+                studio_json::from_value(Value::Object(catalog.extra))
                     .map_err(|_| ApiError::internal())?;
             response.data = Some(Some(catalog.data));
             response.next_cursor = catalog.next_cursor;
@@ -98,7 +98,7 @@ async fn models(
         }
         Err((status, value)) => {
             let response: crate::generated::ModelCatalogResponse =
-                serde_json::from_value(value).map_err(|_| ApiError::internal())?;
+                studio_json::from_value(value).map_err(|_| ApiError::internal())?;
             Ok((status, Json(response)))
         }
     }
@@ -412,7 +412,7 @@ async fn worker_catalog(
             json!({"error": "No worker model catalog is available"}),
         ));
     }
-    let mut extra = serde_json::Map::new();
+    let mut extra = studio_json::Map::new();
     extra.insert("unavailableAccounts".into(), json!(unavailable));
     if pending {
         extra.insert("catalogPending".into(), Value::Bool(true));
@@ -444,7 +444,7 @@ fn append_worker_models(
 mod tests {
     use super::{PENDING_MESSAGE, account_catalog, account_context};
     use axum::http::StatusCode;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use studio_runtime_providers::ProviderKind;
@@ -756,7 +756,7 @@ mod tests {
 
     fn snapshot(account: Value) -> AccountsSnapshot {
         AccountsSnapshot {
-            accounts: vec![serde_json::from_value(account).expect("public account fixture")],
+            accounts: vec![studio_json::from_value(account).expect("public account fixture")],
             archived_accounts: Vec::new(),
             default_account_key: json!("default"),
             default_account_groups: Vec::new(),
@@ -822,7 +822,7 @@ mod tests {
 
         for provider in [ProviderKind::Codex, ProviderKind::Claude] {
             for workers in [false, true] {
-                let startup = serde_json::to_vec(&json!({
+                let startup = studio_json::to_vec(&json!({
                 "version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION, "defaultAccountKey":"target", "logins":{},
                 "accounts":{"target":{"id":"target","home":"fixture","provider":provider,"label":"Target","source":"fixture","status":"ready"}}
             })).expect("startup account");
@@ -887,7 +887,7 @@ mod tests {
                     .await
                     .expect("display response");
                 assert_eq!(display.status(), StatusCode::OK);
-                let display: Value = serde_json::from_slice(
+                let display: Value = studio_json::from_slice(
                     &to_bytes(display.into_body(), 65536)
                         .await
                         .expect("display body"),
@@ -916,7 +916,7 @@ mod tests {
                     .expect("selection task")
                     .expect("selection response");
                 assert_eq!(response.status(), StatusCode::OK);
-                let body: Value = serde_json::from_slice(
+                let body: Value = studio_json::from_slice(
                     &to_bytes(response.into_body(), 65536)
                         .await
                         .expect("selection body"),
@@ -1081,17 +1081,17 @@ mod tests {
             "nextCursor":null
         });
         assert_eq!(
-            serde_json::to_value(first.expect("cold catalog waits for 200 response"))
+            studio_json::to_value(first.expect("cold catalog waits for 200 response"))
                 .expect("serialized catalog"),
             expected
         );
         assert_eq!(
-            serde_json::to_value(second.expect("concurrent catalog shares result"))
+            studio_json::to_value(second.expect("concurrent catalog shares result"))
                 .expect("serialized catalog"),
             expected
         );
         let document: Value =
-            serde_json::from_str(include_str!("../../openapi.json")).expect("OpenAPI document");
+            studio_json::from_str(include_str!("../../openapi.json")).expect("OpenAPI document");
         let schema = json!({
             "components":document["components"],
             "$ref":"#/components/schemas/ModelCatalogResponse"
@@ -1178,7 +1178,7 @@ mod tests {
             .find(|operation| operation.key() == ("GET".to_owned(), "/api/models".to_owned()))
             .expect("models operation is registered");
         assert_eq!(
-            serde_json::to_value(operation).expect("operation serializes"),
+            studio_json::to_value(operation).expect("operation serializes"),
             json!({
                 "method":"GET",
                 "path":"/api/models",

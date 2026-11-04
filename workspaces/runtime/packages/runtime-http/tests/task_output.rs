@@ -5,7 +5,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_store::{RuntimeStore, StoreError};
@@ -30,7 +30,7 @@ async fn get(app: &axum::Router, path: &str, origin: &str) -> (u16, Value) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 #[tokio::test]
 async fn authorized_task_output_read_and_projection() {
@@ -147,7 +147,7 @@ async fn monitor_restart_http_preserves_identity_and_waits_for_old_exit() {
         let response = app.clone().oneshot(request).await.unwrap();
         let status = response.status();
         let response: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+            studio_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
                 .unwrap();
         assert_eq!(status, 200, "{response}");
         if let Some(id) = &first {
@@ -177,7 +177,7 @@ async fn monitor_restart_http_preserves_identity_and_waits_for_old_exit() {
     assert!(port.starts.lock().unwrap().is_empty());
     port.deliveries.lock().unwrap().push_back(Delivery {
         id: case["before"]["id"].as_str().unwrap().into(),
-        operation: serde_json::from_value(case["before"]["operation"].clone()).unwrap(),
+        operation: studio_json::from_value(case["before"]["operation"].clone()).unwrap(),
         cursor: "old-exit".into(),
         event: MonitorEvent::Exit {
             code: Some(0),

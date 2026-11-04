@@ -6,7 +6,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use studio_runtime_http::{HttpState, router};
@@ -625,7 +625,7 @@ async fn call_body(app: &axum::Router, method: &str, path: &str, body: String) -
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 
 #[tokio::test]
@@ -809,7 +809,7 @@ async fn held_claude_response_stop_refuses_foreign_or_ineligible_owners_without_
                     [],
                     |r| r.get(0),
                 )?;
-                let mut owner: Value = serde_json::from_str(&raw)?;
+                let mut owner: Value = studio_json::from_str(&raw)?;
                 for (key, value) in patch.as_object().unwrap() {
                     if let Some(fields) = value.as_object() {
                         for (field, value) in fields {

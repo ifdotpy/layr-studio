@@ -7,7 +7,7 @@ use axum::{
     http::Request,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
@@ -82,7 +82,7 @@ async fn call(app: &axum::Router, body: Value) -> (u16, Value) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 
 #[tokio::test]
@@ -178,7 +178,7 @@ async fn ui_child_permissions_inherit_override_review_and_refuse_escalation() {
         let projected =
             studio_runtime_services::sync_views::project_persisted_record("agent", &parent)
                 .unwrap();
-        let projected: PermissionFields = serde_json::from_value(projected).unwrap();
+        let projected: PermissionFields = studio_json::from_value(projected).unwrap();
         assert_eq!(projected.permission_mode, mode);
         assert!(projected.yolo_mode.is_none());
         assert!(
@@ -205,7 +205,7 @@ async fn ui_child_permissions_inherit_override_review_and_refuse_escalation() {
                 .unwrap()
                 .unwrap()
                 .value();
-        let child: PermissionFields = serde_json::from_value(child).unwrap();
+        let child: PermissionFields = studio_json::from_value(child).unwrap();
         assert_eq!(child.permission_mode, expected);
         assert!(child.yolo_mode.is_none());
         assert!(

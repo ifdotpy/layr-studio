@@ -16,7 +16,7 @@ jsonschema = { workspace = true }
 futures-util = { workspace = true }
 rusqlite = { workspace = true }
 http-range-header = { workspace = true }
-serde_json = { workspace = true }
+studio-json = { path = "../json" }
 serde = { workspace = true, features = ["derive"] }
 serde_path_to_error = { workspace = true }
 sha2 = { workspace = true }
@@ -36,7 +36,7 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 
 [build-dependencies]
 openapi-to-rust = { version = "=0.22.0", default-features = false }
-serde_json = { workspace = true }
+studio-json = { path = "../json" }
 studio-runtime-schema = { path = "../runtime-schema" }
 
 [dev-dependencies]

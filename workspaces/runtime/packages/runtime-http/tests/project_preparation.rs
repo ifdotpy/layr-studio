@@ -4,7 +4,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_schema::approvals::{
@@ -39,7 +39,7 @@ async fn call(app: &axum::Router, path: &str, body: Value, token: &str) -> (u16,
         .expect("test fixture");
     (
         status,
-        serde_json::from_slice(&bytes).expect("test fixture"),
+        studio_json::from_slice(&bytes).expect("test fixture"),
     )
 }
 

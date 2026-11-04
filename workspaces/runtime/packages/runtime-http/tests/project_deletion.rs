@@ -7,7 +7,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -150,7 +150,7 @@ impl Fixture {
             .expect("response");
         (
             status,
-            serde_json::from_slice(&bytes)
+            studio_json::from_slice(&bytes)
                 .unwrap_or_else(|_| json!({"raw":String::from_utf8_lossy(&bytes)})),
         )
     }
@@ -484,7 +484,7 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
             })
             .expect("retained room");
         let room: studio_runtime_schema::room_record::RoomRecord =
-            serde_json::from_str(&raw).expect("room");
+            studio_json::from_str(&raw).expect("room");
         assert!(room.project_deleted_at.is_some());
         assert!(
             reader
@@ -691,7 +691,7 @@ async fn project_deletion_streams_tombstones_to_two_clients_and_reconnect() {
                 let bytes = stream.next().await.expect("frame").expect("bytes");
                 let frame = String::from_utf8_lossy(&bytes);
                 if frame.starts_with("event: resources\n") {
-                    return serde_json::from_str(
+                    return studio_json::from_str(
                         frame
                             .lines()
                             .find_map(|line| line.strip_prefix("data: "))
@@ -859,7 +859,7 @@ async fn project_deletion_work_release_never_changes_another_project() {
             |r| r.get(0),
         )
         .expect("selected");
-    assert!(serde_json::from_str::<Value>(&selected).expect("task")["owner"].is_null());
+    assert!(studio_json::from_str::<Value>(&selected).expect("task")["owner"].is_null());
 }
 
 #[tokio::test]

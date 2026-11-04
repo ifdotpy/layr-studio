@@ -5,7 +5,7 @@ use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::Value;
+use studio_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 use studio_runtime_services::usage::{self, UsageError};
 use studio_runtime_store::{UsageRepositoryError, disable_usage_resume};
@@ -149,7 +149,7 @@ async fn cost_interest(
             | error @ studio_runtime_store::StoreError::CommitActorOutcomeUnknown(_)
             | error @ studio_runtime_store::StoreError::ReadTaskFailed => ApiError::stored(error),
         })?;
-    Ok(Json(serde_json::json!({})))
+    Ok(Json(studio_json::json!({})))
 }
 
 async fn reset_limits(
@@ -207,7 +207,7 @@ async fn capacity_retry(
                             |row| row.get(0),
                         )
                         .map_err(studio_runtime_store::StoreError::from)?;
-                    let response = serde_json::from_str::<crate::generated::RetryResponse>(&raw)
+                    let response = studio_json::from_str::<crate::generated::RetryResponse>(&raw)
                         .map_err(|error| {
                             studio_runtime_services::continuation::ContinuationError::Invalid(
                                 if error.is_syntax() || error.is_eof() {
@@ -245,7 +245,7 @@ async fn capacity_retry(
             })
             .await
             .map_err(continuation_error)?;
-        serde_json::from_value::<crate::generated::RetryResponse>(value)
+        studio_json::from_value::<crate::generated::RetryResponse>(value)
             .map_err(|_| {
                 studio_runtime_services::continuation::ContinuationError::Invalid(
                     "/capacity/response".to_owned(),
@@ -287,7 +287,7 @@ async fn usage_resume(
             return Ok(Json(None));
         };
         let response =
-            serde_json::from_value::<crate::generated::UsageResumeResponse>(value.value())
+            studio_json::from_value::<crate::generated::UsageResumeResponse>(value.value())
                 .map_err(|_| ApiError::internal())?;
         return Ok(Json(Some(response)));
     }
@@ -301,7 +301,7 @@ async fn usage_resume(
                 if value.is_null() {
                     return Ok(None);
                 }
-                serde_json::from_value(value).map(Some).map_err(|_| {
+                studio_json::from_value(value).map(Some).map_err(|_| {
                     UsageRepositoryError::InvalidStoredObject {
                         table: "runtime_usage_resumes",
                         id: resume_id.clone(),
@@ -373,7 +373,7 @@ mod tests {
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use axum::http::{Method as HttpMethod, Request, StatusCode};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
@@ -525,7 +525,7 @@ mod tests {
             let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
-            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            let body: Value = studio_json::from_slice(&bytes).unwrap();
             assert_eq!(status, StatusCode::OK, "{body}");
             assert_eq!(body["id"], id);
             assert_eq!(body["status"], expected);
@@ -569,7 +569,7 @@ mod tests {
             let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
-            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            let body: Value = studio_json::from_slice(&bytes).unwrap();
             assert_eq!(status, StatusCode::OK, "{body}");
             assert_eq!(body["id"], "resume");
             assert_eq!(body["status"], expected);
@@ -619,7 +619,7 @@ mod tests {
         let first_body = axum::body::to_bytes(first.into_body(), usize::MAX)
             .await
             .unwrap();
-        let first_json: Value = serde_json::from_slice(&first_body).unwrap();
+        let first_json: Value = studio_json::from_slice(&first_body).unwrap();
         assert_eq!(first_status, StatusCode::OK, "{first_json}");
         assert_eq!(first_json["outcome"], "uncertain");
 
@@ -628,7 +628,7 @@ mod tests {
         let second_body = axum::body::to_bytes(second.into_body(), usize::MAX)
             .await
             .unwrap();
-        let second_json: Value = serde_json::from_slice(&second_body).unwrap();
+        let second_json: Value = studio_json::from_slice(&second_body).unwrap();
         assert_eq!(second_status, StatusCode::OK, "{second_json}");
         assert_eq!(second_json["outcome"], "reset");
         let calls = session.calls.lock().unwrap();
@@ -684,44 +684,44 @@ mod ingress_bounds_tests {
 
     #[test]
     fn usage_body_bounds_are_enforced() {
-        assert!(serde_json::from_str::<CostInterestRequest>(r#"{"account_key":"a"}"#).is_ok());
-        assert!(serde_json::from_str::<CostInterestRequest>(r#"{"account_key":""}"#).is_err());
+        assert!(studio_json::from_str::<CostInterestRequest>(r#"{"account_key":"a"}"#).is_ok());
+        assert!(studio_json::from_str::<CostInterestRequest>(r#"{"account_key":""}"#).is_err());
         assert!(
-            serde_json::from_str::<CapacityRetryRequest>(
+            studio_json::from_str::<CapacityRetryRequest>(
                 r#"{"id":"","retry_id":"r","action":"retry"}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<UsageResumeRequest>(
+            studio_json::from_str::<UsageResumeRequest>(
                 r#"{"id":"a","resume_id":"","enabled":true}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<CostInterestRequest>(r#"{"account_key":"a","extra":1}"#)
+            studio_json::from_str::<CostInterestRequest>(r#"{"account_key":"a","extra":1}"#)
                 .is_err()
         );
         assert!(
-            serde_json::from_str::<CapacityRetryRequest>(
+            studio_json::from_str::<CapacityRetryRequest>(
                 r#"{"id":"a","retry_id":"r","action":"retry"}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<CapacityRetryRequest>(
+            studio_json::from_str::<CapacityRetryRequest>(
                 r#"{"id":"a","retry_id":"r","action":"retry","extra":1}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<UsageResumeRequest>(
+            studio_json::from_str::<UsageResumeRequest>(
                 r#"{"id":"a","resume_id":"r","enabled":true}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<UsageResumeRequest>(
+            studio_json::from_str::<UsageResumeRequest>(
                 r#"{"id":"a","resume_id":"r","enabled":true,"extra":1}"#
             )
             .is_err()

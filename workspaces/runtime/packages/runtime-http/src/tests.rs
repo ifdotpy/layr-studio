@@ -12,8 +12,8 @@ fn generated_provider_identity_is_the_schema_owner() {
         let owner: studio_runtime_schema::ProviderKind = generated;
         assert_eq!(owner, provider);
         assert_eq!(
-            serde_json::to_value(generated).expect("generated provider serializes"),
-            serde_json::to_value(provider).expect("owner serializes")
+            studio_json::to_value(generated).expect("generated provider serializes"),
+            studio_json::to_value(provider).expect("owner serializes")
         );
     }
 }
@@ -149,7 +149,7 @@ fn api_responses_include_schema_and_security_headers() {
 
 #[test]
 #[allow(clippy::disallowed_methods)]
-fn workspace_keeps_serde_json_maps_sorted() {
+fn workspace_keeps_studio_json_maps_sorted() {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../");
     let output = std::process::Command::new("cargo")
         .args([
@@ -170,11 +170,11 @@ fn workspace_keeps_serde_json_maps_sorted() {
     );
     let tree = String::from_utf8_lossy(&output.stdout);
     // arbitrary_precision changes JSON numbers into a private object representation.
-    // preserve_order changes serde_json::Map from sorted to insertion-ordered keys.
+    // preserve_order changes studio_json::Map from sorted to insertion-ordered keys.
     assert!(
         !tree.contains("serde_json feature \"arbitrary_precision\"")
             && !tree.contains("serde_json feature \"preserve_order\""),
-        "serde_json arbitrary_precision changes number meaning, and preserve_order changes Map order relied upon by canonical output in several crates; code needing insertion order must parse ordered pairs locally"
+        "studio_json arbitrary_precision changes number meaning, and preserve_order changes Map order relied upon by canonical output in several crates; code needing insertion order must parse ordered pairs locally"
     );
 }
 

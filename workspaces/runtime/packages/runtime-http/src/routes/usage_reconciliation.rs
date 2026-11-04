@@ -74,7 +74,7 @@ inventory::submit! {
 mod tests {
     use super::*;
     use axum::{body::Body, extract::ConnectInfo, http::Request};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
@@ -159,7 +159,7 @@ mod tests {
             "id":"claude","provider":"claude","home":profile,"label":"Claude","source":"Fixture","status":"ready","deleted":true,
             "claudeOptions":{"configDir":profile}}}});
         let policy = studio_runtime_services::account_policy::AccountPolicyState::from_startup(
-            Some(&serde_json::to_vec(&registry).expect("registry")),
+            Some(&studio_json::to_vec(&registry).expect("registry")),
             [],
         )
         .expect("policy");
@@ -206,9 +206,9 @@ mod tests {
             let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
                 .await
                 .expect("bounded body");
-            let value: Value = serde_json::from_slice(&bytes).expect("JSON");
+            let value: Value = studio_json::from_slice(&bytes).expect("JSON");
             let _: crate::generated::UsageReconciliationResponse =
-                serde_json::from_value(value.clone()).expect("generated route contract");
+                studio_json::from_value(value.clone()).expect("generated route contract");
             assert_eq!(
                 value["counts"],
                 json!({"responses":5,"missingRecorded":1,"missingEvidence":1,"mismatched":1,"unknownRecorded":2,"rejectedEntries":0})
@@ -277,7 +277,7 @@ mod tests {
             let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
                 .await
                 .expect("bounded body");
-            let value: Value = serde_json::from_slice(&bytes).expect("JSON");
+            let value: Value = studio_json::from_slice(&bytes).expect("JSON");
             let report = value["files"]
                 .as_array()
                 .expect("files")

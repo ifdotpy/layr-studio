@@ -7,7 +7,7 @@ use axum::{
     http::Request,
 };
 use futures_util::StreamExt;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_store::{AgentRecord, AgentRepository, MonitorRecord, RuntimeStore, Table};
@@ -42,7 +42,7 @@ async fn streamed_incident(stream: &mut axum::body::BodyDataStream, id: &str, op
                 let frame = pending[..end].to_owned();
                 pending.drain(..end + 2);
                 for line in frame.lines().filter_map(|line| line.strip_prefix("data: ")) {
-                    let event: Value = serde_json::from_str(line).unwrap();
+                    let event: Value = studio_json::from_str(line).unwrap();
                     for version in event["resourceVersions"].as_array().into_iter().flatten() {
                         for row in version["entityChanges"]["documents"]
                             .as_array()
@@ -105,11 +105,11 @@ async fn call_with_id(
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    let value: Value = serde_json::from_slice(&bytes).unwrap();
+    let value: Value = studio_json::from_slice(&bytes).unwrap();
     if method == "GET" && path == "/api/studio-errors" && status == 200 {
         for row in value["items"].as_array().unwrap() {
             let kind: studio_runtime_schema::studio_errors::Kind =
-                serde_json::from_value(row["kind"].clone()).unwrap();
+                studio_json::from_value(row["kind"].clone()).unwrap();
             assert_eq!(row["level"], json!(kind.level()), "{row}");
         }
     }
@@ -169,7 +169,7 @@ async fn studio_errors_list_studio_caused_endings_and_hide_a_dismissed_row() {
                     now,
                 ),
             ] {
-                Table::new(tx).put(&serde_json::from_value::<MonitorRecord>(record)?)?;
+                Table::new(tx).put(&studio_json::from_value::<MonitorRecord>(record)?)?;
             }
             Ok::<_, studio_runtime_store::StoreError>(())
         })
@@ -257,7 +257,7 @@ async fn repeated_failures_of_one_rule_or_command_are_one_row() {
             store
                 .transaction(move |tx| {
                     for record in records {
-                        Table::new(tx).put(&serde_json::from_value::<MonitorRecord>(record)?)?;
+                        Table::new(tx).put(&studio_json::from_value::<MonitorRecord>(record)?)?;
                     }
                     Ok::<_, studio_runtime_store::StoreError>(())
                 })
@@ -633,7 +633,7 @@ async fn batch_fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, axum::Router)
                     now,
                 );
                 record["command"] = json!(format!("cargo test {id}"));
-                Table::new(tx).put(&serde_json::from_value::<MonitorRecord>(record)?)?;
+                Table::new(tx).put(&studio_json::from_value::<MonitorRecord>(record)?)?;
             }
             Ok::<_, studio_runtime_store::StoreError>(())
         })
@@ -758,7 +758,7 @@ async fn actual_lost_monitor_settlement_preserves_identity_and_unknown_effects()
     record["command"] = json!("password=command-canary");
     store
         .transaction(move |tx| {
-            Table::new(tx).put(&serde_json::from_value::<MonitorRecord>(record)?)
+            Table::new(tx).put(&studio_json::from_value::<MonitorRecord>(record)?)
         })
         .await
         .unwrap();
@@ -888,7 +888,7 @@ async fn a_malformed_source_timestamp_uses_observation_time_and_still_streams() 
     let record = monitor(root.path(), "bad-clock", "running", Value::Null, "", now);
     store
         .transaction(move |tx| {
-            Table::new(tx).put(&serde_json::from_value::<MonitorRecord>(record)?)
+            Table::new(tx).put(&studio_json::from_value::<MonitorRecord>(record)?)
         })
         .await
         .unwrap();
@@ -1001,7 +1001,7 @@ async fn malformed_failed_monitor_fields_remain_candidates_and_stream_after_a_he
     ] {
         let mut record = monitor(&path, "new-invalid", "running", Value::Null, "", now);
         record[field] = invalid;
-        assert!(serde_json::from_value::<MonitorRecord>(record).is_err());
+        assert!(studio_json::from_value::<MonitorRecord>(record).is_err());
     }
     store
         .transaction(move |tx| {
@@ -1013,7 +1013,7 @@ async fn malformed_failed_monitor_fields_remain_candidates_and_stream_after_a_he
                 "bad-created",
                 "own-exit",
             ] {
-                Table::new(tx).put(&serde_json::from_value::<MonitorRecord>(monitor(
+                Table::new(tx).put(&studio_json::from_value::<MonitorRecord>(monitor(
                     &path,
                     id,
                     "running",
@@ -1347,7 +1347,7 @@ async fn startup_models_http_reports_pending_and_refuses_an_unknown_explicit_acc
     let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
     let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{},"logins":{}});
     let policy = studio_runtime_services::account_policy::AccountPolicyState::from_startup(
-        Some(&serde_json::to_vec(&registry).unwrap()),
+        Some(&studio_json::to_vec(&registry).unwrap()),
         [],
     )
     .unwrap();
@@ -1389,7 +1389,7 @@ async fn studio_errors_sse_carries_upserts_and_bulk_dismissal_tombstones() {
                 let Some(data) = text.lines().find_map(|line| line.strip_prefix("data: ")) else {
                     continue;
                 };
-                let frame: Value = serde_json::from_str(data).unwrap();
+                let frame: Value = studio_json::from_str(data).unwrap();
                 for entry in frame["resourceVersions"].as_array().into_iter().flatten() {
                     if entry["resource"]["kind"] != "state" {
                         continue;

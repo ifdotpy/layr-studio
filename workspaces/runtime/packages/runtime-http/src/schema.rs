@@ -3,13 +3,13 @@
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use serde_json::Value;
+use studio_json::Value;
 
 const METHODS: [&str; 8] = [
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
 ];
 
-static OPERATIONS: OnceLock<Result<BTreeSet<(String, String)>, serde_json::Error>> =
+static OPERATIONS: OnceLock<Result<BTreeSet<(String, String)>, studio_json::Error>> =
     OnceLock::new();
 
 pub use studio_runtime_schema::api_schema::{
@@ -75,7 +75,7 @@ pub(crate) fn methods_for_path(path: &str) -> Option<Vec<String>> {
     (!methods.is_empty()).then(|| methods.into_iter().collect())
 }
 
-pub fn operations() -> Result<&'static BTreeSet<(String, String)>, &'static serde_json::Error> {
+pub fn operations() -> Result<&'static BTreeSet<(String, String)>, &'static studio_json::Error> {
     match OPERATIONS.get_or_init(|| {
         let mut operations = BTreeSet::new();
         if let Some(paths) = document().get("paths").and_then(Value::as_object) {

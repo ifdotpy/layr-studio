@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io::{Seek, Write};
 
 use axum::response::sse::Event;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     SYNC_ENTITY_STREAM_MAX_DOCUMENTS, SYNC_STREAM_EVENT_MAX_BYTES,
 };
@@ -61,7 +61,7 @@ pub(super) async fn attach(
             entries.push(entry);
             continue;
         }
-        let key = serde_json::to_string(&resource).map_err(ApiError::json)?;
+        let key = studio_json::to_string(&resource).map_err(ApiError::json)?;
         let cursor = since
             .get(&key)
             .or_else(|| sequences.get(&key))
@@ -111,7 +111,7 @@ async fn prepare(
 > {
     let (scope, id, agent) =
         super::subscription_entities::selection(&resource).ok_or_else(data_error)?;
-    let collections = serde_json::to_string(&scope.collections).map_err(ApiError::json)?;
+    let collections = studio_json::to_string(&scope.collections).map_err(ApiError::json)?;
     let id = id.map(str::to_owned);
     let agent = agent.map(str::to_owned);
     let workspace = state.workspace_id.clone();
@@ -149,11 +149,11 @@ async fn prepare(
             let batches = byte_pages(after, checkpoint, documents)?;
             for (index, batch) in batches.iter().enumerate() {
                 let complete = final_sql_page && index + 1 == batches.len();
-                if cfg!(debug_assertions) && !serde_json::to_value(batch).is_ok_and(|value| validators.validate_component("EntityChangeBatch", &value)) { return Err(data_error()); }
+                if cfg!(debug_assertions) && !studio_json::to_value(batch).is_ok_and(|value| validators.validate_component("EntityChangeBatch", &value)) { return Err(data_error()); }
                 if page_index == 0 && complete {
                     let entry = ResourceRevisionEntry { resource: Some(Some(resource.clone())), revision: through, cursor: Some(cursor.clone()), reply_kind: Some(if snapshot { crate::generated::SubscriptionReplyKind::Snapshot } else { crate::generated::SubscriptionReplyKind::Delta }), entity_changes: Some(Some(batch.clone())), discovery_snapshot: None, voice_records: None, view_snapshot: None, draft_changes: None, draft_snapshot: None, entity_sequence_reset: None, entity_sequences: None, terminal_base_offset: None, transcript_changes: None, transcript_snapshot: None };
                     let ordinary = ResourceChangeEvent { protocol: i64::from(studio_runtime_schema::SYNC_PROTOCOL_VERSION), workspace_id: workspace.clone(), epoch: epoch.clone(), revision, reason: reason.clone(), resources: vec![resource.clone()], resource_versions: vec![entry.clone()] };
-                    if "event: resources\nid: \ndata: \n\n".len() + revision.to_string().len() + serde_json::to_vec(&ordinary).map_err(ApiError::json)?.len() <= SYNC_STREAM_EVENT_MAX_BYTES { return Ok((Some(entry), None, cursor)); }
+                    if "event: resources\nid: \ndata: \n\n".len() + revision.to_string().len() + studio_json::to_vec(&ordinary).map_err(ApiError::json)?.len() <= SYNC_STREAM_EVENT_MAX_BYTES { return Ok((Some(entry), None, cursor)); }
                 }
                 let file = match &mut spool { Some(file) => file, None => spool.insert(tempfile::tempfile().map_err(|_| io_error())?) };
                 spool_page(file, &metadata, page_index, complete, batch, &validators)?;
@@ -184,7 +184,7 @@ fn byte_pages(
     };
     let mut bytes = 0;
     for document in documents {
-        let size = serde_json::to_vec(&document).map_err(ApiError::json)?.len();
+        let size = studio_json::to_vec(&document).map_err(ApiError::json)?.len();
         if !batch.documents.is_empty() && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2 {
             batch.through = batch.documents.last().ok_or_else(data_error)?.seq;
             let next = EntityChangeBatch {
@@ -210,7 +210,7 @@ fn spool_page(
     page: &EntityChangeBatch,
     validators: &crate::validation::Registry,
 ) -> Result<(), ApiError> {
-    let data = serde_json::to_string(page).map_err(ApiError::json)?;
+    let data = studio_json::to_string(page).map_err(ApiError::json)?;
     let mut direct = metadata.clone();
     let fields = direct.as_object_mut().ok_or_else(data_error)?;
     fields.insert("pageIndex".into(), json!(page_index));
@@ -218,7 +218,7 @@ fn spool_page(
     fields.insert("partCount".into(), json!(1));
     fields.insert("complete".into(), json!(complete));
     fields.insert("data".into(), json!(&data));
-    let encoded = serde_json::to_vec(&direct).map_err(ApiError::json)?;
+    let encoded = studio_json::to_vec(&direct).map_err(ApiError::json)?;
     if "event: entity-transfer\ndata: \n\n".len() + encoded.len() <= SYNC_STREAM_EVENT_MAX_BYTES {
         if cfg!(debug_assertions)
             && !validators.validate_component("ResourceEntityTransferEvent", &direct)
@@ -253,7 +253,7 @@ fn spool_page(
             json!(complete && index + 1 == parts.len()),
         );
         fields.insert("data".into(), json!(part));
-        let encoded = serde_json::to_vec(&frame).map_err(ApiError::json)?;
+        let encoded = studio_json::to_vec(&frame).map_err(ApiError::json)?;
         if "event: entity-transfer\ndata: \n\n".len() + encoded.len() > SYNC_STREAM_EVENT_MAX_BYTES
             || (cfg!(debug_assertions)
                 && !validators.validate_component("ResourceEntityTransferEvent", &frame))
@@ -305,7 +305,7 @@ mod tests {
             agent.into(),
             id.into(),
             "turn".into(),
-            serde_json::from_str("1").expect("valid timestamp"),
+            studio_json::from_str("1").expect("valid timestamp"),
             TaskType::CommandExecution,
             "commandExecution".into(),
         );
@@ -320,7 +320,7 @@ mod tests {
         projection
     }
     fn event(state: &HttpState) -> ResourceChangeEvent {
-        serde_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"fixture","revision":1,"reason":"initial","resources":[],"resourceVersions":[]})).expect("event")
+        studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"fixture","revision":1,"reason":"initial","resources":[],"resourceVersions":[]})).expect("event")
     }
     async fn wire(event: Event) -> Vec<u8> {
         let response = Sse::new(futures_util::stream::iter([Ok::<
@@ -408,7 +408,7 @@ mod tests {
         live.resources.push(resource.clone());
         live.resource_versions.push(candidate.clone());
         let mut cursors = BTreeMap::from([(
-            serde_json::to_string(&resource).expect("key"),
+            studio_json::to_string(&resource).expect("key"),
             cursor.clone(),
         )]);
         let readers = attach(&state, &mut live, &BTreeMap::new(), &mut cursors)
@@ -514,7 +514,7 @@ mod tests {
             .await
             .expect("scope source");
         let resource: ResourceRef =
-            serde_json::from_value(json!({"kind":"tasks","agentId":"lead"})).expect("resource");
+            studio_json::from_value(json!({"kind":"tasks","agentId":"lead"})).expect("resource");
         let (_, _, before) = prepare(&state, &event(&state), resource.clone(), None)
             .await
             .expect("baseline");
@@ -665,9 +665,9 @@ mod tests {
             })
             .await
             .expect("publish initial task owner");
-        let alpha: ResourceRef = serde_json::from_value(json!({"kind":"tasks","agentId":"alpha"}))
+        let alpha: ResourceRef = studio_json::from_value(json!({"kind":"tasks","agentId":"alpha"}))
             .expect("alpha task resource");
-        let beta: ResourceRef = serde_json::from_value(json!({"kind":"tasks","agentId":"beta"}))
+        let beta: ResourceRef = studio_json::from_value(json!({"kind":"tasks","agentId":"beta"}))
             .expect("beta task resource");
         let (_, _, baseline) = prepare(&state, &event(&state), alpha.clone(), None)
             .await
@@ -713,7 +713,7 @@ mod tests {
             .expect("new scope documents")
             .documents;
         let projection: studio_runtime_schema::process_controls::TaskProjection =
-            serde_json::from_value(
+            studio_json::from_value(
                 documents
                     .first()
                     .expect("new owner document")
@@ -850,7 +850,7 @@ mod tests {
             .await
             .expect("source fixture");
         let resource: ResourceRef =
-            serde_json::from_value(json!({"kind":"state"})).expect("resource");
+            studio_json::from_value(json!({"kind":"state"})).expect("resource");
         let (small, reader, cursor) = prepare(&state, &event(&state), resource.clone(), None)
             .await
             .expect("spooled interval");
@@ -866,7 +866,7 @@ mod tests {
             maximum_wire_bytes = maximum_wire_bytes.max(wire.len());
             assert!(wire.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
             let text = std::str::from_utf8(&wire).expect("utf8");
-            let frame: Value = serde_json::from_str(
+            let frame: Value = studio_json::from_str(
                 text.lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("data"),
@@ -881,7 +881,7 @@ mod tests {
             if frame["partIndex"].as_u64().expect("index") + 1
                 == frame["partCount"].as_u64().expect("parts")
             {
-                let page: Value = serde_json::from_str(&encoded).expect("canonical page");
+                let page: Value = studio_json::from_str(&encoded).expect("canonical page");
                 assert!(
                     state
                         .validators
@@ -998,7 +998,7 @@ mod tests {
         let (_directory, state) = fixture().await;
         let store = state.store.as_ref().expect("store");
         let resource: ResourceRef =
-            serde_json::from_str(r#"{"kind":"work","agentId":"lead"}"#).expect("work resource");
+            studio_json::from_str(r#"{"kind":"work","agentId":"lead"}"#).expect("work resource");
         let (_, _, first) = prepare(&state, &event(&state), resource.clone(), None)
             .await
             .expect("baseline");

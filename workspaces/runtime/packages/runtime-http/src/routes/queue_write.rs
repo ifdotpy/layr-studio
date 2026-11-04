@@ -41,7 +41,7 @@ fn signature(agent_id: &str, body: &QueueCommand) -> Result<String, ApiError> {
         agent: &'a str,
         body: &'a QueueCommand,
     }
-    let signature = serde_json::to_vec(&Signature {
+    let signature = studio_json::to_vec(&Signature {
         agent: agent_id,
         body,
     })
@@ -55,7 +55,7 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
@@ -91,16 +91,16 @@ mod tests {
             .expect("body");
         (
             status,
-            serde_json::from_slice(&bytes).expect("JSON response"),
+            studio_json::from_slice(&bytes).expect("JSON response"),
         )
     }
 
     #[test]
     fn queue_signature_is_stable_and_normalizes_null() {
         let id: QueueCommand =
-            serde_json::from_str(r#"{"action":"first","id":"a","request_id":"request"}"#)
+            studio_json::from_str(r#"{"action":"first","id":"a","request_id":"request"}"#)
                 .expect("command");
-        let normalized: QueueCommand = serde_json::from_str(
+        let normalized: QueueCommand = studio_json::from_str(
             r#"{"action":"first","id":"a","request_id":"request","agent":null}"#,
         )
         .expect("normalized command");
@@ -177,11 +177,11 @@ mod tests {
             .expect("stored queue receipt");
         let envelope: studio_runtime_store::request_results::ResultEnvelope<
             queue_write::QueueReply,
-        > = serde_json::from_str(&stored).expect("typed stored queue receipt");
+        > = studio_json::from_str(&stored).expect("typed stored queue receipt");
         assert_eq!(
-            serde_json::from_str::<Value>(&serde_json::to_string(&envelope).expect("serialized"))
+            studio_json::from_str::<Value>(&studio_json::to_string(&envelope).expect("serialized"))
                 .expect("JSON"),
-            serde_json::from_str::<Value>(&stored).expect("stored JSON")
+            studio_json::from_str::<Value>(&stored).expect("stored JSON")
         );
         assert_eq!(
             call(&app, reorder.clone()).await,
@@ -189,7 +189,7 @@ mod tests {
             "stale revision replay returns original receipt"
         );
         let legacy = "738dc495419b22256783449bd011949a7de1f3aa4c2a8f99c2ad7ff8f8e39c58";
-        let typed: QueueCommand = serde_json::from_value(reorder.clone()).expect("queue command");
+        let typed: QueueCommand = studio_json::from_value(reorder.clone()).expect("queue command");
         let current = super::signature("workspace", &typed).expect("current signature");
         store
             .transaction(move |tx| {

@@ -3,7 +3,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     path::PathBuf,
     sync::{
@@ -50,7 +50,7 @@ impl RetainedAccountSession for Session {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert!(request.deadline > std::time::Instant::now());
         let registry: Value =
-            serde_json::from_slice(&std::fs::read(&self.path).expect("durable registry"))
+            studio_json::from_slice(&std::fs::read(&self.path).expect("durable registry"))
                 .expect("JSON");
         let result = if request.method == Method::AccountLoginStart {
             assert_eq!(registry["logins"][ID]["status"], "starting");
@@ -120,7 +120,7 @@ async fn post(app: &axum::Router, path: &str, value: Value) -> (u16, Value) {
     let bytes = to_bytes(response.into_body(), 1024 * 1024)
         .await
         .expect("body");
-    (status, serde_json::from_slice(&bytes).expect("JSON"))
+    (status, studio_json::from_slice(&bytes).expect("JSON"))
 }
 #[allow(clippy::disallowed_methods)]
 fn fixture(

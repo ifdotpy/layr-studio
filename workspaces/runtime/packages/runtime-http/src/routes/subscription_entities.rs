@@ -4,7 +4,7 @@
 use crate::error::ApiError;
 use crate::generated::{ResourceRef, ResourceRevisionEntry, SubscriptionCursor};
 use crate::router::HttpState;
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_schema::shared_values::{
     SYNC_ENTITY_STREAM_MAX_DOCUMENTS, SYNC_STREAM_EVENT_MAX_BYTES,
 };
@@ -59,7 +59,7 @@ async fn read_page(
     let id = id.map(str::to_owned);
     let agent = agent.map(str::to_owned);
     let collections =
-        serde_json::to_string(&scope.collections).map_err(|_| ApiError::internal())?;
+        studio_json::to_string(&scope.collections).map_err(|_| ApiError::internal())?;
     state
         .store
         .as_ref()
@@ -92,7 +92,7 @@ pub(super) async fn initial_snapshot(
     // Existing global pull pagination owns oversized initial lists. Never
     // advertise a complete per-view cursor for a truncated interval.
     if page.checkpoint < page.max_sequence {
-        return serde_json::from_value(json!({"revision":revision,"resource":resource}))
+        return studio_json::from_value(json!({"revision":revision,"resource":resource}))
             .map_err(|_| ApiError::internal());
     }
     let documents = page
@@ -101,19 +101,19 @@ pub(super) async fn initial_snapshot(
         .map(super::sync_documents::entity_document)
         .collect::<Option<Vec<_>>>()
         .ok_or_else(ApiError::internal)?;
-    let entry: ResourceRevisionEntry = serde_json::from_value(json!({
+    let entry: ResourceRevisionEntry = studio_json::from_value(json!({
         "revision":revision,
         "resource":resource,
         "cursor":{"workspaceId":state.workspace_id,"seq":revision},
         "replyKind":if page.reset {"snapshot"} else {"delta"},
         "entityChanges":{"after":if page.reset {0} else {after.unwrap_or(0)},"through":revision,"documents":documents}
     })).map_err(|_| ApiError::internal())?;
-    if serde_json::to_vec(&entry)
+    if studio_json::to_vec(&entry)
         .map_err(|_| ApiError::internal())?
         .len()
         > SYNC_STREAM_EVENT_MAX_BYTES
     {
-        return serde_json::from_value(json!({"revision":revision,"resource":entry.resource}))
+        return studio_json::from_value(json!({"revision":revision,"resource":entry.resource}))
             .map_err(|_| ApiError::internal());
     }
     Ok(entry)
@@ -143,7 +143,7 @@ mod tests {
                 value[field] = json!("selector");
             }
             let resource: ResourceRef =
-                serde_json::from_value(value.clone()).expect("typed entity reference");
+                studio_json::from_value(value.clone()).expect("typed entity reference");
             let (selected, id, agent) = selection(&resource).expect("every OpenAPI entity scope");
             assert_eq!(selected.collections, scope.collections);
             assert_eq!(
@@ -192,9 +192,9 @@ mod tests {
             None,
         );
         let list_ref: ResourceRef =
-            serde_json::from_value(json!({"kind":"state"})).expect("state ref");
+            studio_json::from_value(json!({"kind":"state"})).expect("state ref");
         let detail_ref: ResourceRef =
-            serde_json::from_value(json!({"kind":"agentDetail","agentId":"chat"}))
+            studio_json::from_value(json!({"kind":"agentDetail","agentId":"chat"}))
                 .expect("detail ref");
         store.transaction_with(|tx| {
             AgentRepository::put(tx,&AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"chat","parentId":"chat","epoch":1,"status":"idle"}))?)?;
@@ -202,13 +202,13 @@ mod tests {
             Ok::<_, StoreError>(())
         }).await.expect("worker command source");
         let tasks_ref: ResourceRef =
-            serde_json::from_value(json!({"kind":"tasks","agentId":"chat"}))
+            studio_json::from_value(json!({"kind":"tasks","agentId":"chat"}))
                 .expect("team task ref");
         let tasks = initial_snapshot(state.clone(), tasks_ref, None)
             .await
             .expect("team tasks");
         assert!(
-            serde_json::to_value(tasks).expect("task frame")["entityChanges"]["documents"]
+            studio_json::to_value(tasks).expect("task frame")["entityChanges"]["documents"]
                 .as_array()
                 .expect("task records")
                 .iter()
@@ -218,7 +218,7 @@ mod tests {
             .await
             .expect("global snapshot");
         let before = list.cursor.clone();
-        let list = serde_json::to_value(list).expect("typed entry");
+        let list = studio_json::to_value(list).expect("typed entry");
         let documents = list["entityChanges"]["documents"]
             .as_array()
             .expect("complete list");
@@ -241,7 +241,7 @@ mod tests {
         let detail = initial_snapshot(state.clone(), detail_ref.clone(), None)
             .await
             .expect("detail snapshot");
-        let detail = serde_json::to_value(detail).expect("typed detail");
+        let detail = studio_json::to_value(detail).expect("typed detail");
         assert_eq!(
             detail["entityChanges"]["documents"][0]["value"]["lastAnswer"],
             "Detailed answer"
@@ -274,7 +274,7 @@ mod tests {
             .await
             .expect("changed detail");
         assert_eq!(
-            serde_json::to_value(entry).expect("typed entry")["entityChanges"]["documents"][0]["value"]
+            studio_json::to_value(entry).expect("typed entry")["entityChanges"]["documents"][0]["value"]
                 ["lastAnswer"],
             "Changed answer"
         );

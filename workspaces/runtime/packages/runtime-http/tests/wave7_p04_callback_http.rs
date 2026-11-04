@@ -7,7 +7,7 @@ use axum::{
     http::Request,
 };
 use fixture::*;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::callback_runtime::*;
@@ -69,7 +69,7 @@ async fn call(app: &axum::Router, path: &str, body: Value, token: &str) -> (u16,
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 
 #[tokio::test]
@@ -288,7 +288,7 @@ async fn complaint_http_replays_original_signature_before_version_and_recipient_
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {
             let raw = studio_runtime_store::QuestionsWriteRepository::complaint(tx, "complaint")?
                 .unwrap();
-            let mut complaint: Value = serde_json::from_str(&raw).unwrap();
+            let mut complaint: Value = studio_json::from_str(&raw).unwrap();
             complaint["recipient"] = json!("lead");
             complaint["responses"].as_array_mut().unwrap().push(json!({
                 "id":"lead-response", "author":lead, "status":"resolved", "text":"Handled", "at":2

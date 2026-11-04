@@ -6,7 +6,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::monitor_runtime_wiring::MonitorRuntime;
@@ -38,7 +38,7 @@ fn database_snapshot(store: &studio_runtime_store::RuntimeStore) -> Value {
         .expect("table names")
         .collect::<Result<Vec<_>, _>>()
         .expect("table list");
-    let mut snapshot = serde_json::Map::new();
+    let mut snapshot = studio_json::Map::new();
     snapshot.insert("sqlite_master".into(), Value::Array(schema));
     for table in tables {
         let escaped = table.replace('"', "\"\"");
@@ -113,7 +113,7 @@ async fn call_with_identity(
     let bytes = to_bytes(response.into_body(), 1024 * 1024)
         .await
         .expect("response");
-    (status, serde_json::from_slice(&bytes).expect("JSON"))
+    (status, studio_json::from_slice(&bytes).expect("JSON"))
 }
 
 #[tokio::test]
@@ -308,7 +308,7 @@ async fn acknowledged_monitor_input_returns_without_entity_envelope() {
         );
     }
 
-    let saved = serde_json::to_value(
+    let saved = studio_json::to_value(
         MonitorsRepository::get(&store.test_reader().expect("read monitor"), id)
             .expect("read monitor record")
             .expect("monitor record"),
@@ -390,7 +390,7 @@ async fn acknowledged_monitor_input_returns_without_entity_envelope() {
         }
     }
     let operation =
-        serde_json::from_value(case["before"]["operation"].clone()).expect("command operation");
+        studio_json::from_value(case["before"]["operation"].clone()).expect("command operation");
     let finished_id = id.to_owned();
     store
         .transaction_with(move |tx| {
@@ -496,7 +496,7 @@ async fn monitor_approval_routes_commit_decision_then_launch_only_accepts() {
         .expect("approval request");
         assert_eq!(request["status"], "answered");
         assert_eq!(request["decision"], decision);
-        let monitor = serde_json::to_value(
+        let monitor = studio_json::to_value(
             MonitorsRepository::get(&store.test_reader().expect("read monitor"), id)
                 .expect("get monitor")
                 .expect("monitor"),

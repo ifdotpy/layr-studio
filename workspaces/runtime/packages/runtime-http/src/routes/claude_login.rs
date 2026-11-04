@@ -3,7 +3,7 @@ use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::Value;
+use studio_json::Value;
 use std::sync::Arc;
 use studio_runtime_services::claude_login::{LoginError, service::LoginService};
 pub(crate) fn routes() -> RouteGroup {
@@ -134,7 +134,7 @@ mod tests {
     use super::{routes, service};
     use crate::router::HttpState;
     use axum::{body::to_bytes, http::StatusCode, response::IntoResponse};
-    use serde_json::Value;
+    use studio_json::Value;
 
     #[test]
     fn claude_login_routes_are_registered_as_implemented() {
@@ -179,7 +179,7 @@ mod tests {
             .await
             .expect("response body");
         assert_eq!(
-            serde_json::from_slice::<Value>(&body).expect("JSON body")["error"],
+            studio_json::from_slice::<Value>(&body).expect("JSON body")["error"],
             "Not implemented: requires provider-session/claude-login"
         );
     }

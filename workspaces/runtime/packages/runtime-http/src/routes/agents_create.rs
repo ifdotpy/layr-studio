@@ -4,7 +4,7 @@ use super::extractors::ApiJson;
 use super::manifest::{OperationStatus, RouteGroup, post};
 use crate::{error::ApiError, generated, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::{
     claude_permissions::PermissionMode,
@@ -352,7 +352,7 @@ mod workspace_admission_tests {
     #[test]
     fn native_parent_admits_native_layr_without_image_metadata() {
         let native = studio_runtime_store::AgentRecord::from_value(
-            serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
+            studio_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                 "id":"native-parent","rootId":"native-parent","epoch":1,"status":"queued",
                 "workspaceMode":"layr-native","cwd":"/fake/project"
             }),
@@ -371,7 +371,7 @@ mod workspace_admission_tests {
             .expect("runtime store opens");
         let record = |id: &str, epoch: i64, status: &str| {
             studio_runtime_store::AgentRecord::from_value(
-                serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
+                studio_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                     "id":id,"rootId":"lead","epoch":epoch,"status":status,
                     "workspaceMode":"shared","cwd":"/fake/project"
                 }),
@@ -662,7 +662,7 @@ fn resolve_catalog_row(
 #[test]
 fn catalog_rejects_unsupported_effort_and_uses_native_default_when_omitted() {
     let row: studio_runtime_schema::model_catalog::ProviderModel =
-        serde_json::from_value(serde_json::json!({
+        studio_json::from_value(studio_json::json!({
             "model":"opus",
             "supportedReasoningEfforts":[{"reasoningEffort":"high"}],
             "defaultReasoningEffort":"high"
@@ -1816,7 +1816,7 @@ mod title_http_tests {
         body::{Body, to_bytes},
         http::Request,
     };
-    use serde_json::json;
+    use studio_json::json;
     use std::{
         future::Future,
         pin::Pin,
@@ -1988,7 +1988,7 @@ mod title_http_tests {
             .expect("valid HTTP request");
         let response = app.oneshot(request).await.expect("HTTP route response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);
-        let receipt: Value = serde_json::from_slice(
+        let receipt: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 65536)
                 .await
                 .expect("rename response body"),
@@ -2026,7 +2026,7 @@ mod title_http_tests {
                         |row| row.get::<_, String>(0),
                     )
                     .expect("title agent exists");
-                let record: Value = serde_json::from_str(&record).expect("agent JSON");
+                let record: Value = studio_json::from_str(&record).expect("agent JSON");
                 if record["name"] == "Generated through HTTP"
                     && record.get("naming").and_then(Value::as_str) == Some("manual")
                 {
@@ -2046,7 +2046,7 @@ mod creation_catalog_flow_tests {
         catalog_admission_candidates, catalog_cwd_for_conversation,
         existing_conversation_catalog_parent,
     };
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_providers::ProviderKind;
 
     #[test]
@@ -2066,7 +2066,7 @@ mod creation_catalog_flow_tests {
             json!({"id":"later-codex","home":"/codex-2","provider":"codex","status":"ready"}),
         ]
         .into_iter()
-        .map(|row| serde_json::from_value(row).expect("account fixture"))
+        .map(|row| studio_json::from_value(row).expect("account fixture"))
         .collect::<Vec<_>>();
         let candidates = catalog_admission_candidates(
             &rows,
@@ -2099,7 +2099,7 @@ mod creation_catalog_flow_tests {
     #[test]
     fn no_automatic_provider_candidate_is_validated_by_the_selector() {
         let rows = vec![
-            serde_json::from_value(
+            studio_json::from_value(
                 json!({"id":"only-claude","home":"/claude","provider":"claude","status":"ready"}),
             )
             .expect("account fixture"),
@@ -2145,7 +2145,7 @@ mod stale_revision_tests {
         let body = to_bytes(response.into_body(), 4096)
             .await
             .expect("response body");
-        let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON body");
+        let value: studio_json::Value = studio_json::from_slice(&body).expect("JSON body");
         assert_eq!(value["outcome"], "not_applied");
     }
 }
@@ -2157,7 +2157,7 @@ mod conversation_catalog_admission_tests {
         conversation_settings_need_conversation_account, review_settings_catalog_account,
         worker_settings_catalog_account,
     };
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::{creation_intent::WorkerDefaults, queue_command::Field};
 
     fn typed_defaults(account_key: Field<String>) -> WorkerDefaults {
@@ -2171,14 +2171,14 @@ mod conversation_catalog_admission_tests {
         }
     }
 
-    fn parse_request(mut value: serde_json::Value) -> crate::generated::ConversationRequest {
+    fn parse_request(mut value: studio_json::Value) -> crate::generated::ConversationRequest {
         value["id"] = json!("agent");
-        serde_json::from_value(value).unwrap()
+        studio_json::from_value(value).unwrap()
     }
 
     #[test]
     fn creation_intent_retains_http_clear_and_explicit_permissions() {
-        let body: crate::generated::CreateAgentRequest = serde_json::from_str(
+        let body: crate::generated::CreateAgentRequest = studio_json::from_str(
             r#"{"prompt":"Task","model":"gpt-6-luna","effort":null,"permission_mode":"plan","workspaceMode":"shared"}"#,
         ).unwrap();
         let intent = super::agent_intent(&body);
@@ -2202,7 +2202,7 @@ mod conversation_catalog_admission_tests {
     fn generated_conversation_preserves_presence() {
         for field in ["model", "fast_mode", "worker_defaults", "review_defaults"] {
             let mut value = json!({});
-            value[field] = serde_json::Value::Null;
+            value[field] = studio_json::Value::Null;
             assert_eq!(
                 super::conversation_null_field(&parse_request(value)),
                 Some(field)

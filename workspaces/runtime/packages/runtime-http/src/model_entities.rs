@@ -1,7 +1,7 @@
 //! Durable per-account model catalog entities.
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::model_catalog::ModelCatalog;
 use studio_runtime_services::model_catalog::ChangeCallback;
@@ -138,7 +138,7 @@ fn publish_catalog(
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for id in existing.into_iter().filter_map(|(id, payload)| {
-        let belongs_to_account = serde_json::from_str::<
+        let belongs_to_account = studio_json::from_str::<
             studio_runtime_schema::json_object::JsonObject<StoredModelEnvelope>,
         >(&payload)
         .ok()
@@ -163,7 +163,7 @@ mod tests {
     fn typed(value: Value) -> ModelCatalog {
         ModelCatalog::parse(value).expect("valid catalog")
     }
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     #[tokio::test]
@@ -283,7 +283,7 @@ mod tests {
             .find(|(id, _, _)| id == "one:alpha")
             .expect("updated model retained");
         assert!(!one_alpha.1);
-        let one_value: Value = serde_json::from_str(&one_alpha.2).expect("entity payload JSON");
+        let one_value: Value = studio_json::from_str(&one_alpha.2).expect("entity payload JSON");
         assert_eq!(one_value["value"]["accountKey"], "one");
         assert_eq!(one_value["value"]["provider"], "codex");
         assert_eq!(one_value["value"]["hidden"], true);

@@ -1,13 +1,13 @@
-use serde_json::Value;
+use studio_json::Value;
 
 const MAX_NESTING: usize = 127;
 
-/// Bound bytes and nesting before serde_json's recursive value parser runs.
+/// Bound bytes and nesting before studio_json's recursive value parser runs.
 pub(crate) fn parse_bounded(bytes: &[u8], byte_limit: usize) -> Result<Value, ()> {
     if bytes.len() > byte_limit || nesting_exceeds(bytes, MAX_NESTING) {
         return Err(());
     }
-    serde_json::from_slice(bytes).map_err(|_| ())
+    studio_json::from_slice(bytes).map_err(|_| ())
 }
 
 fn nesting_exceeds(bytes: &[u8], limit: usize) -> bool {
@@ -67,7 +67,7 @@ mod tests {
             .expect("valid JSON object");
         assert_eq!(
             value,
-            serde_json::json!({"$serde_json::private::Number":"1"})
+            studio_json::json!({"$serde_json::private::Number":"1"})
         );
     }
 

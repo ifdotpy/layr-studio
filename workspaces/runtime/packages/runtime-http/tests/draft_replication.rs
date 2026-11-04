@@ -5,7 +5,7 @@ use axum::{
     extract::ConnectInfo,
     http::{Request, StatusCode},
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{net::SocketAddr, sync::Arc};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_store::RuntimeStore;
@@ -31,7 +31,7 @@ async fn request(app: &Router, method: &str, uri: &str, body: Value) -> Value {
     ));
     let response = app.clone().oneshot(request).await.expect("response");
     assert_eq!(response.status(), StatusCode::OK);
-    serde_json::from_slice(
+    studio_json::from_slice(
         &to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body"),
@@ -57,7 +57,7 @@ async fn draft_push_ack_and_echo_follow_shared_contract() {
         None,
     ))
     .expect("router");
-    let fixture: Value = serde_json::from_str(include_str!(
+    let fixture: Value = studio_json::from_str(include_str!(
         "../../../../client/contracts/draft-replication.json"
     ))
     .expect("shared fixture");

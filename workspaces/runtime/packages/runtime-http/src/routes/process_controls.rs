@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{error::ApiError, router::HttpState};
 use axum::{Extension, Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
@@ -61,7 +61,7 @@ fn store(state: &HttpState) -> Result<Arc<RuntimeStore>, ApiError> {
 }
 fn provider(state: &HttpState, owner: &Value) -> Result<Arc<dyn AccountSessionPort>, ApiError> {
     let agent: AgentRecord =
-        serde_json::from_value(owner.clone()).map_err(|_| ApiError::internal())?;
+        studio_json::from_value(owner.clone()).map_err(|_| ApiError::internal())?;
     Ok(super::agent_management::native_action_provider(
         store(state)?.as_ref(),
         &agent,
@@ -580,7 +580,7 @@ async fn stop_process(
             return Err(invalid("Invalid native process list"));
         }
         let page: studio_runtime_services::provider_pagination::Page<Value> =
-            serde_json::from_value(result).map_err(|_| invalid("Invalid native process list"))?;
+            studio_json::from_value(result).map_err(|_| invalid("Invalid native process list"))?;
         if page.data.len() > NATIVE_TERMINAL_ITEMS_PER_PAGE {
             return Err(invalid("Invalid native terminal list"));
         }

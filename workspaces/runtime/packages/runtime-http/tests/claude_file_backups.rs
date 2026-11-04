@@ -5,7 +5,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -169,7 +169,7 @@ async fn post(app: &axum::Router, path: &str, body: Value) -> (u16, Value) {
     let status = response.status().as_u16();
     (
         status,
-        serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+        studio_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
             .unwrap(),
     )
 }
@@ -239,7 +239,7 @@ pub(crate) async fn fixture() -> (
     .await
     .unwrap();
     native.ready.notified().await;
-    let policy=AccountPolicyState::from_startup(Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"account","accounts":{"account":{"id":"account","provider":"claude","home":"/fixture","label":"Fixture","source":"Claude Code","status":"ready"}},"logins":{}}).to_string().as_bytes()),[]).unwrap();
+    let policy=AccountPolicyState::from_startup(Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"account","accounts":{"account":{"id":"account","provider":"claude","home":"/fixture","label":"Fixture","source":"Claude Code","status":"ready"}},"logins":{}}).to_string().as_bytes()),[]).unwrap();
     let mut state = HttpState::new(
         "fixture-token".into(),
         "fixture".into(),
