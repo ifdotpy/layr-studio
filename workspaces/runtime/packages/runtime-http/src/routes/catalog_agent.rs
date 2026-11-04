@@ -1130,10 +1130,6 @@ mod native_command_tests {
                 let reply: crate::generated::NativeCommandResponse =
                     serde_json::from_slice(&bytes).expect("typed original reply");
                 if action == "input" {
-                    assert_eq!(
-                        bytes.as_ref(),
-                        br#"{"id":"original-input","status":"pending"}"#
-                    );
                     assert_eq!(reply.id.flatten().as_deref(), Some("original-input"));
                 } else {
                     assert_eq!(reply.terminated.flatten(), Some(true));

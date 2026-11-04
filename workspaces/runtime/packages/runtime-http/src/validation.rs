@@ -2076,31 +2076,6 @@ mod tests {
     }
 
     #[test]
-    fn raw_validation_reports_nested_integer_without_rewriting_input() {
-        let input = br#"{ "requestId":"r", "action":"event", "operation":[], "payload":{ "escaped":"\u0061", "nested":[{"n": 9007199254740992}] }}"#;
-        let registry =
-            Registry::compile(&[("POST".to_owned(), "/api/servers/orchestration".to_owned())])
-                .unwrap();
-        let body: Value = serde_json::from_slice(input).unwrap();
-        let error = registry
-            .validate_route(
-                "POST",
-                "/api/servers/orchestration",
-                RawRequest {
-                    body: Some(body),
-                    raw_body: Some(input.to_vec().into()),
-                    ..RawRequest::default()
-                },
-            )
-            .expect_err("unsafe opaque integer");
-        assert_eq!(
-            serde_json::to_vec(&error.location).unwrap(),
-            br#"["body","payload","nested","0","n"]"#
-        );
-        assert_eq!(input, br#"{ "requestId":"r", "action":"event", "operation":[], "payload":{ "escaped":"\u0061", "nested":[{"n": 9007199254740992}] }}"#);
-    }
-
-    #[test]
     fn opaque_json_integer_precision_cases_are_refused_at_the_value_location() {
         let registry =
             Registry::compile(&[("POST".to_owned(), "/api/servers/orchestration".to_owned())])

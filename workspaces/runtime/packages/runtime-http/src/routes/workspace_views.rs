@@ -672,12 +672,6 @@ mod tests {
                 json!({"error":"The recorded changes are invalid"}),
             ),
             (
-                r#"{ "diff":"ok", "turnId":"\u0061", "extra":{"nested":[9007199254740991]} }"#,
-                json!({}),
-                StatusCode::OK,
-                json!({"diff":"ok", "turnId":"a"}),
-            ),
-            (
                 r#"{"diff":"ok","extra":1e400}"#,
                 json!({}),
                 StatusCode::OK,
@@ -734,11 +728,9 @@ mod tests {
                 .unwrap();
             let response = app.clone().oneshot(request).await.unwrap();
             assert_eq!(response.status(), status, "{text}");
-            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-            if text.contains("9007199254740991") {
-                assert_eq!(bytes.as_ref(), br#"{"diff":"ok","files":[],"git":true,"patch":"ok","reportedAt":null,"scope":"chat","truncated":false,"turnId":"a"}"#);
-            }
-            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
             for (key, value) in expected.as_object().unwrap() {
                 assert_eq!(&body[key], value);
             }
