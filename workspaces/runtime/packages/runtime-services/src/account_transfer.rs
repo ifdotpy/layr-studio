@@ -216,6 +216,54 @@ pub enum TransferError {
     Store(#[from] studio_runtime_store::StoreError),
 }
 
+impl From<crate::account_session_runtime::AccountSessionError> for TransferError {
+    fn from(error: crate::account_session_runtime::AccountSessionError) -> Self {
+        use crate::account_session_runtime::AccountSessionError;
+        match error {
+            AccountSessionError::Expired => Self::Expired,
+            AccountSessionError::Requires(name) => Self::Requires(name),
+            AccountSessionError::Refused(reason) => Self::Refused(reason),
+            AccountSessionError::InvalidResponse(pointer) => Self::Stored {
+                object: "account session response",
+                pointer,
+            },
+            AccountSessionError::Persistence => Self::Refused("Account session persistence failed"),
+            AccountSessionError::Unknown => Self::Refused(
+                "The provider request outcome is unknown; inspect its receipt before retrying",
+            ),
+        }
+    }
+}
+
+/// Maximum length of a user-visible transfer refusal reason, in Unicode scalar values.
+const TRANSFER_PUBLIC_REASON_MAX_CHARS: usize = 1000;
+
+pub(crate) fn public_preparation_reason(error: &TransferError) -> String {
+    let reason = match error {
+        TransferError::Refused(reason) => (*reason).to_owned(),
+        TransferError::Stored {
+            object: "account session response",
+            pointer,
+        } => {
+            format!("Invalid account session response at {pointer}")
+        }
+        TransferError::Expired
+        | TransferError::Stored { .. }
+        | TransferError::Requires(_)
+        | TransferError::Store(_) => "Transfer preparation failed".to_owned(),
+    };
+    if reason.chars().count() <= TRANSFER_PUBLIC_REASON_MAX_CHARS {
+        reason
+    } else {
+        let mut shortened: String = reason
+            .chars()
+            .take(TRANSFER_PUBLIC_REASON_MAX_CHARS - 1)
+            .collect();
+        shortened.push('…');
+        shortened
+    }
+}
+
 impl From<studio_runtime_store::transfer_record::TransferRecordError> for TransferError {
     fn from(error: studio_runtime_store::transfer_record::TransferRecordError) -> Self {
         use studio_runtime_store::transfer_record::TransferRecordError;
@@ -1685,6 +1733,7 @@ impl Snapshot {
     pub fn typed_preparation_failed(
         &self,
         agent: &str,
+        reason: &str,
         source: &studio_runtime_schema::queue_command::Field<
             studio_runtime_store::transfer_record::TransferSource,
         >,
@@ -1709,7 +1758,7 @@ impl Snapshot {
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         member.phase = Phase::Blocked;
-        member.error = Field::Value("Transfer preparation failed before native submission".into());
+        member.error = Field::Value(reason.into());
         Ok(self.decision(operation, self.agents.clone(), vec![]))
     }
 
@@ -2694,26 +2743,75 @@ mod provider_receipt_tests {
         let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
         assert!(
             snapshot
-                .typed_preparation_failed("agent", &Field::Missing)
+                .typed_preparation_failed("agent", "reason", &Field::Missing)
                 .unwrap()
                 .changed
         );
         let decision = snapshot
-            .typed_preparation_failed("agent", &Field::Null)
+            .typed_preparation_failed(
+                "agent",
+                "Finish the Claude turn and background tasks before a move",
+                &Field::Null,
+            )
             .unwrap();
         assert!(decision.changed);
         assert_eq!(
             decision.operation.members.get("agent").unwrap().phase,
             super::Phase::Blocked
         );
+        assert_eq!(
+            decision.operation.members.get("agent").unwrap().error,
+            Field::Value("Finish the Claude turn and background tasks before a move".into())
+        );
+        let long = "é".repeat(65_537);
+        let reason = super::public_preparation_reason(&super::TransferError::from(
+            crate::account_session_runtime::AccountSessionError::InvalidResponse(long),
+        ));
+        let decision = snapshot
+            .typed_preparation_failed("agent", &reason, &Field::Null)
+            .unwrap();
+        assert!(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .error
+                .value()
+                .unwrap()
+                .chars()
+                .count()
+                <= 1000
+        );
         let absent = raw.replace(",\"source\":null", "");
         let snapshot =
             super::Snapshot::read(&absent, [("agent".into(), agent.to_string())]).unwrap();
         assert!(
             !snapshot
-                .typed_preparation_failed("agent", &Field::Null)
+                .typed_preparation_failed("agent", "reason", &Field::Null)
                 .unwrap()
                 .changed
+        );
+    }
+
+    #[test]
+    fn transfer_public_reason_limit_fits_persisted_transfer_member_error_schema() {
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../runtime-schema/src/schemas/persisted-account-transfer-record.schema.json"
+        ))
+        .unwrap();
+        let storage_limit = schema["$defs"]["TransferMemberRecord"]["properties"]["error"]["anyOf"]
+            [0]["maxLength"]
+            .as_u64()
+            .unwrap();
+        assert!(super::TRANSFER_PUBLIC_REASON_MAX_CHARS as u64 <= storage_limit);
+        let internal = super::TransferError::Stored {
+            object: "private database path",
+            pointer: "secret".into(),
+        };
+        assert_eq!(
+            super::public_preparation_reason(&internal),
+            "Transfer preparation failed"
         );
     }
 
