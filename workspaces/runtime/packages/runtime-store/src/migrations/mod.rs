@@ -89,6 +89,7 @@ mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;
 mod m2026_11_03_drop_completed_turns;
 mod m2026_11_03_request_signature_digest;
+mod m2026_11_04_direct_read_time;
 mod m2026_11_04_work_read_time;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1522,6 +1523,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_04_work_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-direct-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with plan, annotation, rule or approval copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_direct_read_time::apply(c.transaction),
     },
 ];
 

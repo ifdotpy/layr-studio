@@ -863,8 +863,7 @@ mod tests {
         store
             .transaction_with(move |tx| {
                 // The pending card is shown to the client.
-                let (row, _) = crate::browser_cards::load(tx, &shown).expect("card").expect("card");
-                crate::approval_sync::publish(tx, &row)?;
+                let (_row, _) = crate::browser_cards::load(tx, &shown).expect("card").expect("card");
                 // The decline tells the chat, so the chat exists.
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
@@ -899,11 +898,7 @@ mod tests {
             let id = id.clone();
             store
                 .test_read_transaction(move |tx| {
-                    Ok(tx.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='request' AND id=?1 AND deleted=0)",
-                        [id],
-                        |row| row.get::<_, bool>(0),
-                    )?)
+                    Ok(crate::entity_scope::direct_document(tx, "request", &id)?.is_some())
                 })
                 .expect("request entity reads")
         };

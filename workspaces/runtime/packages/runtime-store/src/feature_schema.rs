@@ -205,11 +205,8 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     // A deleted row is no longer readable by the writer journal. Its source
     // trigger owns the corresponding summary tombstone in the same transaction.
     for (table, collection) in [
-        ("runtime_plans", "plan"),
-        ("runtime_annotations", "annotation"),
         ("runtime_events", "messageReceipt"),
         ("runtime_tasks", "task"),
-        ("runtime_requests", "questionHistory"),
         ("runtime_agents", "retainedWorktree"),
     ] {
         let tombstone =

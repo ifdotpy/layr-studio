@@ -1,11 +1,9 @@
 //! Read persisted rule and owner records for the rules list.
 
 use rusqlite::{Connection, Transaction};
-use serde::Serialize;
 
 use crate::StoreResult;
 use crate::records::{AgentId, AgentRecord, RuleRecord, Table};
-use crate::repositories::sync_documents::SyncDocumentsRepository;
 use crate::schema::{SchemaRequirements, TableRequirement};
 
 const RULE_TABLE: TableRequirement = TableRequirement {
@@ -52,23 +50,12 @@ impl RulesRepository {
         Table::<AgentRecord>::new(connection).get(&AgentId::from(id))
     }
 
-    pub fn publish_entity(transaction: &Transaction<'_>, record: &RuleRecord) -> StoreResult<()> {
-        put_rule_entity(
-            transaction,
-            record.id(),
-            Some(&record.agent),
-            Some(record.name.as_str()),
-            false,
-        )
-    }
-
+    /// Store a rule. Its client view is built at read time (`entity_scope`).
     pub fn put(transaction: &Transaction<'_>, record: &RuleRecord) -> StoreResult<()> {
-        Self::publish_entity(transaction, record)?;
         Table::<RuleRecord>::new(transaction).put(record)
     }
 
     pub fn delete(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
-        put_rule_entity(transaction, id, None, None, true)?;
         Table::<RuleRecord>::new(transaction).delete(&id.to_owned())?;
         Ok(())
     }
@@ -86,50 +73,6 @@ impl RulesRepository {
             .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
-}
-
-fn put_rule_entity(
-    transaction: &Transaction<'_>,
-    id: &str,
-    agent: Option<&str>,
-    name: Option<&str>,
-    deleted: bool,
-) -> StoreResult<()> {
-    #[derive(Serialize)]
-    struct RuleProjection<'a> {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        agent: Option<&'a str>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        id: Option<&'a str>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        name: Option<&'a str>,
-    }
-    #[derive(Serialize)]
-    struct Envelope<'a> {
-        collection: &'static str,
-        id: &'a str,
-        value: RuleProjection<'a>,
-    }
-    let value = if deleted {
-        RuleProjection {
-            id: None,
-            agent: None,
-            name: None,
-        }
-    } else {
-        RuleProjection {
-            id: Some(id),
-            agent,
-            name,
-        }
-    };
-    let payload = serde_json::to_string(&Envelope {
-        collection: "rule",
-        id,
-        value,
-    })?;
-    SyncDocumentsRepository::put_entity_payload(transaction, "rule", id, &payload, deleted)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -172,113 +115,6 @@ mod tests {
                 .iter()
                 .any(|table| table.name == "runtime_agents")
         );
-    }
-
-    #[test]
-    fn rule_mutations_keep_the_renderer_entity_in_the_same_transaction() {
-        use crate::records::RuleRecord;
-        use rusqlite::TransactionBehavior;
-
-        let mut db = Connection::open_in_memory().expect("in-memory database opens");
-        db.execute_batch(
-            "CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,
-                 PRIMARY KEY(collection,id));
-             CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-             CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);",
-        )
-        .expect("rule and sync tables create");
-        {
-            let transaction = db
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .expect("writer transaction opens");
-            RulesRepository::put(
-                &transaction,
-                &serde_json::from_str::<RuleRecord>(r#"{"id":"r1","agent":"a1","epoch":0,"name":"Check","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#)
-                .expect("rule has an id"),
-            )
-            .expect("rule is persisted");
-            transaction.commit().expect("rule transaction commits");
-        }
-        let stored: Option<String> = db
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rule' AND id='r1' AND deleted=0",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
-        assert_eq!(
-            stored.as_deref(),
-            Some(
-                r#"{"collection":"rule","id":"r1","value":{"agent":"a1","id":"r1","name":"Check"}}"#
-            )
-        );
-        {
-            let transaction = db
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .expect("writer transaction opens");
-            RulesRepository::delete(&transaction, "r1").expect("rule is removed");
-            transaction.commit().expect("delete transaction commits");
-        }
-        let deleted: Option<i64> = db
-            .query_row(
-                "SELECT deleted FROM sync_entities WHERE collection='rule' AND id='r1'",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
-        assert_eq!(deleted, Some(1));
-        assert_eq!(
-            RulesRepository::get(&db, "r1").expect("rule query works"),
-            None
-        );
-    }
-
-    #[test]
-    fn failed_rule_write_rolls_back_its_sync_entity_in_the_same_transaction() {
-        use crate::records::RuleRecord;
-        use rusqlite::OptionalExtension;
-
-        let mut db = Connection::open_in_memory().expect("in-memory database opens");
-        db.execute_batch(
-            "CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,
-                 PRIMARY KEY(collection,id));
-             CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-             CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-             CREATE TRIGGER fail_rule_insert BEFORE INSERT ON runtime_rules
-                 BEGIN SELECT RAISE(ABORT,'injected'); END;",
-        )
-        .expect("rule and sync tables and failure trigger create");
-
-        let transaction = db.transaction().expect("writer transaction opens");
-        let error = RulesRepository::put(
-            &transaction,
-            &serde_json::from_str::<RuleRecord>(r#"{"id":"rollback-rule","agent":"a1","epoch":0,"name":"Rollback","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#)
-            .expect("rule has a valid ID"),
-        )
-        .expect_err("injected rule storage failure is returned");
-        assert!(matches!(error, crate::StoreError::Sqlite(_)));
-        drop(transaction);
-
-        let rule: Option<i64> = db
-            .query_row(
-                "SELECT 1 FROM runtime_rules WHERE id='rollback-rule'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .expect("rule table remains readable");
-        let sync_entity: Option<i64> = db
-            .query_row(
-                "SELECT 1 FROM sync_entities WHERE collection='rule' AND id='rollback-rule'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .expect("sync entity table remains readable");
-        assert_eq!(rule, None);
-        assert_eq!(sync_entity, None);
     }
 
     #[test]

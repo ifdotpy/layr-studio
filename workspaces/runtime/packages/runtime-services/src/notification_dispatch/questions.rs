@@ -471,7 +471,7 @@ pub(super) fn completed(
             .unwrap_or(&agent["turnId"])
             .as_str()
             .map(|turn| typed::TurnId(turn.to_owned()));
-        let row = studio_runtime_store::approvals::create(
+        studio_runtime_store::approvals::create(
             tx,
             studio_runtime_store::approvals::NewApproval {
                 id: approval_id,
@@ -497,7 +497,6 @@ pub(super) fn completed(
             typed::Timestamp(at),
         )
         .map_err(studio_runtime_store::StoreError::from)?;
-        crate::approval_sync::publish(tx, &row)?;
     } else {
         let text = format!(
             "Questions for the orchestrator:\n[{}]",
@@ -569,7 +568,6 @@ pub(super) fn resolved(
             row.fire_at = None;
             studio_runtime_store::approvals::put(tx, &row)
                 .map_err(studio_runtime_store::StoreError::from)?;
-            crate::approval_sync::publish(tx, &row)?;
         }
         pending |= matches!(row.state, typed::ApprovalState::Pending);
     }

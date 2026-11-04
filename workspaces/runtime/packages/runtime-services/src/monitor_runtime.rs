@@ -123,7 +123,6 @@ fn recover_requests(tx: &Transaction<'_>, now: f64) -> Result<usize, MonitorErro
         let apply = (|| {
             studio_runtime_store::approvals::put(tx, &row)
                 .map_err(studio_runtime_store::StoreError::from)?;
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<(), MonitorError>(())
         })();
         if let Err(error) = apply {
@@ -498,14 +497,13 @@ pub async fn answer_approval(
                 typed::CommandId(request_id.clone()),
             )
             .map_err(studio_runtime_store::StoreError::from)?;
-            let answered = studio_runtime_store::approvals::confirm_delivery(
+            studio_runtime_store::approvals::confirm_delivery(
                 tx,
                 &id,
                 typed::Principal::Owner,
                 typed::Timestamp(now),
             )
             .map_err(studio_runtime_store::StoreError::from)?;
-            crate::approval_sync::publish(tx, &answered)?;
             Ok(Some(MonitorApprovalAnswer {
                 response: json!({"status":"answered"}),
                 accepted,
@@ -909,7 +907,6 @@ pub fn apply_with_rule(
                     };
                     studio_runtime_store::approvals::put(tx, &request)
                         .map_err(studio_runtime_store::StoreError::from)?;
-                    crate::approval_sync::publish(tx, &request)?;
                 }
             }
             Effect::Probe { .. } | Effect::Terminate | Effect::Native { .. } => (),
@@ -1556,7 +1553,7 @@ pub fn create_in_transaction(
     repository::put(tx, &record)?;
     crate::agent_progress::publish_owner(tx, &actor.id.0)?;
     if record.status == studio_runtime_schema::studio_errors::MonitorStatus::Approval {
-        let approval = studio_runtime_store::approvals::create(
+        studio_runtime_store::approvals::create(
             tx,
             studio_runtime_store::approvals::NewApproval {
                 id: studio_runtime_schema::approvals::ApprovalId(format!("monitor-approval:{id}")),
@@ -1583,7 +1580,6 @@ pub fn create_in_transaction(
             studio_runtime_schema::approvals::Timestamp(now),
         )
         .map_err(studio_runtime_store::StoreError::from)?;
-        crate::approval_sync::publish(tx, &approval)?;
     }
     let after = MonitorSnapshot::checked_stored(&record, actor_value)?;
     crate::sync_policy::publish_monitor_change(tx, None, &after)?;

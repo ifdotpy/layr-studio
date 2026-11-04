@@ -114,6 +114,12 @@ pub const WORK_COLLECTIONS: &[&str] = &[
     "workRelease",
 ];
 
+/// Collections with one document per row of a main table (`runtime_plans`,
+/// `runtime_annotations`, `runtime_rules`, `approvals`). Like the work documents, they
+/// are built at read time and have no copy in `sync_entities`.
+pub const DIRECT_COLLECTIONS: &[&str] =
+    &["plan", "annotation", "rule", "request", "questionHistory"];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncDocument {
     pub id: String,
@@ -427,7 +433,8 @@ impl SyncDocumentsRepository {
     }
 
     /// Raw scoped rows of `sync_entities` in `(after, through]`, at most `fetch` rows, in
-    /// `seq` order, without [`WORK_COLLECTIONS`]. Shared by every scoped reader.
+    /// `seq` order, without the collections built at read time. Shared by every scoped
+    /// reader.
     #[allow(clippy::too_many_arguments)]
     pub fn scope_rows(
         transaction: &Connection,
@@ -455,7 +462,7 @@ impl SyncDocumentsRepository {
         } else {
             ""
         };
-        let work = work_collection_list();
+        let work = read_time_collection_list();
         let mut statement = transaction.prepare_cached(&format!(
             "SELECT collection,id,seq,payload,deleted FROM sync_entities AS entity{index} \
              WHERE collection NOT LIKE 'transcript:%' AND {collections} AND {identity} \
@@ -583,7 +590,7 @@ impl SyncDocumentsRepository {
             "SELECT collection,id,seq,payload,deleted FROM sync_entities \
              WHERE seq>?1 AND collection NOT LIKE 'transcript:%' AND collection NOT IN ({}) \
              ORDER BY seq LIMIT ?2",
-            work_collection_list()
+            read_time_collection_list()
         ))?;
         let rows = statement.query_map(
             params![
@@ -865,7 +872,7 @@ impl SyncDocumentsRepository {
 }
 
 impl SyncDocumentsRepository {
-    /// Rows of a fresh global pull from `sync_entities`, without [`WORK_COLLECTIONS`]:
+    /// Rows of a fresh global pull from `sync_entities`, without the read-time collections:
     /// live rows above `after`, and deletes above both `tombstone_floor` and
     /// `initial_high`. The summary of `priority_id` comes first.
     pub fn global_rows(
@@ -892,9 +899,12 @@ impl SyncDocumentsRepository {
     }
 }
 
-fn work_collection_list() -> String {
+/// [`WORK_COLLECTIONS`] and [`DIRECT_COLLECTIONS`] as an SQL list. The readers here
+/// skip them; `entity_scope` in runtime-services builds them.
+pub(crate) fn read_time_collection_list() -> String {
     WORK_COLLECTIONS
         .iter()
+        .chain(DIRECT_COLLECTIONS)
         .map(|collection| format!("'{collection}'"))
         .collect::<Vec<_>>()
         .join(",")
@@ -920,7 +930,7 @@ fn read_entity_page(
            AND (?7 IS NULL OR collection IN (SELECT value FROM json_each(?7))) AND seq>?1 \
            AND (deleted=0 OR seq>?2) AND (?3=0 OR deleted=0 OR seq>?4) \
          ORDER BY {order} LIMIT ?6",
-        work = work_collection_list(),
+        work = read_time_collection_list(),
     ))?;
     statement
         .query_map(

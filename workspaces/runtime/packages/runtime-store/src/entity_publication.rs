@@ -31,11 +31,8 @@ pub trait EntityPublisher: Send + Sync {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PendingEntities {
     pub agents: BTreeSet<String>,
-    pub requests: BTreeSet<String>,
     pub receipt_events: BTreeSet<String>,
     pub receipt_items: BTreeSet<String>,
-    pub plans: BTreeSet<String>,
-    pub annotations: BTreeSet<String>,
     pub tasks: BTreeSet<String>,
     pub work: BTreeSet<String>,
     /// Source rows of the derived Studio error list that changed.
@@ -47,11 +44,8 @@ pub struct PendingEntities {
 impl PendingEntities {
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
-            && self.requests.is_empty()
             && self.receipt_events.is_empty()
             && self.receipt_items.is_empty()
-            && self.plans.is_empty()
-            && self.annotations.is_empty()
             && self.tasks.is_empty()
             && self.work.is_empty()
             && self.studio_errors.is_empty()
@@ -118,8 +112,6 @@ enum Source {
     Event,
     EventMeta,
     Item,
-    Plan,
-    Annotation,
     Task,
     Work,
     QueueAsset,
@@ -138,8 +130,6 @@ impl Source {
             "runtime_events" => Some(Self::Event),
             "runtime_event_meta" => Some(Self::EventMeta),
             "runtime_items" => Some(Self::Item),
-            "runtime_plans" => Some(Self::Plan),
-            "runtime_annotations" => Some(Self::Annotation),
             "runtime_tasks" => Some(Self::Task),
             "runtime_work" => Some(Self::Work),
             "runtime_assets" => Some(Self::QueueAsset),
@@ -153,9 +143,6 @@ impl Source {
     fn of_collection(collection: &str) -> Option<Self> {
         match collection {
             "agent" => Some(Self::Agent),
-            "request" => Some(Self::Request),
-            "plan" => Some(Self::Plan),
-            "annotation" => Some(Self::Annotation),
             "task" => Some(Self::Task),
             "work" => Some(Self::Work),
             _ => None,
@@ -169,8 +156,6 @@ impl Source {
             Self::Event => "runtime_events",
             Self::EventMeta => "runtime_event_meta",
             Self::Item => "runtime_items",
-            Self::Plan => "runtime_plans",
-            Self::Annotation => "runtime_annotations",
             Self::Task => "runtime_tasks",
             Self::Work => "runtime_work",
             Self::QueueAsset => "runtime_assets",
@@ -288,8 +273,6 @@ pub(crate) fn pending(
                     | Source::Event
                     | Source::EventMeta
                     | Source::Item
-                    | Source::Plan
-                    | Source::Annotation
                     | Source::Task
                     | Source::Work
                     | Source::Terminal
@@ -382,8 +365,8 @@ pub(crate) fn pending(
             _ => false,
         };
     }
-    // Request attention belongs in summaries even when an explicit request
-    // publisher has already consumed the card's own pending publication.
+    // A changed approval changes the attention fields of its agent's summary. The
+    // approval documents themselves are built at read time.
     for ((source, _), id) in &ids {
         if *source != Source::Request {
             continue;
@@ -435,14 +418,15 @@ pub(crate) fn pending(
         }
         match source {
             Source::Agent => pending.agents.insert(id),
-            Source::Request => pending.requests.insert(id),
             Source::Event | Source::EventMeta => pending.receipt_events.insert(id),
             Source::Item => pending.receipt_items.insert(id),
-            Source::Plan => pending.plans.insert(id),
-            Source::Annotation => pending.annotations.insert(id),
             Source::Task => pending.tasks.insert(id),
             Source::Work => pending.work.insert(id),
-            Source::QueueAsset | Source::Terminal | Source::Monitor | Source::Incident => false,
+            Source::Request
+            | Source::QueueAsset
+            | Source::Terminal
+            | Source::Monitor
+            | Source::Incident => false,
         };
     }
     Ok(pending)

@@ -430,7 +430,6 @@ pub fn maintain_entity_projections_with_server_id(
             ("runtime_rooms", "room"),
             ("runtime_complaints", "complaint"),
             ("runtime_projects", "project"),
-            ("runtime_rules", "rule"),
         ] {
             let records = source_records.get(table).ok_or(StoreError::RecordContract(
                 "entity projection source snapshot is incomplete",
@@ -438,10 +437,6 @@ pub fn maintain_entity_projections_with_server_id(
             for (id, raw) in records {
                 if table == "runtime_projects" && !valid_stored_record(table, id, raw) {
                     eprintln!("ERROR project projection skipped invalid row id={id}");
-                    continue;
-                }
-                if collection == "rule" {
-                    publish_direct(transaction, collection, id, raw)?;
                     continue;
                 }
                 if collection == "room" {
@@ -550,12 +545,6 @@ pub fn maintain_entity_projections_with_server_id(
                 }
             }
         }
-        // Approval rows publish through the same code as their writers.
-        if table_exists(transaction, "approvals")? {
-            for row in studio_runtime_store::approvals::all(transaction)? {
-                crate::approval_sync::publish(transaction, &row)?;
-            }
-        }
         Ok::<(), StoreError>(())
     })?;
     if table_exists(transaction, "runtime_rooms")? {
@@ -659,7 +648,6 @@ impl CheckedAgentRow {
 #[derive(Clone, Debug, Default)]
 pub struct EntityChanges {
     pub agents: BTreeSet<String>,
-    pub requests: BTreeSet<String>,
     /// Changed work rows. Their documents are built at read time (`entity_scope`); a
     /// change here refreshes only the owner agent's views.
     pub work: BTreeSet<String>,
@@ -820,13 +808,6 @@ pub fn publish_entity_changes(
     if !room_agents.is_empty() {
         publish_rooms_of(transaction, &room_agents, &changed_roots, validate)?;
     }
-    // Approval rows publish through the same code as their writers.
-    for id in &changes.requests {
-        let id = studio_runtime_schema::approvals::ApprovalId(id.clone());
-        if let Some(row) = studio_runtime_store::approvals::get(transaction, &id)? {
-            crate::approval_sync::publish(transaction, &row)?;
-        }
-    }
     if !liveness_changed.is_empty() {
         maintain_task_window(transaction, validate)?;
         maintain_monitor_window(transaction, validate)?;
@@ -865,14 +846,6 @@ pub(crate) fn publish_summary_changes(
             &task,
             &|_, _, _, _| true,
         )?;
-    }
-    for (collection, table, ids) in [
-        ("plan", "runtime_plans", &pending.plans),
-        ("annotation", "runtime_annotations", &pending.annotations),
-    ] {
-        for (id, raw) in records_by_id(transaction, table, ids)? {
-            publish_direct(transaction, collection, &id, &raw)?;
-        }
     }
     let mut events = pending.receipt_events.clone();
     for id in &pending.receipt_items {
@@ -965,16 +938,6 @@ fn seed_summary_entities(transaction: &Transaction<'_>) -> StoreResult<()> {
         return Ok(());
     }
     let mut pending = studio_runtime_store::PendingEntities::default();
-    for (table, ids) in [
-        ("runtime_plans", &mut pending.plans),
-        ("runtime_annotations", &mut pending.annotations),
-    ] {
-        if table_exists(transaction, table)? {
-            for (id, _) in stored_record_rows(transaction, table)? {
-                ids.insert(id);
-            }
-        }
-    }
     if table_exists(transaction, "runtime_events")? {
         let mut statement =
             transaction.prepare("SELECT id FROM runtime_events WHERE kind='user'")?;
@@ -1133,58 +1096,50 @@ pub(crate) fn publish_agent_projection(
     put_projection(transaction, "agent", id, compatibility, deleted, validate)
 }
 
-/// Publish one rule or work row.
-fn publish_direct(
-    transaction: &Transaction<'_>,
-    collection: &str,
-    id: &str,
-    raw: &str,
-) -> StoreResult<()> {
-    if collection == "annotation" {
-        let record: studio_runtime_store::AnnotationRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "annotations",
-                id: id.to_owned(),
-            })?;
-        if !record.id().is_empty() {
-            let view =
-                record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
-            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
-        }
-        return Ok(());
-    }
-    if collection == "plan" {
-        let record: studio_runtime_store::PlanRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "plans",
-                id: id.to_owned(),
-            })?;
-        if !record.id().is_empty() {
-            let view = record.sync_view(
-                &|value, field| crate::sync_views::bound_sync_text(value, field),
-                crate::sync_views::SYNC_ARRAY_ITEMS,
-                &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
-            );
-            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
-        }
-        return Ok(());
-    }
-    if collection == "rule" {
-        let invalid = || StoreError::InvalidStoredRecord {
-            object: "rules",
+/// The client view of a plan row; None for a row without an id.
+pub(crate) fn plan_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
+    let record: studio_runtime_store::PlanRecord =
+        serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+            object: "plans",
             id: id.to_owned(),
-        };
-        let record: studio_runtime_store::RuleRecord =
-            serde_json::from_str(raw).map_err(|_| invalid())?;
-        if record.id != id {
-            return Err(invalid());
-        }
-        return studio_runtime_store::RulesRepository::publish_entity(transaction, &record);
+        })?;
+    if record.id().is_empty() {
+        return Ok(None);
     }
+    let view = record.sync_view(
+        &|value, field| crate::sync_views::bound_sync_text(value, field),
+        crate::sync_views::SYNC_ARRAY_ITEMS,
+        &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
+    );
+    Ok(Some(serde_json::to_value(view)?))
+}
 
-    Err(StoreError::RecordContract(
-        "unsupported direct sync collection",
-    ))
+/// The client view of an annotation row; None for a row without an id.
+pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
+    let record: studio_runtime_store::AnnotationRecord =
+        serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+            object: "annotations",
+            id: id.to_owned(),
+        })?;
+    if record.id().is_empty() {
+        return Ok(None);
+    }
+    let view = record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
+    Ok(Some(serde_json::to_value(view)?))
+}
+
+/// The client view of a rule row: its id, agent and name.
+pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<Value> {
+    let invalid = || StoreError::InvalidStoredRecord {
+        object: "rules",
+        id: id.to_owned(),
+    };
+    let record: studio_runtime_store::RuleRecord =
+        serde_json::from_str(raw).map_err(|_| invalid())?;
+    if record.id != id {
+        return Err(invalid());
+    }
+    Ok(json!({"agent": record.agent, "id": id, "name": record.name}))
 }
 
 /// Seed root agent views and the task and monitor windows once, before the first SSE

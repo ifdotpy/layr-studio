@@ -136,7 +136,6 @@ pub(super) fn publish(tx: &Transaction<'_>, row: &Approval) -> Result<(), Callba
         });
         crate::tool_requests::reconcile_effect(tx, ExecutionEffectKind::Requests, &effect, &actor)?;
     }
-    crate::approval_sync::publish(tx, row)?;
     Ok(())
 }
 

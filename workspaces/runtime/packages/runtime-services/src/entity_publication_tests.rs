@@ -925,8 +925,7 @@ async fn create_user_question(
             };
             new.request = Request::Question { questions };
             new.epoch = epoch;
-            let row = studio_runtime_store::approvals::create(tx, new, Timestamp(1.0))?;
-            crate::approval_sync::publish(tx, &row)?;
+            studio_runtime_store::approvals::create(tx, new, Timestamp(1.0))?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -945,7 +944,6 @@ async fn set_question_epoch(
             let mut row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
             row.epoch = Some(epoch);
             studio_runtime_store::approvals::put(tx, &row)?;
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1615,12 +1613,11 @@ fn new_question(id: &str) -> studio_runtime_store::approvals::NewApproval {
 async fn create_question(store: &studio_runtime_store::RuntimeStore, id: &'static str) {
     store
         .transaction_with(move |tx| {
-            let row = studio_runtime_store::approvals::create(
+            studio_runtime_store::approvals::create(
                 tx,
                 new_question(id),
                 studio_runtime_schema::approvals::Timestamp(1.0),
             )?;
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1644,8 +1641,6 @@ async fn answer_question(store: &studio_runtime_store::RuntimeStore, id: &'stati
                 },
                 CommandId("command".into()),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1917,8 +1912,6 @@ async fn question_history_entities_retain_answers_after_the_request_is_closed() 
                 Principal::Owner,
                 Timestamp(2.0),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1943,8 +1936,6 @@ async fn question_history_entities_retain_answers_after_the_request_is_closed() 
                     by: Principal::Owner,
                 }),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -2282,8 +2273,6 @@ async fn the_view_log_matches_the_published_views_of_agents_requests_and_work() 
                 Principal::Owner,
                 Timestamp(2.0),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("approval exists");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await

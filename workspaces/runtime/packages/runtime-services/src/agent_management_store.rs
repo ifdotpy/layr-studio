@@ -542,7 +542,6 @@ fn execute_decision(
             .into_iter()
             .map(|(_, id, _)| id)
             .collect(),
-        requests: written_ids(&decision.writes, "approvals"),
         work: changed_work,
         checked_agents: Vec::new(),
     };
