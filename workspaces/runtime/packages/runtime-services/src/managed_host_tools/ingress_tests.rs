@@ -4412,6 +4412,12 @@ async fn null_and_absent_model_select_the_same_provider_default() {
             root["model"] = Value::Null;
             spec.model = studio_runtime_schema::queue_command::Field::Null;
         }
+        root["id"] = json!("root");
+        root["rootId"] = json!("root");
+        root["epoch"] = json!(0);
+        root["status"] = json!("idle");
+        root["compactions"] = json!(0);
+        let root = studio_runtime_store::AgentRecord::from_value(root).unwrap();
         let settings = crate::managed_child_create::resolve_worker_settings(
             &store,
             &CreationEnvironment,
