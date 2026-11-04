@@ -849,3 +849,31 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
     );
     assert_eq!(peer.0.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn deleting_line_preserves_agents_explicitly_bound_to_another_project() {
+    use studio_runtime_store::{AgentRecord, AgentRepository};
+    let (_root, store, project) = setup().await;
+    let original = project["id"].as_str().unwrap().to_owned();
+    let line = format!("{original}/lines/main");
+    let line_project = json!({"id":line,"path":line,"name":"main","created":1,"peerTeams":[],"homeServerId":"owner","locations":[{"serverId":"owner","path":line,"projectId":line}]});
+    let line_for_insert = line.clone();
+    store.transaction(move |tx| {
+        ProjectsRepository::put_project(tx, &line_project)?;
+        for id in ["first", "second"] {
+            let agent = AgentRecord::from_value(json!({"id":id,"rootId":id,"epoch":1,"status":"paused","accountKey":"default","provider":"codex","projectId":original,"projectServerId":"owner","cwd":line_for_insert,"hostProjectPath":original}))?;
+            AgentRepository::put(tx, &agent)?;
+        }
+        Ok(())
+    }).await.expect("fixtures");
+    let reply = delete(store.clone(), line).await;
+    assert_eq!(reply["deletedAgentIds"], json!([]));
+    let reader = store.test_reader().expect("reader");
+    for id in ["first", "second"] {
+        let record = ProjectsRepository::agent(&reader, id)
+            .expect("read")
+            .expect("surviving agent")
+            .1;
+        assert!(record.get("deletedAt").is_none_or(Value::is_null));
+    }
+}
