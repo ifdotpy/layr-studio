@@ -640,11 +640,6 @@ fn create_worker_line(
     )
 }
 
-#[cfg(test)]
-pub(super) fn prepare_files(state_dir: &Path, record: &Value) -> Result<Value> {
-    prepare_files_reporting(state_dir, record, false, None)
-}
-
 pub(super) fn prepare_files_reporting(
     state_dir: &Path,
     record: &Value,
@@ -1079,6 +1074,11 @@ fn repair_caches(state_dir: &Path, cwd: &Path) -> Result<()> {
 /// repair; repairing it fails and would end every turn save of the line.
 fn needs_repair(overlay: &Value) -> bool {
     overlay["folder"].is_string() && !matches!(overlay["state"].as_str(), Some("cache" | "absent"))
+}
+
+#[cfg(test)]
+pub(super) fn prepare_files(state_dir: &Path, record: &Value) -> Result<Value> {
+    prepare_files_reporting(state_dir, record, false, None)
 }
 
 #[cfg(test)]
