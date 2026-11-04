@@ -1008,6 +1008,10 @@ export function gateSteps(root: string, name: string): GateStep[] {
       cargo("rust-fmt", "Rust formatting", ["fmt", "--all", "--", "--check"], {
         buildOnly: true,
       }),
+      {
+        ...cargo("deny-bans", "Cargo dependency bans", [], { buildOnly: true }),
+        commands: [["just", ["deny-bans"]]],
+      },
       rustTests(
         cargo("rust-tests", "Rust nextest", [
           "nextest",
