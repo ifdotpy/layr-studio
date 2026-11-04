@@ -39,7 +39,7 @@ pub enum ApprovalError {
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
 }
 
 /// Domain errors (conflict, mismatch, closed) become an invalid stored object
@@ -163,9 +163,9 @@ struct ProviderQuestion {
 /// migration). Otherwise unknown keys are dropped, so a new provider field never
 /// loses the user's question.
 pub fn questions_from_provider(
-    mut list: serde_json::Value,
+    mut list: studio_json::Value,
     strict: bool,
-) -> Result<Vec<studio_runtime_schema::approvals::Question>, serde_json::Error> {
+) -> Result<Vec<studio_runtime_schema::approvals::Question>, studio_json::Error> {
     use studio_runtime_schema::approvals::{Question, QuestionOption};
     if !strict {
         const QUESTION_KEYS: [&str; 7] = [
@@ -183,7 +183,7 @@ pub fn questions_from_provider(
                 object.retain(|key, _| QUESTION_KEYS.contains(&key.as_str()));
                 for option in object
                     .get_mut("options")
-                    .and_then(serde_json::Value::as_array_mut)
+                    .and_then(studio_json::Value::as_array_mut)
                     .into_iter()
                     .flatten()
                 {
@@ -247,7 +247,7 @@ fn decode(row: &Row<'_>) -> ApprovalResult<Approval> {
     let json = |index: usize| -> rusqlite::Result<Option<String>> { row.get(index) };
     let need = |value: Option<String>, name: &str| value.ok_or_else(|| stored(&id, name));
     let answer =
-        || -> ApprovalResult<Answer> { Ok(serde_json::from_str(&need(json(6)?, "answer")?)?) };
+        || -> ApprovalResult<Answer> { Ok(studio_json::from_str(&need(json(6)?, "answer")?)?) };
     let at = || -> ApprovalResult<Timestamp> {
         Ok(Timestamp(
             row.get::<_, Option<f64>>(9)?
@@ -263,7 +263,7 @@ fn decode(row: &Row<'_>) -> ApprovalResult<Approval> {
         },
         "answered" => ApprovalState::Answered {
             answer: answer()?,
-            by: serde_json::from_str(&need(json(8)?, "answered_by")?)?,
+            by: studio_json::from_str(&need(json(8)?, "answered_by")?)?,
             at: at()?,
         },
         "unknown" => ApprovalState::Unknown {
@@ -274,7 +274,7 @@ fn decode(row: &Row<'_>) -> ApprovalResult<Approval> {
             ),
         },
         "closed" => ApprovalState::Closed {
-            reason: CloseReason::deserialize(serde_json::Value::String(need(
+            reason: CloseReason::deserialize(studio_json::Value::String(need(
                 json(11)?,
                 "reason",
             )?))?,
@@ -284,7 +284,7 @@ fn decode(row: &Row<'_>) -> ApprovalResult<Approval> {
     };
     let optional_json = |index: usize| -> rusqlite::Result<Option<String>> { row.get(index) };
     let who = |index: usize, name: &str| -> ApprovalResult<Principal> {
-        Ok(serde_json::from_str(&need(optional_json(index)?, name)?)?)
+        Ok(studio_json::from_str(&need(optional_json(index)?, name)?)?)
     };
     let stamp = |index: usize, name: &str| -> ApprovalResult<Timestamp> {
         Ok(Timestamp(
@@ -311,12 +311,12 @@ fn decode(row: &Row<'_>) -> ApprovalResult<Approval> {
         agent: AgentId(row.get(1)?),
         turn: row.get::<_, Option<String>>(2)?.map(TurnId),
         created: Timestamp(row.get(3)?),
-        request: serde_json::from_str(&row.get::<_, String>(4)?)?,
+        request: studio_json::from_str(&row.get::<_, String>(4)?)?,
         epoch: row.get::<_, Option<i64>>(14)?.map(|epoch| epoch as u64),
         delivery: optional_json(15)?
-            .map(|text| serde_json::from_str::<Delivery>(&text))
+            .map(|text| studio_json::from_str::<Delivery>(&text))
             .transpose()?,
-        detail: serde_json::from_str(&need(optional_json(16)?, "detail")?)?,
+        detail: studio_json::from_str(&need(optional_json(16)?, "detail")?)?,
         state,
         deferral,
         fire_at: row.get::<_, Option<f64>>(12)?.map(Timestamp),
@@ -350,17 +350,17 @@ fn select(
 /// Convert one legacy `runtime_requests` record into an approval. Tests seed
 /// their fixtures with it.
 #[cfg(any(test, feature = "test-support"))]
-pub fn from_legacy_record(id: &str, record: &serde_json::Value) -> crate::StoreResult<Approval> {
+pub fn from_legacy_record(id: &str, record: &studio_json::Value) -> crate::StoreResult<Approval> {
     // Old fixtures leave out the time and the turn of a provider request.
     let mut record = record.clone();
     if record.get("createdAt").is_none() {
-        record["createdAt"] = serde_json::json!(0.0);
+        record["createdAt"] = studio_json::json!(0.0);
     }
     let provider_turn = record["method"]
         .as_str()
         .is_some_and(|method| method.starts_with("item/") || method.starts_with("mcpServer/"));
     if provider_turn && record.get("turnId").is_none() && record["params"].get("turnId").is_none() {
-        record["turnId"] = serde_json::json!("turn-0");
+        record["turnId"] = studio_json::json!("turn-0");
     }
     crate::migrations::approval_from_record(id, &record.to_string())
 }
@@ -428,7 +428,7 @@ pub(crate) fn insert(tx: &Connection, row: &Approval) -> ApprovalResult<()> {
             row.turn.as_ref().map(TurnId::as_str),
             row.created.0,
             <&str>::from(RequestKind::from(&row.request)),
-            serde_json::to_string(&row.request)?,
+            studio_json::to_string(&row.request)?,
             state_name(&row.state),
             answer,
             command,
@@ -439,12 +439,12 @@ pub(crate) fn insert(tx: &Connection, row: &Approval) -> ApprovalResult<()> {
             row.fire_at.map(|t| t.0),
             row.hidden.as_ref().map(|h| h.at.0),
             row.epoch.map(|epoch| epoch as i64),
-            row.delivery.as_ref().map(serde_json::to_string).transpose()?,
-            serde_json::to_string(&row.detail)?,
+            row.delivery.as_ref().map(studio_json::to_string).transpose()?,
+            studio_json::to_string(&row.detail)?,
             row.deferral.as_ref().map(|d| d.active),
             row.deferral.as_ref().map(|d| d.at.0),
-            row.deferral.as_ref().map(|d| serde_json::to_string(&d.by)).transpose()?,
-            row.hidden.as_ref().map(|h| serde_json::to_string(&h.by)).transpose()?
+            row.deferral.as_ref().map(|d| studio_json::to_string(&d.by)).transpose()?,
+            row.hidden.as_ref().map(|h| studio_json::to_string(&h.by)).transpose()?
         ],
     )?;
     Ok(())
@@ -464,7 +464,7 @@ type Columns = (
 );
 
 fn columns(state: &ApprovalState) -> ApprovalResult<Columns> {
-    let json = |answer: &Answer| serde_json::to_string(answer);
+    let json = |answer: &Answer| studio_json::to_string(answer);
     Ok(match state {
         ApprovalState::Pending => (None, None, None, None, None, None),
         ApprovalState::Answering { answer, command } => (
@@ -478,7 +478,7 @@ fn columns(state: &ApprovalState) -> ApprovalResult<Columns> {
         ApprovalState::Answered { answer, by, at } => (
             Some(json(answer)?),
             None,
-            Some(serde_json::to_string(by)?),
+            Some(studio_json::to_string(by)?),
             Some(at.0),
             None,
             None,
@@ -808,7 +808,7 @@ pub fn set_hidden(tx: &Connection, id: &ApprovalId, hidden: Option<&Hidden>) -> 
         params![
             id.as_str(),
             hidden.map(|h| h.at.0),
-            hidden.map(|h| serde_json::to_string(&h.by)).transpose()?
+            hidden.map(|h| studio_json::to_string(&h.by)).transpose()?
         ],
     )?;
     if changed == 0 {
@@ -1314,5 +1314,11 @@ mod tests {
         ));
         let expired = expire_due(&tx, Timestamp(101.0)).unwrap();
         assert_eq!(expired.len(), 1, "the restored timer fires");
+    }
+}
+
+impl From<studio_json::error::Error> for ApprovalError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
     }
 }

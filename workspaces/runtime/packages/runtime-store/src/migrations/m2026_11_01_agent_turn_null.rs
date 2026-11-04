@@ -8,12 +8,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     })?;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
-            serde_json::from_str(&raw)?;
+        let mut record: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+            studio_json::from_str(&raw)?;
         record.remove("turnId");
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![studio_json::to_string(&record)?, id],
         )?;
     }
     Ok(())

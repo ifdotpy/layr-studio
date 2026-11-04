@@ -6,7 +6,7 @@ use rusqlite::{
     types::{Value as SqlValue, ValueRef},
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     path::Path,
@@ -39,7 +39,7 @@ pub struct RecoveryFields {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     notice: Field<Value>,
     #[serde(flatten)]
-    extra: serde_json::Map<String, Value>,
+    extra: studio_json::Map<String, Value>,
 }
 
 impl<'de> Deserialize<'de> for SupervisorRecovery {
@@ -109,7 +109,7 @@ pub enum JournalError {
     #[error(transparent)]
     Refused(#[from] Refusal),
     #[error("supervisor journal contains invalid JSON")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     Migration(#[from] Box<crate::StoreError>),
     #[error("supervisor journal lock poisoned")]
@@ -183,7 +183,7 @@ pub struct StoredHandle {
 pub struct StoredEvent {
     pub sequence: u64,
     pub kind: JournalEventKind,
-    pub payload: Box<serde_json::value::RawValue>,
+    pub payload: studio_json::OwnedRawJson,
     pub generation: u64,
 }
 
@@ -246,12 +246,12 @@ impl StoredEvent {
             sequence,
             kind,
             // RawValue validates JSON syntax without requiring numbers to fit f64.
-            payload: serde_json::value::RawValue::from_string(payload)?,
+            payload: studio_json::OwnedRawJson::from_string(payload)?,
             generation,
         })
     }
     fn into_legacy(self) -> Value {
-        json!({"sequence":self.sequence,"kind":EventKind::from(self.kind),"payload":self.payload.get(),"generation":self.generation})
+        json!({"sequence":self.sequence,"kind":EventKind::from(self.kind),"payload":self.payload.as_str(),"generation":self.generation})
     }
 }
 
@@ -333,7 +333,7 @@ fn stored(db: &Connection, handle: &str, buffered: u64) -> Result<Option<StoredH
     row.map(|(signature,pid,init,closed_at,closed_reason,start_time,pgid,identity_pid)| {
         if identity_pid.is_some_and(|identity| identity != pid) { return Err(Refusal("Supervisor child identity disagrees with its handle").into()); }
         let recovery_proof = db.query_row("SELECT 1 FROM degraded_handles d JOIN child_identities c ON c.handle=d.handle WHERE d.handle=? AND d.prior_pid=? AND c.pid=d.prior_pid AND c.start_time=d.start_time", params![handle,pid], |_| Ok(true)).optional()?.unwrap_or(false);
-        Ok(StoredHandle { id:handle.to_owned(), signature,pid, snapshot:snapshot(db,handle)?, init_result:init.map(|s|serde_json::from_str(&s)).transpose()?, closed_at,closed_reason,start_time,pgid,buffered,recovery_proof })
+        Ok(StoredHandle { id:handle.to_owned(), signature,pid, snapshot:snapshot(db,handle)?, init_result:init.map(|s|studio_json::from_str(&s)).transpose()?, closed_at,closed_reason,start_time,pgid,buffered,recovery_proof })
     }).transpose()
 }
 
@@ -617,7 +617,7 @@ impl SupervisorJournal {
         if sequence >= i64::MAX as u64 {
             return Err(Refusal("Supervisor event sequence exhausted").into());
         }
-        let raw = serde_json::to_string(payload)?;
+        let raw = studio_json::to_string(payload)?;
         self.transaction(|tx, buffered| {
             let state = snapshot(tx,handle)?;
             if state.generation() != generation { return Ok((AppendResult::Obsolete, None)); }
@@ -629,7 +629,7 @@ impl SupervisorJournal {
             tx.execute("INSERT INTO events(handle,sequence,kind,payload,size,generation) VALUES (?,?,?,?,?,?)",params![handle,sql(sequence)?,kind.as_str(),raw,sql(raw.len() as u64)?,sql(generation)?])?;
             if kind == JournalEventKind::Stdout {
                 if payload.get("id").and_then(Value::as_u64) == Some(1) && payload.get("result").is_some() {
-                    tx.execute("UPDATE handles SET init_result=? WHERE id=?",params![serde_json::to_string(&payload["result"])?,handle])?;
+                    tx.execute("UPDATE handles SET init_result=? WHERE id=?",params![studio_json::to_string(&payload["result"])?,handle])?;
                 }
                 if let Some(id) = payload.get("id").and_then(Value::as_i64).filter(|_|payload.get("method").is_none()) {
                     tx.execute("UPDATE operations SET response=?,response_sequence=? WHERE handle=? AND native_id=? AND generation=? AND substr(operation_id,1,8)='monitor:' AND response IS NULL",params![raw,sql(sequence)?,handle,id,sql(generation)?])?;
@@ -816,12 +816,12 @@ impl SupervisorJournal {
                 return Err(Refusal("Operator close refused: handle identity changed").into());
             }
             tx.execute("UPDATE handles SET closed_at=?,closed_reason='Closed by operator after verified test/unknown-client ownership' WHERE id=?", params![now,expected.id])?;
-            tx.execute("INSERT INTO supervisor_state VALUES ('recovery',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [serde_json::to_string(recovery)?])?;
+            tx.execute("INSERT INTO supervisor_state VALUES ('recovery',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [studio_json::to_string(recovery)?])?;
             Ok(((), None))
         })
     }
     pub fn save_recovery(&self, recovery: &SupervisorRecovery) -> Result<()> {
-        self.transaction(|tx, _buffered| { tx.execute("INSERT INTO supervisor_state VALUES ('recovery',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(recovery)?])?; Ok(((), None)) })
+        self.transaction(|tx, _buffered| { tx.execute("INSERT INTO supervisor_state VALUES ('recovery',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[studio_json::to_string(recovery)?])?; Ok(((), None)) })
     }
 }
 #[derive(Debug, PartialEq, Eq)]
@@ -905,8 +905,8 @@ mod tests {
             json!({"degraded":"legacy","fallbackReady":0,"blocked":false,"extra":[1,null]}),
         ] {
             let recovery = SupervisorRecovery::deserialize(input.clone()).unwrap();
-            let encoded = serde_json::to_string(&recovery).unwrap();
-            let decoded: Value = serde_json::from_str(&encoded).unwrap();
+            let encoded = studio_json::to_string(&recovery).unwrap();
+            let decoded: Value = studio_json::from_str(&encoded).unwrap();
             assert_eq!(decoded, input);
             journal.save_recovery(&recovery).unwrap();
             let saved: String = journal
@@ -918,7 +918,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), input);
+            assert_eq!(studio_json::from_str::<Value>(&saved).unwrap(), input);
         }
         for blocked in [json!(false), json!(0), json!(""), json!({}), json!([])] {
             let recovery = SupervisorRecovery::deserialize(json!({"blocked":blocked})).unwrap();
@@ -928,13 +928,13 @@ mod tests {
             SupervisorRecovery::deserialize(json!({"degraded":"legacy","blocked":false,"extra":3}))
                 .unwrap();
         recovery.clear_blocked();
-        let saved = recovery.serialize(serde_json::value::Serializer).unwrap();
+        let saved = recovery.serialize(studio_json::value::Serializer).unwrap();
         assert_eq!(
             saved,
             json!({"degraded":"legacy","fallbackReady":"legacy","blocked":null,"extra":3})
         );
         recovery.finish_recovery();
-        let saved = recovery.serialize(serde_json::value::Serializer).unwrap();
+        let saved = recovery.serialize(studio_json::value::Serializer).unwrap();
         assert_eq!(saved["fallbackReady"], false);
     }
 
@@ -1021,7 +1021,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [1, 2]
         );
-        assert_eq!(events[0].payload.get(), raw);
+        assert_eq!(events[0].payload.as_str(), raw);
     }
 
     #[test]
@@ -1083,7 +1083,7 @@ mod tests {
             let raw = journal
                 .provider_operation_status("account:a", "outbox:effect")
                 .expect("status");
-            serde_json::from_str::<Status>(&serde_json::to_string(&raw).expect("serialize status"))
+            studio_json::from_str::<Status>(&studio_json::to_string(&raw).expect("serialize status"))
                 .expect("typed status")
                 .state
         };
@@ -1177,7 +1177,7 @@ mod tests {
             .events_v2("server-command:oversized", 0, generation, 64, 2048)
             .expect("read event with a sufficient frame budget");
         assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].payload.get(), payload.to_string());
+        assert_eq!(batch[0].payload.as_str(), payload.to_string());
     }
 
     #[test]

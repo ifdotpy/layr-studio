@@ -2,7 +2,7 @@ use super::{SchedulerRepository, select_turn_batch};
 use crate::records::{AgentId, AgentRecord, AgentRepository, AgentStatus};
 use crate::{QueueEvent, QueueEventId};
 use rusqlite::Connection;
-use serde_json::json;
+use studio_json::json;
 use std::collections::BTreeMap;
 
 fn database() -> Connection {
@@ -599,7 +599,7 @@ fn idle_batch_selection_combines_eligible_composer_inputs() {
     );
 }
 
-fn snapshot(connection: &Connection) -> serde_json::Value {
+fn snapshot(connection: &Connection) -> studio_json::Value {
     let agent: String = connection
         .query_row(
             "SELECT record FROM runtime_agents WHERE id='agent'",

@@ -6,7 +6,7 @@ use crate::{
 };
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::json_object::JsonObject;
 
 pub struct ClaudeRetryRecords {
@@ -29,7 +29,7 @@ impl ClaudeRetryRepository {
             return Ok(None);
         };
         let JsonObject(attempt): JsonObject<ClaudeAttemptRecord> =
-            serde_json::from_str(&raw).map_err(|_| invalid("attempt"))?;
+            studio_json::from_str(&raw).map_err(|_| invalid("attempt"))?;
         if attempt.id() != attempt_id {
             return Err(invalid(attempt_id));
         }
@@ -44,7 +44,7 @@ impl ClaudeRetryRepository {
                 .as_str()
                 .ok_or_else(|| invalid(attempt_id))?;
             let metadata: EventMetadataRecord =
-                serde_json::from_str(encoded).map_err(|_| invalid(id))?;
+                studio_json::from_str(encoded).map_err(|_| invalid(id))?;
             row["metadata"] = metadata.into_value();
             events.push(row);
         }
@@ -76,7 +76,7 @@ impl ClaudeRetryRepository {
         agent: &str,
         attempt: &ClaudeAttemptRecord,
     ) -> StoreResult<()> {
-        let value = attempt.serialize(serde_json::value::Serializer)?;
+        let value = attempt.serialize(studio_json::value::Serializer)?;
         validate_attempt(&value)?;
         let changed=tx.execute("UPDATE runtime_execution_attempts SET record=?1 WHERE id=?2 AND run IN (SELECT id FROM runtime_execution_runs WHERE agent=?3)",params![value.to_string(),attempt.id(),agent])?;
         if changed != 1 {

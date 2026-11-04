@@ -1,7 +1,7 @@
 //! Durable pending-event selection and claim primitives for the scheduler.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::records::{AgentId, AgentRecord, AgentRepository, AgentStatus, get_json_record};
@@ -164,7 +164,7 @@ mod tests {
     use super::{interrupt_uncertain, same_recovery_scope, same_typed_attempt};
     use crate::records::{AgentId, AgentRecord, AgentRepository, AgentStatus};
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
     use std::collections::BTreeMap;
 
     #[test]
@@ -220,8 +220,8 @@ mod tests {
     }
     #[test]
     fn restart_snapshot_checks_typed_changes_not_payload_encoding() {
-        let a: crate::StartAttemptView = serde_json::from_str(r#"{"id":"a","events":["one"],"vmWorkspacePreparation":{"requestId":"r","method":"m","phase":"submitted","params":{"b": 2,"a":1}}}"#).unwrap();
-        let b: crate::StartAttemptView = serde_json::from_str(r#"{"id":"a","events":["one"],"vmWorkspacePreparation":{"requestId":"r","method":"m","phase":"submitted","params":{"a":1,"b":2}}}"#).unwrap();
+        let a: crate::StartAttemptView = studio_json::from_str(r#"{"id":"a","events":["one"],"vmWorkspacePreparation":{"requestId":"r","method":"m","phase":"submitted","params":{"b": 2,"a":1}}}"#).unwrap();
+        let b: crate::StartAttemptView = studio_json::from_str(r#"{"id":"a","events":["one"],"vmWorkspacePreparation":{"requestId":"r","method":"m","phase":"submitted","params":{"a":1,"b":2}}}"#).unwrap();
         assert!(same_typed_attempt(&a, &b));
         let mut changed = b;
         changed.events = Some(vec!["other".into()]);

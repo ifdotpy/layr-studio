@@ -1,6 +1,6 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
-use serde_json::value::RawValue;
+use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -11,18 +11,18 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut changed = false;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: BTreeMap<String, Box<RawValue>> = serde_json::from_str(&raw)?;
+        let mut record: BTreeMap<String, RawValue> = studio_json::from_str(&raw)?;
         let manual = record.remove("manualName");
         let title = record.remove("needsTitle");
         if manual.is_none()
             && title.is_none()
             && record.get("naming").is_some_and(|value| {
-                serde_json::from_str::<crate::AgentNaming>(value.get()).is_ok()
+                studio_json::from_str::<crate::AgentNaming>(value.as_str()).is_ok()
             })
         {
             continue;
         }
-        let is_true = |v: Option<&Box<RawValue>>| v.is_some_and(|v| v.get() == "true");
+        let is_true = |v: Option<&RawValue>| v.is_some_and(|v| v.as_str() == "true");
         let naming = if is_true(manual.as_ref()) {
             "manual"
         } else if is_true(title.as_ref()) {
@@ -32,11 +32,11 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         };
         record.insert(
             "naming".into(),
-            RawValue::from_string(serde_json::to_string(naming)?)?,
+            RawValue::from_string(studio_json::to_string(naming)?)?,
         );
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![studio_json::to_string(&record)?, id],
         )?;
         changed = true;
     }
@@ -70,7 +70,7 @@ mod tests {
             struct Naming {
                 naming: crate::AgentNaming,
             }
-            let record: Naming = serde_json::from_str(&raw).unwrap();
+            let record: Naming = studio_json::from_str(&raw).unwrap();
             assert_eq!(record.naming, crate::AgentNaming::default());
         }
     }
@@ -111,7 +111,7 @@ mod tests {
                     r.get(0)
                 })
                 .unwrap();
-            let record: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(record["naming"], expected, "{id}");
             assert!(record.get("manualName").is_none() && record.get("needsTitle").is_none());
             tx.commit().unwrap();

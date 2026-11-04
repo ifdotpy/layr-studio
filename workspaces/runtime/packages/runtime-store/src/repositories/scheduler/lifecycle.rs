@@ -46,7 +46,7 @@ impl SchedulerRepository {
         {
             return Ok(false);
         }
-        let event_ids = (serde_json::to_string(events)?, events.len());
+        let event_ids = (studio_json::to_string(events)?, events.len());
         let count: i64 = transaction.query_row_cached(
             "SELECT COUNT(*) FROM runtime_events WHERE agent=?1 AND epoch=?2 AND id IN (SELECT value FROM json_each(?3)) AND status='uncertain' AND turn_id IS NULL AND error=?4",
             params![identity.agent_id, identity.epoch, event_ids.0, Self::UNCLEAN_START_HOLD], |row| row.get(0))?;
@@ -96,7 +96,7 @@ impl SchedulerRepository {
             if attempt.submitted != Some(false) || agent.start_outcome_hold.is_some() {
                 return Err(invalid_agent(&id));
             }
-            let events_json = serde_json::to_string(&events)?;
+            let events_json = studio_json::to_string(&events)?;
             let changed = transaction.execute_cached(
                 "UPDATE runtime_events SET status='uncertain',error=?1 WHERE agent=?2 AND epoch=?3 AND status='reserved' AND id IN (SELECT value FROM json_each(?4))",
                 params![Self::UNCLEAN_START_HOLD, id, epoch, events_json],
@@ -563,7 +563,7 @@ impl SchedulerRepository {
             studio_runtime_schema::queue_command::Field::Missing => false,
             studio_runtime_schema::queue_command::Field::Null => expected_error.is_null(),
             studio_runtime_schema::queue_command::Field::Value(error) => {
-                serde::Serialize::serialize(error, serde_json::value::Serializer)
+                serde::Serialize::serialize(error, studio_json::value::Serializer)
                     .is_ok_and(|stored| stored == *expected_error)
             }
         };
@@ -1116,7 +1116,7 @@ impl SchedulerRepository {
         let Some(agent) = load_agent(transaction, &identity.agent_id)? else {
             return Ok(false);
         };
-        if ExecutionHistoryRepository::receipt::<serde_json::Value>(
+        if ExecutionHistoryRepository::receipt::<studio_json::Value>(
             transaction,
             &identity.attempt_id,
             ExecutionReceiptKind::StartResult,
@@ -1888,7 +1888,7 @@ impl SchedulerRepository {
             agent_id,
             turn_id,
             <studio_runtime_schema::persistence::ExecutionStatus as serde::Deserialize>::deserialize(
-                serde::de::value::StrDeserializer::<serde_json::Error>::new(native_status),
+                serde::de::value::StrDeserializer::<studio_json::Error>::new(native_status),
             )?,
             native_error,
         )?;
@@ -2564,7 +2564,7 @@ pub(super) fn disconnect_agent(
     crate::domain::mark_sessions_lost(transaction, &agent.id.0)?;
     transaction.execute_cached("UPDATE runtime_events SET status='uncertain',error=?3 WHERE agent=?1 AND epoch=?2 AND status='dispatching'", params![agent.id.0,epoch,if restart {"Server restarted before delivery acknowledgement"} else {"Codex disconnected"}])?;
     if restart_input_wait {
-        transaction.execute_cached("UPDATE runtime_events SET status='uncertain' WHERE agent=?1 AND epoch=?2 AND id IN (SELECT value FROM json_each(?3)) AND status IN ('reserved','dispatching','uncertain')", params![agent.id.0,epoch,serde_json::to_string(&attempt.as_ref().and_then(|a| a.events.as_ref()))?])?;
+        transaction.execute_cached("UPDATE runtime_events SET status='uncertain' WHERE agent=?1 AND epoch=?2 AND id IN (SELECT value FROM json_each(?3)) AND status IN ('reserved','dispatching','uncertain')", params![agent.id.0,epoch,studio_json::to_string(&attempt.as_ref().and_then(|a| a.events.as_ref()))?])?;
     }
     if !restart {
         agent.start_attempt = None;
@@ -2622,7 +2622,7 @@ pub(super) fn same_typed_attempt(a: &crate::StartAttemptView, b: &crate::StartAt
     fn without_payloads(mut attempt: crate::StartAttemptView) -> crate::StartAttemptView {
         fn blank(value: &mut studio_runtime_schema::raw_json::RawJson) {
             *value = studio_runtime_schema::raw_json::RawJson(
-                serde_json::value::RawValue::from_string("null".into()).expect("valid null"),
+                studio_json::OwnedRawJson::from_string("null".into()).expect("valid null"),
             );
         }
         if let Some(request) = &mut attempt.native_request {
@@ -3090,7 +3090,7 @@ pub(super) fn deliver_attempt_events(
         params![turn_id, agent_id, epoch, event_ids.0, super::steer::STOP_QUEUED_ERROR])?;
     let held = usize::try_from(held).map_err(|_| invalid_agent(agent_id))?;
     require_membership(changed + held, event_ids.1, agent_id)?;
-    let event_ids: Vec<String> = serde_json::from_str(&event_ids.0)?;
+    let event_ids: Vec<String> = studio_json::from_str(&event_ids.0)?;
     SchedulerRepository::project_delivered_chat_events(
         transaction,
         agent_id,
@@ -3209,7 +3209,7 @@ pub(super) fn validated_events(
         .events
         .as_ref()
         .ok_or_else(|| invalid_agent(&agent.id.0))?;
-    let events = serde_json::to_string(events)?;
+    let events = studio_json::to_string(events)?;
     // A native action and a provider-started turn submit no queued input;
     // every other attempt submits at least one event.
     let empty_allowed = native_action_attempt(attempt) || provider_turn_attempt(attempt);
@@ -3301,13 +3301,13 @@ mod tests;
 mod account_scope_tests {
     #[test]
     fn typed_transfer_pointer_blocks_continuation() {
-        let agent: crate::AgentRecord = serde_json::from_str(r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"accountTransferId":"move"}"#).unwrap();
+        let agent: crate::AgentRecord = studio_json::from_str(r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"accountTransferId":"move"}"#).unwrap();
         assert!(!super::continuation_allowed(&agent));
     }
 
     #[test]
     fn clearing_account_hold_restores_prior_error_and_hold() {
-        let mut agent: crate::AgentRecord = serde_json::from_str(
+        let mut agent: crate::AgentRecord = studio_json::from_str(
             r#"{"id":"a","rootId":"a","epoch":1,"status":"waiting","accountKey":"default","compactions":0,"error":"paused","nativeFailureHold":true,"startOutcomeHold":{"stage":"account_settlement","cursor":12,"reason":"paused","previousError":"original","previousNativeFailureHold":{"present":true,"value":"previous"}}}"#,
         )
         .expect("stored agent");
@@ -3316,10 +3316,10 @@ mod account_scope_tests {
         assert_eq!(
             serde::Serialize::serialize(
                 &(&agent.native_failure_hold),
-                serde_json::value::Serializer
+                studio_json::value::Serializer
             )
             .unwrap(),
-            serde_json::json!("previous")
+            studio_json::json!("previous")
         );
         assert!(agent.start_outcome_hold.is_none());
     }

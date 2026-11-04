@@ -2,7 +2,7 @@
 
 use crate::CachedSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 
 use super::sync_documents::{hash_payload, next_sequence};
 use crate::records::{
@@ -79,7 +79,7 @@ impl EventWriteRepository {
             return Ok(Some(false));
         };
         let mut record: Value =
-            serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredObject {
+            studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredObject {
                 table: "runtime_capacity_retries",
                 id: retry_id.to_owned(),
             })?;
@@ -167,7 +167,7 @@ impl EventWriteRepository {
                 timing
             }
         };
-        timing.insert("enqueuedAt".to_owned(), serde_json::json!(monotonic_ns));
+        timing.insert("enqueuedAt".to_owned(), studio_json::json!(monotonic_ns));
         table.put_at(&key, &record)
     }
 
@@ -329,7 +329,7 @@ impl EventWriteRepository {
     fn update_agent_sync(
         transaction: &Transaction<'_>,
         agent_id: &str,
-        update: impl FnOnce(&mut serde_json::Map<String, Value>) -> bool,
+        update: impl FnOnce(&mut studio_json::Map<String, Value>) -> bool,
     ) -> StoreResult<()> {
         let old = transaction
             .query_row_cached(
@@ -343,7 +343,7 @@ impl EventWriteRepository {
                 "agent sync projection is missing or deleted".to_owned(),
             ));
         };
-        let mut payload: Value = serde_json::from_str(&old_payload)?;
+        let mut payload: Value = studio_json::from_str(&old_payload)?;
         if payload.get("collection").and_then(Value::as_str) != Some("agent")
             || payload.get("id").and_then(Value::as_str) != Some(agent_id)
         {
@@ -363,7 +363,7 @@ impl EventWriteRepository {
         if !update(value) {
             return Ok(());
         }
-        let payload = serde_json::to_string(&payload)?;
+        let payload = studio_json::to_string(&payload)?;
         let hash = hash_payload(&payload);
         let sequence = next_sequence(transaction)?;
         transaction.execute_cached(
@@ -389,7 +389,7 @@ mod tests {
     use super::EventWriteRepository;
     use crate::StoreError;
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn agent_projection_status_write_advances_its_sync_revision() {
@@ -415,7 +415,7 @@ mod tests {
             .expect("updated projection exists");
         assert_eq!(sequence, 2);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&payload)
+            studio_json::from_str::<studio_json::Value>(&payload)
                 .expect("updated projection remains JSON"),
             json!({
                 "collection":"agent","id":"a","value":{"id":"a","status":"queued","overview":{"result":"","resultTruncated":false,"resultTurnId":null,"task":"keep"}}
@@ -472,7 +472,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("projection exists");
-        let value = serde_json::from_str::<serde_json::Value>(&payload)
+        let value = studio_json::from_str::<studio_json::Value>(&payload)
             .expect("projection remains JSON")["value"]
             .clone();
         assert_eq!(value["status"], "running");
@@ -535,7 +535,7 @@ mod tests {
             "479117e334e36d6086763c6fdaa607248774b31c33490bab45fee0d9d741e8b6"
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&payload)
+            studio_json::from_str::<studio_json::Value>(&payload)
                 .expect("updated projection remains JSON")["value"],
             json!({"id":"a","name":"New","naming":"manual","role":"orchestrator"})
         );
@@ -558,7 +558,7 @@ mod tests {
             )
             .expect("metadata exists");
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&record).expect("metadata parses")["timing"]
+            studio_json::from_str::<studio_json::Value>(&record).expect("metadata parses")["timing"]
                 ["enqueuedAt"],
             42
         );
@@ -572,7 +572,7 @@ mod tests {
                 "CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);",
             )
             .unwrap();
-        let original = serde_json::json!({"delivery":"after_turn","requestedDelivery":null,"timing":{"prior":18446744073709551615u64},"assets":[null,{"extra":true}],"future":{"a":1}});
+        let original = studio_json::json!({"delivery":"after_turn","requestedDelivery":null,"timing":{"prior":18446744073709551615u64},"assets":[null,{"extra":true}],"future":{"a":1}});
         connection
             .execute(
                 "INSERT INTO runtime_event_meta VALUES('e',?1)",
@@ -588,9 +588,9 @@ mod tests {
             )
             .unwrap();
         let mut expected = original;
-        expected["timing"]["enqueuedAt"] = serde_json::json!(42);
+        expected["timing"]["enqueuedAt"] = studio_json::json!(42);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
+            studio_json::from_str::<studio_json::Value>(&raw).unwrap(),
             expected
         );
     }

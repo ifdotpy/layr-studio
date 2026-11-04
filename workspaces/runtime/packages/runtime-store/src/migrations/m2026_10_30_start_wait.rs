@@ -13,10 +13,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        if serde_json::from_str::<AgentStartWait>(&raw).is_ok() {
+        if studio_json::from_str::<AgentStartWait>(&raw).is_ok() {
             continue;
         }
-        let wait = serde_json::from_str::<serde_json::Value>(&raw)
+        let wait = studio_json::from_str::<studio_json::Value>(&raw)
             .ok()
             .and_then(|mut value| {
                 let reason = value.get("reason")?.as_str()?.to_owned();
@@ -31,7 +31,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 AgentStartWait::deserialize(value).ok()
             });
         if let Some(wait) = wait {
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.startWait',json(?2)) WHERE id=?1", params![id, serde_json::to_string(&wait)?])?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.startWait',json(?2)) WHERE id=?1", params![id, studio_json::to_string(&wait)?])?;
             normalized += 1;
         } else {
             tx.execute(
@@ -49,7 +49,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     fn migrate(wait: &Value) -> Value {
         let mut db = Connection::open_in_memory().unwrap();
@@ -70,7 +70,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        serde_json::from_str(&raw).unwrap()
+        studio_json::from_str(&raw).unwrap()
     }
 
     #[test]

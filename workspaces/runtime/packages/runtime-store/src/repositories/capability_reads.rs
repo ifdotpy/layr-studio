@@ -51,7 +51,7 @@ inventory::submit! {
 mod tests {
     use super::CapabilityReadsRepository;
     use crate::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory database opens");

@@ -794,7 +794,7 @@ mod tests {
         dictionaries::ensure_analytics_schema(&connection).expect("schema");
         dictionaries::install_analytics_sql(&connection).expect("sql");
         let record = |index: usize| {
-            serde_json::json!({"id": format!("item-{index:05}"), "agentId": "agent",
+            studio_json::json!({"id": format!("item-{index:05}"), "agentId": "agent",
                 "type": "agentMessage", "output": {"bytes": index}})
             .to_string()
         };

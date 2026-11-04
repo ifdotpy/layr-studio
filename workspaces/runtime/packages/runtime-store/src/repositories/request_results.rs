@@ -16,7 +16,7 @@ pub enum RequestResultError {
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     Identity(#[from] RequestIdentityError),
     #[error("request id {id} already has a different signature")]
@@ -213,7 +213,7 @@ impl RequestResults {
         };
         saved
             .map(|(signature, result)| {
-                let envelope: ResultEnvelope<R> = serde_json::from_str(&result)?;
+                let envelope: ResultEnvelope<R> = studio_json::from_str(&result)?;
                 Ok(StoredReply {
                     signature,
                     reply: envelope.reply,
@@ -323,7 +323,7 @@ impl RequestResults {
         if let Some(saved) = Self::stored(tx, id, signature)? {
             return Ok(saved);
         }
-        let result = serde_json::to_string(result)?;
+        let result = studio_json::to_string(result)?;
         tx.execute(
             "INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
             params![id, signature, result, created],
@@ -360,7 +360,7 @@ mod tests {
         let tx = db.transaction().expect("transaction");
         tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES('effect',?1,?2,'owner','sig',?3,'{}',1)", params![OutboxKind::ProviderCall, OwnerKind::Agent, OutboxStatus::Unknown]).expect("outbox");
         let token = AdmittedRequest::from_migration("effect", "sig", 1);
-        let effect: crate::outbox::OutboxRow<serde_json::Value> =
+        let effect: crate::outbox::OutboxRow<studio_json::Value> =
             crate::outbox::Outbox::get(&tx, "effect")
                 .expect("row")
                 .expect("exists");
@@ -371,7 +371,7 @@ mod tests {
         .expect("conflict");
         assert!(RequestResults::settle_abandoned(&tx, &effect).is_err());
         assert!(
-            crate::outbox::Outbox::get::<serde_json::Value>(&tx, "effect")
+            crate::outbox::Outbox::get::<studio_json::Value>(&tx, "effect")
                 .expect("row")
                 .is_some()
         );
@@ -382,7 +382,7 @@ mod tests {
             .expect("read")
             .expect("saved");
         let result: ResultEnvelope<AbandonedResult> =
-            serde_json::from_str(&saved.result).expect("typed result");
+            studio_json::from_str(&saved.result).expect("typed result");
         assert_eq!(
             result.reply,
             AbandonedResult::Abandoned {
@@ -420,7 +420,7 @@ mod tests {
         let now = REQUEST_RESULT_TTL_MS * 2;
         let root = uuid::Uuid::from_u128(((now as u128) << 80) | (7 << 76) | (2 << 62)).to_string();
         let canonical = RequestIdentity::new("read", &["actor"], &root, &["op"]).unwrap();
-        let envelope = serde_json::to_string(&ResultEnvelope {
+        let envelope = studio_json::to_string(&ResultEnvelope {
             actor: None,
             reply: "exact reply",
             references: vec![],
@@ -535,7 +535,7 @@ mod tests {
             panic!("fresh root");
         };
         let persisted: AdmittedRequest =
-            serde_json::from_str(&serde_json::to_string(&root).expect("persist token"))
+            studio_json::from_str(&studio_json::to_string(&root).expect("persist token"))
                 .expect("restore token");
         let final_result =
             persisted.derive_result("execution-attempt", &["terminal"], "exact callback input");

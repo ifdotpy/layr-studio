@@ -11,7 +11,7 @@
 //! Files already in the target are kept, so a repeated run copies nothing new.
 use crate::{StoreResult, account_registry::RegistryOrder};
 use rusqlite::Transaction;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -107,7 +107,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let Ok(bytes) = std::fs::read(root.join("accounts/registry.json")) else {
         return Ok(());
     };
-    let Some(plan) = serde_json::from_slice::<Value>(&bytes)
+    let Some(plan) = studio_json::from_slice::<Value>(&bytes)
         .ok()
         .and_then(|registry| plan(&registry, root))
     else {
@@ -135,7 +135,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         for (id, raw) in rows {
-            let mut record: Value = serde_json::from_str(&raw)?;
+            let mut record: Value = studio_json::from_str(&raw)?;
             let moved = fields
                 .iter()
                 .any(|field| record.get(*field).and_then(Value::as_str) == Some(LOCAL));
@@ -300,7 +300,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        serde_json::from_str(&raw).unwrap()
+        studio_json::from_str(&raw).unwrap()
     }
 
     #[test]

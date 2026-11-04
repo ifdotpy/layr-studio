@@ -844,7 +844,7 @@ pub enum StoreError {
     #[error("SQLite commit outcome is unknown: {0}")]
     CommitOutcomeUnknown(rusqlite::Error),
     #[error("stored JSON record is invalid: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("invalid stored object {table}/{id}")]
     InvalidStoredObject { table: &'static str, id: String },
     #[error("full transcript text is unavailable for {id}")]
@@ -2432,7 +2432,7 @@ pub fn local_server_id(root: &Path) -> StoreResult<Option<String>> {
             "identity.json is not a regular file",
         ));
     }
-    let identity: serde_json::Value = match serde_json::from_reader(BufReader::new(file)) {
+    let identity: studio_json::Value = match studio_json::from_reader(BufReader::new(file)) {
         Ok(identity) => identity,
         Err(_) => return Err(invalid_local_identity("malformed JSON in identity.json")),
     };
@@ -3714,7 +3714,7 @@ mod commit_notification_tests {
                     tx,
                     "agent",
                     "agent",
-                    serde_json::json!({"id":"agent"}),
+                    studio_json::json!({"id":"agent"}),
                     false,
                 )?;
                 Ok(())
@@ -3727,7 +3727,7 @@ mod commit_notification_tests {
                     tx,
                     "agent",
                     "agent",
-                    serde_json::json!({}),
+                    studio_json::json!({}),
                     true,
                 )?;
                 Ok(())
@@ -3754,7 +3754,7 @@ mod commit_notification_tests {
                     tx,
                     "agent",
                     "agent",
-                    serde_json::json!({"id":"agent"}),
+                    studio_json::json!({"id":"agent"}),
                     false,
                 )?;
                 Ok(())
@@ -4082,7 +4082,7 @@ mod commit_notification_tests {
         // Captured from a finished pre-retirement store; target was added later.
         type Column = (String, String, i64, i64, i64);
         let expected: std::collections::BTreeMap<String, Vec<Column>> =
-            serde_json::from_str(include_str!("receipt_migrated_columns.fixture.json")).unwrap();
+            studio_json::from_str(include_str!("receipt_migrated_columns.fixture.json")).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
         drop(store);
@@ -5189,8 +5189,8 @@ mod wal_flush_tests {
 /// Use only with derived projection types; the reply and record types passed
 /// here are derived with string keys.
 #[allow(clippy::expect_used)]
-pub fn projection_value<T: serde::Serialize>(value: &T) -> serde_json::Value {
-    serde_json::to_value(value).expect("projection serialization failed")
+pub fn projection_value<T: serde::Serialize>(value: &T) -> studio_json::Value {
+    studio_json::to_value(value).expect("projection serialization failed")
 }
 
 #[cfg(test)]
@@ -5206,6 +5206,12 @@ mod projection_adapter_tests {
             name: "sample",
             count: 3,
         });
-        assert_eq!(projected, serde_json::json!({"name":"sample", "count":3}));
+        assert_eq!(projected, studio_json::json!({"name":"sample", "count":3}));
+    }
+}
+
+impl From<studio_json::error::Error> for StoreError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
     }
 }

@@ -1,7 +1,7 @@
 //! Queue event mutations used by the queue-write service.
 
 use rusqlite::{Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::records::{EventMetadataRecord, QueueEventId, Table};
 use crate::{

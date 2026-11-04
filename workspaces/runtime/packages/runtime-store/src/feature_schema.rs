@@ -253,7 +253,7 @@ mod tests {
     fn terminal_generation_preserves_output_and_counts_resets() {
         use crate::TerminalsRepository;
         let mut db = crate::fresh_state::test_canvas();
-        let record = serde_json::json!({"id":"terminal","agent":"a","title":"Terminal","cwd":std::env::temp_dir(),"status":"running","created":1});
+        let record = studio_json::json!({"id":"terminal","agent":"a","title":"Terminal","cwd":std::env::temp_dir(),"status":"running","created":1});
         db.execute(
             "INSERT INTO user_terminals(id,record,output,offset) VALUES('terminal',?1,'a🙂',0)",
             [record.to_string()],

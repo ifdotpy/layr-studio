@@ -3,7 +3,7 @@ use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, types::ValueRef};
 use serde::Serialize;
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::ProfileRecord;
 use crate::StoreResult;
@@ -120,7 +120,7 @@ fn check_table<R: JsonRecord>(connection: &Connection) -> StoreResult<StateCheck
                 continue;
             }
         };
-        let value: Value = match serde_json::from_str(&record) {
+        let value: Value = match studio_json::from_str(&record) {
             Ok(value) => value,
             Err(_) => {
                 record_failure(&mut failures, &mut rejected_count, "", "json");
@@ -133,7 +133,7 @@ fn check_table<R: JsonRecord>(connection: &Connection) -> StoreResult<StateCheck
             record_failure(&mut failures, &mut rejected_count, &pointer, &keyword);
             continue;
         }
-        let decoded = match serde_json::from_value::<R>(value) {
+        let decoded = match studio_json::from_value::<R>(value) {
             Ok(record) => record,
             Err(_) => {
                 record_failure(&mut failures, &mut rejected_count, "", "recordType");
@@ -216,7 +216,7 @@ fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTab
                     continue;
                 }
             };
-            let mut value = match serde_json::from_str::<Value>(&raw) {
+            let mut value = match studio_json::from_str::<Value>(&raw) {
                 Ok(v) => v,
                 Err(_) => {
                     record_failure(&mut failures, &mut report.rejected_count, "", "json");
@@ -224,7 +224,7 @@ fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTab
                 }
             };
             if table == "runtime_chat_messages" {
-                value = serde_json::json!({"id":id,"deliveries":value,"seq":row.get::<_,i64>(2)?,"room":row.get::<_,String>(3)?,"sender":row.get::<_,String>(4)?,"text":row.get::<_,String>(5)?,"created":row.get::<_,f64>(6)?});
+                value = studio_json::json!({"id":id,"deliveries":value,"seq":row.get::<_,i64>(2)?,"room":row.get::<_,String>(3)?,"sender":row.get::<_,String>(4)?,"text":row.get::<_,String>(5)?,"created":row.get::<_,f64>(6)?});
             }
             let schema = studio_runtime_schema::table_schema(table).ok_or_else(|| {
                 crate::StoreError::SchemaValidation(format!("missing table schema {table}"))
@@ -323,7 +323,7 @@ fn check_sync_entities(connection: &Connection) -> StoreResult<StateCheckTable> 
             );
             continue;
         };
-        let mut payload = match serde_json::from_str::<Value>(&raw) {
+        let mut payload = match studio_json::from_str::<Value>(&raw) {
             Ok(value) => value,
             Err(_) => {
                 record_failure(&mut failures, &mut report.rejected_count, "", "json");
@@ -360,7 +360,7 @@ fn check_sync_entities(connection: &Connection) -> StoreResult<StateCheckTable> 
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     use super::check_sync_entities;
 

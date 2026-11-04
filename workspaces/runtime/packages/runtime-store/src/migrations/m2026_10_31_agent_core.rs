@@ -36,8 +36,8 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     })?;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
-            serde_json::from_str(&raw)?;
+        let mut record: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+            studio_json::from_str(&raw)?;
         for field in [
             "nativeNameSynced",
             "agentModeChangedAt",
@@ -49,7 +49,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         for field in FLAGS {
             if record
                 .get(*field)
-                .is_some_and(|value| serde_json::from_str::<bool>(value.get()).is_err())
+                .is_some_and(|value| studio_json::from_str::<bool>(value.as_str()).is_err())
             {
                 record.remove(*field);
             }
@@ -57,35 +57,35 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         for field in TEXT {
             if record
                 .get(*field)
-                .is_some_and(|value| serde_json::from_str::<Option<String>>(value.get()).is_err())
+                .is_some_and(|value| studio_json::from_str::<Option<String>>(value.as_str()).is_err())
             {
                 record.remove(*field);
             }
         }
         if record
             .get("role")
-            .is_some_and(|value| serde_json::from_str::<Option<AgentRole>>(value.get()).is_err())
+            .is_some_and(|value| studio_json::from_str::<Option<AgentRole>>(value.as_str()).is_err())
         {
             let role = record
                 .get("role")
-                .and_then(|value| serde_json::from_str::<String>(value.get()).ok());
+                .and_then(|value| studio_json::from_str::<String>(value.as_str()).ok());
             let native_review = record
                 .get("nativeReview")
-                .and_then(|value| serde_json::from_str(value.get()).ok());
+                .and_then(|value| studio_json::from_str(value.as_str()).ok());
             let is_lead = record
                 .get("isLead")
-                .and_then(|value| serde_json::from_str::<bool>(value.get()).ok())
+                .and_then(|value| studio_json::from_str::<bool>(value.as_str()).ok())
                 .unwrap_or(false);
             let inferred = if role.as_deref() == Some("lead") {
                 AgentRole::Orchestrator
             } else {
                 AgentRole::inferred(crate::truthy(native_review.as_ref()), is_lead)
             };
-            record.insert("role".into(), serde_json::value::to_raw_value(&inferred)?);
+            record.insert("role".into(), studio_json::to_raw_value(&inferred)?);
         }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![studio_json::to_string(&record)?, id],
         )?;
     }
     Ok(())

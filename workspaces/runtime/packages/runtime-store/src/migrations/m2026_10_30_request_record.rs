@@ -12,14 +12,14 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let raw: String = row.get(1)?;
         // Rows that cannot be reconstructed remain untouched; typed reads report them per row.
         let Ok(request) =
-            serde_json::from_str::<studio_runtime_schema::request_record::RequestRecord>(&raw)
+            studio_json::from_str::<studio_runtime_schema::request_record::RequestRecord>(&raw)
         else {
             continue;
         };
         if request.id != id {
             continue;
         }
-        let encoded = serde_json::to_string(&request)?;
+        let encoded = studio_json::to_string(&request)?;
         if encoded != raw {
             tx.execute(
                 "UPDATE runtime_requests SET record=?1 WHERE id=?2",
@@ -73,10 +73,10 @@ mod tests {
                 .get(&"invalid".into())
                 .is_err()
         );
-        let canonical: crate::RequestRecord = serde_json::from_str(r#"{"id":"valid","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1.0,"params":{}}"#).unwrap();
+        let canonical: crate::RequestRecord = studio_json::from_str(r#"{"id":"valid","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1.0,"params":{}}"#).unwrap();
         tx.execute(
             "INSERT INTO runtime_requests VALUES(?1,?2)",
-            rusqlite::params!["valid", serde_json::to_string(&canonical).unwrap()],
+            rusqlite::params!["valid", studio_json::to_string(&canonical).unwrap()],
         )
         .unwrap();
         tx.execute_batch("CREATE TRIGGER no_rewrite BEFORE UPDATE ON runtime_requests BEGIN SELECT RAISE(ABORT, 'unexpected rewrite'); END").unwrap();

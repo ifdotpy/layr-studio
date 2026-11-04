@@ -1260,7 +1260,7 @@ fn terminal_claude_error_keeps_only_bounded_failure_metadata() {
     let saved = stored(&connection);
     assert_eq!(saved["lastCompletedTurnError"]["claudeFailure"], metadata);
     assert_eq!(saved["error"]["codexErrorInfo"], "unauthorized");
-    let receipt = crate::ExecutionHistoryRepository::receipt::<serde_json::Value>(
+    let receipt = crate::ExecutionHistoryRepository::receipt::<studio_json::Value>(
         &connection,
         "attempt",
         ExecutionReceiptKind::Terminal,

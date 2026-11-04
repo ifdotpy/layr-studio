@@ -45,7 +45,7 @@ struct SteerPayload {
     root_request_id: String,
     admission: AdmittedRequest,
     #[serde(skip)]
-    held_payload: Option<Box<serde_json::value::RawValue>>,
+    held_payload: Option<studio_json::OwnedRawJson>,
 }
 
 #[derive(serde::Deserialize)]
@@ -61,12 +61,12 @@ struct SteerWire {
     created: f64,
     root_request_id: String,
     admission: AdmittedRequest,
-    request_ticket: Option<Box<serde_json::value::RawValue>>,
-    generation: Option<Box<serde_json::value::RawValue>>,
-    submitted_at: Option<Box<serde_json::value::RawValue>>,
-    prepared_submission: Option<Box<serde_json::value::RawValue>>,
-    response: Option<Box<serde_json::value::RawValue>>,
-    interrupt_still_queued: Option<Box<serde_json::value::RawValue>>,
+    request_ticket: Option<studio_json::OwnedRawJson>,
+    generation: Option<studio_json::OwnedRawJson>,
+    submitted_at: Option<studio_json::OwnedRawJson>,
+    prepared_submission: Option<studio_json::OwnedRawJson>,
+    response: Option<studio_json::OwnedRawJson>,
+    interrupt_still_queued: Option<studio_json::OwnedRawJson>,
 }
 
 #[derive(serde::Deserialize)]
@@ -124,12 +124,12 @@ impl TryFrom<&mut SteerWire> for SteerState {
     }
 }
 
-fn parse_wire<T: serde::de::DeserializeOwned>(raw: &serde_json::value::RawValue) -> Result<T, ()> {
-    serde_json::from_str(raw.get()).map_err(|_| ())
+fn parse_wire<T: serde::de::DeserializeOwned>(raw: &studio_json::OwnedRawJson) -> Result<T, ()> {
+    studio_json::from_str(raw.as_str()).map_err(|_| ())
 }
 
 impl SteerWire {
-    fn into_payload(mut self, raw: Box<serde_json::value::RawValue>) -> Result<SteerPayload, ()> {
+    fn into_payload(mut self, raw: studio_json::OwnedRawJson) -> Result<SteerPayload, ()> {
         let stage = SteerState::try_from(&mut self)?;
         let held_payload = matches!(stage, SteerState::Held).then_some(raw);
         Ok(SteerPayload {
@@ -165,7 +165,7 @@ pub(crate) struct SubmittedSteer {
     generation: u64,
     submitted_at: f64,
     #[serde(default)]
-    prepared_submission: Option<Box<serde_json::value::RawValue>>,
+    prepared_submission: Option<studio_json::OwnedRawJson>,
     #[serde(default)]
     response: Option<String>,
     #[serde(default)]
@@ -235,7 +235,7 @@ pub struct AcknowledgedSteer {
     pub event_ids: Vec<String>,
     /// Opaque compiler-owned projection frozen before transport, retained until
     /// acknowledgement even after the ordinary request reply is retired.
-    pub prepared_submission: Option<Box<serde_json::value::RawValue>>,
+    pub prepared_submission: Option<studio_json::OwnedRawJson>,
     pub events: Vec<QueueEvent>,
     pub submitted_at: f64,
 }
@@ -254,11 +254,11 @@ fn invalid_wire(id: &str) -> StoreError {
     }
 }
 fn load(db: &Connection, id: &str) -> StoreResult<Option<SteerPayload>> {
-    Outbox::get::<Box<serde_json::value::RawValue>>(db, id)
+    Outbox::get::<studio_json::OwnedRawJson>(db, id)
         .map_err(StoreError::from)?
         .map(|row| {
             let payload: SteerWire =
-                serde_json::from_str(row.payload.get()).map_err(|_| invalid_wire(id))?;
+                studio_json::from_str(row.payload.as_str()).map_err(|_| invalid_wire(id))?;
             let payload = payload
                 .into_payload(row.payload)
                 .map_err(|_| invalid_wire(id))?;
@@ -277,7 +277,7 @@ fn store(tx: &Transaction<'_>, id: &str, value: &SteerPayload) -> StoreResult<()
     #[derive(serde::Serialize)]
     #[serde(untagged)]
     enum Stored<'a> {
-        Held(&'a serde_json::value::RawValue),
+        Held(&'a studio_json::OwnedRawJson),
         Active(&'a SteerPayload),
     }
     let status = match value.stage {
@@ -314,7 +314,7 @@ fn delete(tx: &Transaction<'_>, id: &str) -> StoreResult<()> {
     Ok(())
 }
 fn receipts(tx: &Transaction<'_>, agent: &str) -> StoreResult<Vec<(String, SteerPayload)>> {
-    Outbox::for_owner::<Box<serde_json::value::RawValue>>(
+    Outbox::for_owner::<studio_json::OwnedRawJson>(
         tx,
         OwnerKind::Agent,
         agent,
@@ -324,7 +324,7 @@ fn receipts(tx: &Transaction<'_>, agent: &str) -> StoreResult<Vec<(String, Steer
     .into_iter()
     .map(|row| {
         let wire: SteerWire =
-            serde_json::from_str(row.payload.get()).map_err(|_| invalid_wire(&row.id))?;
+            studio_json::from_str(row.payload.as_str()).map_err(|_| invalid_wire(&row.id))?;
         let payload = wire
             .into_payload(row.payload)
             .map_err(|_| invalid_wire(&row.id))?;
@@ -336,7 +336,7 @@ fn receipt_events(id: &str, receipt: &SteerPayload) -> StoreResult<String> {
     if receipt.events.is_empty() {
         return Err(invalid_receipt(id));
     }
-    Ok(serde_json::to_string(&receipt.events)?)
+    Ok(studio_json::to_string(&receipt.events)?)
 }
 
 /// The running turn and thread that may receive input, or `None`.
@@ -555,7 +555,7 @@ impl SchedulerRepository {
         }
         tx.execute(
             "UPDATE runtime_events SET status=?2 WHERE status='uncertain' AND id IN (SELECT value FROM json_each(?1))",
-            params![serde_json::to_string(&receipt.events)?, status.as_str()],
+            params![studio_json::to_string(&receipt.events)?, status.as_str()],
         )?;
         Ok(texts)
     }
@@ -760,14 +760,14 @@ impl SchedulerRepository {
         tx: &Transaction<'_>,
         agent_id: &str,
         steer_id: &str,
-        submission: &serde_json::value::RawValue,
-    ) -> StoreResult<Option<Box<serde_json::value::RawValue>>> {
+        submission: &studio_json::OwnedRawJson,
+    ) -> StoreResult<Option<studio_json::OwnedRawJson>> {
         let id = receipt_id(agent_id, steer_id);
         let mut receipt = load(tx, &id)?.ok_or_else(|| invalid_receipt(&id))?;
         let SteerState::Submitted(sent) = &mut receipt.stage else {
             return Err(invalid_receipt(&id));
         };
-        if !submission.get().trim_start().starts_with('{') {
+        if !submission.as_str().trim_start().starts_with('{') {
             return Err(invalid_receipt(&id));
         }
         if let Some(saved) = &sent.prepared_submission {
@@ -956,7 +956,7 @@ impl SchedulerRepository {
                          AND (status IN ('reserved','dispatching','uncertain') OR (status='delivered' AND turn_id=?6))",
                         params![status, if status == "cancelled" { STOP_CANCELLED_ERROR }
                             else { STOP_QUEUED_ERROR },
-                            agent_id, epoch, serde_json::to_string(events)?, turn],
+                            agent_id, epoch, studio_json::to_string(events)?, turn],
                     )?;
                 Self::project_chat_event_status(tx, agent_id, epoch, turn, events, status)?;
             }
@@ -983,7 +983,7 @@ impl SchedulerRepository {
             } else {
                 continue;
             };
-            let event_ids = serde_json::to_string(&receipt.events)?;
+            let event_ids = studio_json::to_string(&receipt.events)?;
             if status != "cancelled" {
                 sent.interrupt_still_queued = true;
             }
@@ -1103,7 +1103,7 @@ impl SchedulerRepository {
             OutboxStatus::Unknown,
         ] {
             rows.extend(
-                Outbox::for_account::<Box<serde_json::value::RawValue>>(
+                Outbox::for_account::<studio_json::OwnedRawJson>(
                     tx,
                     account,
                     OutboxKind::Steer,
@@ -1116,7 +1116,7 @@ impl SchedulerRepository {
         for row in rows {
             let id = row.id;
             let wire: SteerWire =
-                serde_json::from_str(row.payload.get()).map_err(|_| invalid_wire(&id))?;
+                studio_json::from_str(row.payload.as_str()).map_err(|_| invalid_wire(&id))?;
             let receipt = wire
                 .into_payload(row.payload)
                 .map_err(|_| invalid_wire(&id))?;

@@ -1,7 +1,7 @@
 //! Open execution-attempt record for the shared typed table and read-only audit.
 use crate::{JsonRecord, RecordKeyMode, RecordQueryShape};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use studio_runtime_schema::claude_permissions::PermissionMode;
 use studio_runtime_schema::queue_command::Field;
 
@@ -147,7 +147,7 @@ impl JsonRecord for ClaudeAttemptRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn frozen_input_matches_legacy_and_canonical_permission_modes() {
@@ -171,7 +171,7 @@ mod tests {
         let conflicting = json!({"input":[],"source":{"permissionMode":"bypassPermissions","yoloMode":false,"cwd":"/project"}});
         assert!(!record.matches_field("claudeInputRequest", Some(&conflicting)));
         assert_eq!(
-            serde_json::from_str::<Value>(&serde_json::to_string(&record).unwrap()).unwrap(),
+            studio_json::from_str::<Value>(&studio_json::to_string(&record).unwrap()).unwrap(),
             frozen
         );
     }
@@ -185,20 +185,20 @@ mod tests {
             json!({"id":"attempt","events":["event"],"submitted":true}),
         ] {
             let record = ClaudeAttemptRecord::deserialize(input.clone()).unwrap();
-            let encoded = serde_json::to_string(&record).unwrap();
-            let saved: Value = serde_json::from_str(&encoded).unwrap();
+            let encoded = studio_json::to_string(&record).unwrap();
+            let saved: Value = studio_json::from_str(&encoded).unwrap();
             assert_eq!(saved, input);
             for field in ["id", "events", "submitted", "future"] {
                 assert!(record.matches_field(field, input.get(field)));
             }
         }
         let receipt: ClaudeAttemptRecord =
-            serde_json::from_str(r#"{"id":"attempt","supervisorIdentity":null}"#).unwrap();
+            studio_json::from_str(r#"{"id":"attempt","supervisorIdentity":null}"#).unwrap();
         assert!(receipt.matches_field("supervisorIdentity", None));
         assert!(!receipt.matches_field("supervisorIdentity", Some(&json!({"handle":"other"}))));
-        let missing: ClaudeAttemptRecord = serde_json::from_str(r#"{"id":"attempt"}"#).unwrap();
+        let missing: ClaudeAttemptRecord = studio_json::from_str(r#"{"id":"attempt"}"#).unwrap();
         let null: ClaudeAttemptRecord =
-            serde_json::from_str(r#"{"id":"attempt","events":null,"submitted":null}"#).unwrap();
+            studio_json::from_str(r#"{"id":"attempt","events":null,"submitted":null}"#).unwrap();
         assert!(!missing.matches_field("events", Some(&Value::Null)));
         assert!(!null.matches_field("events", None));
         assert!(!missing.matches_field("submitted", Some(&Value::Null)));

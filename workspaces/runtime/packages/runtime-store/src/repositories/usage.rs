@@ -2,7 +2,7 @@
 
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value, json};
+use studio_json::{Number, Value, json};
 use std::collections::BTreeMap;
 use studio_runtime_schema::continuation_snapshot::{
     UsageContinuationCause, UsageContinuationStatus,
@@ -139,7 +139,7 @@ pub fn cancel_capacity_retry(
         .optional()?
         .ok_or(UsageRepositoryError::UnknownContinuation)?;
     let mut retry: Value =
-        serde_json::from_str(&raw).map_err(|_| invalid("runtime_capacity_retries", retry_id))?;
+        studio_json::from_str(&raw).map_err(|_| invalid("runtime_capacity_retries", retry_id))?;
     if !validate_retry(&retry, retry_id) {
         return Err(invalid("runtime_capacity_retries", retry_id));
     }
@@ -170,7 +170,7 @@ pub fn cancel_capacity_retry(
         transaction.execute(
             "UPDATE runtime_capacity_retries SET record=?1 WHERE id=?2 AND agent=?3",
             params![
-                serde_json::to_string(&retry)
+                studio_json::to_string(&retry)
                     .map_err(|_| invalid("runtime_capacity_retries", retry_id))?,
                 retry_id,
                 agent_id
@@ -208,7 +208,7 @@ pub fn disable_usage_resume(
         .ok_or(UsageRepositoryError::UnknownContinuation)?;
     // Parse through Value first to retain the stored last-duplicate-key behavior.
     let raw_value: Value =
-        serde_json::from_str(&raw).map_err(|_| invalid("runtime_usage_resumes", resume_id))?;
+        studio_json::from_str(&raw).map_err(|_| invalid("runtime_usage_resumes", resume_id))?;
     let mut resume = decode_resume(raw_value, resume_id)
         .ok_or_else(|| invalid("runtime_usage_resumes", resume_id))?;
     let embedded = agent
@@ -235,7 +235,7 @@ pub fn disable_usage_resume(
             transaction.execute(
                 "UPDATE runtime_usage_resumes SET record=?1 WHERE id=?2 AND agent=?3",
                 params![
-                    serde_json::to_string(&resume)
+                    studio_json::to_string(&resume)
                         .map_err(|_| invalid("runtime_usage_resumes", resume_id))?,
                     resume_id,
                     agent_id
@@ -277,7 +277,7 @@ pub fn cancel_usage_resume(
         .ok_or(UsageRepositoryError::UnknownContinuation)?;
     // Parse through Value first to retain the stored last-duplicate-key behavior.
     let raw_value: Value =
-        serde_json::from_str(&raw).map_err(|_| invalid("runtime_usage_resumes", resume_id))?;
+        studio_json::from_str(&raw).map_err(|_| invalid("runtime_usage_resumes", resume_id))?;
     let mut resume = decode_resume(raw_value, resume_id)
         .ok_or_else(|| invalid("runtime_usage_resumes", resume_id))?;
     let embedded = agent
@@ -301,7 +301,7 @@ pub fn cancel_usage_resume(
     transaction.execute(
         "UPDATE runtime_usage_resumes SET record=?1 WHERE id=?2 AND agent=?3",
         params![
-            serde_json::to_string(&resume)
+            studio_json::to_string(&resume)
                 .map_err(|_| invalid("runtime_usage_resumes", resume_id))?,
             resume_id,
             agent_id
@@ -361,7 +361,7 @@ mod tests {
         UsageRepositoryError, cancel_capacity_retry, cancel_usage_resume, disable_usage_resume,
     };
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     const AGENT: &str = "agent-1";
 
@@ -509,8 +509,8 @@ mod tests {
         insert(&connection, "runtime_usage_resumes", "resume", &saved);
         let tx = connection.unchecked_transaction().expect("transaction");
         disable_usage_resume(&tx, AGENT, "resume", 200.0).expect("disable result");
-        let agent: serde_json::Value =
-            serde_json::from_str(&read(&tx, "runtime_agents", AGENT)).unwrap();
+        let agent: studio_json::Value =
+            studio_json::from_str(&read(&tx, "runtime_agents", AGENT)).unwrap();
         assert_eq!(agent["usageResumeEnabled"], false);
         assert_eq!(agent["usageResume"]["status"], "cancelled");
     }
@@ -570,11 +570,11 @@ mod tests {
         expected["updatedAt"] = json!(200.0);
         assert_eq!(result, expected);
         assert_eq!(
-            serde_json::from_str::<Value>(&read(&tx, "runtime_usage_resumes", "resume")).unwrap(),
+            studio_json::from_str::<Value>(&read(&tx, "runtime_usage_resumes", "resume")).unwrap(),
             expected
         );
         assert_eq!(
-            serde_json::from_str::<Value>(&read(&tx, "runtime_agents", AGENT)).unwrap()["usageResume"],
+            studio_json::from_str::<Value>(&read(&tx, "runtime_agents", AGENT)).unwrap()["usageResume"],
             expected
         );
         tx.rollback().unwrap();
@@ -593,8 +593,8 @@ mod tests {
         let result = cancel_usage_resume(&tx, AGENT, "resume", "moved", 200.0).unwrap();
         assert!(result.get("waitingForAuth").is_none());
         let row: Value =
-            serde_json::from_str(&read(&tx, "runtime_usage_resumes", "resume")).unwrap();
-        let agent: Value = serde_json::from_str(&read(&tx, "runtime_agents", AGENT)).unwrap();
+            studio_json::from_str(&read(&tx, "runtime_usage_resumes", "resume")).unwrap();
+        let agent: Value = studio_json::from_str(&read(&tx, "runtime_agents", AGENT)).unwrap();
         assert_eq!(row, result);
         assert_eq!(agent.get("usageResume"), Some(&result));
     }

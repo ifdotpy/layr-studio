@@ -583,7 +583,7 @@ mod tests {
         crate::domain::project(
             &connection,
             "c-running",
-            &serde_json::json!({"status":"running","deletedAt":5}),
+            &studio_json::json!({"status":"running","deletedAt":5}),
         )
         .expect("project the running chat");
         connection
@@ -596,7 +596,7 @@ mod tests {
         crate::domain::project(
             &connection,
             "e-reserved",
-            &serde_json::json!({"status":"idle","startAttempt":{"activeAtReservation":true}}),
+            &studio_json::json!({"status":"idle","startAttempt":{"activeAtReservation":true}}),
         )
         .expect("project the reserved attempt");
         let ids =

@@ -6,7 +6,7 @@
 //! `Closed { reason: Legacy }`: nothing is inferred.
 use rusqlite::Transaction;
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use studio_runtime_schema::approvals::{
     AgentId, Answer, Approval, ApprovalId, ApprovalState, BrowserCallbackForward, BrowserCard,
     BrowserOutcome, BrowserPhase, BrowserRedirect, BrowserSource, CloseReason, CommandId, Decision,
@@ -183,11 +183,11 @@ fn browser_card(id: &str, params: &mut Map<String, Value>) -> StoreResult<Browse
     let http = params.remove("outcomeHttp");
     let waiting: Option<LegacyWaiting> = waiting
         .filter(|value| !value.is_null())
-        .map(serde_json::from_value)
+        .map(studio_json::from_value)
         .transpose()
         .map_err(|e| bad(id, &format!("browser waiting: {e}")))?;
     let paste: Option<LegacyPaste> = paste
-        .map(serde_json::from_value)
+        .map(studio_json::from_value)
         .transpose()
         .map_err(|e| bad(id, &format!("browser paste: {e}")))?;
     let phase = match (phase.as_deref(), outcome, waiting, paste) {
@@ -196,7 +196,7 @@ fn browser_card(id: &str, params: &mut Map<String, Value>) -> StoreResult<Browse
             http: match http {
                 None | Some(Value::Null) => None,
                 Some(value) => Some(
-                    serde_json::from_value(value)
+                    studio_json::from_value(value)
                         .map_err(|e| bad(id, &format!("browser outcomeHttp: {e}")))?,
                 ),
             },
@@ -214,7 +214,7 @@ fn browser_card(id: &str, params: &mut Map<String, Value>) -> StoreResult<Browse
     let redirect = match params.remove("redirect") {
         None | Some(Value::Null) => None,
         Some(value) => Some(
-            serde_json::from_value::<BrowserRedirect>(value)
+            studio_json::from_value::<BrowserRedirect>(value)
                 .map_err(|e| bad(id, &format!("browser redirect: {e}")))?,
         ),
     };
@@ -227,7 +227,7 @@ fn browser_card(id: &str, params: &mut Map<String, Value>) -> StoreResult<Browse
     let forward = match params.remove("forward") {
         None | Some(Value::Null) => None,
         Some(value) => {
-            let legacy: LegacyForward = serde_json::from_value(value)
+            let legacy: LegacyForward = studio_json::from_value(value)
                 .map_err(|e| bad(id, &format!("browser forward: {e}")))?;
             Some(BrowserCallbackForward {
                 token_hash: legacy.token_hash,
@@ -237,7 +237,7 @@ fn browser_card(id: &str, params: &mut Map<String, Value>) -> StoreResult<Browse
     };
     let joined = match params.remove("joined") {
         None | Some(Value::Null) => Vec::new(),
-        Some(value) => serde_json::from_value::<Vec<String>>(value)
+        Some(value) => studio_json::from_value::<Vec<String>>(value)
             .map_err(|e| bad(id, &format!("browser joined: {e}")))?
             .into_iter()
             .map(AgentId)
@@ -534,8 +534,8 @@ pub(crate) fn approval_from_record(id: &str, record: &str) -> StoreResult<Approv
 /// Reads a stored record through the request record type of the runtime schema
 /// (strict: an unknown key or a bad value fails), then into the converter's view.
 fn legacy_of(id: &str, record: &str) -> StoreResult<Legacy> {
-    let placed = |error: serde_json::Error| bad(id, &format!("cannot place a field: {error}"));
-    let mut value: Value = serde_json::from_str(record).map_err(placed)?;
+    let placed = |error: studio_json::Error| bad(id, &format!("cannot place a field: {error}"));
+    let mut value: Value = studio_json::from_str(record).map_err(placed)?;
     // The state directory and handle of the supervised process are stored next to
     // the generation. The request record type has the generation only, so these two
     // are set aside here and put back in the converter's view.
@@ -544,8 +544,8 @@ fn legacy_of(id: &str, record: &str) -> StoreResult<Legacy> {
         .and_then(Value::as_object_mut)
         .map(|supervisor| (supervisor.remove("stateDir"), supervisor.remove("handle")));
     let typed: studio_runtime_schema::request_record::RequestRecord =
-        serde_json::from_value(value).map_err(placed)?;
-    let mut view = serde_json::to_value(&typed)?;
+        studio_json::from_value(value).map_err(placed)?;
+    let mut view = studio_json::to_value(&typed)?;
     if let (Some((state_dir, handle)), Some(supervisor)) = (
         process,
         view.get_mut("supervisor").and_then(Value::as_object_mut),
@@ -556,7 +556,7 @@ fn legacy_of(id: &str, record: &str) -> StoreResult<Legacy> {
             }
         }
     }
-    serde_json::from_value(view).map_err(placed)
+    studio_json::from_value(view).map_err(placed)
 }
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -593,7 +593,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn every_legacy_row_is_kept_and_nothing_is_inferred() {
@@ -714,7 +714,7 @@ mod tests {
             "decision":"answer","answeredBy":"user","answeredAt":2.0,
             "answerHistory":[{"id":"0","question":"?","isSecret":true,"answer":["sensitive-value"]},{"id":"1","question":"?","isSecret":false,"answer":["public-value"]}]});
         let approval = approval_from_record("s", &row.to_string()).unwrap();
-        let serialized = serde_json::to_string(&approval).unwrap();
+        let serialized = studio_json::to_string(&approval).unwrap();
         assert!(!serialized.contains("sensitive-value"));
         assert!(serialized.contains("public-value"));
         let ApprovalState::Answered {
@@ -732,7 +732,7 @@ mod tests {
         row["answerHistory"][0]["isSecret"] = json!(false);
         let approval = approval_from_record("s", &row.to_string()).unwrap();
         assert!(
-            !serde_json::to_string(&approval)
+            !studio_json::to_string(&approval)
                 .unwrap()
                 .contains("sensitive-value")
         );

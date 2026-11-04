@@ -2,7 +2,7 @@
 
 use crate::CachedSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, named_params, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     SYNC_BATCH_LIMIT, SYNC_ENTITY_PAGE_LIMIT, SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
 };
@@ -170,7 +170,7 @@ impl SyncDocumentsRepository {
             )
             .optional()?;
         let mut envelope: Value = match raw {
-            Some(raw) => serde_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
+            Some(raw) => studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
                 scope: collection.to_owned(),
                 id: id.to_owned(),
             })?,
@@ -559,13 +559,13 @@ impl SyncDocumentsRepository {
         #[derive(serde::Serialize)]
         struct Empty {}
         let payload = if deleted {
-            serde_json::to_string(&Entity {
+            studio_json::to_string(&Entity {
                 collection,
                 id,
                 value: Empty {},
             })?
         } else {
-            serde_json::to_string(&Entity {
+            studio_json::to_string(&Entity {
                 collection,
                 id,
                 value,
@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     fn scope_visibility_tracks_predicate_moves_atomically_without_replaying_appends() {
-        use serde_json::json;
+        use studio_json::json;
         let mut connection = Connection::open_in_memory().expect("memory SQLite");
         connection
             .execute_batch(
@@ -1263,7 +1263,7 @@ mod tests {
 
     #[test]
     fn scope_visibility_retains_deleted_owner_until_restore_and_ignores_team_for_root_only_work() {
-        use serde_json::json;
+        use studio_json::json;
         let mut connection = Connection::open_in_memory().expect("SQLite");
         connection
             .execute_batch(
@@ -1498,7 +1498,7 @@ mod tests {
              CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);",
         ).expect("sync fixture creates");
         let transaction = connection.transaction().expect("transaction begins");
-        let value = serde_json::json!({"b":2,"a":1});
+        let value = studio_json::json!({"b":2,"a":1});
         assert!(
             SyncDocumentsRepository::put_entity(&transaction, "workspace", "current", value, false)
                 .expect("initial entity")
@@ -1510,7 +1510,7 @@ mod tests {
                 &transaction,
                 "workspace",
                 "current",
-                serde_json::json!({"a":1,"b":2}),
+                studio_json::json!({"a":1,"b":2}),
                 false
             )
             .expect("normalized replay")
@@ -1519,7 +1519,7 @@ mod tests {
             &transaction,
             "workspace",
             "current",
-            serde_json::json!({"a":1}),
+            studio_json::json!({"a":1}),
         )
         .expect("equal patch");
         assert_eq!(
@@ -1531,7 +1531,7 @@ mod tests {
                 &transaction,
                 "workspace",
                 "current",
-                serde_json::json!({"a":2}),
+                studio_json::json!({"a":2}),
                 false
             )
             .expect("content change")
@@ -1545,7 +1545,7 @@ mod tests {
                 &transaction,
                 "workspace",
                 "current",
-                serde_json::json!({}),
+                studio_json::json!({}),
                 true
             )
             .expect("delete")
@@ -1557,7 +1557,7 @@ mod tests {
                 &transaction,
                 "workspace",
                 "current",
-                serde_json::json!({"ignored":true}),
+                studio_json::json!({"ignored":true}),
                 true
             )
             .expect("repeated delete")
@@ -1571,7 +1571,7 @@ mod tests {
                 &transaction,
                 "workspace",
                 "current",
-                serde_json::json!({}),
+                studio_json::json!({}),
                 false
             )
             .expect("revive")

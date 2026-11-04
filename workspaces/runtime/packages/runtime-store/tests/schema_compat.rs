@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::studio_errors::{
     MigrationPhase, MigrationRollbackOutcome, MigrationTarget,
 };
@@ -572,7 +572,7 @@ async fn sync_bootstrap_failure_rolls_back_earlier_ddl_and_seed_rows() {
 }
 
 fn create_from_live_schema(root: &Path) {
-    let schema: Value = serde_json::from_str(LIVE_SCHEMA).expect("schema-only fixture parses");
+    let schema: Value = studio_json::from_str(LIVE_SCHEMA).expect("schema-only fixture parses");
     for database in ["canvas.sqlite3", "analytics.sqlite3"] {
         let mut connection = Connection::open(root.join(database)).expect("database file opens");
         studio_runtime_store::sqlite_durability::configure_writer(&connection)

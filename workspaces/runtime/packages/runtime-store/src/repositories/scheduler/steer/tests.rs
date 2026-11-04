@@ -45,15 +45,15 @@ fn wire_stage_round_trip(stage: &str) {
             |row| row.get(0),
         )
         .expect("payload");
-    let mut value: Value = serde_json::from_str(&raw).expect("stored JSON");
+    let mut value: Value = studio_json::from_str(&raw).expect("stored JSON");
     value["stage"] = json!(stage);
     let legacy = value.to_string();
-    let payload = serde_json::from_str::<SteerWire>(&legacy)
+    let payload = studio_json::from_str::<SteerWire>(&legacy)
         .expect("wire")
-        .into_payload(serde_json::value::RawValue::from_string(legacy.clone()).unwrap())
+        .into_payload(studio_json::OwnedRawJson::from_string(legacy.clone()).unwrap())
         .expect("stage");
-    let encoded = serde_json::to_string(&payload).expect("encoded");
-    assert_eq!(serde_json::from_str::<Value>(&encoded).unwrap(), value);
+    let encoded = studio_json::to_string(&payload).expect("encoded");
+    assert_eq!(studio_json::from_str::<Value>(&encoded).unwrap(), value);
 }
 
 #[test]
@@ -99,21 +99,21 @@ fn stored_steer_round_trips_and_incomplete_submission_is_held() {
             |row| row.get(0),
         )
         .expect("stored receipt");
-    let payload = serde_json::from_str::<SteerWire>(&raw)
+    let payload = studio_json::from_str::<SteerWire>(&raw)
         .expect("read stored receipt")
-        .into_payload(serde_json::value::RawValue::from_string(raw.clone()).unwrap())
+        .into_payload(studio_json::OwnedRawJson::from_string(raw.clone()).unwrap())
         .expect("valid stored receipt");
-    let encoded = serde_json::to_string(&payload).expect("write stored receipt");
+    let encoded = studio_json::to_string(&payload).expect("write stored receipt");
     assert_eq!(
-        serde_json::from_str::<Value>(&raw).unwrap(),
-        serde_json::from_str::<Value>(&encoded).unwrap()
+        studio_json::from_str::<Value>(&raw).unwrap(),
+        studio_json::from_str::<Value>(&encoded).unwrap()
     );
     let incomplete = raw.replace("\"generation\":7", "\"generation\":null");
     assert_ne!(raw, incomplete);
     assert!(
-        serde_json::from_str::<SteerWire>(&incomplete)
+        studio_json::from_str::<SteerWire>(&incomplete)
             .unwrap()
-            .into_payload(serde_json::value::RawValue::from_string(incomplete.clone()).unwrap())
+            .into_payload(studio_json::OwnedRawJson::from_string(incomplete.clone()).unwrap())
             .is_err()
     );
     connection.execute(
@@ -1083,7 +1083,7 @@ fn frozen_projection_survives_response_loss_and_rejects_payload_changes() {
     let mut connection = database();
     submit(&mut connection, "frozen");
     let projection = json!({"operation":"frozen","compiled":{"text":"bounded evidence"}});
-    let frozen = serde_json::value::to_raw_value(&projection).expect("projection JSON");
+    let frozen = studio_json::to_raw_value(&projection).expect("projection JSON");
     settle(&mut connection, |tx| {
         assert!(
             SchedulerRepository::freeze_steer_submission(tx, AGENT, "frozen", &frozen)?.is_none()
@@ -1091,15 +1091,15 @@ fn frozen_projection_survives_response_loss_and_rejects_payload_changes() {
         Ok(())
     });
     let changed =
-        serde_json::value::to_raw_value(&json!({"compiled":"changed"})).expect("changed JSON");
+        studio_json::to_raw_value(&json!({"compiled":"changed"})).expect("changed JSON");
     let previous = with(&mut connection, |tx| {
         SchedulerRepository::freeze_steer_submission(tx, AGENT, "frozen", &changed)
     })
     .expect("frozen projection")
     .expect("previous projection");
     assert_eq!(
-        previous.get(),
-        frozen.get(),
+        previous.as_str(),
+        frozen.as_str(),
         "a retry cannot rewrite frozen content"
     );
     settle(&mut connection, |tx| {
@@ -1108,8 +1108,8 @@ fn frozen_projection_survives_response_loss_and_rejects_payload_changes() {
     terminal(&mut connection, &[]);
     let ack = acknowledge(&mut connection).expect("late acknowledgement");
     assert_eq!(
-        ack.prepared_submission.as_deref().map(|value| value.get()),
-        Some(frozen.get())
+        ack.prepared_submission.as_ref().map(|value| value.as_str()),
+        Some(frozen.as_str())
     );
     assert_eq!(ack.event_ids, ["u1", "u2", "u4"]);
     assert_eq!(open_receipts(&connection), 0);
@@ -1262,7 +1262,7 @@ fn stop_receipt_cancels_the_initial_prompt_in_pending_dispatch() {
 fn acknowledgement_work(history: usize) -> u64 {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
-    let snapshot: Value = serde_json::from_str(include_str!("../../../runtime-state-schema.json"))
+    let snapshot: Value = studio_json::from_str(include_str!("../../../runtime-state-schema.json"))
         .expect("schema snapshot parses");
     let queue_index = snapshot["canvas.sqlite3"]["sqlite_master"]
         .as_array()

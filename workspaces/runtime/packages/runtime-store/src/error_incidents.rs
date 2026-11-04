@@ -39,7 +39,7 @@ fn owner(incident: &StudioError) -> (OwnerKind, &str) {
 pub fn put(tx: &Transaction<'_>, incident: &StudioError) -> StoreResult<()> {
     let (owner_kind, owner_id) = owner(incident);
     let at = timestamp_ms(incident.at)?;
-    let payload = serde_json::to_string(incident)?;
+    let payload = studio_json::to_string(incident)?;
     tx.execute(
         "INSERT INTO runtime_error_incidents(id,kind,owner_kind,owner_id,created,last_seen,payload) VALUES(?1,?2,?3,?4,?5,?5,?6)
          ON CONFLICT(id) DO UPDATE SET

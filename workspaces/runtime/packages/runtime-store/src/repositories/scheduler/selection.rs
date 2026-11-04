@@ -59,7 +59,7 @@ struct HistoricalAgentSnapshot {
     role: HistoricalField<String>,
     #[serde(default = "missing_historical_field")]
     real_cwd: HistoricalField<String>,
-    start_attempt: Option<Box<serde_json::value::RawValue>>,
+    start_attempt: Option<studio_json::OwnedRawJson>,
 }
 
 enum HistoricalField<T> {
@@ -101,7 +101,7 @@ fn claim_result<T: serde::de::DeserializeOwned>(
             saved.start.id.as_deref().unwrap_or("unknown"),
         )
     };
-    serde_json::from_str(saved.claim_result.as_ref().ok_or_else(invalid)?.get())
+    studio_json::from_str(saved.claim_result.as_ref().ok_or_else(invalid)?.as_str())
         .map_err(|_| invalid())
 }
 
@@ -112,7 +112,7 @@ fn saved_identity(saved: &crate::ExecutionAttempt) -> StoreResult<Vec<InputIdent
             saved.start.id.as_deref().unwrap_or("unknown"),
         )
     };
-    serde_json::from_str(saved.input_identity.as_ref().ok_or_else(invalid)?.get())
+    studio_json::from_str(saved.input_identity.as_ref().ok_or_else(invalid)?.as_str())
         .map_err(|_| invalid())
 }
 
@@ -326,7 +326,7 @@ fn wake_candidate(
     let mode = match raw {
         rusqlite::types::Value::Null => Some(None),
         rusqlite::types::Value::Text(value) => serde::Deserialize::deserialize(
-            serde::de::value::StrDeserializer::<serde_json::Error>::new(&value),
+            serde::de::value::StrDeserializer::<studio_json::Error>::new(&value),
         )
         .ok()
         .map(Some),
@@ -537,7 +537,7 @@ impl SchedulerRepository {
             || original
                 .start_attempt
                 .as_ref()
-                .and_then(|raw| serde_json::from_str::<crate::StartAttemptView>(raw.get()).ok())
+                .and_then(|raw| studio_json::from_str::<crate::StartAttemptView>(raw.as_str()).ok())
                 .is_none_or(|original| {
                     original.id.as_deref() != Some(id)
                         || original.events != attempt.events
@@ -1278,7 +1278,7 @@ impl SchedulerRepository {
             "SELECT id,agent,kind,text,status,created,epoch,turn_id,error FROM runtime_events \
              WHERE id IN (SELECT value FROM json_each(?1)) AND agent=?2 AND epoch=?3 ORDER BY created,rowid",
         )?;
-        let payload = serde_json::to_string(&event_ids)?;
+        let payload = studio_json::to_string(&event_ids)?;
         let rows = statement.query_map(
             params![payload, agent_id, epoch],
             crate::QueueEventRepository::from_row,
@@ -1319,7 +1319,7 @@ impl SchedulerRepository {
         if retired.is_empty() {
             return Ok(true);
         }
-        let payload = serde_json::to_string(&changes)?;
+        let payload = studio_json::to_string(&changes)?;
         let mut update = transaction.prepare_cached(
             "UPDATE runtime_events SET status=json_extract((SELECT value FROM json_each(?1) WHERE key=runtime_events.id),'$.status'), \
              error=json_extract((SELECT value FROM json_each(?1) WHERE key=runtime_events.id),'$.error') \
@@ -1425,7 +1425,7 @@ pub(super) fn replay_claim(
     let mut statement = tx.prepare_cached(&format!("SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,{metadata_column} FROM json_each(?1) j JOIN runtime_events e ON e.id=json_extract(j.value,'$.id') {metadata_join} ORDER BY j.key"))?;
     let mut events = Vec::new();
     let mut metadata = BTreeMap::new();
-    for row in statement.query_map([serde_json::to_string(&identity)?], |r| {
+    for row in statement.query_map([studio_json::to_string(&identity)?], |r| {
         Ok((
             crate::QueueEventRepository::from_row(r)?,
             r.get::<_, Option<String>>(9)?,
@@ -1437,7 +1437,7 @@ pub(super) fn replay_claim(
         if let Some(raw) = raw {
             metadata.insert(
                 event.id.0.clone(),
-                serde_json::from_str(&raw).map_err(|_| receipt_error())?,
+                studio_json::from_str(&raw).map_err(|_| receipt_error())?,
             );
         }
         if let Some(text) = model_event_text(&event.text, metadata.get(&event.id.0)) {
@@ -1484,7 +1484,7 @@ pub(super) fn pending_metadata(
     raw: Option<&str>,
 ) -> StoreResult<Option<Value>> {
     let value = raw
-        .map(serde_json::from_str::<Value>)
+        .map(studio_json::from_str::<Value>)
         .transpose()
         .map_err(|_| invalid_object("runtime_event_meta", &event.id.0))?;
     if value.as_ref().is_some_and(|value| {
@@ -1832,7 +1832,7 @@ pub(super) fn model_event_text(text: &str, metadata: Option<&Value>) -> Option<S
     let count = metadata?
         .get("earlierProgressUpdates")
         .filter(|count| truthy(count))?;
-    let Ok(Value::Object(mut value)) = serde_json::from_str(text) else {
+    let Ok(Value::Object(mut value)) = studio_json::from_str(text) else {
         return None;
     };
     value.insert("earlierProgressUpdates".to_owned(), count.clone());
@@ -1860,7 +1860,7 @@ pub(super) fn apply_preparation(
         .map(|(id, status, reason)| (id.clone(), json!({"status":status,"error":reason})))
         .collect::<BTreeMap<_, _>>();
     if !changes.is_empty() {
-        let payload = serde_json::to_string(&changes)?;
+        let payload = studio_json::to_string(&changes)?;
         let mut statement = transaction.prepare_cached(
             "UPDATE runtime_events SET status=json_extract((SELECT value FROM json_each(?1) WHERE key=runtime_events.id),'$.status'), \
              error=json_extract((SELECT value FROM json_each(?1) WHERE key=runtime_events.id),'$.error') \
@@ -1903,7 +1903,7 @@ pub(super) fn obsolete_work_review_ids(
     if !table_exists(transaction, "runtime_work")? {
         return Ok(BTreeSet::new());
     }
-    let ids = serde_json::to_string(
+    let ids = studio_json::to_string(
         &events
             .iter()
             .map(|event| event.id.0.as_str())
@@ -2008,22 +2008,22 @@ mod account_wake_index_tests {
         account_wake_invalid_target_query, account_wake_pending_agents_query,
     };
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
     use std::collections::BTreeMap;
 
     #[test]
     fn thread_preparation_receipt_requires_typed_scope() {
         let valid = r#"{"agent":"a","epoch":2,"account":"account","previousThread":null,"thread":"thread"}"#;
-        let scope: super::ThreadPreparationScope = serde_json::from_str(valid).unwrap();
+        let scope: super::ThreadPreparationScope = studio_json::from_str(valid).unwrap();
         assert_eq!(scope.agent, "a");
         assert!(
-            serde_json::from_str::<super::ThreadPreparationScope>(
+            studio_json::from_str::<super::ThreadPreparationScope>(
                 &valid.replace("\"epoch\":2", "\"epoch\":\"2\"")
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<super::ThreadPreparationScope>(
+            studio_json::from_str::<super::ThreadPreparationScope>(
                 &valid.replace("\"agent\":\"a\"", "\"agent\":\"a\",\"unknown\":true")
             )
             .is_err()
@@ -2032,8 +2032,8 @@ mod account_wake_index_tests {
 
     #[test]
     fn stored_wake_boundary_mode_projection_matches_openapi_owner() {
-        let openapi: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../runtime-http/openapi.json"))
+        let openapi: studio_json::Value =
+            studio_json::from_str(include_str!("../../../../runtime-http/openapi.json"))
                 .expect("OpenAPI owner");
         assert_eq!(
             openapi["components"]["schemas"]["AgentRecordResponse"]["properties"]["workspaceMode"]
@@ -2041,7 +2041,7 @@ mod account_wake_index_tests {
             "#/components/schemas/WorkspaceMode",
             "wake projection consumes the generated Rust owner"
         );
-        let schema: serde_json::Value = serde_json::from_str(include_str!(
+        let schema: studio_json::Value = studio_json::from_str(include_str!(
             "../../../../runtime-schema/src/schemas/persisted-agent-record.schema.json"
         ))
         .expect("persisted schema");
@@ -2076,7 +2076,7 @@ mod account_wake_index_tests {
         connection
     }
 
-    fn put_agent(connection: &Connection, id: &str, value: serde_json::Value) {
+    fn put_agent(connection: &Connection, id: &str, value: studio_json::Value) {
         connection
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",

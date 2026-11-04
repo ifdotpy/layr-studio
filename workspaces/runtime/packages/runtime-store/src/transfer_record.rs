@@ -105,7 +105,7 @@ pub struct TransferSource {
 }
 
 /// Native provider payloads remain opaque and retain their exact JSON bytes.
-pub type ProviderPayload = Box<serde_json::value::RawValue>;
+pub type ProviderPayload = studio_json::OwnedRawJson;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -316,7 +316,7 @@ where
     D: serde::Deserializer<'de>,
     T: serde::de::DeserializeOwned,
 {
-    let value = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?;
+    let value = Option::<Vec<studio_json::Value>>::deserialize(deserializer)?;
     match value {
         None => Ok(Field::Null),
         Some(values) => values
@@ -438,13 +438,13 @@ pub struct TransferAccountHistoryEntry {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub target_thread_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub at: Field<serde_json::Number>,
+    pub at: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub tool_refresh_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub result: Field<serde_json::Value>,
+    pub result: Field<studio_json::Value>,
 }
 
 impl TransferAccountHistoryEntry {
@@ -529,9 +529,9 @@ pub struct TransferMember {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub interrupt_turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub interrupt_submitted_at: Field<serde_json::Number>,
+    pub interrupt_submitted_at: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub interrupt_confirmed_at: Field<serde_json::Number>,
+    pub interrupt_confirmed_at: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub source: Field<TransferSource>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -547,11 +547,11 @@ pub struct TransferMember {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub source_claude_options: Field<TransferClaudeOptions>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub submitted_at: Field<serde_json::Number>,
+    pub submitted_at: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub target_connection: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub next_check: Field<serde_json::Number>,
+    pub next_check: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub native_method: Field<TransferMethod>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -684,7 +684,7 @@ pub struct SavedTransferResponse {
     pub lead_id: String,
     pub target_account_key: AccountKey,
     pub status: TransferStatus,
-    pub created: serde_json::Number,
+    pub created: studio_json::Number,
     #[serde(default)]
     pub scope: TransferScope,
     pub members: BTreeMap<String, SavedTransferMember>,
@@ -703,7 +703,7 @@ pub struct SavedTransferResponse {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub target_provider: Field<studio_runtime_schema::ProviderKind>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub updated: Field<serde_json::Number>,
+    pub updated: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub finish_history: Field<bool>,
 }
@@ -726,12 +726,12 @@ pub struct TransferRecord {
     pub lead_id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
     pub target_account_key: AccountKey,
     pub status: TransferStatus,
-    pub created: serde_json::Number,
+    pub created: studio_json::Number,
     pub members: OrderedMembers<TransferMember>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub target_provider: Field<studio_runtime_schema::ProviderKind>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub updated: Field<serde_json::Number>,
+    pub updated: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub scope: Field<TransferScope>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -755,7 +755,7 @@ impl TransferRecord {
         lead_id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
         target: AccountKey,
         provider: studio_runtime_schema::ProviderKind,
-        created: serde_json::Number,
+        created: studio_json::Number,
         members: OrderedMembers<TransferMember>,
     ) -> Self {
         let status = if members.0.iter().all(|(_, member)| member.phase.terminal()) {
@@ -857,7 +857,7 @@ pub struct UnreadableTransferSummary {
     pub kind: UnreadableTransferKind,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub original: Option<serde_json::Value>,
+    pub original: Option<studio_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -978,7 +978,7 @@ pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cyber_access_program: Field<String>,
     #[serde(flatten)]
-    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
+    pub extra: std::collections::BTreeMap<String, studio_json::Value>,
 }
 
 /// Stable identity of an account transfer, shared with its lazy hold.
@@ -1077,16 +1077,16 @@ mod tests {
     fn transfer_record_rejects_out_of_bounds_identifiers() {
         for id in [String::new(), "x".repeat(201)] {
             for field in ["id", "leadId"] {
-                let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
+                let mut record = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
                 record[field] = id.clone().into();
                 assert!(
-                    serde_json::from_str::<super::TransferRecord>(&record.to_string()).is_err(),
+                    studio_json::from_str::<super::TransferRecord>(&record.to_string()).is_err(),
                     "{field} must be bounded"
                 );
             }
         }
     }
-    fn rejects_at_store(record: &serde_json::Value) -> bool {
+    fn rejects_at_store(record: &studio_json::Value) -> bool {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute(
             "CREATE TABLE runtime_account_transfers (id TEXT PRIMARY KEY, record TEXT NOT NULL)",
@@ -1107,7 +1107,7 @@ mod tests {
     #[test]
     fn transfer_record_rejects_out_of_bounds_member_text() {
         for field in ["name", "waiting", "error", "reason", "interruptReason"] {
-            let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source"}}});
+            let mut record = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source"}}});
             record["members"]["lead"][field] = "x".repeat(65_537).into();
             assert!(rejects_at_store(&record), "{field} must be bounded");
         }
@@ -1116,7 +1116,7 @@ mod tests {
     fn transfer_record_rejects_out_of_bounds_member_identifiers() {
         for field in ["sourceThreadId", "targetConnection"] {
             for value in [String::new(), "x".repeat(201)] {
-                let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source"}}});
+                let mut record = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source"}}});
                 record["members"]["lead"][field] = value.into();
                 assert!(rejects_at_store(&record), "{field} must be bounded");
             }
@@ -1125,7 +1125,7 @@ mod tests {
     #[test]
     fn transfer_record_rejects_invalid_member_keys() {
         for id in [String::new(), "x".repeat(201)] {
-            let record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{id:{"phase":"waiting","sourceAccountKey":"source"}}});
+            let record = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{id:{"phase":"waiting","sourceAccountKey":"source"}}});
             assert!(rejects_at_store(&record));
         }
     }
@@ -1135,48 +1135,48 @@ mod tests {
             for bad_key in [true, false] {
                 let key = if bad_key { &id } else { "request" };
                 let lead = if bad_key { "lead" } else { &id };
-                let record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{},"requests":{key:{"leadId":lead,"targetAccountKey":"target"}}});
+                let record = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{},"requests":{key:{"leadId":lead,"targetAccountKey":"target"}}});
                 assert!(rejects_at_store(&record));
             }
         }
     }
     #[test]
     fn transfer_record_rejects_excess_members_and_requests() {
-        let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
+        let mut record = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
         let members = (0..2051)
             .map(|i| {
                 (
                     format!("agent-{i}"),
-                    serde_json::json!({"phase":"waiting","sourceAccountKey":"source"}),
+                    studio_json::json!({"phase":"waiting","sourceAccountKey":"source"}),
                 )
             })
             .collect();
-        record["members"] = serde_json::Value::Object(members);
+        record["members"] = studio_json::Value::Object(members);
         assert!(rejects_at_store(&record));
-        record["members"] = serde_json::json!({});
+        record["members"] = studio_json::json!({});
         let requests = (0..4097)
             .map(|i| {
                 (
                     format!("request-{i}"),
-                    serde_json::json!({"leadId":"lead","targetAccountKey":"target"}),
+                    studio_json::json!({"leadId":"lead","targetAccountKey":"target"}),
                 )
             })
             .collect();
-        record["requests"] = serde_json::Value::Object(requests);
+        record["requests"] = studio_json::Value::Object(requests);
         assert!(rejects_at_store(&record));
     }
     #[test]
     fn destination_settings_preserve_pending_and_reject_unknown_fields() {
-        let value = serde_json::json!({"model":"model", "pendingSettings":{"model":"queued"}, "pendingSettingsAccountKey":"account"});
+        let value = studio_json::json!({"model":"model", "pendingSettings":{"model":"queued"}, "pendingSettingsAccountKey":"account"});
         let settings: super::DestinationSettings =
             serde::Deserialize::deserialize(value.clone()).unwrap();
         assert_eq!(
-            serde::Serialize::serialize(&(settings), serde_json::value::Serializer).unwrap(),
+            serde::Serialize::serialize(&(settings), studio_json::value::Serializer).unwrap(),
             value
         );
         assert!(
             <super::DestinationSettings as serde::Deserialize>::deserialize(
-                serde_json::json!({"unexpected":true})
+                studio_json::json!({"unexpected":true})
             )
             .is_err()
         );
@@ -1185,14 +1185,14 @@ mod tests {
     #[test]
     fn legacy_vm_flag_of_the_retired_backend_is_read_and_kept() {
         let raw = r#"{"id":"move","leadId":"lead","targetAccountKey":"target","status":"completed","created":1,"members":{},"vm":true,"updated":2}"#;
-        let record: super::TransferRecord = serde_json::from_str(raw).unwrap();
-        let value = serde::Serialize::serialize(&record, serde_json::value::Serializer).unwrap();
+        let record: super::TransferRecord = studio_json::from_str(raw).unwrap();
+        let value = serde::Serialize::serialize(&record, studio_json::value::Serializer).unwrap();
         assert_eq!(value["vm"], true);
     }
 
     #[test]
     fn public_summary_projects_typed_transfer() {
-        let summary: super::AgentTransferSummary = serde_json::from_str(r#"{"id":"move","targetAccountKey":"target","status":"pending","total":2,"updated":1,"canCancel":true,"blocked":[{"id":"a","provider":"codex","reason":"busy"}],"leftOnSource":[{"id":"b","provider":"claude"}]}"#)
+        let summary: super::AgentTransferSummary = studio_json::from_str(r#"{"id":"move","targetAccountKey":"target","status":"pending","total":2,"updated":1,"canCancel":true,"blocked":[{"id":"a","provider":"codex","reason":"busy"}],"leftOnSource":[{"id":"b","provider":"claude"}]}"#)
         .unwrap();
         let dto: studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto =
             summary.into();
@@ -1216,7 +1216,7 @@ mod tests {
             left.provider.value(),
             Some(&studio_runtime_schema::ProviderKind::Claude)
         );
-        let actual = serde::Serialize::serialize(&(dto), serde_json::value::Serializer).unwrap();
+        let actual = serde::Serialize::serialize(&(dto), studio_json::value::Serializer).unwrap();
         assert!(
             actual
                 .as_object()
@@ -1228,12 +1228,12 @@ mod tests {
 
     #[test]
     fn read_receipt_rejects_conflicting_certainty_and_result_shapes() {
-        let scope = serde_json::json!({"account":"source","connection":"conn","generation":1});
-        let receipt = serde_json::json!({"operation":"read","scope":scope,"certainty":"written"});
-        let conflict = serde_json::json!({"certainty":"unknown","receipt":receipt});
+        let scope = studio_json::json!({"account":"source","connection":"conn","generation":1});
+        let receipt = studio_json::json!({"operation":"read","scope":scope,"certainty":"written"});
+        let conflict = studio_json::json!({"certainty":"unknown","receipt":receipt});
         assert!(<ProviderReadReceipt as serde::Deserialize>::deserialize(conflict).is_err());
         let both =
-            serde_json::json!({"kind":"reply","value":{},"valueBlob":{"sha256":"hash","size":2}});
+            studio_json::json!({"kind":"reply","value":{},"valueBlob":{"sha256":"hash","size":2}});
         assert!(<ProviderResult as serde::Deserialize>::deserialize(both).is_err());
     }
     use super::*;
@@ -1241,10 +1241,10 @@ mod tests {
     #[test]
     fn transfer_source_preserves_missing_and_null_fields() {
         let source: TransferSource =
-            serde_json::from_str(r#"{"accountKey":null,"epoch":null,"cwd":null}"#).unwrap();
+            studio_json::from_str(r#"{"accountKey":null,"epoch":null,"cwd":null}"#).unwrap();
         assert_eq!(
-            serde::Serialize::serialize(&(source), serde_json::value::Serializer).unwrap(),
-            serde_json::json!({"accountKey":null,"epoch":null,"cwd":null})
+            serde::Serialize::serialize(&(source), studio_json::value::Serializer).unwrap(),
+            studio_json::json!({"accountKey":null,"epoch":null,"cwd":null})
         );
     }
 
@@ -1280,7 +1280,7 @@ mod tests {
 
     #[test]
     fn agent_transfer_pointers_are_owned_by_typed_fields() {
-        let raw = serde_json::json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle","accountKey":"source","compactions":0,
+        let raw = studio_json::json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle","accountKey":"source","compactions":0,
             "accountTransferId":"move", "lazyAccountTransfer":{"id":"move","sourceAccountKey":"source","sourceThreadId":null,"sourceState":{},"sourceStateExact":true}});
         let agent = crate::AgentRecord::from_value(raw.clone()).unwrap();
         assert!(!agent.extra.contains_key("accountTransferId"));
@@ -1295,7 +1295,7 @@ mod tests {
     #[test]
     fn ordered_members_and_null_fields_round_trip() {
         let json = r#"{"id":"transfer","leadId":"lead","targetAccountKey":"target","status":"pending","created":1.0,"members":{"z":{"phase":"waiting","sourceAccountKey":"source","sourceThreadId":null},"a":{"phase":"lazy","sourceAccountKey":"source"}}}"#;
-        let record: TransferRecord = serde_json::from_str(json).unwrap();
+        let record: TransferRecord = studio_json::from_str(json).unwrap();
         assert_eq!(
             record
                 .members
@@ -1313,7 +1313,7 @@ mod tests {
             record.members.0[1].1.source_thread_id,
             Field::Missing
         ));
-        let encoded = serde_json::to_string(&record).unwrap();
+        let encoded = studio_json::to_string(&record).unwrap();
         assert!(encoded.find("\"z\"").unwrap() < encoded.find("\"a\"").unwrap());
         assert!(encoded.contains("\"sourceThreadId\":null"));
     }
@@ -1321,12 +1321,12 @@ mod tests {
     #[test]
     fn unknown_member_field_is_rejected() {
         let json = r#"{"id":"transfer","leadId":"lead","targetAccountKey":"target","status":"pending","created":1.0,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source","unexpected":1}}}"#;
-        assert!(serde_json::from_str::<TransferRecord>(json).is_err());
+        assert!(studio_json::from_str::<TransferRecord>(json).is_err());
     }
 
     #[test]
     fn transfer_snapshot_preserves_legacy_portable_history_array() {
-        let input = serde_json::json!({"id":"transfer","leadId":"lead","targetAccountKey":"target",
+        let input = studio_json::json!({"id":"transfer","leadId":"lead","targetAccountKey":"target",
             "status":"pending","created":1.0,"members":{"lead":{"phase":"waiting",
             "sourceAccountKey":"source","settings":{"portableHistory":[1,"legacy"]}}}});
         let record: TransferRecord = serde::Deserialize::deserialize(input.clone()).unwrap();
@@ -1345,7 +1345,7 @@ mod tests {
             crate::StoredTransferObject::Unreadable(_)
         ));
         assert_eq!(
-            serde::Serialize::serialize(&(record), serde_json::value::Serializer).unwrap(),
+            serde::Serialize::serialize(&(record), studio_json::value::Serializer).unwrap(),
             input
         );
     }
@@ -1353,9 +1353,9 @@ mod tests {
     #[test]
     #[ignore = "run explicitly against a read-only copied corpus"]
     fn copied_transfer_corpus_decodes_without_losing_fields() {
-        fn difference(left: &serde_json::Value, right: &serde_json::Value) -> String {
+        fn difference(left: &studio_json::Value, right: &studio_json::Value) -> String {
             match (left, right) {
-                (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+                (studio_json::Value::Object(a), studio_json::Value::Object(b)) => {
                     for (key, value) in a {
                         if b.get(key) != Some(value) {
                             let label = if key.len() > 20 { "*" } else { key };
@@ -1368,7 +1368,7 @@ mod tests {
                     }
                     "/extra".into()
                 }
-                (serde_json::Value::Array(a), serde_json::Value::Array(b)) => {
+                (studio_json::Value::Array(a), studio_json::Value::Array(b)) => {
                     for (index, (left, right)) in a.iter().zip(b).enumerate() {
                         if left != right {
                             return format!("/{index}{}", difference(left, right));
@@ -1391,11 +1391,11 @@ mod tests {
             .unwrap();
         for (index, raw) in records.enumerate() {
             let raw = raw.unwrap();
-            let record: TransferRecord = serde_json::from_str(&raw)
+            let record: TransferRecord = studio_json::from_str(&raw)
                 .unwrap_or_else(|error| panic!("record {index}: {error}"));
-            let original: serde_json::Value = serde_json::from_str(&raw).unwrap();
-            let encoded = serde_json::to_string(&record).unwrap();
-            let restored: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            let original: studio_json::Value = studio_json::from_str(&raw).unwrap();
+            let encoded = studio_json::to_string(&record).unwrap();
+            let restored: studio_json::Value = studio_json::from_str(&encoded).unwrap();
             assert!(
                 original == restored,
                 "record {index} changed at {}",

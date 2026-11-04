@@ -123,7 +123,7 @@ fn put_rule_entity(
             name,
         }
     };
-    let payload = serde_json::to_string(&Envelope {
+    let payload = studio_json::to_string(&Envelope {
         collection: "rule",
         id,
         value,
@@ -194,7 +194,7 @@ mod tests {
                 .expect("writer transaction opens");
             RulesRepository::put(
                 &transaction,
-                &serde_json::from_str::<RuleRecord>(r#"{"id":"r1","agent":"a1","epoch":0,"name":"Check","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#)
+                &studio_json::from_str::<RuleRecord>(r#"{"id":"r1","agent":"a1","epoch":0,"name":"Check","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#)
                 .expect("rule has an id"),
             )
             .expect("rule is persisted");
@@ -254,7 +254,7 @@ mod tests {
         let transaction = db.transaction().expect("writer transaction opens");
         let error = RulesRepository::put(
             &transaction,
-            &serde_json::from_str::<RuleRecord>(r#"{"id":"rollback-rule","agent":"a1","epoch":0,"name":"Rollback","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#)
+            &studio_json::from_str::<RuleRecord>(r#"{"id":"rollback-rule","agent":"a1","epoch":0,"name":"Rollback","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#)
             .expect("rule has a valid ID"),
         )
         .expect_err("injected rule storage failure is returned");

@@ -2,7 +2,7 @@
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::persistence::OutboxStatus;
 
 use super::remote_outbox::{RemoteEffect, RemoteOutbox};
@@ -119,7 +119,7 @@ impl FederationMessagingRepository {
                 id: id.into(),
             });
         }
-        let value = serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredObject {
+        let value = studio_json::from_str(raw).map_err(|_| StoreError::InvalidStoredObject {
             table: table.name(),
             id: id.into(),
         })?;
@@ -134,7 +134,7 @@ impl FederationMessagingRepository {
         value: &Value,
     ) -> StoreResult<()> {
         table.validate(id, value)?;
-        let raw = serde_json::to_string(value)?;
+        let raw = studio_json::to_string(value)?;
         if raw.len() > MAX_RECORD_BYTES {
             return Err(StoreError::InvalidStoredObject {
                 table: table.name(),
@@ -250,7 +250,7 @@ mod tests {
             "CREATE TABLE runtime_federation_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
         )
         .unwrap();
-        let record = serde_json::json!({"enabled":true,"number":1e-6});
+        let record = studio_json::json!({"enabled":true,"number":1e-6});
         let tx = db.transaction().unwrap();
         FederationMessagingRepository::put(
             &tx,
@@ -282,8 +282,8 @@ mod tests {
     fn queued_outbox_size_counts_utf8_bytes() {
         let mut db = Connection::open_in_memory().expect("open in-memory database");
         crate::receipt_schema::create(&db).expect("shared outbox");
-        let queued = serde_json::json!({"status":"queued","text":"é😀","nextAt":0,"created":1,"admission":{"id":"a","signature":"s1","created":1}});
-        let delivered = serde_json::json!({"status":"delivered","admission":{"id":"b","signature":"s2","created":1}});
+        let queued = studio_json::json!({"status":"queued","text":"é😀","nextAt":0,"created":1,"admission":{"id":"a","signature":"s1","created":1}});
+        let delivered = studio_json::json!({"status":"delivered","admission":{"id":"b","signature":"s2","created":1}});
         let tx = db.transaction().expect("transaction");
         super::put_outbox(&tx, "m1", "peer", &queued).expect("insert queued record");
         super::put_outbox(&tx, "m2", "peer", &delivered).expect("insert delivered record");

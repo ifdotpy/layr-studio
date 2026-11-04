@@ -419,12 +419,12 @@ pub struct RateLimitView {
 
 impl RateLimitView {
     pub fn read(
-        observation: &studio_json::OwnedRawJson,
+        observation: &str,
         account: &str,
         now: f64,
     ) -> Result<Self, studio_json::Error> {
         let JsonObject(value): JsonObject<UsageLimitsResponse> =
-            studio_json::from_str(observation.as_str())?;
+            studio_json::from_str(observation)?;
         if value.account_key != account {
             return Err(serde::de::Error::custom(
                 "rate-limit account identity mismatch",
@@ -1142,8 +1142,8 @@ mod tests {
             r#"{"accountKey":"a","data":{"source":null,"rateLimits":{"secondary":null},"vendor":{"unknown":[1,true]}}}"#.to_owned(),
         )
         .unwrap();
-        assert!(RateLimitView::read(&raw, "other", 100.0).is_err());
-        let view = RateLimitView::read(&raw, "a", 100.0).unwrap();
+        assert!(RateLimitView::read(raw.as_str(), "other", 100.0).is_err());
+        let view = RateLimitView::read(raw.as_str(), "a", 100.0).unwrap();
         assert_eq!(view.observation.account_key, "a");
         let data = view.observation.data.unwrap().0;
         assert!(data.source.is_none());

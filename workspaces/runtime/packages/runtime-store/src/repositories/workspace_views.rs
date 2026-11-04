@@ -1,5 +1,5 @@
 use rusqlite::{Connection, params_from_iter, types::Value as SqlValue};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::StoreResult;
 use crate::records::{
@@ -427,7 +427,7 @@ inventory::submit! {
 mod bulk_read_tests {
     use super::*;
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
-    use serde_json::json;
+    use studio_json::json;
     use std::cell::Cell;
 
     thread_local! {

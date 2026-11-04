@@ -1,7 +1,7 @@
 //! Current account registry codec and atomic replacement; account order is durable UI state.
 use serde::Deserialize;
 use serde::ser::{Serialize, SerializeMap, Serializer};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
@@ -38,13 +38,13 @@ pub fn decode_registry_typed(
     {
         return Err(("/".to_owned(), "resourceLimit".to_owned()));
     }
-    let parsed = serde_json::from_slice::<
+    let parsed = studio_json::from_slice::<
         studio_runtime_schema::json_object::JsonObject<
             studio_runtime_schema::account_registry::AccountRegistry,
         >,
     >(bytes);
     let value: Value =
-        serde_json::from_slice(bytes).map_err(|_| ("/".to_owned(), "invalid JSON".to_owned()))?;
+        studio_json::from_slice(bytes).map_err(|_| ("/".to_owned(), "invalid JSON".to_owned()))?;
     let parsed = match parsed {
         Ok(parsed) => parsed.0,
         Err(_) => {
@@ -54,7 +54,7 @@ pub fn decode_registry_typed(
             });
         }
     };
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let mut deserializer = studio_json::Deserializer::from_slice(bytes);
     let order = RegistryOrder::deserialize(&mut deserializer)
         .map_err(|_| ("/".to_owned(), "invalid registry order".to_owned()))?;
     Ok((value, order, parsed))
@@ -65,7 +65,7 @@ pub enum EncodeRegistryError {
     #[error("invalid account registry object shape")]
     InvalidShape,
     #[error("account registry serialization failed")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(#[from] studio_json::Error),
 }
 
 pub fn encode_registry(
@@ -80,7 +80,7 @@ pub fn encode_registry(
     };
     let logins = root.get("logins").and_then(Value::as_object);
     let mut output = Vec::new();
-    let mut serializer = serde_json::Serializer::new(&mut output);
+    let mut serializer = studio_json::Serializer::new(&mut output);
     let mut map = serializer.serialize_map(Some(root.len()))?;
     for (key, field) in root {
         match key.as_str() {
@@ -258,7 +258,7 @@ pub fn atomic_replace_with(
 #[cfg(test)]
 mod tests {
     use super::{decode_registry, decode_registry_typed};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn typed_registry_decode_preserves_order_and_error_location() {
@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(value["version"], json!(2.0));
         assert_eq!(typed.default_account_key, "b");
         assert_eq!(typed.accounts["a"].0.id, "a");
-        let mut invalid: serde_json::Value = serde_json::from_str(&source).unwrap();
+        let mut invalid: studio_json::Value = studio_json::from_str(&source).unwrap();
         invalid["accounts"]["b"]["provider"] = json!("unknown");
         let error = match decode_registry(invalid.to_string().as_bytes()) {
             Ok(_) => panic!("unknown provider must be rejected"),
@@ -286,7 +286,7 @@ mod tests {
             ("accounts", "b", "status", "ready"),
             ("logins", "r", "status", "ready"),
         ] {
-            let mut invalid: serde_json::Value = serde_json::from_str(&source).unwrap();
+            let mut invalid: studio_json::Value = studio_json::from_str(&source).unwrap();
             if section == "logins" {
                 invalid["logins"]["r"] = json!({"requestId":"r","accountKey":"b","status":"ready"});
             }
@@ -298,5 +298,11 @@ mod tests {
         }
         let duplicate = source.replacen("\"version\":2.0", "\"version\":2,\"version\":2", 1);
         assert!(decode_registry(duplicate.as_bytes()).is_err());
+    }
+}
+
+impl From<studio_json::error::Error> for EncodeRegistryError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Serialization(value.into())
     }
 }

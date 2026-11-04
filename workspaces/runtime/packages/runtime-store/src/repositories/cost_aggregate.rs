@@ -130,7 +130,7 @@ impl From<&UsageTokens> for CostTokens {
 
 fn cost_observation(
     db: &Connection,
-    record: &serde_json::Value,
+    record: &studio_json::Value,
 ) -> StoreResult<Option<UsageObservation>> {
     if record.get("studioUsage").is_some() {
         return studio_runtime_schema::usage::ledger::UsageLedgerRow::from_typed_analytics(record)
@@ -372,8 +372,8 @@ fn partition_journal_receipts_cached<'a>(
     if !added.is_empty() {
         let mut statement = db.prepare_cached(JOURNAL_RECEIPT_SQL)?;
         let mut rows = statement.query(params![
-            serde_json::to_string(&added)?,
-            serde_json::to_string(&scopes)?
+            studio_json::to_string(&added)?,
+            studio_json::to_string(&scopes)?
         ])?;
         while let Some(row) = rows.next()? {
             let receipt = (row.get(0)?, row.get(1)?, row.get(2)?);
@@ -483,7 +483,7 @@ pub fn recorded_responses_bounded(
     agent_ids: &[String],
     limit: usize,
 ) -> StoreResult<(Vec<RecordedResponse>, bool)> {
-    let ids = serde_json::to_string(agent_ids)?;
+    let ids = studio_json::to_string(agent_ids)?;
     let sql_limit = i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX);
     let mut statement = db.prepare_cached(
         "SELECT agent,at,record FROM analytics_usage WHERE agent IN (SELECT value FROM json_each(?1))
@@ -499,7 +499,7 @@ pub fn recorded_responses_bounded(
             return Ok((rows, true));
         }
         inspected += 1;
-        let value: serde_json::Value = serde_json::from_str(&row.get::<_, String>(2)?)?;
+        let value: studio_json::Value = studio_json::from_str(&row.get::<_, String>(2)?)?;
         if let DecodedUsageEvidence::Response(response) =
             decode_usage_evidence(db, row.get(0)?, row.get(1)?, &value)?
         {
@@ -521,7 +521,7 @@ fn decode_usage_evidence(
     db: &Connection,
     agent_id: String,
     at: f64,
-    value: &serde_json::Value,
+    value: &studio_json::Value,
 ) -> StoreResult<DecodedUsageEvidence> {
     let fields = UsageCostFields::deserialize(value)?;
     let (response_id, model, tokens, evidence) = match cost_observation(db, value)? {
@@ -598,7 +598,7 @@ pub fn reconciliation_usage_window(
         }
         let at: f64 = row.get(2)?;
         let sequence: i64 = row.get(0)?;
-        let value: serde_json::Value = serde_json::from_str(&row.get::<_, String>(3)?)?;
+        let value: studio_json::Value = studio_json::from_str(&row.get::<_, String>(3)?)?;
         decoded.push((
             at,
             sequence,
@@ -856,7 +856,7 @@ fn backfill(db: &Connection) -> StoreResult<()> {
             .get_ref(7)?
             .as_str()
             .map_err(rusqlite::Error::from)?;
-        let record: serde_json::Value = serde_json::from_str(raw)?;
+        let record: studio_json::Value = studio_json::from_str(raw)?;
         let fields = UsageCostFields::deserialize(&record)?;
         let observation = cost_observation(db, &record)?;
         let root: String = source_row.get(1)?;
@@ -1065,7 +1065,7 @@ fn scope_rows(
     // merely sharing the touched turn; otherwise a suppressed legacy row can revive.
     // One statement serves every touched turn: each turn seeks the scope index and
     // each response seeks the agent/response index, so no turn repeats an agent scan.
-    let requested = serde_json::to_string(turns)
+    let requested = studio_json::to_string(turns)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     let mut statement = db.prepare_cached(&format!(
         "WITH requested(thread,turn,response) AS MATERIALIZED (
@@ -1125,7 +1125,7 @@ fn refresh_scope(
 pub(crate) fn apply_usage_write(
     db: &Connection,
     id: &str,
-    record: &serde_json::Value,
+    record: &studio_json::Value,
 ) -> StoreResult<()> {
     let fields = UsageCostFields::deserialize(record)?;
     let observation = cost_observation(db, record)?;
@@ -1392,7 +1392,7 @@ mod tests {
     }
     #[tokio::test]
     async fn provider_identity_orphan_legacy_cost_is_invalid_but_typed_fact_is_preserved() {
-        use serde_json::json;
+        use studio_json::json;
         let root = tempfile::tempdir().expect("state");
         let store = crate::RuntimeStore::open(Some(root.path()))
             .await
@@ -1408,13 +1408,13 @@ mod tests {
 
     #[test]
     fn provider_identity_cost_members_reject_unknown_and_malformed_providers() {
-        use serde_json::json;
+        use studio_json::json;
         for provider in [json!("future"), json!(""), json!(7), json!({})] {
             assert!(
-                serde_json::from_value::<super::CostMember>(json!({"provider":provider})).is_err()
+                studio_json::from_value::<super::CostMember>(json!({"provider":provider})).is_err()
             );
             assert!(
-                serde_json::from_value::<super::CostMember>(
+                studio_json::from_value::<super::CostMember>(
                     json!({"accountHistory":[{"provider":provider}]})
                 )
                 .is_err()
@@ -1422,17 +1422,17 @@ mod tests {
         }
         for provider in [json!("codex"), json!("claude")] {
             assert!(
-                serde_json::from_value::<super::CostMember>(json!({"provider":provider})).is_ok()
+                studio_json::from_value::<super::CostMember>(json!({"provider":provider})).is_ok()
             );
         }
-        assert!(serde_json::from_value::<super::CostMember>(json!({})).is_err());
-        assert!(serde_json::from_value::<super::CostMember>(json!({"provider":null})).is_err());
+        assert!(studio_json::from_value::<super::CostMember>(json!({})).is_err());
+        assert!(studio_json::from_value::<super::CostMember>(json!({"provider":null})).is_err());
     }
     use super::{JournalPartition, ensure_cost_aggregate};
     use crate::analytics_capture::{AnalyticsCaptureRepository, CaptureTable};
     use crate::{RuntimeStore, StoreError};
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
     use std::path::Path;
 
     fn scope_fixture(size: usize) -> Connection {
@@ -1586,7 +1586,7 @@ mod tests {
                     "tokens":{"uncachedInput":10,"cacheReadInput":0,"cacheWriteInput":0,"output":2}}
             }))?;
             let receipts = ["final", "missing"].map(|id| ("acct".to_owned(), "thread".to_owned(), id.to_owned())).into();
-            let members = [("agent".to_owned(), serde_json::from_value(member)?)];
+            let members = [("agent".to_owned(), studio_json::from_value(member)?)];
             let partition = partition_journal_receipts(tx, &receipts, &members)?;
             assert_eq!(partition.accepted.len(), 1);
             assert_eq!(partition.superseded.len(), 1, "historical account scope preserves final authority");
@@ -1878,8 +1878,8 @@ mod tests {
         store.analytics_transaction::<_,StoreError>(|tx,_| {
             AnalyticsCaptureRepository::write(tx, CaptureTable::Agents, &json!({"id":"agent","provider":"codex"}))?;
             for (index, (category, unknown)) in [
-                ("cachedInputTokens",None), ("cachedInputTokens",Some(serde_json::Value::Null)),
-                ("cacheWriteInputTokens",None), ("cacheWriteInputTokens",Some(serde_json::Value::Null)),
+                ("cachedInputTokens",None), ("cachedInputTokens",Some(studio_json::Value::Null)),
+                ("cacheWriteInputTokens",None), ("cacheWriteInputTokens",Some(studio_json::Value::Null)),
             ].into_iter().enumerate() {
                 let mut last = json!({"inputTokens":10,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2});
                 match unknown {
@@ -1918,9 +1918,9 @@ mod tests {
             AnalyticsCaptureRepository::write(tx, CaptureTable::Usage, &record)?;
             let receipts = [("acct".into(), "thread".into(), "response".into())].into();
             assert_eq!(partition_journal_receipts(tx, &receipts, &receipt_members())?.superseded.len(), 1);
-            let observation = serde_json::from_value(record["studioUsage"].clone())?;
+            let observation = studio_json::from_value(record["studioUsage"].clone())?;
             let ledger = UsageLedgerRow::capture("agent", Some("thread"), observation);
-            record.as_object_mut().expect("row").extend(serde_json::to_value(ledger)?.as_object().expect("ledger").clone());
+            record.as_object_mut().expect("row").extend(studio_json::to_value(ledger)?.as_object().expect("ledger").clone());
             tx.execute("UPDATE analytics_usage SET record=?1 WHERE id='receipt'", [record.to_string()])?;
             assert_eq!(partition_journal_receipts(tx, &receipts, &receipt_members())?.superseded.len(), 1);
             for pointer in ["/receiptKey", "/usageIdentity/agent", "/usageIdentity/responseId", "/studioUsage/tokens/output"] {

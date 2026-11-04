@@ -8,7 +8,7 @@ use crate::{
     transfer_record::{TransferRecord, TransferStatus},
 };
 use rusqlite::{Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::BTreeMap;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -27,13 +27,13 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     // Lead id -> true while every held transfer of the lead is restored.
     let mut all_restored: BTreeMap<String, bool> = BTreeMap::new();
     for (id, raw) in rows {
-        let Some(original) = serde_json::from_str::<Value>(&raw)
+        let Some(original) = studio_json::from_str::<Value>(&raw)
             .ok()
             .and_then(|held| held.get("original")?.as_str().map(str::to_owned))
         else {
             continue;
         };
-        let Ok(value) = serde_json::from_str::<Value>(&original) else {
+        let Ok(value) = studio_json::from_str::<Value>(&original) else {
             continue;
         };
         let terminal = value
@@ -46,10 +46,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 )
             });
         let restorable = terminal
-            && match serde_json::from_str::<TransferRecord>(&original) {
+            && match studio_json::from_str::<TransferRecord>(&original) {
                 Ok(record) if record.id == id => {
                     let encoded =
-                        serde::Serialize::serialize(&record, serde_json::value::Serializer)?;
+                        serde::Serialize::serialize(&record, studio_json::value::Serializer)?;
                     studio_runtime_schema::validate("PersistedAccountTransferRecord", &encoded)
                         .map_err(StoreError::SchemaValidation)?
                 }
@@ -84,7 +84,7 @@ mod tests {
         let legacy = r#"{"id":"move","leadId":"lead","targetAccountKey":"target","targetProvider":"claude","status":"completed","scope":"team","created":1,"members":{},"requests":{},"vm":true,"updated":2}"#;
         let pending = r#"{"id":"next","leadId":"other","targetAccountKey":"target","status":"pending","scope":"team","created":3,"members":{},"vm":true}"#;
         let held = |original: &str| {
-            serde_json::json!({"kind":"unreadable","reason":"unknown field `vm`","original":original})
+            studio_json::json!({"kind":"unreadable","reason":"unknown field `vm`","original":original})
                 .to_string()
         };
         db.execute(

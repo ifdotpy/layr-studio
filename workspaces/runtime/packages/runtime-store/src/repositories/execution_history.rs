@@ -6,8 +6,8 @@ use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequir
 use crate::{AgentRecord, StoreError, StoreResult};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
-use serde_json::{Value, json};
+use studio_json::OwnedRawJson as RawValue;
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{
     AttemptSubmission, ExecutionReceiptKind, ExecutionStatus, RequestIdentity,
 };
@@ -20,12 +20,12 @@ pub struct AttemptReceipt<I> {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExecutionRun<T = String, E = serde_json::Number> {
+pub struct ExecutionRun<T = String, E = studio_json::Number> {
     pub id: String,
     pub agent: String,
     pub account_key: String,
     pub epoch: E,
-    pub created: serde_json::Number,
+    pub created: studio_json::Number,
     #[serde(deserialize_with = "string_status")]
     pub status: ExecutionStatus,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -39,7 +39,7 @@ pub struct ExecutionRun<T = String, E = serde_json::Number> {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub latest_attempt_id: Field<String>,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: studio_json::Map<String, Value>,
 }
 fn string_status<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -56,11 +56,11 @@ pub struct ExecutionAttempt {
     pub run_id: String,
     pub submission: Option<AttemptSubmission>,
     pub turn_status: Option<ExecutionStatus>,
-    pub input_identity: Option<Box<RawValue>>,
-    pub claim_result: Option<Box<RawValue>>,
-    pub provider_submission: Option<Box<RawValue>>,
-    pub terminal_repair: Option<Box<RawValue>>,
-    pub snapshot: Option<Box<RawValue>>,
+    pub input_identity: Option<RawValue>,
+    pub claim_result: Option<RawValue>,
+    pub provider_submission: Option<RawValue>,
+    pub terminal_repair: Option<RawValue>,
+    pub snapshot: Option<RawValue>,
 }
 
 #[derive(Default)]
@@ -69,10 +69,10 @@ struct ExecutionAttemptFields {
     run_id: Option<String>,
     submission: Option<AttemptSubmission>,
     turn_status: Option<ExecutionStatus>,
-    input_identity: Option<Box<RawValue>>,
-    claim_result: Option<Box<RawValue>>,
-    provider_submission: Option<Box<RawValue>>,
-    terminal_repair: Option<Box<RawValue>>,
+    input_identity: Option<RawValue>,
+    claim_result: Option<RawValue>,
+    provider_submission: Option<RawValue>,
+    terminal_repair: Option<RawValue>,
     seen: std::collections::BTreeSet<String>,
 }
 
@@ -111,7 +111,7 @@ impl<'de> studio_runtime_schema::raw_object::RawObjectFields<'de> for ExecutionA
     }
     fn finish<E: serde::de::Error>(
         self,
-        _extra: std::collections::BTreeMap<String, Box<RawValue>>,
+        _extra: std::collections::BTreeMap<String, RawValue>,
     ) -> Result<Self::Output, E> {
         Ok(ExecutionAttempt {
             start: self.start.attempt,
@@ -217,7 +217,7 @@ impl ExecutionHistoryRepository {
         )
         .optional()?
         .flatten()
-        .map(|raw| serde_json::from_str(&raw).map_err(StoreError::from))
+        .map(|raw| studio_json::from_str(&raw).map_err(StoreError::from))
         .transpose()
     }
     fn set_vm_admission(
@@ -239,7 +239,7 @@ impl ExecutionHistoryRepository {
         }
         let changed = tx.execute(
             "UPDATE runtime_execution_attempts SET record=json_set(record,?1,json(?2)) WHERE id=?3",
-            params![kind.path(), serde_json::to_string(admitted)?, id],
+            params![kind.path(), studio_json::to_string(admitted)?, id],
         )?;
         if changed != 1 {
             return Err(Self::invalid("runtime_execution_attempts", id));
@@ -343,9 +343,9 @@ impl ExecutionHistoryRepository {
         let saved = RequestResults::admitted_result(db, &token).map_err(StoreError::from)?;
         saved
             .map(|saved| {
-                let envelope: ResultEnvelope<Value> = serde_json::from_str(&saved.result)?;
+                let envelope: ResultEnvelope<Value> = studio_json::from_str(&saved.result)?;
                 Ok(AttemptReceipt {
-                    input: serde_json::from_str(&signature)?,
+                    input: studio_json::from_str(&signature)?,
                     result: envelope.reply,
                 })
             })
@@ -380,7 +380,7 @@ impl ExecutionHistoryRepository {
                 | RequestResultError::Json(_)
                 | RequestResultError::Identity(_)) => StoreError::from(other),
             })?;
-        if serde_json::from_str::<ResultEnvelope<Value>>(&saved.result)? != envelope {
+        if studio_json::from_str::<ResultEnvelope<Value>>(&saved.result)? != envelope {
             return Err(Self::invalid("runtime_execution_attempts", id));
         }
         Ok(())
@@ -393,7 +393,7 @@ impl ExecutionHistoryRepository {
         )
         .optional()?
         .map(|s| {
-            let mut attempt: ExecutionAttempt = serde_json::from_str(&s)
+            let mut attempt: ExecutionAttempt = studio_json::from_str(&s)
                 .map_err(|_| Self::invalid("runtime_execution_attempts", id))?;
             if attempt.start.id.as_deref() != Some(id)
                 || attempt.start.epoch.is_none()
@@ -401,7 +401,7 @@ impl ExecutionHistoryRepository {
             {
                 return Err(Self::invalid("runtime_execution_attempts", id));
             }
-            attempt.snapshot = Some(serde_json::from_str(&s)?);
+            attempt.snapshot = Some(studio_json::from_str(&s)?);
             Ok(attempt)
         })
         .transpose()
@@ -525,7 +525,7 @@ impl ExecutionHistoryRepository {
         identity: &T,
         result: &Value,
     ) -> StoreResult<()> {
-        tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.inputIdentity',json(?1),'$.claimResult',json(?2)) WHERE id=?3",params![serde_json::to_string(identity)?,result.to_string(),id])?;
+        tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.inputIdentity',json(?1),'$.claimResult',json(?2)) WHERE id=?3",params![studio_json::to_string(identity)?,result.to_string(),id])?;
         Ok(())
     }
     /// Reflect a claimed/submitted/accepted attempt, including Python-written existing runs.
@@ -557,9 +557,9 @@ impl ExecutionHistoryRepository {
                 account_key: account.to_owned(),
                 epoch: attempt
                     .epoch
-                    .map(serde_json::Number::from)
+                    .map(studio_json::Number::from)
                     .ok_or_else(|| invalid(id))?,
-                created: serde_json::Number::from_f64(attempt.created.unwrap_or_else(now))
+                created: studio_json::Number::from_f64(attempt.created.unwrap_or_else(now))
                     .ok_or_else(|| invalid(id))?,
                 status: ExecutionStatus::Pending,
                 thread_id: Field::Null,
@@ -567,7 +567,7 @@ impl ExecutionHistoryRepository {
                 first_attempt_id: Field::Null,
                 root_attempt_id: Field::Null,
                 latest_attempt_id: Field::Null,
-                extra: serde_json::Map::new(),
+                extra: studio_json::Map::new(),
             },
         };
         if run.agent != agent.id.0 || run.account_key != account {
@@ -625,14 +625,14 @@ impl ExecutionHistoryRepository {
             };
         }
         merge_recovery(&mut run, agent);
-        let mut saved = std::collections::BTreeMap::<String, Box<RawValue>>::new();
+        let mut saved = std::collections::BTreeMap::<String, RawValue>::new();
         if let Some(previous) = Self::attempt(tx, id)? {
-            let previous: std::collections::BTreeMap<String, Box<RawValue>> = serde_json::from_str(
+            let previous: std::collections::BTreeMap<String, RawValue> = studio_json::from_str(
                 previous
                     .snapshot
                     .as_ref()
                     .ok_or_else(|| Self::invalid("runtime_execution_attempts", id))?
-                    .get(),
+                    .as_str(),
             )?;
             for key in [
                 "inputIdentity",
@@ -668,31 +668,31 @@ impl ExecutionHistoryRepository {
                 };
             saved.insert(
                 "admission".into(),
-                serde_json::value::to_raw_value(&admission)?,
+                studio_json::to_raw_value(&admission)?,
             );
             saved.insert(
                 "rootRequestId".into(),
-                serde_json::value::to_raw_value(&root)?,
+                studio_json::to_raw_value(&root)?,
             );
         }
         let run_id = &run.id;
         let terminal = execution_terminal(run.status);
-        saved.insert("runId".into(), serde_json::value::to_raw_value(&run_id)?);
+        saved.insert("runId".into(), studio_json::to_raw_value(&run_id)?);
         saved.insert(
             "submission".into(),
-            serde_json::value::to_raw_value(&evidence)?,
+            studio_json::to_raw_value(&evidence)?,
         );
         saved.insert(
             "prepareAttemptId".into(),
-            serde_json::value::to_raw_value(&agent.prepare_attempt.value())?,
+            studio_json::to_raw_value(&agent.prepare_attempt.value())?,
         );
         saved.insert(
             "turnStatus".into(),
-            serde_json::value::to_raw_value(&terminal.then_some(run.status))?,
+            studio_json::to_raw_value(&terminal.then_some(run.status))?,
         );
         saved.insert(
             "resultRunId".into(),
-            serde_json::value::to_raw_value(&terminal.then_some(run_id))?,
+            studio_json::to_raw_value(&terminal.then_some(run_id))?,
         );
         // The durable receipt owns this field once admitted.
         let mut attempt_record = attempt.clone();
@@ -705,9 +705,9 @@ impl ExecutionHistoryRepository {
         };
         save_run(tx, &run)?;
         tx.execute("INSERT INTO runtime_execution_attempts(id,run,record) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET run=excluded.run,record=excluded.record",
-            params![id,run_id,serde_json::to_string(&record)?])?;
+            params![id,run_id,studio_json::to_string(&record)?])?;
         tx.execute("INSERT OR IGNORE INTO runtime_execution_inputs(run,event) SELECT ?1,value FROM json_each(?2)",
-            params![run_id,serde_json::to_string(&attempt.events)?])?;
+            params![run_id,studio_json::to_string(&attempt.events)?])?;
         Ok(())
     }
     fn record_recovery(tx: &Transaction<'_>, agent: &AgentRecord) -> StoreResult<()> {
@@ -791,7 +791,7 @@ fn save_run(tx: &Transaction<'_>, run: &ExecutionRun) -> StoreResult<()> {
         tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.turnStatus',?1,'$.resultRunId',?2) WHERE run=?2", params![run.status.as_str(), run.id])?;
     }
     tx.execute("INSERT INTO runtime_execution_runs(id,agent,account,epoch,thread,turn,created,record) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET thread=excluded.thread,turn=excluded.turn,record=excluded.record",
-        params![run.id,run.agent,run.account_key,run.epoch.as_i64(),run.thread_id.value(),run.turn_id.value(),run.created.as_f64(),serde_json::to_string(run)?])?;
+        params![run.id,run.agent,run.account_key,run.epoch.as_i64(),run.thread_id.value(),run.turn_id.value(),run.created.as_f64(),studio_json::to_string(run)?])?;
     Ok(())
 }
 #[derive(serde::Serialize)]
@@ -799,7 +799,7 @@ struct AttemptWrite<'a> {
     #[serde(flatten)]
     attempt: &'a crate::StartAttemptView,
     #[serde(flatten)]
-    receipt_fields: &'a std::collections::BTreeMap<String, Box<RawValue>>,
+    receipt_fields: &'a std::collections::BTreeMap<String, RawValue>,
 }
 
 fn merge_recovery(run: &mut ExecutionRun, agent: &AgentRecord) {
@@ -871,7 +871,7 @@ fn now() -> f64 {
 fn decode(table: &str, id: &str, raw: &str) -> StoreResult<ExecutionRun> {
     let invalid = || ExecutionHistoryRepository::invalid(table, id);
     let JsonObject(run): JsonObject<ExecutionRun> =
-        serde_json::from_str(raw).map_err(|_| invalid())?;
+        studio_json::from_str(raw).map_err(|_| invalid())?;
     if run.id != id
         || run.epoch.as_i64().is_none()
         || !run.created.as_f64().is_some_and(f64::is_finite)
@@ -895,24 +895,24 @@ mod tests {
         };
         let raw = RawValue::from_string(r#"{ "vendor": [1, 2] }"#.into()).unwrap();
         let fields = [("claimResult".to_owned(), raw)].into();
-        let record = serde_json::to_string(&AttemptWrite {
+        let record = studio_json::to_string(&AttemptWrite {
             attempt: &attempt,
             receipt_fields: &fields,
         })
         .unwrap();
-        let decoded: std::collections::BTreeMap<String, Box<RawValue>> =
-            serde_json::from_str(&record).unwrap();
-        assert_eq!(decoded["claimResult"].get(), r#"{ "vendor": [1, 2] }"#);
+        let decoded: std::collections::BTreeMap<String, RawValue> =
+            studio_json::from_str(&record).unwrap();
+        assert_eq!(decoded["claimResult"].as_str(), r#"{ "vendor": [1, 2] }"#);
     }
 
     #[test]
     fn execution_attempt_decodes_owner_fields_with_closed_start_attempt() {
         let raw = r#"{"id":"attempt","runId":"run","submitted":false,"submission":"unsent","inputIdentity":[{"id":"event"}],"admission":{"id":"token"}}"#;
-        let attempt: ExecutionAttempt = serde_json::from_str(raw).unwrap();
+        let attempt: ExecutionAttempt = studio_json::from_str(raw).unwrap();
         assert_eq!(attempt.start.id.as_deref(), Some("attempt"));
         assert_eq!(attempt.run_id, "run");
         assert_eq!(attempt.submission, Some(AttemptSubmission::Unsent));
-        assert_eq!(attempt.input_identity.unwrap().get(), r#"[{"id":"event"}]"#);
+        assert_eq!(attempt.input_identity.unwrap().as_str(), r#"[{"id":"event"}]"#);
     }
 
     #[test]
@@ -933,7 +933,7 @@ mod tests {
 
     #[test]
     fn execution_run_wire_tracks_known_schema_fields() {
-        let schema: Value = serde_json::from_str(include_str!(
+        let schema: Value = studio_json::from_str(include_str!(
             "../../../runtime-schema/src/schemas/persisted-execution-run-record.schema.json"
         ))
         .unwrap();
@@ -1000,17 +1000,17 @@ mod tests {
     #[test]
     fn persisted_run_preserves_nullable_fields_numbers_and_unconstrained_evidence() {
         let raw = r#"{"id":"run","agent":"agent","accountKey":"default","epoch":1,"created":1,"status":"running","threadId":null,"rootAttemptId":{"future":true},"extension":[null,4]}"#;
-        let JsonObject(wire): JsonObject<ExecutionRun<Value>> = serde_json::from_str(raw).unwrap();
-        let output = serde_json::to_string(&wire).unwrap();
-        let original: Value = serde_json::from_str(raw).unwrap();
-        let roundtrip: Value = serde_json::from_str(&output).unwrap();
+        let JsonObject(wire): JsonObject<ExecutionRun<Value>> = studio_json::from_str(raw).unwrap();
+        let output = studio_json::to_string(&wire).unwrap();
+        let original: Value = studio_json::from_str(raw).unwrap();
+        let roundtrip: Value = studio_json::from_str(&output).unwrap();
         assert_eq!(roundtrip, original);
         assert!(!output.contains("latestAttemptId"));
         for number in ["1.0", "9007199254740993"] {
             let variant = raw.replace("\"created\":1,", &format!("\"created\":{number},"));
             let JsonObject(run): JsonObject<ExecutionRun<Value>> =
-                serde_json::from_str(&variant).unwrap();
-            let written = serde_json::to_string(&run).unwrap();
+                studio_json::from_str(&variant).unwrap();
+            let written = studio_json::to_string(&run).unwrap();
             assert!(
                 written.contains(&format!("\"created\":{number}")),
                 "{written}"
@@ -1082,21 +1082,21 @@ mod tests {
         let saved = ExecutionHistoryRepository::attempt(&db, "attempt")
             .expect("read")
             .expect("attempt");
-        assert_eq!(saved.snapshot.as_ref().unwrap().get(), attempt);
+        assert_eq!(saved.snapshot.as_ref().unwrap().as_str(), attempt);
         assert_eq!(
-            saved.input_identity.as_ref().unwrap().get(),
+            saved.input_identity.as_ref().unwrap().as_str(),
             r#"[ { "text": "hello" } ]"#
         );
         assert_eq!(
-            saved.claim_result.as_ref().unwrap().get(),
+            saved.claim_result.as_ref().unwrap().as_str(),
             r#"{ "metadata": {"custom":true} }"#
         );
         assert_eq!(
-            saved.provider_submission.as_ref().unwrap().get(),
+            saved.provider_submission.as_ref().unwrap().as_str(),
             r#"{"response": [1, 2]}"#
         );
         assert_eq!(
-            saved.terminal_repair.as_ref().unwrap().get(),
+            saved.terminal_repair.as_ref().unwrap().as_str(),
             r#"{"note": "preserve"}"#
         );
         let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"agent","rootId":"agent","provider":"codex","epoch":1,"status":"idle","activeExecution":{"runId":"run","attemptId":"attempt"}})).expect("agent");
@@ -1170,7 +1170,7 @@ mod tests {
         };
         tx.execute(
             "UPDATE runtime_execution_attempts SET record=json_set(record,'$.admission',json(?1))",
-            [serde_json::to_string(&admission).expect("token")],
+            [studio_json::to_string(&admission).expect("token")],
         )
         .expect("persist admission");
         let final_effect = admission.derive_result("provider-call", &["bootstrap"], "fingerprint");

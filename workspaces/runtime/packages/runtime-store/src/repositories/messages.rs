@@ -33,7 +33,7 @@ impl MessageRepository {
             [&id.0],
             |row| {
                 let deliveries: String = row.get(6)?;
-                let parsed = serde_json::from_str(&deliveries).map_err(|error| {
+                let parsed = studio_json::from_str(&deliveries).map_err(|error| {
                     rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(error))
                 })?;
                 Ok(ChatMessage {
@@ -47,7 +47,7 @@ impl MessageRepository {
     pub fn put(connection: &Connection, message: &ChatMessage) -> StoreResult<()> {
         connection.execute(
             "INSERT INTO runtime_chat_messages(id, room, sender, text, created, deliveries) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET room=excluded.room, sender=excluded.sender, text=excluded.text, created=excluded.created, deliveries=excluded.deliveries",
-            params![message.id.0, message.room, message.sender, message.text, message.created, serde_json::to_string(&message.deliveries)?],
+            params![message.id.0, message.room, message.sender, message.text, message.created, studio_json::to_string(&message.deliveries)?],
         )?;
         Ok(())
     }

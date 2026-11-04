@@ -9,7 +9,7 @@ use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequir
 use crate::stored_text::{StoredText, StoredTextValue};
 use crate::text_blobs;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::TRANSCRIPT_MAX_TOMBSTONES;
 use thiserror::Error;
 
@@ -474,7 +474,7 @@ impl TranscriptRepository {
             params![
                 id,
                 agent,
-                serde_json::to_string(record).map_err(|_| invalid_record("runtime_items", id))?,
+                studio_json::to_string(record).map_err(|_| invalid_record("runtime_items", id))?,
                 created
             ],
         )?;
@@ -714,7 +714,7 @@ fn transcript_pull_write(
         .flatten()
         .filter(|(key, _)| key.as_str() != "items")
         .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<serde_json::Map<_, _>>();
+        .collect::<studio_json::Map<_, _>>();
     let mut current = transaction
         .prepare_cached(
             "SELECT id,seq,hash,deleted FROM sync_entities WHERE collection=?1 ORDER BY rowid",
@@ -868,7 +868,7 @@ fn transcript_pull_write(
     }
     let full = after == 0 || base_missing || was_deleted || after < floor;
     let documents = if full {
-        let encoded = serde_json::to_string(payload).map_err(crate::StoreError::from)?;
+        let encoded = studio_json::to_string(payload).map_err(crate::StoreError::from)?;
         vec![json!({"id":scope,"payload":encoded,"seq":high,"_deleted":deleted})]
     } else if after < high && deleted {
         vec![json!({"id":scope,"payload":"{}","seq":high,"_deleted":true})]
@@ -910,7 +910,7 @@ fn transcript_pull_write(
         if order_changed {
             delta["order"] = json!(order);
         }
-        let encoded = serde_json::to_string(&delta).map_err(crate::StoreError::from)?;
+        let encoded = studio_json::to_string(&delta).map_err(crate::StoreError::from)?;
         vec![json!({"id":scope,"payload":encoded,"seq":high,"_deleted":false})]
     } else {
         Vec::new()
@@ -985,8 +985,8 @@ fn search_phase(connection: &Connection) -> TranscriptStoreResult<String> {
 mod tests {
     use crate::text_blobs;
     use rusqlite::Connection;
-    use serde_json::Value;
-    use serde_json::json;
+    use studio_json::Value;
+    use studio_json::json;
 
     use super::{TranscriptRepository, TranscriptStoreError};
 
@@ -1004,7 +1004,7 @@ mod tests {
         while let Some(row) = rows.next().unwrap() {
             let id: String = row.get(0).unwrap();
             let raw: String = row.get(1).unwrap();
-            let record: crate::TranscriptItemRecord = serde_json::from_str(&raw)
+            let record: crate::TranscriptItemRecord = studio_json::from_str(&raw)
                 .unwrap_or_else(|error| panic!("invalid transcript {id}: {error}"));
             assert_eq!(record.id().as_ref(), id);
             count += 1;
@@ -1333,7 +1333,7 @@ mod tests {
         let item = super::TranscriptItem {
             id: "agent:long".to_owned(),
             agent: "agent".to_owned(),
-            record: serde_json::from_str(
+            record: studio_json::from_str(
                 r#"{"id":"agent:long","role":"assistant","text":"preview","truncated":true}"#,
             )
             .unwrap(),
@@ -1477,7 +1477,7 @@ mod tests {
         let item = super::TranscriptItem {
             id: "agent:long".to_owned(),
             agent: "agent".to_owned(),
-            record: serde_json::from_str(&record.to_string()).unwrap(),
+            record: studio_json::from_str(&record.to_string()).unwrap(),
         };
         assert_eq!(
             TranscriptRepository::full_text(&connection, &item)
@@ -1512,7 +1512,7 @@ mod tests {
         let item = super::TranscriptItem {
             id: "agent:long".to_owned(),
             agent: "agent".to_owned(),
-            record: serde_json::from_str(&long_record(false).to_string()).unwrap(),
+            record: studio_json::from_str(&long_record(false).to_string()).unwrap(),
         };
         assert_eq!(
             TranscriptRepository::full_text(&connection, &item)

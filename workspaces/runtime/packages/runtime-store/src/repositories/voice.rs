@@ -2,7 +2,7 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
@@ -105,7 +105,7 @@ pub struct VoiceRecord {
 
 impl VoiceRecord {
     pub fn value(&self) -> StoreResult<Value> {
-        Ok(serde_json::to_value(self)?)
+        Ok(studio_json::to_value(self)?)
     }
 }
 
@@ -183,7 +183,7 @@ impl VoiceRepository {
     pub fn fingerprint(connection: &Connection, agent: &str) -> StoreResult<Vec<u8>> {
         let sequence = Self::record_sequence(connection, agent)?;
         let session = connection.query_row("SELECT id,state,answer,error,ended FROM voice_sessions WHERE agent=?1 AND state IS NOT NULL ORDER BY created DESC LIMIT 1", [agent], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<f64>>(4)?))).optional()?;
-        serde_json::to_vec(&(sequence, session)).map_err(StoreError::from)
+        studio_json::to_vec(&(sequence, session)).map_err(StoreError::from)
     }
 
     pub fn latest_session(connection: &Connection, agent: &str) -> StoreResult<Option<Value>> {
@@ -193,7 +193,7 @@ impl VoiceRepository {
                  WHERE agent=?1 AND state IS NOT NULL ORDER BY created DESC LIMIT 1",
                 [agent],
                 |row| {
-                    Ok(serde_json::json!({
+                    Ok(studio_json::json!({
                         "session_id": row.get::<_, String>(0)?,
                         "state": row.get::<_, Option<String>>(1)?,
                         "sdp": row.get::<_, Option<String>>(2)?,
@@ -212,7 +212,7 @@ impl VoiceRepository {
                 "SELECT id,state,answer,error,ended FROM voice_sessions WHERE id=?1 AND agent=?2",
                 params![id, agent],
                 |row| {
-                    Ok(serde_json::json!({
+                    Ok(studio_json::json!({
                         "session_id": row.get::<_, String>(0)?,
                         "state": row.get::<_, Option<String>>(1)?,
                         "sdp": row.get::<_, Option<String>>(2)?,
@@ -231,7 +231,7 @@ impl VoiceRepository {
                 "SELECT id,session,record_id,state,error FROM voice_speech_requests WHERE id=?1",
                 [id],
                 |row| {
-                    Ok(serde_json::json!({
+                    Ok(studio_json::json!({
                         "id": row.get::<_, String>(0)?,
                         "session": row.get::<_, String>(1)?,
                         "record_id": row.get::<_, String>(2)?,

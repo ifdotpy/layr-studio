@@ -229,3 +229,21 @@ impl From<Error> for std::io::Error {
         }
     }
 }
+
+#[inline]
+pub fn to_raw_value<T: Serialize + ?Sized>(value: &T) -> Result<OwnedRawJson> {
+    OwnedRawJson::from_string(to_string(value)?)
+}
+
+impl Error {
+    #[inline]
+    pub fn classify(&self) -> error::Category {
+        match self {
+            Self::Serde(error) => error.classify(),
+            #[cfg(feature = "sonic-backend")]
+            Self::Sonic(_) => error::Category::Data,
+            #[cfg(feature = "simd-backend")]
+            Self::Simd(_) => error::Category::Data,
+        }
+    }
+}

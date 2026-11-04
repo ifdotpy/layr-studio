@@ -2,7 +2,7 @@
 use crate::path_identity::{CanonicalPath, LexicalPath};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -313,7 +313,7 @@ impl WorkspaceReadyRepository {
                 |row| row.get::<_, String>(0),
             )
             .optional()?
-            .map(|raw| serde_json::from_str(&raw).map_err(StoreError::from))
+            .map(|raw| studio_json::from_str(&raw).map_err(StoreError::from))
             .transpose()
     }
 
@@ -334,7 +334,7 @@ impl WorkspaceReadyRepository {
             return Ok(false);
         }
         let mut operation = if let Some(operation) = Self::journal(tx, &plan.id)? {
-            if operation.get("plan") != Some(&serde_json::to_value(plan)?)
+            if operation.get("plan") != Some(&studio_json::to_value(plan)?)
                 || operation["phase"] == "completed"
             {
                 return Ok(false);
@@ -372,7 +372,7 @@ impl WorkspaceReadyRepository {
         now: f64,
     ) -> StoreResult<()> {
         if let Some(mut operation) = Self::journal(tx, &plan.id)? {
-            if operation.get("plan") != Some(&serde_json::to_value(plan)?)
+            if operation.get("plan") != Some(&studio_json::to_value(plan)?)
                 || operation["phase"] == "completed"
             {
                 return Ok(());
@@ -442,7 +442,7 @@ impl WorkspaceReadyRepository {
                 && a.record.get("deletedAt").is_none_or(Value::is_null)
                 && a.record["workspaceReservationId"] == plan.id
                 && a.record["workspaceOperation"] == "provision"
-        }) && operation.get("plan") == Some(&serde_json::to_value(plan)?)
+        }) && operation.get("plan") == Some(&studio_json::to_value(plan)?)
             && matches!(
                 operation["phase"].as_str(),
                 Some("local_mutation" | "recovery_required")
@@ -517,7 +517,7 @@ impl WorkspaceReadyRepository {
                     checkpoint_error: reason,
                     reservation_id: None,
                 },
-                serde_json::value::Serializer,
+                studio_json::value::Serializer,
             )?;
         }
         tx.execute(

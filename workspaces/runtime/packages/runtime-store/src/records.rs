@@ -5,7 +5,7 @@ use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::StoreResult;
 
@@ -817,11 +817,11 @@ impl AgentRecord {
         }
     }
 
-    pub fn usage_resume_value(&self) -> Result<Option<Value>, serde_json::Error> {
+    pub fn usage_resume_value(&self) -> Result<Option<Value>, studio_json::Error> {
         self.usage_resume
             .value()
-            .map(|value| serde::Serialize::serialize(value, serde_json::value::Serializer))
-            .transpose()
+            .map(|value| serde::Serialize::serialize(value, studio_json::value::Serializer))
+            .transpose().map_err(Into::into)
     }
 
     pub fn usage_resume_truthy(&self) -> bool {
@@ -1119,7 +1119,7 @@ impl AgentRecord {
         self.error.value().and_then(|error| error.as_text())
     }
 
-    pub fn set_error_receipt(&mut self, value: Value) -> Result<(), serde_json::Error> {
+    pub fn set_error_receipt(&mut self, value: Value) -> Result<(), studio_json::Error> {
         use studio_runtime_schema::queue_command::Field;
         self.error = if value.is_null() {
             Field::Null
@@ -1277,12 +1277,12 @@ impl AgentRecord {
         )
     }
 
-    pub fn active_execution(&self) -> Result<Option<ActiveExecutionView>, serde_json::Error> {
+    pub fn active_execution(&self) -> Result<Option<ActiveExecutionView>, studio_json::Error> {
         self.extra
             .get("activeExecution")
             .filter(|value| !value.is_null())
             .map(ActiveExecutionView::deserialize)
-            .transpose()
+            .transpose().map_err(Into::into)
     }
 
     fn set_active_execution_field<T: Serialize>(
@@ -1293,9 +1293,9 @@ impl AgentRecord {
         let pointer = self
             .extra
             .entry("activeExecution".into())
-            .or_insert_with(|| serde_json::Map::new().into());
+            .or_insert_with(|| studio_json::Map::new().into());
         if pointer.is_null() {
-            *pointer = serde_json::Map::new().into();
+            *pointer = studio_json::Map::new().into();
         }
         let pointer = pointer
             .as_object_mut()
@@ -1327,8 +1327,8 @@ impl AgentRecord {
         set_start_attempt_connection_generation: u64 => connection_generation = Some;
     }
 
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        Self::deserialize(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        Ok(Self::deserialize(value)?)
     }
 
     pub fn id(&self) -> &AgentId {
@@ -1373,7 +1373,7 @@ impl JsonRecord for AgentRecord {
     }
 
     fn check_write_value(&self, value: &Value) -> StoreResult<()> {
-        self.check_extra_round_trip(&serde_json::to_string(value)?)?;
+        self.check_extra_round_trip(&studio_json::to_string(value)?)?;
         Ok(())
     }
 
@@ -1386,7 +1386,7 @@ impl JsonRecord for AgentRecord {
 
 impl AgentRecord {
     fn check_extra_round_trip(&self, encoded: &str) -> StoreResult<()> {
-        let mut deserializer = serde_json::Deserializer::from_str(encoded);
+        let mut deserializer = studio_json::Deserializer::from_str(encoded);
         let decoded: Self =
             serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
                 let key = error.path().to_string();
@@ -1481,7 +1481,7 @@ mod duplicate_stored_record_tests {
     #[test]
     fn duplicate_stored_record_monitor() {
         assert!(
-            serde_json::from_str::<MonitorRecord>(r#"{"id":"other","id":"m","future":null}"#)
+            studio_json::from_str::<MonitorRecord>(r#"{"id":"other","id":"m","future":null}"#)
                 .is_err()
         );
     }
@@ -1516,7 +1516,7 @@ impl JsonRecord for PlanRecord {
 mod plan_typed_tests {
     use super::{AgentId, PlanRecord, Table};
     use serde::Deserialize;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn plan_deserialization_enforces_shape_and_preserves_extensions() {
@@ -1574,7 +1574,7 @@ impl JsonRecord for AnnotationRecord {
 mod annotation_typed_tests {
     use super::{AnnotationRecord, Table};
     use serde::Deserialize;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn annotation_deserialization_enforces_shapes() {
@@ -1663,7 +1663,7 @@ impl JsonRecord for ToolResultRecord {
 #[cfg(test)]
 mod tool_result_typed_tests {
     use super::{Table, ToolResultRecord};
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn tool_result_table_checks_shell_and_preserves_extensions() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
@@ -1706,13 +1706,13 @@ impl JsonRecord for RequestRecord {
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String> {
         if self.id != row_id
             || !self.created_at.is_finite()
-            || serde_json::from_str::<studio_runtime_schema::request_projection::RequestParams>(
-                self.params.get(),
+            || studio_json::from_str::<studio_runtime_schema::request_projection::RequestParams>(
+                self.params.as_str(),
             )
             .is_err()
             || self.preview.as_ref().is_some_and(|value| {
-                serde_json::from_str::<studio_runtime_schema::request_projection::RequestPreview>(
-                    value.get(),
+                studio_json::from_str::<studio_runtime_schema::request_projection::RequestPreview>(
+                    value.as_str(),
                 )
                 .is_err()
             })
@@ -1722,13 +1722,13 @@ impl JsonRecord for RequestRecord {
                 id: row_id.to_owned(),
             });
         }
-        Ok(serde_json::to_string(self)?)
+        Ok(studio_json::to_string(self)?)
     }
 }
 #[cfg(test)]
 mod request_typed_tests {
     use super::{RequestRecord, Table};
-    use serde_json::Value;
+    use studio_json::Value;
 
     #[test]
     fn shared_decoder_requires_object_for_direct_records() {
@@ -1771,9 +1771,9 @@ mod request_typed_tests {
             "CREATE TABLE runtime_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
         )
         .unwrap();
-        let mut record: RequestRecord = serde_json::from_str(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{}}"#).unwrap();
+        let mut record: RequestRecord = studio_json::from_str(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{}}"#).unwrap();
         record.params =
-            serde_json::value::RawValue::from_string(r#"{"command":42}"#.into()).unwrap();
+            studio_json::OwnedRawJson::from_string(r#"{"command":42}"#.into()).unwrap();
         assert!(Table::new(&db).put(&record).is_err());
         assert!(
             Table::<RequestRecord>::new(&db)
@@ -1800,7 +1800,7 @@ mod request_typed_tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.status.as_str(), "pending");
-        assert_eq!(row.params.get(), r#"{"opaque":[1,null]}"#);
+        assert_eq!(row.params.as_str(), r#"{"opaque":[1,null]}"#);
         db.execute(
             "UPDATE runtime_requests SET record=?1",
             [r#"{"id":"other","status":"pending"}"#],
@@ -1813,7 +1813,7 @@ mod request_typed_tests {
         )
         .unwrap();
         assert!(Table::<RequestRecord>::new(&db).get(&"r".into()).is_err());
-        let unchanged: Value = serde_json::from_str(
+        let unchanged: Value = studio_json::from_str(
             &db.query_row("SELECT record FROM runtime_requests", [], |r| {
                 r.get::<_, String>(0)
             })
@@ -1839,7 +1839,7 @@ impl JsonRecord for ComplaintRecord {
 mod complaint_typed_tests {
     use super::{ComplaintRecord, Table};
     use serde::Deserialize;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn complaint_deserialization_enforces_closed_shape() {
@@ -1880,7 +1880,7 @@ mod complaint_typed_tests {
                 .unwrap()
                 .unwrap()
                 .into_value(),
-            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+            studio_json::from_str::<studio_json::Value>(raw).unwrap()
         );
         assert!(crate::QuestionsWriteRepository::put_complaint(&tx, "other", raw).is_err());
         tx.execute(
@@ -1932,7 +1932,7 @@ mod monitor_direct_write_tests {
             "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
         )
         .unwrap();
-        let record: MonitorRecord = serde_json::from_str(r#"{"id":"m","agent":"a","epoch":0,"status":"running","command":"test","created":5,"tail":"first","requestId":"r","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit"}"#).unwrap();
+        let record: MonitorRecord = studio_json::from_str(r#"{"id":"m","agent":"a","epoch":0,"status":"running","command":"test","created":5,"tail":"first","requestId":"r","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit"}"#).unwrap();
         validation_counts::CHECKS.with(|count| count.set(0));
         Table::new(&db).put(&record).unwrap();
         assert_eq!(validation_counts::CHECKS.with(|count| count.get()), 0);
@@ -1943,7 +1943,7 @@ mod monitor_direct_write_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(saved, serde_json::to_string(&record).unwrap());
+        assert_eq!(saved, studio_json::to_string(&record).unwrap());
         assert_eq!(
             Table::<MonitorRecord>::new(&db).get(&record.id).unwrap(),
             Some(record.clone())
@@ -1969,7 +1969,7 @@ impl JsonRecord for TerminalRecord {
 mod terminal_typed_tests {
     use super::{Table, TerminalRecord};
     use serde::Deserialize;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn terminal_deserialization_enforces_schema_and_preserves_fields() {
@@ -2076,7 +2076,7 @@ impl LegacyWorkReply {
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.value.get(key)
     }
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
         let fields = WorkItemFields::deserialize(&value)?;
         Ok(Self { value, fields })
     }
@@ -2086,7 +2086,7 @@ impl LegacyWorkReply {
     pub fn into_value(self) -> Value {
         self.value
     }
-    pub fn set(&mut self, key: &str, value: Value) -> Result<(), serde_json::Error> {
+    pub fn set(&mut self, key: &str, value: Value) -> Result<(), studio_json::Error> {
         let mut updated = self.value.clone();
         updated[key] = value;
         let updated = Self::from_value(updated)?;
@@ -2127,8 +2127,8 @@ impl<'de> Deserialize<'de> for ExecutionRunRecord {
     }
 }
 impl ExecutionRunRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        Self::deserialize(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        Ok(Self::deserialize(value)?)
     }
     pub fn run(&self) -> &crate::ExecutionRun<Value, studio_runtime_schema::AgentCounter> {
         &self.0
@@ -2149,7 +2149,7 @@ impl JsonRecord for ExecutionRunRecord {
 mod execution_run_record_tests {
     use super::{ExecutionRunRecord, Table};
     use serde::Serialize;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn execution_run_table_preserves_evidence_and_checks_physical_identity() {
@@ -2165,8 +2165,8 @@ mod execution_run_record_tests {
             .get(&"run".into())
             .unwrap()
             .unwrap();
-        let value = record.serialize(serde_json::value::Serializer).unwrap();
-        let expected: Value = serde_json::from_str(raw).unwrap();
+        let value = record.serialize(studio_json::value::Serializer).unwrap();
+        let expected: Value = studio_json::from_str(raw).unwrap();
         assert_eq!(value, expected);
         assert_eq!(value["extra"], json!(9007199254740993_u64));
         assert!(value.get("threadId").is_none());
@@ -2233,7 +2233,7 @@ impl JsonRecord for TranscriptItemRecord {
             self.text(),
             studio_runtime_schema::transcript_record::TranscriptText::Inline(_)
         ) {
-            return Ok(serde_json::to_string(self)?);
+            return Ok(studio_json::to_string(self)?);
         }
         let text = connection
             .query_row(
@@ -2250,7 +2250,7 @@ impl JsonRecord for TranscriptItemRecord {
             })?;
         let mut hydrated = self.clone();
         hydrated.set_inline_text(text);
-        Ok(serde_json::to_string(&hydrated)?)
+        Ok(studio_json::to_string(&hydrated)?)
     }
 }
 impl JsonRecord for TranscriptAssetRecord {
@@ -2282,8 +2282,8 @@ impl WorkItemRecord {
     pub(crate) fn history_value(&self) -> Value {
         self.0.value()
     }
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        Self::deserialize(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        Ok(Self::deserialize(value)?)
     }
     pub fn checked(value: &Value) -> StoreResult<Self> {
         let id = value
@@ -2324,7 +2324,7 @@ impl WorkItemRecord {
             table: Self::TABLE,
             id: row_id.into(),
         };
-        let value = serde_json::from_str(encoded).map_err(|_| invalid())?;
+        let value = studio_json::from_str(encoded).map_err(|_| invalid())?;
         let record = Self::checked_at(&value, row_id)?;
         if record.id().as_ref() != row_id {
             return Err(invalid());
@@ -2376,19 +2376,19 @@ impl WorkItemRecord {
     pub fn updated(&self) -> f64 {
         self.0.updated()
     }
-    pub fn version(&self) -> Option<&serde_json::Number> {
+    pub fn version(&self) -> Option<&studio_json::Number> {
         self.0.version()
     }
-    pub fn results(&self) -> Option<&[serde_json::Map<String, Value>]> {
+    pub fn results(&self) -> Option<&[studio_json::Map<String, Value>]> {
         self.0.results()
     }
-    pub fn decisions(&self) -> Option<&[serde_json::Map<String, Value>]> {
+    pub fn decisions(&self) -> Option<&[studio_json::Map<String, Value>]> {
         self.0.decisions()
     }
-    pub fn results_mut(&mut self) -> Option<&mut Vec<serde_json::Map<String, Value>>> {
+    pub fn results_mut(&mut self) -> Option<&mut Vec<studio_json::Map<String, Value>>> {
         self.0.results_mut()
     }
-    pub fn decisions_mut(&mut self) -> Option<&mut Vec<serde_json::Map<String, Value>>> {
+    pub fn decisions_mut(&mut self) -> Option<&mut Vec<studio_json::Map<String, Value>>> {
         self.0.decisions_mut()
     }
     pub fn blocked_by(&self, statuses: &BTreeMap<String, WorkStatus>) -> Vec<String> {
@@ -2398,7 +2398,7 @@ impl WorkItemRecord {
             .cloned()
             .collect()
     }
-    pub fn set(&mut self, key: impl Into<String>, value: Value) -> Result<(), serde_json::Error> {
+    pub fn set(&mut self, key: impl Into<String>, value: Value) -> Result<(), studio_json::Error> {
         self.0.set(key, value)
     }
     pub fn set_status(&mut self, status: WorkStatus) {
@@ -2468,7 +2468,7 @@ pub trait JsonRecord: Serialize + DeserializeOwned {
                 id: row_id.to_owned(),
             });
         }
-        Ok(serde_json::to_string(self)?)
+        Ok(studio_json::to_string(self)?)
     }
 
     fn decode_stored(connection: &Connection, row_id: &str, encoded: &str) -> StoreResult<Self> {
@@ -2965,7 +2965,7 @@ pub(crate) fn decode_value(
     encoded: &str,
     invalid: impl Fn() -> crate::StoreError,
 ) -> StoreResult<Value> {
-    let value = serde_json::from_str(encoded).map_err(|_| invalid())?;
+    let value = studio_json::from_str(encoded).map_err(|_| invalid())?;
     validate_value(schema, value, invalid)
 }
 
@@ -2979,7 +2979,7 @@ pub(crate) fn decode_record<R: JsonRecord>(
         id: row_id.to_owned(),
     };
     let record = if R::TYPED_SHAPE {
-        serde_json::from_str::<studio_runtime_schema::json_object::JsonObject<R>>(encoded)
+        studio_json::from_str::<studio_runtime_schema::json_object::JsonObject<R>>(encoded)
             .map_err(|_| invalid())?
             .0
     } else {
@@ -3011,7 +3011,7 @@ pub(crate) fn parse_agent_record(row_id: &str, encoded: &str) -> StoreResult<Age
         row_id,
         crate::agent_volatile::publication_work::Operation::Decode,
     );
-    let agent: AgentRecord = serde_json::from_str(encoded)
+    let agent: AgentRecord = studio_json::from_str(encoded)
         .map_err(|_| invalid_agent_field(row_id, "", "record_decode", None))?;
     if agent.id.0 != row_id {
         return Err(invalid_agent_field(row_id, "/id", "row_id_mismatch", None));
@@ -3057,7 +3057,7 @@ fn encode_record<R: JsonRecord>(
 fn checked_value<R: JsonRecord>(record: &R, row_id: &str) -> StoreResult<Value> {
     #[cfg(test)]
     validation_counts::CHECKS.with(|count| count.set(count.get() + 1));
-    let value = record.serialize(serde_json::value::Serializer)?;
+    let value = record.serialize(studio_json::value::Serializer)?;
     record.check_write_value(&value)?;
     checked_serialized_value(record, row_id, value)
 }
@@ -3085,7 +3085,7 @@ fn checked_serialized_value<R: JsonRecord>(
 
 /// Validate the JSON schema of an open record before encoding it for storage.
 pub fn encode_open_record<R: JsonRecord>(record: &R, row_id: &str) -> StoreResult<String> {
-    Ok(serde_json::to_string(&checked_value(record, row_id)?)?)
+    Ok(studio_json::to_string(&checked_value(record, row_id)?)?)
 }
 
 fn stored_text(value: ValueRef<'_>, table: &'static str, id: &str) -> StoreResult<String> {
@@ -3182,7 +3182,7 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
     column: usize,
 ) -> rusqlite::Result<T> {
     let json: String = row.get(column)?;
-    serde_json::from_str(&json).map_err(|error| {
+    studio_json::from_str(&json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             column,
             rusqlite::types::Type::Text,
@@ -3201,13 +3201,13 @@ mod tests {
     #[test]
     fn agent_write_rejects_extra_keys_owned_by_named_fields() {
         for (key, value) in [
-            ("error", serde_json::json!(null)),
-            ("error", serde_json::json!(42)),
-            ("capacity", serde_json::json!(null)),
-            ("naming", serde_json::json!(null)),
-            ("id", serde_json::json!(null)),
+            ("error", studio_json::json!(null)),
+            ("error", studio_json::json!(42)),
+            ("capacity", studio_json::json!(null)),
+            ("naming", studio_json::json!(null)),
+            ("id", studio_json::json!(null)),
         ] {
-            let mut agent = super::AgentRecord::from_value(serde_json::json!({
+            let mut agent = super::AgentRecord::from_value(studio_json::json!({
                 "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
                 "accountKey":"default", "compactions":0
             }))
@@ -3226,7 +3226,7 @@ mod tests {
         use super::JsonRecord;
         let raw =
             std::fs::read_to_string(std::env::var("STUDIO_AGENT_TIMING_RECORD").unwrap()).unwrap();
-        let agent: super::AgentRecord = serde_json::from_str(&raw).unwrap();
+        let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
         let db = rusqlite::Connection::open_in_memory().unwrap();
         let encoded = agent.encode_stored(&db, &agent.id.0).unwrap();
         let start = std::time::Instant::now();
@@ -3242,7 +3242,7 @@ mod tests {
     #[test]
     fn agent_record_requires_materialized_account() {
         let old = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle"}"#;
-        assert!(serde_json::from_str::<super::AgentRecord>(old).is_err());
+        assert!(studio_json::from_str::<super::AgentRecord>(old).is_err());
     }
     use super::{
         AgentId, AgentRecord, AgentStatus, EventMetadataRecord, QueueEventId, RecordOrder,
@@ -3252,12 +3252,12 @@ mod tests {
     };
     use crate::StoreError;
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn agent_effect_records_keep_live_and_current_shapes() {
         let legacy = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"nativeReviewThread":{"attempt":"attempt","connection":"connection","generation":2,"operation":"operation","requestDigest":"digest","sequence":1,"status":"accepted","threadId":"thread"},"nativeRelease":{"id":"release","phase":"released","resetPending":false}}"#;
-        let agent: AgentRecord = serde_json::from_str(legacy).expect("live review and release");
+        let agent: AgentRecord = studio_json::from_str(legacy).expect("live review and release");
         assert!(
             agent
                 .native_review_thread
@@ -3267,25 +3267,25 @@ mod tests {
                 .is_none()
         );
         assert!(agent.native_release.as_ref().unwrap().scope.is_none());
-        let encoded = serde_json::to_string(&agent).expect("serialize legacy agent");
-        let round_trip: AgentRecord = serde_json::from_str(&encoded).expect("round-trip agent");
+        let encoded = studio_json::to_string(&agent).expect("serialize legacy agent");
+        let round_trip: AgentRecord = studio_json::from_str(&encoded).expect("round-trip agent");
         assert_eq!(agent, round_trip);
         assert_eq!(
             agent.value(),
-            serde_json::from_str::<Value>(&encoded).unwrap()
+            studio_json::from_str::<Value>(&encoded).unwrap()
         );
         assert_eq!(agent.clone().into_value(), agent.value());
 
         let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic","vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
-        let agent: AgentRecord = serde_json::from_str(current).expect("current effect fields");
-        let encoded = serde_json::to_string(&agent).expect("serialize current agent");
+        let agent: AgentRecord = studio_json::from_str(current).expect("current effect fields");
+        let encoded = studio_json::to_string(&agent).expect("serialize current agent");
         assert_eq!(
-            serde_json::from_str::<Value>(&encoded).unwrap(),
-            serde_json::from_str::<Value>(current).unwrap()
+            studio_json::from_str::<Value>(&encoded).unwrap(),
+            studio_json::from_str::<Value>(current).unwrap()
         );
         assert_eq!(
             agent.value(),
-            serde_json::from_str::<Value>(&encoded).unwrap()
+            studio_json::from_str::<Value>(&encoded).unwrap()
         );
     }
 
@@ -3301,20 +3301,20 @@ mod tests {
     #[test]
     fn agent_rejects_malformed_start_attempt_on_decode() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"startAttempt":{"id":"attempt","submitted":"false"}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
     }
 
     #[test]
     fn agent_rejects_malformed_creation_intent_on_decode() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":{"prompt":"Task","effort":42}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
         let null_mode = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":{"permission_mode":null}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(null_mode).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(null_mode).is_err());
         let null_intent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":null,"draft":null,"queueMutationRevision":null,"authResumeAttempt":null,"startWait":null}"#;
         let absent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
         assert_eq!(
-            serde_json::from_str::<AgentRecord>(null_intent).unwrap(),
-            serde_json::from_str::<AgentRecord>(absent).unwrap()
+            studio_json::from_str::<AgentRecord>(null_intent).unwrap(),
+            studio_json::from_str::<AgentRecord>(absent).unwrap()
         );
     }
 
@@ -3323,8 +3323,8 @@ mod tests {
         let absent =
             r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"}"#;
         let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":null}"#;
-        let absent: AgentRecord = serde_json::from_str(absent).unwrap();
-        let null: AgentRecord = serde_json::from_str(null).unwrap();
+        let absent: AgentRecord = studio_json::from_str(absent).unwrap();
+        let null: AgentRecord = studio_json::from_str(null).unwrap();
         assert_eq!(absent, null);
         assert!(null.value().get("compactions").unwrap().is_null());
     }
@@ -3333,8 +3333,8 @@ mod tests {
     fn agent_permission_mode_is_a_closed_contract() {
         let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"permissionMode":"bypassPermissions"}"#;
         let unknown = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"permissionMode":"unknown"}"#;
-        assert!(serde_json::from_str::<AgentRecord>(valid).is_ok());
-        assert!(serde_json::from_str::<AgentRecord>(unknown).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(valid).is_ok());
+        assert!(studio_json::from_str::<AgentRecord>(unknown).is_err());
     }
 
     #[test]
@@ -3349,11 +3349,11 @@ mod tests {
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":"false"}}"#
             );
             assert!(
-                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                studio_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{field}"
             );
             let valid = raw.replace("\"false\"", "false");
-            let record: AgentRecord = serde_json::from_str(&valid).unwrap();
+            let record: AgentRecord = studio_json::from_str(&valid).unwrap();
             assert_eq!(record.value()[field], false, "{field}");
         }
     }
@@ -3379,14 +3379,14 @@ mod tests {
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
             );
             assert!(
-                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                studio_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{field}"
             );
             let null = raw.replace("42", "null");
-            let record: AgentRecord = serde_json::from_str(&null).unwrap();
+            let record: AgentRecord = studio_json::from_str(&null).unwrap();
             assert_eq!(record.value().get(field), Some(&Value::Null), "{field}");
             let missing = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
-            let record: AgentRecord = serde_json::from_str(missing).unwrap();
+            let record: AgentRecord = studio_json::from_str(missing).unwrap();
             assert!(record.value().get(field).is_none(), "{field}");
         }
     }
@@ -3395,10 +3395,10 @@ mod tests {
     fn agent_role_is_closed_and_preserves_null() {
         let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":"future"}"#;
         let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":null}"#;
-        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
-        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(studio_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = studio_json::from_str(null).unwrap();
         assert!(
-            serde_json::to_string(&agent)
+            studio_json::to_string(&agent)
                 .unwrap()
                 .contains("\"role\":null")
         );
@@ -3407,30 +3407,30 @@ mod tests {
     #[test]
     fn agent_error_preserves_non_error_values() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":42}"#;
-        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        let decoded: AgentRecord = studio_json::from_str(raw).unwrap();
         assert_eq!(
             decoded.value()["error"],
-            serde_json::json!({"message":"","studioRawEvidence":42})
+            studio_json::json!({"message":"","studioRawEvidence":42})
         );
         let last_error = raw.replace("\"error\":42", "\"lastCompletedTurnError\":42");
-        let decoded: AgentRecord = serde_json::from_str(&last_error).unwrap();
+        let decoded: AgentRecord = studio_json::from_str(&last_error).unwrap();
         assert_eq!(
             decoded.value()["lastCompletedTurnError"],
-            serde_json::json!({"message":"","studioRawEvidence":42})
+            studio_json::json!({"message":"","studioRawEvidence":42})
         );
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#;
-        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        let decoded: AgentRecord = studio_json::from_str(raw).unwrap();
         assert_eq!(decoded.value()["error"]["data"]["id"], 1);
-        let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
+        let via_value = AgentRecord::from_value(studio_json::from_str(raw).unwrap()).unwrap();
         assert_eq!(via_value.value()["error"]["data"]["id"], 1);
     }
 
     #[test]
     fn agent_excluded_accounts_are_strings() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked",42]}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
         let valid = raw.replace(",42", "");
-        assert!(serde_json::from_str::<AgentRecord>(&valid).is_ok());
+        assert!(studio_json::from_str::<AgentRecord>(&valid).is_ok());
     }
 
     #[test]
@@ -3439,7 +3439,7 @@ mod tests {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":"{state}"}}"#
             );
-            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            let agent: AgentRecord = studio_json::from_str(&raw).unwrap();
             assert_eq!(agent.value()["naming"], state);
         }
     }
@@ -3451,11 +3451,11 @@ mod tests {
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
             );
             assert!(
-                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                studio_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{field}"
             );
             let null = raw.replace("42", "null");
-            let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+            let agent: AgentRecord = studio_json::from_str(&null).unwrap();
             assert_eq!(agent.value().get(field), Some(&Value::Null), "{field}");
         }
     }
@@ -3467,15 +3467,15 @@ mod tests {
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":{value}}}"#
             );
             assert!(
-                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                studio_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{value}"
             );
         }
         let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
-        let record: AgentRecord = serde_json::from_str(valid).unwrap();
+        let record: AgentRecord = studio_json::from_str(valid).unwrap();
         assert_eq!(record.auth_resume_attempt, Some(1));
         assert!(
-            serde_json::to_string(&record)
+            studio_json::to_string(&record)
                 .unwrap()
                 .contains("\"authResumeAttempt\":1")
         );
@@ -3488,7 +3488,7 @@ mod tests {
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
             );
             assert!(
-                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                studio_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{value}"
             );
         }
@@ -3496,9 +3496,9 @@ mod tests {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
             );
-            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            let agent: AgentRecord = studio_json::from_str(&raw).unwrap();
             assert!(
-                serde_json::to_string(&agent)
+                studio_json::to_string(&agent)
                     .unwrap()
                     .contains(&format!("\"max\":{value}"))
             );
@@ -3512,7 +3512,7 @@ mod tests {
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"queueMutationRevision":{value}}}"#
             );
             assert!(
-                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                studio_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{value}"
             );
         }
@@ -3522,10 +3522,10 @@ mod tests {
     fn agent_created_is_nonnegative_and_preserves_null() {
         let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"created":-1}"#;
         let null = bad.replace("-1", "null");
-        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
-        let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+        assert!(studio_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = studio_json::from_str(&null).unwrap();
         assert!(
-            serde_json::to_string(&agent)
+            studio_json::to_string(&agent)
                 .unwrap()
                 .contains("\"created\":null")
         );
@@ -3535,10 +3535,10 @@ mod tests {
     fn agent_provider_is_closed_and_preserves_null() {
         let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":"future"}"#;
         let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":null}"#;
-        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
-        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(studio_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = studio_json::from_str(null).unwrap();
         assert!(
-            serde_json::to_string(&agent)
+            studio_json::to_string(&agent)
                 .unwrap()
                 .contains("\"provider\":null")
         );
@@ -3547,10 +3547,10 @@ mod tests {
     #[test]
     fn agent_retains_creation_intent_clear_and_default_fields() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":{"name":"Worker","prompt":"Task","parent":"root","effort":null,"worker_defaults":{"model":"model","effort":"high","fast_mode":false,"delegation_depth":1}}}"#;
-        let record: AgentRecord = serde_json::from_str(raw).unwrap();
+        let record: AgentRecord = studio_json::from_str(raw).unwrap();
         assert_eq!(
             record.value()["creationIntent"],
-            serde_json::from_str::<Value>(raw).unwrap()["creationIntent"]
+            studio_json::from_str::<Value>(raw).unwrap()["creationIntent"]
         );
     }
 
@@ -3657,14 +3657,14 @@ mod tests {
     #[test]
     fn transcript_record_preserves_opaque_extension_bytes() {
         let raw = r#"{"id":"item-1","role":"user","text":"body","nested":[ { "retained":true } ],"inputs":[{"text":"input","blob":[ {"v":1} ]}]}"#;
-        let record: TranscriptItemRecord = serde_json::from_str(raw).expect("record");
-        let encoded = serde_json::to_string(&record).expect("serialize");
+        let record: TranscriptItemRecord = studio_json::from_str(raw).expect("record");
+        let encoded = studio_json::to_string(&record).expect("serialize");
         assert!(encoded.contains(r#"[ { "retained":true } ]"#));
         assert!(encoded.contains(r#"[ {"v":1} ]"#));
     }
 
     fn task(value: &Value) -> TaskRecord {
-        serde_json::from_str(&value.to_string()).expect("runtime task has a string id")
+        studio_json::from_str(&value.to_string()).expect("runtime task has a string id")
     }
 
     fn work(value: Value) -> WorkItemRecord {
@@ -3893,7 +3893,7 @@ mod tests {
             assert_eq!(record.value().get("pendingSettings"), Some(&raw));
         }
         let dto: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto =
-            serde_json::from_str(r#"{"model":"m","accountKey":"target","updatedAt":1}"#).unwrap();
+            studio_json::from_str(r#"{"model":"m","accountKey":"target","updatedAt":1}"#).unwrap();
         let settings: crate::transfer_record::TransferSettings = dto.into();
         assert_eq!(settings.account_key.as_deref(), Some("target"));
         assert_eq!(settings.updated_at.value(), Some(&1.0));
@@ -4123,7 +4123,7 @@ mod tests {
             {
                 let transfer: crate::transfer_record::TransferWorkerDefaults = defaults.clone();
                 assert_eq!(
-                    serde::Serialize::serialize(&(transfer), serde_json::value::Serializer)
+                    serde::Serialize::serialize(&(transfer), studio_json::value::Serializer)
                         .unwrap(),
                     value
                 );
@@ -4152,7 +4152,7 @@ mod tests {
         #[serde(untagged)]
         enum OlderDefaults {
             Known(OlderKnown),
-            Unreadable(serde_json::Value),
+            Unreadable(studio_json::Value),
         }
         #[derive(serde::Deserialize, serde::Serialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -4164,7 +4164,7 @@ mod tests {
             serde::Deserialize::deserialize(written["workerDefaults"].clone()).unwrap();
         assert!(matches!(older, OlderDefaults::Unreadable(_)));
         assert_eq!(
-            serde::Serialize::serialize(&older, serde_json::value::Serializer).unwrap(),
+            serde::Serialize::serialize(&older, studio_json::value::Serializer).unwrap(),
             value
         );
     }
@@ -4282,14 +4282,14 @@ mod tests {
 
     #[test]
     fn stored_work_boundary_contract_matches_openapi_owner() {
-        let openapi: Value = serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
             .expect("OpenAPI owner");
         assert_eq!(
             openapi["components"]["schemas"]["WorkItem"]["properties"]["status"]["$ref"],
             "#/components/schemas/WorkStatus",
             "work status consumes the generated Rust owner"
         );
-        let schema: Value = serde_json::from_str(include_str!(
+        let schema: Value = studio_json::from_str(include_str!(
             "../../runtime-schema/src/schemas/persisted-work-item-record.schema.json"
         ))
         .expect("persisted owner");
@@ -4357,7 +4357,7 @@ mod tests {
             Value::Bool(true)
         );
 
-        let request: RequestRecord = serde_json::from_str(r#"{"id":"request-1","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"connectionId":null}"#)
+        let request: RequestRecord = studio_json::from_str(r#"{"id":"request-1","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"connectionId":null}"#)
         .expect("Python may persist a request without a connection identity");
         assert!(request.connection_id.is_none());
     }
@@ -4377,12 +4377,12 @@ mod tests {
     #[test]
     fn known_status_has_only_one_representation() {
         for known in AgentStatus::VALUES {
-            let decoded: AgentStatus = serde_json::from_str(&format!("{known:?}")).unwrap();
+            let decoded: AgentStatus = studio_json::from_str(&format!("{known:?}")).unwrap();
             assert!(UnknownAgentStatus::new((*known).to_owned()).is_none());
             assert_eq!(decoded.as_str(), *known);
         }
         assert_eq!(
-            serde_json::from_str::<AgentStatus>("\"running\"").unwrap(),
+            studio_json::from_str::<AgentStatus>("\"running\"").unwrap(),
             AgentStatus::Running
         );
     }
@@ -4537,7 +4537,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("record reads");
-        let value = serde_json::from_str::<Value>(&stored).expect("stored metadata parses");
+        let value = studio_json::from_str::<Value>(&stored).expect("stored metadata parses");
         assert_eq!(value, json!({"timing":{"enqueuedAt":9}}));
         assert!(value.get("id").is_none());
     }
@@ -4682,7 +4682,7 @@ mod tests {
 #[cfg(test)]
 mod agent_projection_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn stored_agent_rejects_legacy_start_wait_shapes() {
@@ -4753,25 +4753,25 @@ mod agent_projection_tests {
     #[test]
     fn stored_agent_rejects_malformed_archive() {
         let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"agentArchive":{"at":"bad","epoch":1}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
     }
 
     #[test]
     fn stored_agent_rejects_malformed_sandbox() {
         let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"sandbox":{"type":"invalid"}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
     }
 
     #[test]
     fn stored_agent_rejects_malformed_cleanup_receipt() {
         let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"cleanedWorktree":{"bytes":"bad"}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
     }
 
     #[test]
     fn stored_agent_rejects_malformed_safety_buffering() {
         let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"nativeSafetyBuffering":{"showBufferingUi":"yes"}}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
     }
 
     #[test]
@@ -4780,7 +4780,7 @@ mod agent_projection_tests {
             let raw = format!(
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,{field}}}"#
             );
-            assert!(serde_json::from_str::<AgentRecord>(&raw).is_err());
+            assert!(studio_json::from_str::<AgentRecord>(&raw).is_err());
         }
     }
 
@@ -4793,7 +4793,7 @@ mod agent_projection_tests {
             let raw = format!(
                 r#"{{"id":"a","rootId":"a","epoch":{epoch},"status":"idle","accountKey":"default","compactions":0}}"#
             );
-            assert!(serde_json::from_str::<AgentRecord>(&raw).is_err());
+            assert!(studio_json::from_str::<AgentRecord>(&raw).is_err());
         }
     }
 
@@ -4803,7 +4803,7 @@ mod agent_projection_tests {
             r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":{}}}"#,
             studio_runtime_schema::shared_values::MAX_SAFE_INTEGER + 1
         );
-        assert!(serde_json::from_str::<AgentRecord>(&raw).is_err());
+        assert!(studio_json::from_str::<AgentRecord>(&raw).is_err());
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
@@ -4847,13 +4847,13 @@ mod agent_projection_tests {
         let missing = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default"}"#;
         let unknown = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":null}"#;
         assert_eq!(
-            serde_json::from_str::<AgentRecord>(missing)
+            studio_json::from_str::<AgentRecord>(missing)
                 .unwrap()
                 .compactions,
             None
         );
         assert_eq!(
-            serde_json::from_str::<AgentRecord>(unknown)
+            studio_json::from_str::<AgentRecord>(unknown)
                 .unwrap()
                 .compactions,
             None
@@ -5003,8 +5003,8 @@ mod activity_projection_tests {
         };
         let projected = WireActivity::try_from(&activity).unwrap();
         assert_eq!(
-            serde::Serialize::serialize(&(projected), serde_json::value::Serializer).unwrap(),
-            serde_json::json!({"phase":"running","tools":[{"id":"id","name":"tool","type":"call"}]})
+            serde::Serialize::serialize(&(projected), studio_json::value::Serializer).unwrap(),
+            studio_json::json!({"phase":"running","tools":[{"id":"id","name":"tool","type":"call"}]})
         );
         activity.tools.as_mut().unwrap()[0].id = None;
         assert!(WireActivity::try_from(&activity).is_err());

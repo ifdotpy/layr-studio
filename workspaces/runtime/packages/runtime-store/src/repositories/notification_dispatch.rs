@@ -4,7 +4,7 @@ use crate::CachedSql;
 use crate::schema::SchemaRequirements;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::repositories::transcript::{TranscriptItem, TranscriptRepository, TranscriptStoreError};
 use crate::{StoreError, StoreResult};
@@ -59,7 +59,7 @@ impl NotificationDispatchRepository {
         tx: &Transaction<'_>,
         agent: &str,
         event: &str,
-    ) -> StoreResult<Option<Box<serde_json::value::RawValue>>> {
+    ) -> StoreResult<Option<studio_json::OwnedRawJson>> {
         if Self::user_event(tx, agent, event)?.is_none() {
             return Err(invalid_record("runtime_events", event));
         }
@@ -80,8 +80,8 @@ impl NotificationDispatchRepository {
             )
             .optional()?;
         raw.map(|raw| {
-            let metadata: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
-                serde_json::from_str(&raw)
+            let metadata: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+                studio_json::from_str(&raw)
                     .map_err(|_| invalid_record("runtime_event_meta", event))?;
             Ok(metadata
                 .into_iter()
@@ -97,7 +97,7 @@ impl NotificationDispatchRepository {
         events: &[&str],
         owner: &T,
     ) -> StoreResult<()> {
-        let raw = serde_json::to_string(owner)?;
+        let raw = studio_json::to_string(owner)?;
         for event in events {
             Self::event_metadata(tx, event)?;
             tx.execute_cached(
@@ -144,7 +144,7 @@ impl NotificationDispatchRepository {
             )
             .optional()?;
         raw.map(|raw| {
-            let value: Value = serde_json::from_str(&raw).map_err(|_| invalid_record(table, id))?;
+            let value: Value = studio_json::from_str(&raw).map_err(|_| invalid_record(table, id))?;
             if !value.is_object() || value.get("id").and_then(Value::as_str) != Some(id) {
                 return Err(invalid_record(table, id));
             }
@@ -281,7 +281,7 @@ impl NotificationDispatchRepository {
             )
             .optional()?;
         if let Some(meta) = meta {
-            serde_json::from_str::<
+            studio_json::from_str::<
                 studio_runtime_schema::json_object::JsonObject<serde::de::IgnoredAny>,
             >(&meta)
             .map_err(|_| invalid_record("runtime_event_meta", event_id))?;
@@ -290,7 +290,7 @@ impl NotificationDispatchRepository {
                 params![item_id, event_id],
             )?;
         } else {
-            let record = serde_json::json!({"transcriptItemId":item_id,"modelEventProjection":1});
+            let record = studio_json::json!({"transcriptItemId":item_id,"modelEventProjection":1});
             transaction.execute_cached(
                 "INSERT INTO runtime_event_meta(id,record) VALUES(?1,?2)",
                 params![event_id, record.to_string()],
@@ -357,7 +357,7 @@ impl NotificationDispatchRepository {
         let Some(raw) = raw else {
             return Ok(None);
         };
-        let value: Value = serde_json::from_str(&raw)
+        let value: Value = studio_json::from_str(&raw)
             .map_err(|_| invalid_record("runtime_event_meta", event_id))?;
         if !value.is_object() {
             return Err(invalid_record("runtime_event_meta", event_id));

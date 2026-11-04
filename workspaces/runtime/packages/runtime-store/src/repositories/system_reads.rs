@@ -2,7 +2,7 @@
 use crate::schema::SchemaRequirements;
 use crate::{StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::Value;
+use studio_json::Value;
 
 #[cfg(test)]
 std::thread_local! { pub(crate) static VALIDATE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
@@ -38,13 +38,13 @@ pub(crate) fn validate_row_key(table: &str, id: &str, value: &Value) -> StoreRes
 }
 
 pub fn decode(table: &str, id: &str, raw: &str) -> StoreResult<Value> {
-    let value = serde_json::from_str(raw).map_err(|_| invalid(table, id))?;
+    let value = studio_json::from_str(raw).map_err(|_| invalid(table, id))?;
     validate(table, id, value)
 }
 
 /// [`decode`] for a row read here: an agent gets its volatile fields first.
 fn decode_row(connection: &Connection, table: &str, id: &str, raw: &str) -> StoreResult<Value> {
-    let mut value = serde_json::from_str(raw).map_err(|_| invalid(table, id))?;
+    let mut value = studio_json::from_str(raw).map_err(|_| invalid(table, id))?;
     crate::agent_volatile::merge_if_agent(connection, table, id, &mut value)?;
     validate(table, id, value)
 }

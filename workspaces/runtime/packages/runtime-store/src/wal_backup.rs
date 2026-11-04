@@ -107,7 +107,7 @@ impl WalBackup {
         let folder = state_dir.join("backup");
         fs::create_dir_all(&folder)?;
         let mut state: State = match fs::read(folder.join("state.json")) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
+            Ok(bytes) => studio_json::from_slice(&bytes).map_err(io::Error::other)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => State::default(),
             Err(error) => return Err(error),
         };
@@ -151,7 +151,7 @@ impl WalBackup {
         let temporary = self.folder.join("state.json.new");
         fs::write(
             &temporary,
-            serde_json::to_vec(state).map_err(io::Error::other)?,
+            studio_json::to_vec(state).map_err(io::Error::other)?,
         )?;
         fs::rename(temporary, self.folder.join("state.json"))
     }

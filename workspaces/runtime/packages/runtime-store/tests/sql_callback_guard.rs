@@ -49,17 +49,17 @@ async fn stored_path_identities_deserialize_lexically_inside_sql() {
     let spelling = format!("{}//link/./missing/", prefix.display());
     let traversal = prefix.join("../other");
     let check = move || {
-        let stored = serde_json::json!(spelling);
+        let stored = studio_json::json!(spelling);
         let lexical: LexicalPath =
-            serde_json::from_value(stored.clone()).expect("lexical identity");
-        let canonical: CanonicalPath = serde_json::from_value(stored).expect("stored identity");
+            studio_json::from_value(stored.clone()).expect("lexical identity");
+        let canonical: CanonicalPath = studio_json::from_value(stored).expect("stored identity");
         assert_eq!(lexical.as_path(), expected.as_path());
         assert_eq!(
-            serde_json::to_value(canonical).expect("stored string"),
-            serde_json::json!(expected)
+            studio_json::to_value(canonical).expect("stored string"),
+            studio_json::json!(expected)
         );
-        assert!(serde_json::from_value::<LexicalPath>(serde_json::json!("relative")).is_err());
-        assert!(serde_json::from_value::<CanonicalPath>(serde_json::json!(traversal)).is_err());
+        assert!(studio_json::from_value::<LexicalPath>(studio_json::json!("relative")).is_err());
+        assert!(studio_json::from_value::<CanonicalPath>(studio_json::json!(traversal)).is_err());
         Ok::<_, StoreError>(())
     };
     let read_check = check.clone();
