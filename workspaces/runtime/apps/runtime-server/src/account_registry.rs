@@ -731,9 +731,12 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                 Err(studio_runtime_services::account_worker::retained::PortError::Expired) => {
                     Err(AccountSessionError::Expired)
                 }
-                Err(_) => Err(AccountSessionError::Refused(
-                    "Account transfer source request was rejected",
-                )),
+                Err(error) => {
+                    eprintln!("account transfer source request {operation} rejected: {error}");
+                    Err(AccountSessionError::Refused(
+                        "Account transfer source request was rejected",
+                    ))
+                }
             }
         })
     }

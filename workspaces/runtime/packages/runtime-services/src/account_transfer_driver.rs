@@ -781,6 +781,12 @@ fn admit_mutation(
     Ok(())
 }
 
+/// Source calls that the retained worker stores need a durable request identity;
+/// a read with no stored receipt goes without one.
+pub(crate) fn source_call_needs_admission(method: &str) -> bool {
+    matches!(method, "thread/unsubscribe" | "claude/moveExport")
+}
+
 pub(crate) async fn provider_admission(
     store: &RuntimeStore,
     transfer: &str,
@@ -869,7 +875,7 @@ pub(crate) async fn provider_read_intent(
                 .map(|saved| inline_reply(&root, saved))
                 .transpose()?;
             let mut decision = snapshot.typed_provider_read_intent(&agent, &next)?;
-            if method == "thread/unsubscribe" {
+            if source_call_needs_admission(&method) {
                 if member
                     .provider_read_intents
                     .value()
