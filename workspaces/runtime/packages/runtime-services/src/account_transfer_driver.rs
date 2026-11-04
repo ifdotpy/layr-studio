@@ -1223,9 +1223,10 @@ pub async fn execute_member(
         }
         Err(error) => Err(error),
     };
-    if result.is_err() {
+    if let Err(error) = &result {
         let operation_id = operation.to_owned();
         let failed_agent = agent_id.clone();
+        let reason = error.to_string();
         store
             .transaction_with_error(move |tx| {
                 let snapshot = load(tx, &operation_id)?;
@@ -1233,6 +1234,7 @@ pub async fn execute_member(
                     tx,
                     snapshot.typed_preparation_failed(
                         &failed_agent,
+                        &reason,
                         input
                             .operation
                             .members
@@ -1767,6 +1769,65 @@ mod request_tests {
             before, after,
             "the same blocker changes no revision or timestamp"
         );
+    }
+
+    #[test]
+    fn preparation_refusal_is_visible_and_can_be_cancelled() {
+        struct Refusing(std::sync::atomic::AtomicUsize);
+        impl TransferTransport for Refusing {
+            fn send<'a>(
+                &'a self,
+                _: &'a Ticket,
+                _: &'a crate::account_session_runtime::ConnectionScope,
+                _: &'a str,
+                _: &'a Value,
+            ) -> TransferFuture<'a, Result<TransferDispatch, TransferError>> {
+                Box::pin(async { panic!("no native request should be sent") })
+            }
+        }
+        impl TransferExecutor for Refusing {
+            fn available(&self) -> Result<(), TransferError> {
+                Ok(())
+            }
+            fn prepare<'a>(
+                &'a self,
+                _: &'a TransferPreparation,
+            ) -> TransferFuture<'a, Result<PreparedTransfer, TransferError>> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async {
+                    Err(
+                        crate::account_session_runtime::AccountSessionError::Refused(
+                            "Finish the Claude turn and background tasks before a move",
+                        )
+                        .into(),
+                    )
+                })
+            }
+        }
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4a002";
+        let executor = Refusing(std::sync::atomic::AtomicUsize::new(0));
+        request(&store, id, "lead", "target", "team", "codex", 1.0).unwrap();
+        run_async(execute_member(&store, &executor, id, "lead", 2.0)).unwrap_err();
+        let operation = Repository::get(&store.test_reader().unwrap(), id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation["members"]["lead"]["phase"], "blocked");
+        assert_eq!(
+            operation["members"]["lead"]["error"],
+            "Finish the Claude turn and background tasks before a move"
+        );
+        let retried = run_async(action(&store, id, Action::Retry, 3.0)).unwrap();
+        assert_eq!(retried["members"]["lead"]["phase"], "lazy");
+        run_async(execute_member(&store, &executor, id, "lead", 4.0)).unwrap_err();
+        assert_eq!(executor.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let cancelled = run_async(action(&store, id, Action::Cancel, 5.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let lead = stored(&store, "lead");
+        assert_eq!(lead["accountKey"], "source");
+        assert!(lead.get("accountTransferId").is_none_or(Value::is_null));
+        let lead = AgentRecord::from_value(lead).unwrap();
+        crate::account_transfer::before_start(&lead).expect("cancel releases admission");
     }
 
     #[test]

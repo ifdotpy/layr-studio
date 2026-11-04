@@ -767,16 +767,7 @@ async fn session_reply(
                 })
                 .await
         })
-        .map_err(|error| match error {
-            AccountSessionError::Expired => TransferError::Expired,
-            AccountSessionError::Requires(name) => TransferError::Requires(name),
-            AccountSessionError::Refused(_)
-            | AccountSessionError::InvalidResponse(_)
-            | AccountSessionError::Persistence
-            | AccountSessionError::Unknown => TransferError::Refused(
-                "The retained provider request failed; inspect its durable intent",
-            ),
-        })?;
+        .map_err(TransferError::from)?;
         let certainty = receipt.certainty();
         let receipt = driver::provider_read_receipt(
             context.store,
@@ -1152,18 +1143,10 @@ impl TransferExecutor for AccountTransferExecutor {
                 // No other agent may use the source account any more, so its
                 // worker can be stopped. Start it before the source reads.
                 if self.session.current_scope(source_account).is_none() {
-                    self.session.ensure_session(source_account).await.map_err(
-                        |error| match error {
-                            AccountSessionError::Expired => TransferError::Expired,
-                            AccountSessionError::Requires(name) => TransferError::Requires(name),
-                            AccountSessionError::Refused(_)
-                            | AccountSessionError::InvalidResponse(_)
-                            | AccountSessionError::Persistence
-                            | AccountSessionError::Unknown => {
-                                TransferError::Refused("The source account session did not start")
-                            }
-                        },
-                    )?;
+                    self.session
+                        .ensure_session(source_account)
+                        .await
+                        .map_err(TransferError::from)?;
                 }
                 let source_context = ProviderReadContext {
                     store: self.store.as_ref(),
