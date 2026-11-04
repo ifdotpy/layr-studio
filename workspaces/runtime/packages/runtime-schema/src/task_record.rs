@@ -413,7 +413,7 @@ mod tests {
         let input = r#"{"id":"t","agent":"a","created":1,"itemId":"i","kind":"command","status":"running","turnId":"u","type":"commandExecution","name":"run","reattachRecovery":{ "nested": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }}"#;
         let record: TaskRecord = studio_json::from_slice(input.as_bytes()).unwrap();
         assert_eq!(
-            record.reattach_recovery.as_ref().unwrap().0.get(),
+            record.reattach_recovery.as_ref().unwrap().0.as_str(),
             r#"{ "nested": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }"#
         );
         assert_eq!(studio_json::to_vec(&record).unwrap(), input.as_bytes());

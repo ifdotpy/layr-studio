@@ -223,7 +223,7 @@ fn owned_raw_json_value_conversion() {
         studio_json::to_value(&raw).expect("to value"),
         studio_json::json!({"a":1})
     );
-    let parsed: studio_json::OwnedRawJson =
-        studio_json::from_value(studio_json::json!({"a":1})).expect("from value");
+    let value = studio_json::json!({"a":1});
+    let parsed: studio_json::OwnedRawJson = studio_json::from_value(value).expect("from value");
     assert_eq!(parsed.as_str(), "{\"a\":1}");
 }

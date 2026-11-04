@@ -479,7 +479,7 @@ mod tests {
         let input = r#"{"id":"i","role":"user","text":"hello","inputs":[{"id":"in","kind":"user","text":"hello","assets":[{ "id": "\u0061", "n": 1e400 }],"provider":{ "nested": [1, 2] }}],"assets":[{ "x": 123456789012345678901234567890 }],"provider":{"z": ["\u00e9", { "n": 1e400 }]}}"#;
         let record: TranscriptItemRecord = studio_json::from_slice(input.as_bytes()).unwrap();
         assert_eq!(
-            record.extra["provider"].get(),
+            record.extra["provider"].as_str(),
             r#"{"z": ["\u00e9", { "n": 1e400 }]}"#
         );
         assert_eq!(studio_json::to_vec(&record).unwrap(), input.as_bytes());

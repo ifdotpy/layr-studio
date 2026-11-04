@@ -289,7 +289,7 @@ mod tests {
         let input = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1.0,"params":{ "provider": ["\u0061", {"n": 123456789012345678901234567890}] },"preview":{ "changes": {"x": [1, 2]} },"answerHistory":[{"id":"q","question":"?","isSecret":false,"answer":{ "nested": ["\u00e9", 1e400] }}]}"#;
         let record: RequestRecord = studio_json::from_slice(input.as_bytes()).unwrap();
         assert_eq!(
-            record.params.get(),
+            record.params.as_str(),
             r#"{ "provider": ["\u0061", {"n": 123456789012345678901234567890}] }"#
         );
         assert_eq!(studio_json::to_vec(&record).unwrap(), input.as_bytes());
