@@ -486,7 +486,9 @@ fn write_item(
 ) -> Result<(), NotificationDispatchError> {
     let (role, title) = presentation;
     let id = format!("{agent}:{key}");
-    let mut record = json!({"id":id,"role":role,"title":title,"text":text.chars().take(super::ITEM_PREVIEW_CHARS).collect::<String>(),"truncated":text.chars().count()>super::ITEM_PREVIEW_CHARS,"at":at});
+    let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(text);
+    let mut record =
+        json!({"id":id,"role":role,"title":title,"text":preview,"truncated":truncated,"at":at});
     record
         .as_object_mut()
         .ok_or(NotificationDispatchError::invalid())?
@@ -563,7 +565,8 @@ pub(super) fn flush_command(
             keys.into_iter()
                 .chain(["aggregatedOutput", "outputTruncated"].map(str::to_owned)),
         );
-        let record = json!({"id":id,"role":"output","title":"commandExecution","text":text.chars().take(super::ITEM_PREVIEW_CHARS).collect::<String>(),"truncated":text.chars().count()>super::ITEM_PREVIEW_CHARS,"at":at,"toolStatus":"running","turnId":key.turn.as_ref().map(|v|json!(v)).unwrap_or_else(||agent["turnId"].clone())});
+        let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(&text);
+        let record = json!({"id":id,"role":"output","title":"commandExecution","text":preview,"truncated":truncated,"at":at,"toolStatus":"running","turnId":key.turn.as_ref().map(|v|json!(v)).unwrap_or_else(||agent["turnId"].clone())});
         NotificationDispatchRepository::put_notification_item(
             tx, &id, agent_id, &record, at, &text, false,
         )?;

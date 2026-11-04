@@ -312,7 +312,7 @@ content.
 
 Traffic to a remote frontend stays small:
 
-- Text below a threshold (for example 8 KB compressed) comes inline. Larger text (tool
+- Text up to 8 KB compressed (`TEXT_INLINE_MAX_COMPRESSED_BYTES`) comes inline. Larger text (tool
   output, long messages) is sent as a hash and a size. The client fetches it once, when
   it opens it.
 - The stream is compressed (brotli or zstd).

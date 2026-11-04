@@ -3762,7 +3762,7 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
     let mut worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
-    let delta = peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"base","delta":"a".repeat(64 * 1024)}})).await;
+    let delta = peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"base","delta":studio_runtime_store::text_blobs::incompressible_text(64 * 1024)}})).await;
     peer.acknowledged(delta).await;
     let full_size = state
         .bridge
@@ -3802,7 +3802,9 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
         .expect("persisted stream base");
     assert_eq!(
         preserved,
-        vec![json!("a".repeat(64 * 1024))],
+        vec![json!(
+            studio_runtime_store::text_blobs::incompressible_text(64 * 1024)
+        )],
         "the current stream owns the exact base before later deltas"
     );
     let delta = peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"base","delta":"tail"}})).await;
@@ -3825,7 +3827,13 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
         })
         .await
         .unwrap();
-    assert_eq!(text, format!("{}tail", "a".repeat(64 * 1024)));
+    assert_eq!(
+        text,
+        format!(
+            "{}tail",
+            studio_runtime_store::text_blobs::incompressible_text(64 * 1024)
+        )
+    );
     assert_eq!(bases, 0);
     worker.shutdown().await.unwrap();
 }
@@ -4186,7 +4194,7 @@ async fn stream_base_and_metadata_rollback_together() {
     peer.phase("starting original turn");
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
-    let delta=peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"atomic","delta":"x".repeat(store::STREAM_FLUSH_BYTES)}})).await;
+    let delta=peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"atomic","delta":studio_runtime_store::text_blobs::incompressible_text(store::STREAM_FLUSH_BYTES)}})).await;
     peer.acknowledged(delta).await;
     peer.phase("forcing stream transaction rollback");
     state.bridge.run(move |store| async move { store.transaction_with(move |tx| {
@@ -4213,7 +4221,12 @@ async fn stream_base_and_metadata_rollback_together() {
                             |row| row.get::<_, studio_runtime_store::stored_text::StoredText>(0),
                         )?
                         .into_string();
-                    assert_eq!(body, "x".repeat(store::STREAM_FLUSH_BYTES));
+                    assert_eq!(
+                        body,
+                        studio_runtime_store::text_blobs::incompressible_text(
+                            store::STREAM_FLUSH_BYTES
+                        )
+                    );
                     assert_eq!(store::checkpoint(tx, "default", 1)?, delta);
                     tx.execute_batch("DROP TRIGGER fail_stream_metadata")?;
                     Ok(())

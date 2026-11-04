@@ -38,7 +38,6 @@ pub use stream::NotificationStreamBuffer;
 use stream::{EnqueueResult, StreamKey};
 use submission::record_submission;
 
-const ITEM_PREVIEW_CHARS: usize = 20_000;
 const SAVEPOINT: &str = "notification_dispatch_scope";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1968,12 +1967,13 @@ fn assistant_item_record(
     turn_id: Option<&str>,
     phase: Value,
 ) -> Value {
+    let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(text);
     json!({
         "id": id,
         "role": "assistant",
         "title": "Assistant",
-        "text": text.chars().take(ITEM_PREVIEW_CHARS).collect::<String>(),
-        "truncated": text.chars().count() > ITEM_PREVIEW_CHARS,
+        "text": preview,
+        "truncated": truncated,
         "at": at,
         "streaming": streaming,
         "turnId": turn_id,

@@ -149,18 +149,24 @@ pub(crate) async fn boundary(
     // request gets no principal here: its handler verifies the signature and only then
     // builds `Federated`, never from a header.
     let mut principal = None;
+    let mut own_link = None;
     if api {
-        let class = matched_operation
+        let (route_method, template) = matched_operation
             .as_ref()
             .and_then(|operation| operation.key.split_once(' '))
-            .map_or_else(
-                || crate::route_class::class_of(method.as_str(), ""),
-                |(operation_method, template)| {
-                    crate::route_class::class_of(operation_method, template)
-                },
-            )
+            .map_or((method.as_str(), ""), |(operation_method, template)| {
+                (operation_method, template)
+            });
+        let class = crate::route_class::class_of(route_method, template)
             .unwrap_or(principal::CommandClass::OwnerOnly);
-        match edge_check(request.extensions().get::<Principal>(), class) {
+        let signed = request.extensions().get::<Principal>();
+        if let Some(peer @ Principal::Peer { server }) = signed
+            && principal::access(peer, class)
+                == principal::Access::Scoped(principal::Scope::OwnLink)
+        {
+            own_link = Some(server.clone());
+        }
+        match edge_check(signed, class, route_method, template) {
             Ok(checked) => principal = checked,
             Err(()) => {
                 return error_response(
@@ -290,6 +296,12 @@ pub(crate) async fn boundary(
                 headers: header_values,
                 invalid_headers,
             };
+            if let Some(server) = own_link.take()
+                && let Some(refusal) =
+                    own_link_refusal(state.store.clone(), server, raw.body.as_ref()).await
+            {
+                return refusal;
+            }
             match state.validators.validate_matched(operation, raw) {
                 Ok(validated) => {
                     request.extensions_mut().insert(validated);
@@ -311,18 +323,64 @@ pub(crate) async fn boundary(
 
 /// The edge decision for a caller and a route class. `Ok(None)` defers a federation
 /// route to its handler, which verifies the signature before it builds `Federated`.
+/// A scoped answer passes only on a route that settles that scope
+/// (`route_class::settles`).
 pub(crate) fn edge_check(
     signed: Option<&Principal>,
     class: principal::CommandClass,
+    method: &str,
+    template: &str,
 ) -> Result<Option<Principal>, ()> {
     if class == principal::CommandClass::Federation && signed.is_none() {
         return Ok(None);
     }
     let caller = signed.cloned().unwrap_or(Principal::Owner);
-    if principal::access(&caller, class).passes_edge() {
-        Ok(Some(caller))
+    match principal::access(&caller, class) {
+        principal::Access::Allow => Ok(Some(caller)),
+        principal::Access::Scoped(scope)
+            if crate::route_class::settles(method, template, scope) =>
+        {
+            Ok(Some(caller))
+        }
+        principal::Access::Scoped(_) | principal::Access::Deny => Err(()),
+    }
+}
+
+/// The `Scope::OwnLink` check of a peer's spawn: the request names a `parent` that is
+/// the home agent of one of the peer's own links. `None` admits the request.
+async fn own_link_refusal(
+    store: Option<std::sync::Arc<studio_runtime_store::RuntimeStore>>,
+    server: String,
+    body: Option<&serde_json::Value>,
+) -> Option<Response> {
+    let refused = || {
+        Some(error_response(
+            StatusCode::FORBIDDEN,
+            "This caller may not run this command",
+        ))
+    };
+    let Some(parent) = body
+        .and_then(|body| body.get("parent"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|parent| !parent.is_empty())
+        .map(str::to_owned)
+    else {
+        return refused();
+    };
+    let Some(store) = store else {
+        return refused();
+    };
+    let owned: Result<bool, studio_runtime_store::StoreError> = store
+        .read_async("runtime-http/own-link", move |connection| {
+            Ok(studio_runtime_services::own_link::peer_owns_link(
+                connection, &server, &parent,
+            )?)
+        })
+        .await;
+    if matches!(owned, Ok(true)) {
+        None
     } else {
-        Err(())
+        refused()
     }
 }
 

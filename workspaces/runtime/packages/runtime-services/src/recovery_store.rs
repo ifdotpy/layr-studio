@@ -1027,8 +1027,9 @@ fn restore_text(
         let previous = N::transcript_item(tx, &agent_id, &id)?;
         let created = previous.as_ref().map_or(at, |(_, created)| *created);
         let mut record = json!({"id":id,"role":"assistant","title":"Assistant","at":at});
-        record["text"] = json!(body.chars().take(20_000).collect::<String>());
-        record["truncated"] = json!(body.chars().count() > 20_000);
+        let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(body);
+        record["text"] = json!(preview);
+        record["truncated"] = json!(truncated);
         record["turnId"] = turn["id"].clone();
         record["turnStatus"] = turn["status"].clone();
         record["streaming"] = json!(false);

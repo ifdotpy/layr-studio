@@ -37,10 +37,60 @@ use crate::cached_sql::CachedSql;
 use crate::stored_text::{self, STORED_TEXT_FORMAT_ZSTD};
 use crate::{StoreError, StoreResult};
 
-/// Item text longer than this many characters goes to a blob. Unit: characters.
-/// It is also the length of the preview that stays in the item record. The
-/// inline threshold of the design (about 8 KB compressed) is a follow-up.
-pub const TEXT_BLOB_MIN_CHARS: usize = 20_000;
+/// Item text whose compressed form ([`crate::stored_text::encode`]) is larger
+/// than this stays outside the item record: in `runtime_item_fulltext`, then
+/// in a blob. Unit: bytes.
+pub const TEXT_INLINE_MAX_COMPRESSED_BYTES: usize = 8 * 1024;
+
+/// Length of the preview that stays in the record of an item with long text.
+/// Unit: characters.
+pub const TEXT_PREVIEW_CHARS: usize = 8_000;
+
+/// True when `text` is too large to stay inline in an item record. Text of at
+/// most [`TEXT_INLINE_MAX_COMPRESSED_BYTES`] bytes never compresses above that
+/// size, so it skips the compression.
+pub fn is_long(text: &str) -> bool {
+    text.len() > TEXT_INLINE_MAX_COMPRESSED_BYTES
+        && stored_text::encode(text).len() > TEXT_INLINE_MAX_COMPRESSED_BYTES
+}
+
+/// The text that an item record holds, and its `truncated` flag. Every writer
+/// of an item record uses it, so that `truncated` and the
+/// `runtime_item_fulltext` row of the item writer always agree.
+pub fn item_preview(text: &str) -> (String, bool) {
+    if is_long(text) {
+        (text.chars().take(TEXT_PREVIEW_CHARS).collect(), true)
+    } else {
+        (text.to_owned(), false)
+    }
+}
+
+/// Deterministic text of `len` ASCII characters that zstd cannot compress much, so
+/// that any length above [`TEXT_INLINE_MAX_COMPRESSED_BYTES`] is long text. Tests
+/// use it; a repeated character compresses to a few bytes and stays inline.
+#[cfg(any(test, feature = "test-support"))]
+pub fn incompressible_text(len: usize) -> String {
+    const ALPHABET: &[u8; 64] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .";
+    let mut state: u64 = 0x2545_F491;
+    (0..len)
+        .map(|_| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            char::from(ALPHABET[(state >> 58) as usize])
+        })
+        .collect()
+}
+
+/// Character budget for the input excerpts of an item whose text is `text`:
+/// the preview length for long text, no limit otherwise.
+pub fn input_budget(text: &str) -> usize {
+    if is_long(text) {
+        TEXT_PREVIEW_CHARS
+    } else {
+        usize::MAX
+    }
+}
 
 /// An unreferenced text blob younger than this is never collected. Unit: seconds.
 pub const TEXT_BLOB_SWEEP_DELAY: Duration = Duration::from_secs(60 * 60);

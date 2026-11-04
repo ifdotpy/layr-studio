@@ -8,9 +8,8 @@ use studio_runtime_store::{
 };
 
 use super::{
-    DispatchOutcome, ITEM_PREVIEW_CHARS, NotificationDispatchError, PreparedSubmission,
-    SubmissionAuthorization, checked_outcome, in_savepoint, saved_text, sha256_json, stored,
-    validate_agent_write_fields,
+    DispatchOutcome, NotificationDispatchError, PreparedSubmission, SubmissionAuthorization,
+    checked_outcome, in_savepoint, saved_text, sha256_json, stored, validate_agent_write_fields,
 };
 
 /// The input owner keeps the publication fence independently of response expiry.
@@ -551,7 +550,8 @@ fn asset_ids(assets: &Value) -> Option<Vec<&str>> {
 }
 
 pub(super) fn submission_record(id: &str, submission: &PreparedSubmission) -> Value {
-    let mut remaining = ITEM_PREVIEW_CHARS;
+    let mut remaining = studio_runtime_store::text_blobs::input_budget(&submission.text);
+    let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(&submission.text);
     let inputs = submission
         .inputs
         .iter()
@@ -572,8 +572,8 @@ pub(super) fn submission_record(id: &str, submission: &PreparedSubmission) -> Va
         "id": id,
         "role": "user",
         "title": "User",
-        "text": submission.text.chars().take(ITEM_PREVIEW_CHARS).collect::<String>(),
-        "truncated": submission.text.chars().count() > ITEM_PREVIEW_CHARS,
+        "text": preview,
+        "truncated": truncated,
         "at": submission.submitted_at,
         "assets": submission.assets,
         "inputs": inputs,

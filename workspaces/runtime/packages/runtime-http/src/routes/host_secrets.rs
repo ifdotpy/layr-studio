@@ -1479,7 +1479,7 @@ mod tests {
         .await
         .expect("reserve");
         assert!(
-            matches!(tokio::time::timeout(Duration::from_millis(100), live.recv()).await.expect("progress publication").expect("live"), studio_runtime_services::resource_notify::LiveEvent::Progress(studio_runtime_schema::progress_selector::ProgressSelector::Vault { request_id, .. }) if request_id == "one")
+            matches!(tokio::time::timeout(Duration::from_millis(100), live.recv()).await.expect("progress publication"), studio_runtime_services::resource_notify::LiveEvent::Progress(studio_runtime_schema::progress_selector::ProgressSelector::Vault { request_id, .. }) if request_id == "one")
         );
         owner.shutdown().await.expect("shutdown");
     }
