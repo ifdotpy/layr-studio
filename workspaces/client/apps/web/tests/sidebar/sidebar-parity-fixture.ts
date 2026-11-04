@@ -223,7 +223,7 @@ export async function sidebarParityFixture(
         | "/api/peer-teams"
         | "/api/rename"
         | "/api/conversation"
-        | "/api/conversation/delete"
+        | "/api/commands"
         | "/api/leads"
       >;
     }[]
@@ -487,16 +487,25 @@ export async function sidebarParityFixture(
         // The legacy fixture acknowledges renames without the current receipt.
         return reply({ ok: true } satisfies JsonInput);
       }
-      if (path === "/api/conversation/delete") {
-        const body = fixturePostBody<"/api/conversation/delete">(rawBody);
-        calls[owner].push({
-          path: "/api/conversation/delete",
-          body: structuredClone(body),
-        });
-        row(body.id).deletedAt = Date.now() / 1000;
-        return reply({
-          deleted: [body.id],
-        } satisfies PostResult<"/api/conversation/delete">);
+      if (path === "/api/commands") {
+        const body = fixturePostBody<"/api/commands">(rawBody);
+        if (body.kind === "delete") {
+          calls[owner].push({
+            path: "/api/commands",
+            body: structuredClone(body),
+          });
+          row(body.target).deletedAt = Date.now() / 1000;
+          return reply({
+            status: "applied",
+            ref_kind: "agent",
+            ref_id: body.target,
+            rev: 0,
+            seq: 0,
+            rows: [],
+            kind: "delete",
+            result: { deleted: [body.target] },
+          } satisfies PostResult<"/api/commands">);
+        }
       }
       if (path === "/api/conversation") {
         const body = fixturePostBody<"/api/conversation">(rawBody);

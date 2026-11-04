@@ -1810,7 +1810,7 @@ export default function App({ active = true }: { active?: boolean }) {
               );
               setModal(null);
               void deleteConversation(
-                post,
+                (chat, signal) => serverCommand.delete(chat, { signal }),
                 id,
                 finishConversationDelete,
                 controller.signal,

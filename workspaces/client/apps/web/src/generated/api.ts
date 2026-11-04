@@ -807,23 +807,6 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
-  "/api/conversation/delete": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /** Delete Conversation */
-    post: operations["delete_conversation_api_conversation_delete_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
   "/api/costs": {
     parameters: {
       query?: never | undefined;
@@ -11059,6 +11042,8 @@ export interface components {
     CommandAnswerBody: {
       [key: string]: unknown;
     };
+    /** @description A delete has no options: it always deletes the descendants of the chat too. */
+    CommandDeleteBody: Record<string, never>;
     /** @enum {string} */
     CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
@@ -11077,6 +11062,7 @@ export interface components {
       | components["schemas"]["CommandRequestResolve"]
       | components["schemas"]["CommandRequestPause"]
       | components["schemas"]["CommandRequestAnswer"]
+      | components["schemas"]["CommandRequestDelete"]
       | components["schemas"]["CommandRequestLeadMessage"];
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
@@ -11087,6 +11073,18 @@ export interface components {
        * @enum {string}
        */
       kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestDelete: {
+      body: components["schemas"]["CommandDeleteBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "delete";
       number: number;
       target: string;
     };
@@ -11167,11 +11165,12 @@ export interface components {
       /** @enum {string} */
       action: "retry" | "delivered" | "discard";
     };
-    /** @description One applied command. The kind names the kind-specific result; only answer has one. */
+    /** @description One applied command. The kind names the kind-specific result; answer, lead_message and delete have one. */
     CommandResponse:
       | components["schemas"]["CommandResponseApplied"]
       | components["schemas"]["CommandResponseAnswer"]
-      | components["schemas"]["CommandResponseLeadMessage"];
+      | components["schemas"]["CommandResponseLeadMessage"]
+      | components["schemas"]["CommandResponseDelete"];
     CommandResponseAnswer: {
       /**
        * @description discriminator enum property added by openapi-typescript
@@ -11195,6 +11194,23 @@ export interface components {
       kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
+      rev: number;
+      rows: components["schemas"]["CommandRow"][];
+      seq: number;
+      /** @enum {string} */
+      status: "applied";
+    };
+    CommandResponseDelete: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "delete";
+      ref_id: string;
+      ref_kind: string;
+      result: {
+        deleted: string[];
+      };
       rev: number;
       rows: components["schemas"]["CommandRow"][];
       seq: number;
@@ -12494,11 +12510,6 @@ export interface components {
       account_key: string;
       /** Request Id */
       request_id: string;
-    };
-    /** DeletedResponse */
-    DeletedResponse: {
-      /** Deleted */
-      deleted: string[];
     };
     /** DeletedRuleReceipt */
     DeletedRuleReceipt: {
@@ -31917,71 +31928,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AgentResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  delete_conversation_api_conversation_delete_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["IdRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DeletedResponse"];
         };
       };
       /** @description Bad Request */

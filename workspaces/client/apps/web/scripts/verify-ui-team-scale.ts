@@ -1366,7 +1366,14 @@ async function cleanup({
     // One delete command: the server removes the lead and every descendant. A
     // lost reply is resolved by observation, never by a second command.
     try {
-      await api("POST", "/api/conversation/delete", { id: leadId });
+      await api("POST", "/api/commands", {
+        id: randomUUID(),
+        client: "verify-ui-team-scale",
+        number: Date.now(),
+        kind: "delete",
+        target: leadId,
+        body: {},
+      });
       state.deleteRequest = "confirmed";
     } catch (error) {
       state.deleteRequest = `unknown: ${String((error as Error)?.message ?? error).slice(0, 200)}`;

@@ -39,7 +39,7 @@ describe("OpenAPI transport facade", () => {
     );
     const controller = new AbortController();
     const result = post(
-      "/api/conversation/delete",
+      "/api/connection-recovery",
       { id: "lead" },
       { signal: controller.signal },
     );

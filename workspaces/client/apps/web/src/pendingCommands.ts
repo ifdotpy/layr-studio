@@ -8,12 +8,7 @@
 // proof. The response carries the changed rows, so the client does not wait for a frame.
 
 export type PendingKind =
-  | "send"
-  | "stop"
-  | "withdraw"
-  | "answer"
-  | "resolve"
-  | "pause";
+  "send" | "stop" | "withdraw" | "answer" | "resolve" | "pause" | "delete";
 
 export type PendingEntry = {
   /** The command id. */
