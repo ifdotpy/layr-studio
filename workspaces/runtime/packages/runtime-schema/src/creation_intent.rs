@@ -111,6 +111,13 @@ pub struct CreationIntent {
         skip_serializing_if = "Option::is_none"
     )]
     pub cwd: Option<String>,
+    #[serde(
+        rename = "layrStoreRoot",
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub layr_store_root: Option<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "EffortSelection::is_inherit")]

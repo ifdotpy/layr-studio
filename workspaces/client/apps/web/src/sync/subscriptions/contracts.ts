@@ -28,6 +28,9 @@ export type ResourceVersion = {
   draftSnapshot?: components["schemas"]["DraftSnapshot"] | undefined;
   /** Transient access metadata; never written to the entity cache. */
   discoverySnapshot?: components["schemas"]["AccessSnapshot"] | undefined;
+  nativeLayrSettings?:
+    | components["schemas"]["NativeLayrSettingsResponse"]
+    | undefined;
   /** Transient cursor interval and media session state. */
   voiceRecords?: components["schemas"]["VoiceRecordBatch"] | undefined;
   /** Highest entity row represented by this StateResource revision, when present. */
@@ -99,6 +102,7 @@ export function hasAppliedResourceBaseline(
     ((!!version.cursor && !!version.replyKind) ||
       !!version.progress ||
       !!version.discoverySnapshot ||
+      !!version.nativeLayrSettings ||
       !!version.voiceRecords ||
       !!version.draftChanges ||
       inlineViewApplied)

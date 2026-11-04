@@ -10,7 +10,7 @@ The chat selector calls this mode **Layr**.
 Studio defaults to the host store at `<Studio state>/layr-native/store`.
 An operator can select an existing host store with `native-layr configure --store-root`.
 Studio saves this setting in `<Studio state>/layr-native/settings.json`.
-Each prepared chat records its store in `layrStoreRoot`.
+The general Studio settings can select the same default, and the new-chat dialog offers an optional store override when Layr is selected. The override wins over the default. Each prepared chat records its store in `layrStoreRoot`.
 A root switch changes the destination for new chats. Existing chats retain their store and line.
 The agent's `PATH` selects the managed Git guard, which refuses Git writes in native lines.
 `NATIVE_LAYR_DIRECTORY` in `runtime-store/src/path.rs` owns the native metadata directory.
@@ -59,7 +59,7 @@ macOS does not require this step.
 ## Select a shared store
 
 Use an existing store outside the source project folder.
-The commands below change only Studio settings. They do not move or delete either store.
+The commands below change only Studio settings. They do not move or delete either store. A CLI change takes effect for new chats immediately; open clients display it after their stream reconnects or the server restarts.
 
 ```sh
 studio-runtime-server native-layr configure --state /path/to/studio-state \
@@ -68,6 +68,8 @@ studio-runtime-server native-layr map --state /path/to/studio-state \
   --project studio /Users/igor/Projects/codex-agents
 studio-runtime-server native-layr paths --state /path/to/studio-state
 ```
+
+The selected directory must exist, use a supported copy-on-write volume, and have a compatible store and service. The server checks the directory against registered project folders; the CLI does not open the Studio database and can only check a source folder supplied to it. On Linux, start a separate root daemon for each selected root at its corresponding socket. A refusal reports the store, socket, and binary paths. Studio does not start or stop the service.
 
 The mapping verifies the Git origin and at least one common ancestor commit.
 GitHub origins match when the GitHub repository IDs match, including a repository rename.

@@ -32,6 +32,7 @@ pub(super) fn selection(
         | ResourceRef::LimitsResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
+        | ResourceRef::NativeLayrSettingsResource(_)
         | ResourceRef::QueueResource(_)
         | ResourceRef::ReceiptsResource(_)
         | ResourceRef::RoomResource(_)

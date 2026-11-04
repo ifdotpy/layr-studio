@@ -9,29 +9,71 @@ fn from_result(result: Result<(), String>) -> NativeLayrCapability {
     }
 }
 
-/// Linux needs a btrfs store and the root daemon for this exact Studio state.
-/// This probe sends no daemon request and never creates directories or a store.
+/// Readiness of the configured store. This probe does not modify it.
 pub fn capability(state_dir: &Path) -> NativeLayrCapability {
-    if let Err(unavailable) = resolve_binary() {
-        return unavailable;
+    match super::settings::selected_store(state_dir) {
+        Ok(root) => for_store(state_dir, &root),
+        Err(error) => from_result(Err(error.to_string())),
     }
-    #[cfg(target_os = "macos")]
-    {
-        from_result(
-            super::settings::selected_store(state_dir)
-                .map(|_| ())
-                .map_err(|e| e.to_string()),
+}
+
+/// Readiness of a particular store, without changing its contents.
+pub fn for_store(state: &Path, root: &Path) -> NativeLayrCapability {
+    let binary = resolve_binary();
+    if matches!(binary, Err(NativeLayrCapability::NotInstalled)) {
+        return NativeLayrCapability::NotInstalled;
+    }
+    let result = (|| {
+        if !cfg!(any(target_os = "linux", target_os = "macos")) {
+            return Err("Native Layr is unavailable on this server.".to_owned());
+        }
+        let binary = binary
+            .as_ref()
+            .map_err(|c| c.message().unwrap_or("Layr is unavailable").to_owned())?;
+        if !root.is_absolute() || !root.is_dir() {
+            return Err(
+                "The native Layr store root must be an existing absolute folder".to_owned(),
+            );
+        }
+        #[cfg(target_os = "linux")]
+        linux_readiness_for_store(state, root)?;
+        #[cfg(target_os = "macos")]
+        if !is_copy_on_write(root) {
+            return Err("The store requires a copy-on-write volume".into());
+        }
+        let _ = binary;
+        super::versions::readiness(state, root).map_err(|e| e.to_string())
+    })();
+    from_result(result.map_err(|reason| {
+        format!(
+            "{reason} Store: {}; socket: {}; binary: {}.",
+            root.display(),
+            super::socket_path_in_store(state, root).display(),
+            binary
+                .ok()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "unavailable".into())
         )
+    }))
+}
+
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "read the volume type without creating a probe file"
+)]
+fn is_copy_on_write(root: &Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(file) = std::fs::File::open(root) else {
+        return false;
+    };
+    // SAFETY: fstatfs fills a valid structure and the descriptor remains open.
+    let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stats) } != 0 {
+        return false;
     }
-    #[cfg(target_os = "linux")]
-    {
-        from_result(linux_readiness(state_dir))
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        let _ = state_dir;
-        from_result(Err("Native Layr is unavailable on this server.".into()))
-    }
+    // SAFETY: f_fstypename is a NUL-terminated kernel-supplied name.
+    unsafe { std::ffi::CStr::from_ptr(stats.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
 }
 
 pub fn resolve_binary() -> Result<PathBuf, NativeLayrCapability> {
@@ -80,22 +122,21 @@ fn resolve_binary_in_path(path: &std::ffi::OsStr) -> Result<PathBuf, NativeLayrC
 }
 
 #[cfg(target_os = "linux")]
-fn linux_readiness(state_dir: &Path) -> Result<(), String> {
+fn linux_readiness_for_store(state_dir: &Path, store: &Path) -> Result<(), String> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    let store = super::settings::selected_store(state_dir).map_err(|e| e.to_string())?;
     if !store.is_dir()
-        || rustix::fs::statfs(&store)
+        || rustix::fs::statfs(store)
             .map(|info| info.f_type as u64)
             .ok()
             != Some(linux_raw_sys::general::BTRFS_SUPER_MAGIC as u64)
     {
         return Err(format!(
-            "Native Layr requires a btrfs store at {}.",
+            "Native Layr requires a copy-on-write volume for store {}.",
             store.display()
         ));
     }
-    let socket = super::selected_socket_path(state_dir).map_err(|e| e.to_string())?;
-    let refusal = || format!("Start the native Layr root daemon at {}.", socket.display());
+    let socket = super::socket_path_in_store(state_dir, store);
+    let refusal = || "The store service for this folder is not running.".to_owned();
     let metadata = std::fs::symlink_metadata(&socket).map_err(|_| refusal())?;
     if !metadata.file_type().is_socket() || metadata.uid() != 0 {
         return Err(refusal());
@@ -184,6 +225,16 @@ mod tests {
                     .into_path_buf()
             )
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_capability_checks_the_requested_store() {
+        let state = tempfile::tempdir().expect("state");
+        let requested = state.path().join("missing-store");
+        let reason =
+            linux_readiness_for_store(state.path(), &requested).expect_err("missing store");
+        assert!(reason.contains(requested.to_str().expect("path")));
     }
 
     #[test]

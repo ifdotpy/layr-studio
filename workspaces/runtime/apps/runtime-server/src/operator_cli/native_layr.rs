@@ -105,6 +105,23 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
             if default_store == store_root.is_some() {
                 return Err("Supply either --store-root or --default-store".into());
             }
+            if !projects.is_empty() {
+                let default_root = studio_runtime_services::layr_native::store_path(&state);
+                let root = studio_runtime_services::layr_native::settings::validate_root(
+                    &state,
+                    store_root.as_deref().unwrap_or(&default_root),
+                )?;
+                for project in &projects {
+                    let project = if project.is_absolute() {
+                        project.clone()
+                    } else {
+                        std::env::current_dir()?.join(project)
+                    };
+                    studio_runtime_services::layr_native::settings::check_project_overlap(
+                        &root, &project,
+                    )?;
+                }
+            }
             println!(
                 "{}",
                 studio_runtime_services::layr_native::settings::configure(

@@ -53,19 +53,58 @@ pub fn selected_store(state: &Path) -> Result<PathBuf> {
     }
 }
 
+pub fn resolve_for_new_chat(state: &Path, root: Option<&Path>) -> Result<PathBuf> {
+    match root {
+        Some(root) => Ok(root.to_owned()),
+        None => selected_store(state),
+    }
+}
+
+pub fn check_project_overlap(root: &Path, project: &Path) -> Result<()> {
+    let project = CanonicalPath::missing_tail(project)
+        .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the project folder".into()))?
+        .into_path_buf();
+    if root.starts_with(&project) || project.starts_with(root) {
+        return Err(NativeLayrError::Refused(
+            "The Layr store must be outside the project folder".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_root(state: &Path, root: &Path) -> Result<PathBuf> {
+    if !root.is_absolute() || !root.is_dir() {
+        return Err(NativeLayrError::Refused(
+            "The native Layr store root must be an existing absolute folder".into(),
+        ));
+    }
+    let root = CanonicalPath::existing(root)?.into_path_buf();
+    let state = CanonicalPath::existing(state)?.into_path_buf();
+    if (root.starts_with(&state) || state.starts_with(&root))
+        && !same_root(&root, &store_path(&state))
+    {
+        return Err(NativeLayrError::Refused(
+            "The native Layr store must be outside the Studio state directory".into(),
+        ));
+    }
+    let capability = super::capability::for_store(&state, &root);
+    if !capability.is_ready() {
+        return Err(NativeLayrError::Refused(
+            capability
+                .message()
+                .unwrap_or("Native Layr is unavailable")
+                .into(),
+        ));
+    }
+    Ok(root)
+}
+
 /// Change only the destination for new imports and mappings. Existing roots stay intact.
 pub fn configure(state: &Path, root: Option<&Path>) -> Result<Value> {
-    let root = root
-        .map(|root| {
-            if !root.is_absolute() || !root.is_dir() {
-                return Err(NativeLayrError::Refused(
-                    "The native Layr store root must be an existing absolute folder".into(),
-                ));
-            }
-            Ok(CanonicalPath::existing(root)?.into_path_buf())
-        })
-        .transpose()?;
-    let settings = Settings { store_root: root };
+    let validated = validate_root(state, root.unwrap_or(&store_path(state)))?;
+    let settings = Settings {
+        store_root: root.map(|_| validated.clone()),
+    };
     let folder = state.join(NATIVE_LAYR_DIRECTORY);
     fs::create_dir_all(&folder)?;
     crate::atomic_file::replace(
@@ -76,7 +115,20 @@ pub fn configure(state: &Path, root: Option<&Path>) -> Result<Value> {
         Some(0o600),
         true,
     )?;
-    Ok(json!({"storeRoot":selected_store(state)?}))
+    Ok(json!({"storeRoot":validated}))
+}
+
+#[cfg(test)]
+pub(super) fn fixture_select(state: &Path, root: &Path) {
+    fs::create_dir_all(state.join(NATIVE_LAYR_DIRECTORY)).expect("settings folder");
+    fs::write(
+        path(state),
+        studio_json::to_string(&Settings {
+            store_root: Some(root.to_owned()),
+        })
+        .unwrap(),
+    )
+    .expect("settings");
 }
 
 pub(super) fn same_root(left: &Path, right: &Path) -> bool {
@@ -180,6 +232,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_layr_rejects_project_store_overlap() {
+        let project = tempfile::tempdir().expect("project");
+        let store = project.path().join("store");
+        assert!(check_project_overlap(&store, project.path()).is_err());
+        assert!(check_project_overlap(project.path(), &store).is_err());
+        let other = tempfile::tempdir().expect("other");
+        assert!(check_project_overlap(other.path(), project.path()).is_ok());
+    }
+
+    #[test]
+    fn native_layr_rejects_a_store_inside_the_state_directory() {
+        let state = tempfile::tempdir().expect("state");
+        let root = state.path().join("other");
+        fs::create_dir(&root).unwrap();
+        let error = validate_root(state.path(), &root).unwrap_err();
+        assert!(error.to_string().contains("outside the Studio state"));
+    }
+
+    #[test]
+    fn native_layr_chat_store_override_wins_over_default() {
+        let state = tempfile::tempdir().expect("state");
+        let default = tempfile::tempdir().expect("default");
+        let override_root = tempfile::tempdir().expect("override");
+        std::fs::create_dir_all(state.path().join(NATIVE_LAYR_DIRECTORY)).unwrap();
+        std::fs::write(
+            path(state.path()),
+            studio_json::to_string(&Settings {
+                store_root: Some(default.path().to_owned()),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_for_new_chat(state.path(), Some(override_root.path())).unwrap(),
+            override_root.path()
+        );
+        assert_eq!(
+            resolve_for_new_chat(state.path(), None).unwrap(),
+            CanonicalPath::existing(default.path())
+                .unwrap()
+                .into_path_buf()
+        );
+    }
+
+    #[test]
     fn native_layr_owned_store_detection_resolves_aliases_before_first_import() {
         let fixture = tempfile::tempdir().expect("fixture");
         let root = store_path(fixture.path());
@@ -251,7 +348,7 @@ mod tests {
     fn native_layr_selected_store_has_its_own_service_socket() {
         let state = tempfile::tempdir().expect("state");
         let other = tempfile::tempdir().expect("store");
-        configure(state.path(), Some(other.path())).expect("configure");
+        fixture_select(state.path(), other.path());
         let env = super::super::transport_environment_in_store(
             state.path(),
             &selected_store(state.path()).expect("store"),
