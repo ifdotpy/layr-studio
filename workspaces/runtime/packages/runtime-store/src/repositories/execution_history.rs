@@ -666,22 +666,13 @@ impl ExecutionHistoryRepository {
                         return Err(Self::invalid("runtime_execution_attempts", id));
                     }
                 };
-            saved.insert(
-                "admission".into(),
-                studio_json::to_raw_value(&admission)?,
-            );
-            saved.insert(
-                "rootRequestId".into(),
-                studio_json::to_raw_value(&root)?,
-            );
+            saved.insert("admission".into(), studio_json::to_raw_value(&admission)?);
+            saved.insert("rootRequestId".into(), studio_json::to_raw_value(&root)?);
         }
         let run_id = &run.id;
         let terminal = execution_terminal(run.status);
         saved.insert("runId".into(), studio_json::to_raw_value(&run_id)?);
-        saved.insert(
-            "submission".into(),
-            studio_json::to_raw_value(&evidence)?,
-        );
+        saved.insert("submission".into(), studio_json::to_raw_value(&evidence)?);
         saved.insert(
             "prepareAttemptId".into(),
             studio_json::to_raw_value(&agent.prepare_attempt.value())?,
@@ -912,7 +903,10 @@ mod tests {
         assert_eq!(attempt.start.id.as_deref(), Some("attempt"));
         assert_eq!(attempt.run_id, "run");
         assert_eq!(attempt.submission, Some(AttemptSubmission::Unsent));
-        assert_eq!(attempt.input_identity.unwrap().as_str(), r#"[{"id":"event"}]"#);
+        assert_eq!(
+            attempt.input_identity.unwrap().as_str(),
+            r#"[{"id":"event"}]"#
+        );
     }
 
     #[test]

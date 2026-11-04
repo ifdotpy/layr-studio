@@ -838,7 +838,8 @@ fn load_agent(tx: &Transaction<'_>, agent_id: &str) -> Result<Value, WorkspaceCl
         .optional()
         .map_err(StoreError::from)?;
     let raw = raw.ok_or(WorkspaceCleanupError::InvalidRecord)?;
-    let mut agent = studio_json::from_str(&raw).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
+    let mut agent =
+        studio_json::from_str(&raw).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
     studio_runtime_store::agent_volatile::merge(tx, agent_id, &mut agent)?;
     Ok(agent)
 }

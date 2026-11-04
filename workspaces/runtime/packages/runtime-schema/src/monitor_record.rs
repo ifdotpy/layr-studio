@@ -1,8 +1,8 @@
 //! Typed persisted monitor rows and their open transport evidence.
 use crate::studio_errors::MonitorStatus;
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::{borrow::Cow, collections::BTreeMap};
+use studio_json::Value;
 
 pub use crate::bounded_integer::BoundedInteger as MonitorInteger;
 pub use crate::bounded_text::BoundedText as MonitorText;

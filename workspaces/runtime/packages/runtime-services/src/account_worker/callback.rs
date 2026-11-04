@@ -1,6 +1,6 @@
 //! Callback services plug into this typed dispatch boundary.
-use studio_json::{Value, json};
 use std::sync::{Arc, LazyLock};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, ResponseBody};
 use studio_runtime_store::{AgentExecutionMode, AgentRecord, JsonRecord, RuntimeStore};
 use tokio::sync::Notify;
@@ -781,8 +781,8 @@ mod tests {
 #[cfg(test)]
 mod catalog_wait_tests {
     use super::{CatalogWait, wait_for_managed_catalog};
-    use studio_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::{Method, RequestFrame, RequestId};
     use studio_runtime_store::RuntimeStore;
 
@@ -876,8 +876,8 @@ mod vm_auth_tests {
         VmProviderAuthFuture, VmProviderLaunchFuture, VmProviderLaunchRequest,
         VmProviderLaunchResolver,
     };
-    use studio_json::Map;
     use std::sync::{Arc, Mutex};
+    use studio_json::Map;
     use studio_runtime_providers::{RequestId, UnknownMethodFrame};
 
     struct Resolver {

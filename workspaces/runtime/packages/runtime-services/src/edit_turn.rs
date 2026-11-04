@@ -13,9 +13,9 @@
 //! provider, so a test can check them without a provider process or a Git repository.
 
 use rusqlite::{Connection, params};
-use studio_json::Value;
 use std::collections::HashSet;
 use std::future::Future;
+use studio_json::Value;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditTurnError {
@@ -87,9 +87,9 @@ where
 mod tests {
     use super::{set_item_visibility, snapshot_then_restore};
     use rusqlite::Connection;
-    use studio_json::{Value, json};
     use std::cell::RefCell;
     use std::collections::HashSet;
+    use studio_json::{Value, json};
 
     fn items(ids: &[&str]) -> Connection {
         let connection = Connection::open_in_memory().expect("memory database");

@@ -1,7 +1,7 @@
 //! Monitor admission uses current ownership while retaining prepared permissions.
 use crate::monitor_fixtures as fixtures;
-use studio_json::{Value, json};
 use std::sync::Mutex;
+use studio_json::{Value, json};
 use studio_runtime_services::{
     monitor_driver::{self, MonitorNative, Submission},
     monitor_policy::{Effect, Operation},

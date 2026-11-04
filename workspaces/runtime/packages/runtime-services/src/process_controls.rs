@@ -2,8 +2,8 @@
 //! Listing is read-only; native effects are driven only after an action is claimed.
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rusqlite::{Connection, OptionalExtension, params};
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
     BackgroundTaskAction, BackgroundTaskDisplay, BackgroundTaskIndicator, BackgroundTaskKind,
@@ -493,8 +493,9 @@ pub fn owners(connection: &Connection, scope: &str) -> Result<Vec<Value>, Error>
         .map_err(StoreError::from)?;
     let mut result = vec![root];
     for row in rows {
-        result
-            .push(studio_json::from_str(&row.map_err(StoreError::from)?).map_err(StoreError::from)?);
+        result.push(
+            studio_json::from_str(&row.map_err(StoreError::from)?).map_err(StoreError::from)?,
+        );
     }
     Ok(result)
 }

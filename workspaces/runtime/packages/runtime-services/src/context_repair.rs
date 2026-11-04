@@ -12,9 +12,9 @@ use crate::account_session_runtime::{
     RequestCertainty,
 };
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{ContextRepairPhase, RequestIdentity};
 use studio_runtime_store::{
     AgentRecord, ContextRepairRepository, RuntimeStore, StoreError, Transaction,
@@ -2027,7 +2027,8 @@ mod repair_history_tests {
 
     #[test]
     fn undispatched_repair_does_not_create_an_unused_diagnostic() {
-        let mut agent = studio_json::from_str(r#"{"contextRepair":{"phase":"preparing"}}"#).unwrap();
+        let mut agent =
+            studio_json::from_str(r#"{"contextRepair":{"phase":"preparing"}}"#).unwrap();
         archive_previous_repair(&mut agent).unwrap();
         assert!(agent.get("lastContextRepairCheck").is_none());
         assert!(agent.get("contextRepairHistory").is_none());

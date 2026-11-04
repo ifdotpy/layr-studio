@@ -3,8 +3,8 @@
 use crate::shared_values::MAX_SAFE_INTEGER;
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Deserializer, de::Error};
-use studio_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(transparent)]
@@ -276,8 +276,8 @@ impl RecoveryAgentRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use studio_json::json;
     use sha2::{Digest, Sha256};
+    use studio_json::json;
 
     #[test]
     fn recovery_attempt_rejects_invalid_action() {

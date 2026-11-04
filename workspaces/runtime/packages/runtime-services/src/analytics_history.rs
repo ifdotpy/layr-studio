@@ -9,8 +9,8 @@ use crate::analytics_capture::{
 };
 use crate::analytics_rollout::{RolloutAction, RolloutContext};
 use rusqlite::OptionalExtension;
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 mod read_proof;
 use read_proof::ReadProof;

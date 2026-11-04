@@ -3,8 +3,8 @@ use crate::protocol::{CommandError, Request, Response};
 use base64::Engine;
 use reqwest::{Client, Url};
 use serde::Deserialize;
-use studio_json::Value;
 use std::{sync::Arc, time::Duration};
+use studio_json::Value;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]

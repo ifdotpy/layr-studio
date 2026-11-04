@@ -330,14 +330,17 @@ mod tests {
         let body =
             r#"{"requestId":"r","resources":[{"kind":"transcript","agentId":"a","tail":40.0}]}"#;
         assert!(studio_json::from_str::<ResourceNotifyRequest>(body).is_err());
-        assert!(studio_json::from_str::<ResourceNotifyRequest>(&body.replace("40.0", "40")).is_ok());
+        assert!(
+            studio_json::from_str::<ResourceNotifyRequest>(&body.replace("40.0", "40")).is_ok()
+        );
     }
 
     #[test]
     fn resource_ref_matches_schema_and_preserves_canonical_key() {
         let validator = crate::compiled_validator("ResourceRef").expect("resource schema");
         let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
         for (path, limit) in [
             (
                 "/components/schemas/AuthProgressResource/properties/requestId/maxLength",

@@ -1,9 +1,9 @@
 use axum::extract::{FromRequest, FromRequestParts};
 use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
-use studio_json::Value;
 #[cfg(test)]
 use std::sync::Arc;
+use studio_json::Value;
 
 use crate::error::ApiError;
 
@@ -238,9 +238,9 @@ mod tests {
     use axum::routing::{get, post};
     use axum::{Json, Router};
     use serde::Deserialize;
-    use studio_json::{Value, json};
     #[cfg(test)]
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use tower::ServiceExt;
 
     #[cfg(test)]
@@ -367,7 +367,10 @@ mod tests {
         let app = with_validated(
             Router::new().route("/items", get(query_handler)),
             ValidatedRequest {
-                query: Arc::new(studio_json::Map::from_iter([("value".to_owned(), json!(1))])),
+                query: Arc::new(studio_json::Map::from_iter([(
+                    "value".to_owned(),
+                    json!(1),
+                )])),
                 ..ValidatedRequest::default()
             },
         );

@@ -2,8 +2,8 @@
 use crate::MAX_SAFE_INTEGER;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::Value;
 
 /// Largest draft text, measured in Unicode code points.
 pub const MAX_DRAFT_TEXT_CODEPOINTS: usize = 100_000;

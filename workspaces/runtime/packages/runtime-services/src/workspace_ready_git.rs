@@ -18,11 +18,11 @@ use crate::workspace_ready::{
     GitObservation, ProvisionEffect, Reservation, WorkspaceActor, WorkspaceDecision,
     decide_workspace, recovery, unsupported,
 };
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use studio_json::{Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::workspace_ready::WorkspacePaths;
 use studio_runtime_store::workspace_ready::{

@@ -4087,9 +4087,11 @@ async fn publish_pending(
             .chain(&publication.coalesced_effects)
         {
             let effect: crate::notification_dispatch::NotificationPostCommit =
-                studio_json::from_str(raw.as_str()).map_err(|_| StoreError::InvalidStoredObject {
-                    table: "runtime_outbox",
-                    id: id.to_owned(),
+                studio_json::from_str(raw.as_str()).map_err(|_| {
+                    StoreError::InvalidStoredObject {
+                        table: "runtime_outbox",
+                        id: id.to_owned(),
+                    }
                 })?;
             if let crate::notification_dispatch::NotificationPostCommit::TokenRateUsage(observation) =
                 &effect

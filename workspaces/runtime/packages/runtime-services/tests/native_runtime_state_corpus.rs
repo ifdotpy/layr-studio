@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::{fs, path::Path};
 
+use std::collections::BTreeMap;
 use studio_json::Value;
 use studio_json::json;
-use std::collections::BTreeMap;
 use tempfile::TempDir;
 
 struct NoProbe;

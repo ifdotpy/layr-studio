@@ -2,7 +2,6 @@ use crate::login_fixtures as claude_fixture;
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 
 use claude_fixture::{Fixture as ClaudeFixture, Script};
-use studio_json::{Value, json};
 use std::{
     path::Path,
     sync::{
@@ -10,6 +9,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::{Method, RequestId, RequestTicket};
 use studio_runtime_services::{
     account_driver::{AccountDriver, AuthMetadata, AuthStatus},

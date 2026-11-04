@@ -1,10 +1,10 @@
 use rusqlite::{Connection, params};
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_services::{
     coordination,
     linux_vm_guest::{GuestError, GuestRpc, GuestSpaceProbe, UnixGuestRpc},
@@ -396,7 +396,8 @@ fn vm_and_mac_functions_match_frozen_corpus_for_each_resolution_choice() {
                     |row| row.get(0),
                 )
                 .expect("Rust P03 metadata");
-            let mut rust_meta: Value = studio_json::from_str(&metadata).expect("Rust metadata JSON");
+            let mut rust_meta: Value =
+                studio_json::from_str(&metadata).expect("Rust metadata JSON");
             let mut python_meta = expected_meta.clone();
             clean_time(&mut rust_meta);
             clean_time(&mut python_meta);

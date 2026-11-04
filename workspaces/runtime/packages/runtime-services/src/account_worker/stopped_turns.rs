@@ -13,8 +13,8 @@
 //! turn of its provider generation, and ends it as the stop would have.
 use super::retained::{RequestActor, RequestResult, RetainedSessionPort, SessionRequest};
 use crate::recovery_history::ConnectionScope;
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository,

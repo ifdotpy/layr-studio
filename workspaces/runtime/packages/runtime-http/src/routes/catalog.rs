@@ -216,8 +216,8 @@ mod tests {
         extract::ConnectInfo,
         http::Request,
     };
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_services::{
         account_driver::AccountDriver, account_policy::AccountPolicyState,
     };

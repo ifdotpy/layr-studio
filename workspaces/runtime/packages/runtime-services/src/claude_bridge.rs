@@ -2,8 +2,8 @@
 //! Native credentials stay with the CLI; all account evidence is injected.
 use crate::account_driver::{AuthMetadata, AuthStatus};
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
+use studio_json::{Value, json};
 use studio_runtime_process::ProviderLaunchSpec;
 /// Launch variable that binds a bridge to its credential identity.
 pub const CREDENTIAL_IDENTITY_ENVIRONMENT: &str = "STUDIO_CLAUDE_CREDENTIAL_IDENTITY";
@@ -340,7 +340,9 @@ fn finish_bridge_options(
     Ok(Value::Object(options))
 }
 
-pub(crate) fn bridge_launch_args(args: &str) -> Result<studio_json::Map<String, Value>, BridgeHold> {
+pub(crate) fn bridge_launch_args(
+    args: &str,
+) -> Result<studio_json::Map<String, Value>, BridgeHold> {
     if args.len() > 4096 {
         return Err(BridgeHold::Options);
     }

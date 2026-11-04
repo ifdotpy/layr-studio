@@ -5,8 +5,8 @@ use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use studio_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
+use studio_json::Value;
 use studio_runtime_services::usage::{self, UsageError};
 use studio_runtime_store::{UsageRepositoryError, disable_usage_resume};
 
@@ -209,15 +209,15 @@ async fn capacity_retry(
                         .map_err(studio_runtime_store::StoreError::from)?;
                     let response = studio_json::from_str::<crate::generated::RetryResponse>(&raw)
                         .map_err(|error| {
-                            studio_runtime_services::continuation::ContinuationError::Invalid(
-                                if error.is_syntax() || error.is_eof() {
-                                    "/capacity/record"
-                                } else {
-                                    "/capacity/response"
-                                }
-                                .to_owned(),
-                            )
-                        })?;
+                        studio_runtime_services::continuation::ContinuationError::Invalid(
+                            if error.is_syntax() || error.is_eof() {
+                                "/capacity/record"
+                            } else {
+                                "/capacity/response"
+                            }
+                            .to_owned(),
+                        )
+                    })?;
                     Ok::<_, studio_runtime_services::continuation::ContinuationError>((
                         response,
                         staged.changed(),
@@ -373,9 +373,9 @@ mod tests {
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use axum::http::{Method as HttpMethod, Request, StatusCode};
-    use studio_json::{Value, json};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
+    use studio_json::{Value, json};
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
     use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
     use studio_runtime_services::account_session_runtime::{

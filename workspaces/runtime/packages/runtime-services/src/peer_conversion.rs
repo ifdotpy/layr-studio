@@ -7,9 +7,9 @@ use crate::projects::operations::{
 };
 use crate::projects::{ProjectsError, project_key};
 use rusqlite::{Connection, Transaction, params};
-use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::peer_team_ingress::Convert;
 use studio_runtime_store::{
     ProjectsRepository, RuntimeStore, SyncDocumentsRepository, system_reads as records,

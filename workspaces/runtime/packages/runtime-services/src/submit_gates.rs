@@ -4,9 +4,9 @@
 
 use crate::event_write::truthy;
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::time::Instant;
+use studio_json::{Value, json};
 use studio_runtime_store::path_identity::LexicalPath;
 use thiserror::Error;
 
@@ -786,8 +786,8 @@ impl ExecutionSnapshot {
                     .as_object_mut()
                     .ok_or_else(|| invalid("agent"))?
                     .extend(stored.clone());
-                let settings =
-                    studio_json::from_value(merged).map_err(|_| invalid("agent/pendingSettings"))?;
+                let settings = studio_json::from_value(merged)
+                    .map_err(|_| invalid("agent/pendingSettings"))?;
                 Ok(PendingSettings { stored, settings })
             })
             .transpose()?;

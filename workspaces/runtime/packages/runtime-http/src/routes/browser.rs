@@ -5,7 +5,6 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
 };
-use studio_json::{Value, json};
 use std::{
     future::Future,
     net::SocketAddr,
@@ -13,6 +12,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use studio_json::{Value, json};
 use studio_runtime_services::{
     browser::{BrowserError, BrowserForwarder, ExchangeOutcome, ForwardInput, PairedExchange},
     linux_vm_guest::GuestRpc,
@@ -59,7 +59,8 @@ impl PairedExchange for SignedBrowserExchange {
                 .unwrap_or(DeliveryOutcome::Unknown);
             Ok(match outcome {
                 DeliveryOutcome::Applied(value) => ExchangeOutcome::Applied(
-                    studio_json::from_str(value.value.as_str()).map_err(|_| BrowserError::Exchange)?,
+                    studio_json::from_str(value.value.as_str())
+                        .map_err(|_| BrowserError::Exchange)?,
                 ),
                 DeliveryOutcome::NotApplied(error) => ExchangeOutcome::NotApplied(error),
                 DeliveryOutcome::Unknown => ExchangeOutcome::Unknown,
@@ -208,8 +209,8 @@ inventory::submit! {
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
-    use studio_json::{Value, json};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use studio_json::{Value, json};
     use tower::ServiceExt;
 
     #[test]

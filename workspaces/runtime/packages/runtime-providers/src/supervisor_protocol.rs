@@ -1,7 +1,7 @@
 //! Pure supervisor admission and journal decisions. No I/O or clock access.
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 
 /// Version of the maintained process supervisor wire protocol.
 pub const SUPERVISOR_PROTOCOL_VERSION: u64 = 3;

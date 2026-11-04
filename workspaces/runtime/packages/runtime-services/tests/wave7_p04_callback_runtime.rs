@@ -2,8 +2,8 @@
 #![allow(clippy::unwrap_used)]
 use crate::callback_fixtures as fixture;
 use fixture::*;
-use studio_json::json;
 use std::sync::Arc;
+use studio_json::json;
 use studio_runtime_schema::persistence::{OutboxStatus, ToolRequestStatus};
 use studio_runtime_services::{callback_runtime::*, provider_callbacks::*};
 use studio_runtime_store::{

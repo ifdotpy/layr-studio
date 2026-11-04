@@ -285,8 +285,8 @@ fn other_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use studio_json::json;
     use std::sync::Arc;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     #[tokio::test]

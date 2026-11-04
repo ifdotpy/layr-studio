@@ -23,8 +23,8 @@ use std::{
 };
 
 use serde::Deserialize;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Method, ProviderKind};
 use studio_runtime_schema::provider_lifecycle::CodexTurnStatus;
 use studio_runtime_services::{
@@ -195,7 +195,7 @@ fn supervisor_health_payload(
     if status.recovery.blocked.is_some() || status.recovery.degraded {
         return json!({"error":"Supervisor crash recovery needs operator attention."});
     }
-    serde_json::to_value(status)
+    studio_json::to_value(status)
         .unwrap_or_else(|_| json!({"error":"invalid supervisor health response"}))
 }
 
@@ -236,7 +236,7 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
                 return ProviderDiagnosticsSnapshot {
                     native_accounts: json!({}),
                     studio_loaded_threads: 0,
-                    queues: serde_json::Map::new(),
+                    queues: studio_json::Map::new(),
                     account_workers: json!({}),
                 };
             };
@@ -278,7 +278,7 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
                 }));
             let (queue_counts, account_reads, worker_reads) =
                 tokio::join!(queue_counts, account_reads, worker_reads);
-            let mut account_workers = serde_json::Map::new();
+            let mut account_workers = studio_json::Map::new();
             for (index, read) in worker_reads.into_iter().enumerate() {
                 let value = match read {
                     Ok(Some(value)) => value,
@@ -289,15 +289,15 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
             }
             let (local_queues, idle_limit_seconds) =
                 queue_counts.unwrap_or_else(|_| (vec![(0, 0); active.len()], 0));
-            let mut native_accounts = serde_json::Map::new();
-            let mut queues = serde_json::Map::new();
+            let mut native_accounts = studio_json::Map::new();
+            let mut queues = studio_json::Map::new();
             let mut loaded_threads = 0_u64;
             for (index, ((_, provider, _), result)) in active.iter().zip(account_reads).enumerate()
             {
                 let alias = format!("account{}", index + 1);
                 match (result, *provider) {
                     (Some(value), ProviderKind::Claude) => {
-                        let mut row = serde_json::Map::new();
+                        let mut row = studio_json::Map::new();
                         row.insert("provider".to_owned(), json!(ProviderKind::Claude.key()));
                         if let Some(fields) = value.as_object() {
                             row.extend(fields.clone());
@@ -547,7 +547,7 @@ impl TitleRequestPort for ProviderTitleRequestPort {
             // Cancellation or process loss during a submitted write must leave
             // the same cwd available when the durable receipt is inspected.
             home.retain();
-            let mut thread_params = serde_json::Map::new();
+            let mut thread_params = studio_json::Map::new();
             thread_params.insert("cwd".into(), json!(home.path()));
             thread_params.insert("model".into(), json!(request.model));
             thread_params.insert("ephemeral".into(), json!(true));
@@ -872,9 +872,9 @@ mod tests {
         ProviderTitleRequestPort, SupervisorDiagnostics, TitleHome, account_queue_counts,
         leased_session_binary,
     };
-    use serde_json::{Value, json};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, SystemTime};
+    use studio_json::{Value, json};
     use studio_runtime_providers::Method;
     use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
     use studio_runtime_services::account_session_runtime::{
@@ -1357,8 +1357,8 @@ mod tests {
             json!({"thread": {"id": ""}}),
             json!({"thread": {"id": boundary, "extra": {"any": true}}, "future": 9}),
             json!({"thread": {"id": over}}),
-            serde_json::from_str::<Value>(r#"{"thread":{"id":"first","id":"last"}}"#).unwrap(),
-            serde_json::from_str::<Value>(r#"{"thread":{"id":"old"},"thread":{"id":false}}"#)
+            studio_json::from_str::<Value>(r#"{"thread":{"id":"first","id":"last"}}"#).unwrap(),
+            studio_json::from_str::<Value>(r#"{"thread":{"id":"old"},"thread":{"id":false}}"#)
                 .unwrap(),
         ];
         for value in cases {
@@ -1505,7 +1505,7 @@ mod tests {
             protocol: studio_runtime_process::SUPERVISOR_PROTOCOL_VERSION,
             state_dir: state.display().to_string(),
             handles: vec![
-                serde_json::from_value(json!({
+                studio_json::from_value(json!({
                     "id":"account-fixture", "pid":4123, "signature":"exact-provider-signature",
                     "startTime":"fixture-process-start", "jobIdentity":"fixture-job",
                     "sequence":19, "acknowledged":17, "bufferedBytes":128,
@@ -1532,7 +1532,7 @@ mod tests {
         let fixture = tempfile::tempdir().expect("supervisor health fixture");
         let state = fixture.path().join("state");
         let status = supervisor_health_status(&state);
-        let expected = serde_json::to_value(status.clone()).expect("health document");
+        let expected = studio_json::to_value(status.clone()).expect("health document");
         assert_eq!(super::supervisor_health_payload(status, &state), expected);
     }
 
@@ -1577,7 +1577,7 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES('agent-a',?1)",
-                    [serde_json::json!({"id":"agent-a","accountKey":"account-a","provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
+                    [studio_json::json!({"id":"agent-a","accountKey":"account-a","provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_tool_requests(id,record) VALUES('callback-a',?1)",

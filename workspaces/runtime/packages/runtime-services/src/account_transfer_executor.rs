@@ -23,7 +23,6 @@ use crate::{
         StoredField,
     },
 };
-use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     fs,
@@ -34,6 +33,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::RuntimeStore;
@@ -2010,9 +2010,10 @@ mod destination_settings_tests {
             history.to_str().unwrap(),
         )
         .unwrap();
-        let manifest: Value =
-            studio_json::from_slice(&fs::read(target.join(".studio-account-imports.json")).unwrap())
-                .unwrap();
+        let manifest: Value = studio_json::from_slice(
+            &fs::read(target.join(".studio-account-imports.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             manifest["sessions/.studio-imports/golden.jsonl"]["sha256"],
             "62e246317762ee0bc6d9090a820ce23f01c74a1aab542d3fb1034928e31edc4d"
@@ -2185,8 +2186,8 @@ mod retained_executor_tests {
     use crate::account_session_runtime::{
         AccountSessionError, ConnectionScope, ProviderRequest, SessionReceipt,
     };
-    use studio_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::{RequestId, RequestTicket};
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository};
 

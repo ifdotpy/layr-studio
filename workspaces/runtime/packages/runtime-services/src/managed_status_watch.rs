@@ -13,8 +13,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::agent_limits::{
     DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_SUBAGENT_CONCURRENCY, MAX_SUBAGENT_CONCURRENCY,
     MIN_GLOBAL_CONCURRENCY, MIN_SUBAGENT_CONCURRENCY,
@@ -1708,7 +1708,10 @@ mod tests {
         let reply: super::RulesReply =
             studio_json::from_str(r#"{"value":{"legacy": [1, 2], "future":true}}"#)
                 .expect("stored reply");
-        assert_eq!(reply.value.0.as_str(), r#"{"legacy": [1, 2], "future":true}"#);
+        assert_eq!(
+            reply.value.0.as_str(),
+            r#"{"legacy": [1, 2], "future":true}"#
+        );
         let encoded = studio_json::to_string(&reply).expect("reply serializes");
         assert!(encoded.contains(reply.value.0.as_str()));
     }

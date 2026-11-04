@@ -401,7 +401,8 @@ mod tests {
             json!({"autoCompactWindow":null}),
             json!({"thinking":false,"permissionMode":"plan","autoCompactWindow":100000}),
         ] {
-            let typed: ClaudeSettings = studio_json::from_value(settings.clone()).expect("settings");
+            let typed: ClaudeSettings =
+                studio_json::from_value(settings.clone()).expect("settings");
             assert_eq!(studio_json::to_value(typed).expect("serialize"), settings);
         }
         let schema = schemars::schema_for!(PermissionMode).to_value();
@@ -425,8 +426,8 @@ mod tests {
 
     #[test]
     fn claude_control_schema_parity_rejects_drift() {
-        let openapi: Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+            .expect("OpenAPI");
         check_schema_parity(&openapi).expect("generated command schemas");
         for (name, _) in schemas() {
             let mut drifted = openapi.clone();
@@ -441,8 +442,8 @@ mod tests {
 
     #[test]
     fn settings_schema_rejects_null_nonnullable_fields() {
-        let openapi: Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+            .expect("OpenAPI");
         let validator =
             jsonschema::validator_for(&openapi["components"]["schemas"]["ClaudeSettings"])
                 .expect("settings schema");

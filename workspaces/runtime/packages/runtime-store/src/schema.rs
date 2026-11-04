@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, functions::FunctionFlags, params};
-use studio_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value};
 
 use crate::{StoreError, StoreResult};
 

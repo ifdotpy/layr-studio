@@ -1794,7 +1794,8 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 "{}.json",
                 studio_runtime_store::sha256_hex(b"line:worker")
             ));
-        let receipt: Value = studio_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        let receipt: Value =
+            studio_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
         assert_eq!(receipt["intent"]["start"], "requested");
         let commands = std::fs::read_to_string(root.join("commands")).unwrap();
         assert!(commands.contains("line new worker requested"));

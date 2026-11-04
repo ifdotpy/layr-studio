@@ -1,7 +1,7 @@
 //! Pure, deterministic provider connection state machine.
 
-use studio_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use studio_json::{Map, Value};
 use studio_runtime_schema::provider_method_policy::{
     is_thread_serialized, thread_serialization_rule,
 };

@@ -4,7 +4,7 @@ message: Construct the owned value directly instead of serializing and deseriali
 severity: warning
 rule:
   any:
-    - pattern: serde_json::from_value(json!($$$ARGS))
-    - pattern: serde_json::from_value(serde_json::json!($$$ARGS))
-    - pattern: serde_json::from_value(serde_json::to_value($$$ARGS)?)
-    - pattern: serde_json::from_value(serde_json::to_value($$$ARGS).unwrap())
+    - pattern: studio_json::from_value(json!($$$ARGS))
+    - pattern: studio_json::from_value(studio_json::json!($$$ARGS))
+    - pattern: studio_json::from_value(studio_json::to_value($$$ARGS)?)
+    - pattern: studio_json::from_value(studio_json::to_value($$$ARGS).unwrap())

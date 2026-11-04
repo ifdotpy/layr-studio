@@ -1,9 +1,9 @@
 //! Injection seam for effects owned by other notification subsystems.
 use super::{DispatchOutcome, NotificationDispatchError, ProviderDeliveryIdentity};
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_store::Transaction;
 
 /// JSON payload shared by immutable publication observations. Serialization is

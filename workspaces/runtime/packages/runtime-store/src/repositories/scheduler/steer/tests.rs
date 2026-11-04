@@ -1090,8 +1090,7 @@ fn frozen_projection_survives_response_loss_and_rejects_payload_changes() {
         );
         Ok(())
     });
-    let changed =
-        studio_json::to_raw_value(&json!({"compiled":"changed"})).expect("changed JSON");
+    let changed = studio_json::to_raw_value(&json!({"compiled":"changed"})).expect("changed JSON");
     let previous = with(&mut connection, |tx| {
         SchedulerRepository::freeze_steer_submission(tx, AGENT, "frozen", &changed)
     })

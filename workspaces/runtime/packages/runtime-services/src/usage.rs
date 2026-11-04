@@ -1,6 +1,5 @@
 //! Local usage snapshot readers that do not require provider or turn drivers.
 
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -9,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
+use studio_json::{Value, json};
 use studio_runtime_schema::provider_kind::ProviderKind;
 use thiserror::Error;
 
@@ -1235,9 +1235,9 @@ mod tests {
     }
 
     use super::{account_cost_snapshot, refresh_account_costs_with, scan_claude_sessions};
-    use studio_json::{Value, json};
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
+    use studio_json::{Value, json};
 
     #[test]
     fn provider_identity_invalid_account_never_reads_or_scans_codex() {

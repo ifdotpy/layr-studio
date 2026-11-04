@@ -8,10 +8,7 @@ use studio_json::OwnedRawJson as RawValue;
 pub trait RawObjectFields<'de>: Default {
     type Output;
     fn field<M: MapAccess<'de>>(&mut self, name: &str, map: &mut M) -> Result<bool, M::Error>;
-    fn finish<E: Error>(
-        self,
-        extensions: BTreeMap<String, RawValue>,
-    ) -> Result<Self::Output, E>;
+    fn finish<E: Error>(self, extensions: BTreeMap<String, RawValue>) -> Result<Self::Output, E>;
 }
 
 /// Decode known fields directly and retain extension values as exact JSON bytes.
@@ -68,10 +65,7 @@ mod tests {
             }
             Ok(false)
         }
-        fn finish<E: Error>(
-            self,
-            extensions: BTreeMap<String, RawValue>,
-        ) -> Result<Object, E> {
+        fn finish<E: Error>(self, extensions: BTreeMap<String, RawValue>) -> Result<Object, E> {
             Ok(Object {
                 id: self.id.ok_or_else(|| E::missing_field("id"))?,
                 extensions,

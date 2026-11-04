@@ -3,9 +3,9 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::hmac;
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
-use studio_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_schema::multi_server_protocol::{
     ACCESS_PROTOCOL_VERSION, PersistedAccessInvite,
 };
@@ -771,8 +771,8 @@ mod tests {
     use super::MultiServerError;
     use crate::federation_credentials::Credentials;
     use serde::Deserialize;
-    use studio_json::json;
     use std::sync::Arc;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     async fn create_invite(

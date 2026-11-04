@@ -2,8 +2,8 @@
 //! the canonical hash of the committed `openapi.json`. This file is the owner;
 //! the web copies in `apiSchema.ts` are rendered by `studio-contracts`.
 
-use studio_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value};
 
 /// Request and response header that carries an API schema hash.
 pub const API_SCHEMA_HASH_HEADER: &str = "X-Studio-API-Schema";

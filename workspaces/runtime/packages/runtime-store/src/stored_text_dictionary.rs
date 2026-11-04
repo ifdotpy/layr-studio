@@ -402,7 +402,8 @@ mod tests {
 
     fn initialize_analytics(connection: Connection) -> Connection {
         let snapshot: studio_json::Value =
-            studio_json::from_str(include_str!("runtime-state-schema.json")).expect("schema source");
+            studio_json::from_str(include_str!("runtime-state-schema.json"))
+                .expect("schema source");
         let table = snapshot["analytics.sqlite3"]["sqlite_master"]
             .as_array()
             .expect("schema objects")

@@ -9,8 +9,8 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::time::{Duration, Instant as StdInstant};
+use studio_json::{Value, json};
 use studio_runtime_services::catalog_reads::{
     CapabilityAgentSnapshot, ProviderRequest, append_capability_error, apply_capability_result,
     capabilities_base, host_finder_view, skills_for_cwd,
@@ -684,10 +684,8 @@ impl studio_runtime_services::native_actions::CommandAdmission for NativeCommand
         _agent: &Value,
         key: &str,
         instruction: &str,
-    ) -> Result<
-        studio_json::OwnedRawJson,
-        studio_runtime_services::native_actions::NativeError,
-    > {
+    ) -> Result<studio_json::OwnedRawJson, studio_runtime_services::native_actions::NativeError>
+    {
         let result = studio_runtime_services::coordination::post_message_with_admission(
             tx,
             studio_runtime_services::coordination::PostManagedMessage {

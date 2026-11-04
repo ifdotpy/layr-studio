@@ -3,8 +3,8 @@
 use crate::event_write::truthy;
 use crate::submit_gates::Deletion;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, ComplaintRecord, PlanRecord, RuntimeStore, StoreError, Table, TaskId, TranscriptItem,
     TranscriptRepository, TranscriptStoreError, WorkItemRecord, WorkspaceViewsRepository,
@@ -1210,8 +1210,8 @@ fn find_lowercase(text: &str, query: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::{hydrate_input, parent_projection};
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_store::{
         AgentRecord, AgentRepository, RuntimeStore, TranscriptItem, TranscriptItemRecord,
     };

@@ -1,9 +1,9 @@
 //! Event-driven scheduling over a retained, checked history roster.
 use crate::analytics_capture::CaptureError;
 use serde::Deserialize;
-use studio_json::Value;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::Value;
 use studio_runtime_store::analytics_capture::CaptureTable;
 /// A history roster input. Stored agents and fixture JSON share the same
 /// AnalyticsAgent validation at scheduler admission.
@@ -909,8 +909,8 @@ mod tests {
     mod legacy {
         use super::super::{ACTIVE_QUOTA, MAX_ACTORS};
         use crate::analytics_capture::CaptureError;
-        use studio_json::Value;
         use std::collections::{BTreeMap, BTreeSet};
+        use studio_json::Value;
         use studio_runtime_store::analytics_capture::CaptureTable;
         #[derive(Clone)]
         struct Poll {

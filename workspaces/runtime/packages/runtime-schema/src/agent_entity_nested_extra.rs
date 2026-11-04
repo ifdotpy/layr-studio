@@ -527,7 +527,8 @@ mod tests {
             studio_json::from_value::<NativeSafetyBufferingRecord>(json!({"dismissed": null}))
                 .is_err()
         );
-        let attempt: AgentStartAttempt = studio_json::from_str(r#"{"retiredEvents":null}"#).unwrap();
+        let attempt: AgentStartAttempt =
+            studio_json::from_str(r#"{"retiredEvents":null}"#).unwrap();
         assert_eq!(
             studio_json::to_value(attempt).unwrap(),
             json!({"retiredEvents": null})

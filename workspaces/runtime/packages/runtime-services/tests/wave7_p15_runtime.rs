@@ -2,8 +2,8 @@
 use crate::monitor_runtime_fixtures as fixtures;
 
 use base64::Engine;
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::monitor_record::{
     MonitorCancelStatus, MonitorInputStatus as AttemptStatus, MonitorQueueEvent,
 };
@@ -165,9 +165,9 @@ struct RuleCase {
 struct RuleCaseRaw<'a> {
     name: String,
     #[serde(borrow)]
-    owner: &'a studio_json::value::RawValue,
+    owner: studio_json::RawJson<'a>,
     #[serde(borrow)]
-    rule: &'a studio_json::value::RawValue,
+    rule: studio_json::RawJson<'a>,
     now: f64,
     event: Option<RuleEventFixture>,
 }
@@ -188,8 +188,8 @@ fn rule_case(name: &str) -> RuleCase {
         .find(|case| case.name == name)
         .unwrap_or_else(|| panic!("rule case {name}"));
     RuleCase {
-        owner: studio_json::from_str(case.owner.get()).expect("rule owner"),
-        rule: studio_json::from_str(case.rule.get()).expect("rule"),
+        owner: studio_json::from_str(case.owner.as_str()).expect("rule owner"),
+        rule: studio_json::from_str(case.rule.as_str()).expect("rule"),
         now: case.now,
         event: case.event,
     }

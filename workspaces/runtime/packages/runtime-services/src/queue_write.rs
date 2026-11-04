@@ -39,7 +39,10 @@ mod receipt_tests {
     fn stored_receipt_round_trips() {
         let stored = r#"{"status":"updated","revision":"abc","capabilities":{"reorder":true,"receipts":true}}"#;
         let reply: QueueReply = studio_json::from_str(stored).expect("stored receipt");
-        assert_eq!(studio_json::to_string(&reply).expect("receipt JSON"), stored);
+        assert_eq!(
+            studio_json::to_string(&reply).expect("receipt JSON"),
+            stored
+        );
     }
 }
 
@@ -215,9 +218,7 @@ pub fn action(
                 );
                 metadata.extensions.insert(
                     "sendNow".into(),
-                    studio_runtime_schema::raw_json::RawJson(studio_json::to_raw_value(
-                        &true,
-                    )?),
+                    studio_runtime_schema::raw_json::RawJson(studio_json::to_raw_value(&true)?),
                 );
                 QueueWriteRepository::put_typed_metadata(transaction, target_id, &metadata)?;
             }

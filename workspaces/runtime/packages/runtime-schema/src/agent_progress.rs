@@ -522,7 +522,8 @@ mod tests {
             );
         }
         assert!(
-            studio_json::from_str::<AgentStall>(r#"{"taskId":"t","since":1,"extra":true}"#).is_err()
+            studio_json::from_str::<AgentStall>(r#"{"taskId":"t","since":1,"extra":true}"#)
+                .is_err()
         );
     }
 }

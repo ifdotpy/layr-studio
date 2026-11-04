@@ -55,17 +55,15 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
         }
         for field in TEXT {
-            if record
-                .get(*field)
-                .is_some_and(|value| studio_json::from_str::<Option<String>>(value.as_str()).is_err())
-            {
+            if record.get(*field).is_some_and(|value| {
+                studio_json::from_str::<Option<String>>(value.as_str()).is_err()
+            }) {
                 record.remove(*field);
             }
         }
-        if record
-            .get("role")
-            .is_some_and(|value| studio_json::from_str::<Option<AgentRole>>(value.as_str()).is_err())
-        {
+        if record.get("role").is_some_and(|value| {
+            studio_json::from_str::<Option<AgentRole>>(value.as_str()).is_err()
+        }) {
             let role = record
                 .get("role")
                 .and_then(|value| studio_json::from_str::<String>(value.as_str()).ok());

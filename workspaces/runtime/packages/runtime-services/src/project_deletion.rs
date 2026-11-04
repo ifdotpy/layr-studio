@@ -6,11 +6,11 @@ use crate::{
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+use studio_json::{Value, json};
 use studio_runtime_store::{
     ProjectsRepository, RuntimeStore, StoreError, SyncDocumentsRepository, Transaction,
 };

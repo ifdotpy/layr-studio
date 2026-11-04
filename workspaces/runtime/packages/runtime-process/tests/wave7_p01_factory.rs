@@ -1,7 +1,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
-use studio_json::{Value, json};
 use std::{collections::BTreeMap, future::Future, task::Poll};
+use studio_json::{Value, json};
 use studio_runtime_process::{
     BackendId, BackendIdentity, Generation, ProviderHandle, ProviderLaunchSpec,
     provider_seam::{

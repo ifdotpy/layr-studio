@@ -2032,7 +2032,8 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let ExchangeOutcome::Applied(missing) = missing else {
         panic!("{missing:?}");
     };
-    let missing: Value = studio_json::from_str(missing.value.as_str()).expect("missing command reply");
+    let missing: Value =
+        studio_json::from_str(missing.value.as_str()).expect("missing command reply");
     assert_eq!(missing["status"], "failed", "{missing}");
     assert_eq!(missing["error"], "No such file or directory");
 }

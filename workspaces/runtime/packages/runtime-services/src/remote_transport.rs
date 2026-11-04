@@ -6,7 +6,6 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use rustls_pki_types::{PrivatePkcs8KeyDer, SubjectPublicKeyInfoDer, pem::PemObject};
-use studio_json::{Map, Value};
 use spki::{ObjectIdentifier, SubjectPublicKeyInfoRef};
 use std::collections::HashMap;
 use std::fmt;
@@ -15,6 +14,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use studio_json::{Map, Value};
 use thiserror::Error;
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
@@ -536,7 +536,10 @@ fn verify_multi_server_identity(
         .into_iter()
         .all(|(value, expected)| {
             value.is_none_or(|value| {
-                studio_json::from_str::<String>(value.as_str()).ok().as_deref() == Some(expected)
+                studio_json::from_str::<String>(value.as_str())
+                    .ok()
+                    .as_deref()
+                    == Some(expected)
             })
         })
     }
@@ -550,8 +553,8 @@ fn verify_multi_server_identity(
     {
         return Err(RemoteTransportError::InvalidResponse);
     }
-    let identity: Identity =
-        studio_json::from_slice(response_body).map_err(|_| RemoteTransportError::InvalidResponse)?;
+    let identity: Identity = studio_json::from_slice(response_body)
+        .map_err(|_| RemoteTransportError::InvalidResponse)?;
     if !matches(&identity, expected_server_id, expected_public_key) {
         return Err(RemoteTransportError::InvalidSignature);
     }
@@ -1427,7 +1430,8 @@ impl PeerLinkClient {
             "bodyLength": request.body.len(),
             "timeout": request.timeout.as_secs_f64(),
         });
-        let mut encoded = studio_json::to_vec(&head).map_err(|_| PeerLinkFailure { sent: false })?;
+        let mut encoded =
+            studio_json::to_vec(&head).map_err(|_| PeerLinkFailure { sent: false })?;
         encoded.push(b'\n');
         if connection.write_all(&encoded).is_err() || connection.write_all(request.body).is_err() {
             // studio-peer-link forwards only a complete local request body.
@@ -1746,9 +1750,9 @@ pub(crate) mod tests {
     };
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
-    use studio_json::{Value, json};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
+    use studio_json::{Value, json};
     use studio_runtime_store::{RemoteTransportRepository, RuntimeStore};
 
     const SEED: [u8; 32] = [
@@ -2783,10 +2787,10 @@ pub(crate) mod tests {
     #[cfg(unix)]
     #[test]
     fn peer_link_client_uses_the_python_unix_framing_with_a_local_fake_peer() {
-        use studio_json::Value;
         use std::io::{BufRead, BufReader, Read, Write};
         use std::os::unix::net::UnixListener;
         use std::time::Duration;
+        use studio_json::Value;
 
         let test_root = std::env::var_os("CODEX_SERVER_TEST_TMP_ROOT")
             .map(PathBuf::from)
@@ -2807,8 +2811,8 @@ pub(crate) mod tests {
             reader
                 .read_until(b'\n', &mut line)
                 .expect("request head reads");
-            let head: Value =
-                studio_json::from_slice(&line[..line.len() - 1]).expect("Python-format head parses");
+            let head: Value = studio_json::from_slice(&line[..line.len() - 1])
+                .expect("Python-format head parses");
             assert_eq!(head["address"], "100.80.1.2:4621");
             assert_eq!(head["publicKey"], "fixture-peer-key");
             assert_eq!(head["method"], "POST");
@@ -2868,10 +2872,10 @@ pub(crate) mod tests {
     #[cfg(unix)]
     #[test]
     fn peer_link_unsent_failure_allows_https_fallback_and_marks_route_down() {
-        use studio_json::Value;
         use std::io::{BufRead, BufReader, Read, Write};
         use std::os::unix::net::UnixListener;
         use std::time::Duration;
+        use studio_json::Value;
 
         let test_root = std::env::var_os("CODEX_SERVER_TEST_TMP_ROOT")
             .map(PathBuf::from)

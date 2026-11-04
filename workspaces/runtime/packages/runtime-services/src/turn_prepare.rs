@@ -11,9 +11,9 @@
 //! revisions retain the explicitly registered negative-zero/u64-overflow exception.
 use chrono::{DateTime, Datelike, SecondsFormat};
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value, json};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Map, Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::provider_input::ProviderInputOrigin;
 use studio_runtime_store::{python_float_json, sha256_hex};
@@ -619,7 +619,8 @@ impl OrderedJson {
                 Ok(OrderedJson::Object(values))
             }
         }
-        Ok(studio_json::Deserializer::from_str(text).deserialize_any(Visitor { depth, progress })?)
+        Ok(studio_json::Deserializer::from_str(text)
+            .deserialize_any(Visitor { depth, progress })?)
     }
 }
 // The raw-token checks share the ordered parse; there is no validation-only walk.

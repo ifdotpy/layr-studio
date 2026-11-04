@@ -418,11 +418,7 @@ pub struct RateLimitView {
 }
 
 impl RateLimitView {
-    pub fn read(
-        observation: &str,
-        account: &str,
-        now: f64,
-    ) -> Result<Self, studio_json::Error> {
+    pub fn read(observation: &str, account: &str, now: f64) -> Result<Self, studio_json::Error> {
         let JsonObject(value): JsonObject<UsageLimitsResponse> =
             studio_json::from_str(observation)?;
         if value.account_key != account {

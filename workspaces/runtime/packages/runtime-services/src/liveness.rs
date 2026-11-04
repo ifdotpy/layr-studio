@@ -17,9 +17,9 @@
 //!   the owner.
 use rusqlite::OptionalExtension;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, SchedulerRepository, StoreError, Transaction,
 };

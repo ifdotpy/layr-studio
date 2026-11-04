@@ -11,9 +11,9 @@
 //! Files already in the target are kept, so a repeated run copies nothing new.
 use crate::{StoreResult, account_registry::RegistryOrder};
 use rusqlite::Transaction;
-use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use studio_json::{Value, json};
 
 pub(crate) const LOCAL: &str = "claude-local";
 pub(crate) const SIGNED_OUT: &str = "claude-signed-out";

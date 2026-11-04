@@ -3,8 +3,8 @@
 //! its expected outcome is `command_replay/<case>.expected.json`.
 
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::path::{Path, PathBuf};
+use studio_json::{Value, json};
 use studio_runtime_services::agent_management::{
     Action, ManagementSnapshot, Records, decide_with_effects,
 };

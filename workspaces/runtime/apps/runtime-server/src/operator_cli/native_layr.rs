@@ -140,7 +140,7 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
         }
         "paths" => println!(
             "{}",
-            serde_json::json!({
+            studio_json::json!({
                 "store":studio_runtime_services::layr_native::settings::selected_store(&state)?,
                 "binary":studio_runtime_services::layr_native::resolve_binary().ok(),
                 "socket":studio_runtime_services::layr_native::selected_socket_path(&state)?,
@@ -163,7 +163,7 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
                 };
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(
+                    studio_json::to_string_pretty(
                         &studio_runtime_services::layr_native::migration::migrate_with_options(
                             &state, &project, dry_run, options
                         )?

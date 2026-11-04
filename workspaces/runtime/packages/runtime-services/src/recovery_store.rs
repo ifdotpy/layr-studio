@@ -10,8 +10,8 @@ use crate::{
     recovery_runtime::ObservationSource,
     scheduler::lifecycle_transaction_with,
 };
-use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, QueueEventId, QueueEventRepository, RuntimeStore,
     StoreError, Transaction,

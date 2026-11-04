@@ -57,11 +57,11 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
         };
         match result {
             Ok(status) => {
-                println!("{}", serde_json::Value::Object(status));
+                println!("{}", studio_json::Value::Object(status));
                 Ok(ExitCode::SUCCESS)
             }
             Err(error) => {
-                println!("{}", serde_json::json!({"error": error.to_string()}));
+                println!("{}", studio_json::json!({"error": error.to_string()}));
                 Ok(ExitCode::FAILURE)
             }
         }

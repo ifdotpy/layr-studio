@@ -314,23 +314,18 @@ fn delete(tx: &Transaction<'_>, id: &str) -> StoreResult<()> {
     Ok(())
 }
 fn receipts(tx: &Transaction<'_>, agent: &str) -> StoreResult<Vec<(String, SteerPayload)>> {
-    Outbox::for_owner::<studio_json::OwnedRawJson>(
-        tx,
-        OwnerKind::Agent,
-        agent,
-        OutboxKind::Steer,
-    )
-    .map_err(StoreError::from)?
-    .into_iter()
-    .map(|row| {
-        let wire: SteerWire =
-            studio_json::from_str(row.payload.as_str()).map_err(|_| invalid_wire(&row.id))?;
-        let payload = wire
-            .into_payload(row.payload)
-            .map_err(|_| invalid_wire(&row.id))?;
-        Ok((row.id, payload))
-    })
-    .collect()
+    Outbox::for_owner::<studio_json::OwnedRawJson>(tx, OwnerKind::Agent, agent, OutboxKind::Steer)
+        .map_err(StoreError::from)?
+        .into_iter()
+        .map(|row| {
+            let wire: SteerWire =
+                studio_json::from_str(row.payload.as_str()).map_err(|_| invalid_wire(&row.id))?;
+            let payload = wire
+                .into_payload(row.payload)
+                .map_err(|_| invalid_wire(&row.id))?;
+            Ok((row.id, payload))
+        })
+        .collect()
 }
 fn receipt_events(id: &str, receipt: &SteerPayload) -> StoreResult<String> {
     if receipt.events.is_empty() {

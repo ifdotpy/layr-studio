@@ -6,9 +6,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
+use std::time::{Duration, Instant};
 use studio_json::Value;
 use studio_json::json;
-use std::time::{Duration, Instant};
 use studio_runtime_schema::{
     queue_command::Field,
     workspace_operation::{OperationPhase, WorkspaceOperationRecord},

@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
-use studio_json::{Value, json};
 use std::{fs, path::Path};
+use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{
     HANDLE_LIMIT, HandleSnapshot, NativeId, ReceiptSnapshot, WriteDecision,
 };

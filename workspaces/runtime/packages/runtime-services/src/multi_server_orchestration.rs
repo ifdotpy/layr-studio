@@ -1718,8 +1718,7 @@ async fn receive_remote_input(
                     admission,
                 )
                 .map_err(|_| refused(400, "input_rejected", "The remote input was not admitted"))?;
-                return studio_json::to_raw_value(&posted.receipt)
-                    .map_err(|_| invalid_receipt());
+                return studio_json::to_raw_value(&posted.receipt).map_err(|_| invalid_receipt());
             }
             crate::event_write::enqueue_recovery_event(
                 tx,
@@ -3394,12 +3393,12 @@ impl OrchestrationDriver {
         };
         let saved: crate::orchestration_wire::OrchestrationRequest = studio_json::from_str(&body)
             .map_err(|_| {
-                refused(
-                    503,
-                    "invalid_record",
-                    "Stored cross-server envelope is invalid",
-                )
-            })?;
+            refused(
+                503,
+                "invalid_record",
+                "Stored cross-server envelope is invalid",
+            )
+        })?;
         let crate::orchestration_wire::OrchestrationCommand::Exec(
             crate::orchestration_exec::ExecPayload::Compacted(compact),
         ) = &saved.command
@@ -4352,8 +4351,7 @@ mod tests {
         assert_eq!(pending, 1, "only unresolved obligations remain");
         let legacy =
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"retained-peer-request").to_string();
-        let retained =
-            studio_json::json!({"requestId":legacy,"operation":[],"action":"projects","payload":{}});
+        let retained = studio_json::json!({"requestId":legacy,"operation":[],"action":"projects","payload":{}});
         let signature = super::Envelope::from_request(&fixture_envelope(&retained))
             .expect("retained envelope")
             .incoming_signature("peer-a")

@@ -4,8 +4,8 @@ use crate::{
     coordination::CoordinationError, event_write::truthy, sync_entity_context::RoomDirectory,
 };
 use rusqlite::{OptionalExtension, Transaction};
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Value, json};
 use studio_runtime_schema::delivery::{MessageRecipientDelivery, MessageSendStatus};
 use studio_runtime_schema::persistence::{EventStatus, RecipientDelivery};
 use studio_runtime_schema::queue_command::Field;
@@ -349,7 +349,8 @@ pub fn chat_read(
         ))?;
         let rows = statement.query_map(
             rusqlite::params![
-                studio_json::to_string(&room_ids).map_err(studio_runtime_store::StoreError::from)?,
+                studio_json::to_string(&room_ids)
+                    .map_err(studio_runtime_store::StoreError::from)?,
                 before,
                 after,
                 (limit + 1) as i64

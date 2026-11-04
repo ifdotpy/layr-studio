@@ -302,10 +302,10 @@ fn opted_in_ingress_matches_schema() {
                     studio_json::from_value::<Object<generated::NativeActionRequest>>(body.clone())
                         .is_ok()
                 }
-                "ClaudeAddStartRequest" => {
-                    studio_json::from_value::<Object<generated::ClaudeAddStartRequest>>(body.clone())
-                        .is_ok()
-                }
+                "ClaudeAddStartRequest" => studio_json::from_value::<
+                    Object<generated::ClaudeAddStartRequest>,
+                >(body.clone())
+                .is_ok(),
                 "ClaudeCancelRequest" => {
                     studio_json::from_value::<Object<generated::ClaudeCancelRequest>>(body.clone())
                         .is_ok()
@@ -346,10 +346,10 @@ fn opted_in_ingress_matches_schema() {
                     studio_json::from_value::<Object<generated::MacSyncConfigRequest>>(body.clone())
                         .is_ok()
                 }
-                "MacSyncResolveRequest" => {
-                    studio_json::from_value::<Object<generated::MacSyncResolveRequest>>(body.clone())
-                        .is_ok()
-                }
+                "MacSyncResolveRequest" => studio_json::from_value::<
+                    Object<generated::MacSyncResolveRequest>,
+                >(body.clone())
+                .is_ok(),
                 "VaultSetupRequest" => {
                     studio_json::from_value::<Object<generated::VaultSetupRequest>>(body.clone())
                         .is_ok()

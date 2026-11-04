@@ -408,7 +408,8 @@ mod tests {
             studio_json::from_str::<studio_json::Value>(raw).unwrap()
         );
         assert!(
-            studio_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"private","extra":1}"#).is_err()
+            studio_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"private","extra":1}"#)
+                .is_err()
         );
         assert!(studio_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"other"}"#).is_err());
     }

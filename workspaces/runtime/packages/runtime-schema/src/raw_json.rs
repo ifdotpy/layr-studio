@@ -1,7 +1,7 @@
 //! Opaque JSON evidence carried without interpreting its contents.
 use serde::{Deserialize, Serialize};
-use studio_json::OwnedRawJson as RawValue;
 use std::borrow::Cow;
+use studio_json::OwnedRawJson as RawValue;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(transparent)]

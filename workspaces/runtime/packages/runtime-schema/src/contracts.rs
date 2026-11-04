@@ -11,8 +11,8 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use studio_json::Value;
 use strum::VariantNames;
+use studio_json::Value;
 
 use crate::{
     DeliveryMoment, agent_limits, api_schema, delivery, multi_server_protocol,
@@ -2384,7 +2384,8 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
         for (schema, _) in PROVIDER_NATIVE_DISCRIMINATORS {
             let path = format!("/components/schemas/{schema}/properties/provider/const");
             let mut drifted = openapi.clone();
-            *drifted.pointer_mut(&path).expect("native discriminator") = studio_json::json!("drift");
+            *drifted.pointer_mut(&path).expect("native discriminator") =
+                studio_json::json!("drift");
             let error = check_schema_parity(&drifted, &transfer).expect_err("discriminator drift");
             assert!(
                 error.contains(&path) && error.contains("provider_kind.rs"),

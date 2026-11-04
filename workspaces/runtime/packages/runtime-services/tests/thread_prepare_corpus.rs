@@ -384,7 +384,10 @@ fn malformed_stored_catalog_family_never_panics() {
     for path in ["inputSchema", "description", "name"] {
         let mut value = baseline();
         value["catalog"]["definitions"][0][path] = json!(false);
-        assert!(studio_json::from_value::<Snapshot>(value).is_err(), "{path}");
+        assert!(
+            studio_json::from_value::<Snapshot>(value).is_err(),
+            "{path}"
+        );
     }
     let mut s = snapshot(&baseline());
     s.actor.thread_id = Some(String::new());

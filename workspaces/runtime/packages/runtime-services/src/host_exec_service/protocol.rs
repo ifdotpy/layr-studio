@@ -12,8 +12,8 @@ use std::io::{Read, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 
 /// Largest request or response frame, in bytes.
 pub(crate) const FRAME_LIMIT: usize = 2 * 1024 * 1024;
@@ -207,7 +207,9 @@ pub(crate) fn load_hashes(path: &Path) -> HashCache {
         .map(|rows| {
             rows.into_iter()
                 .filter_map(|(path, row)| {
-                    studio_json::from_str(row.as_str()).ok().map(|row| (path, row))
+                    studio_json::from_str(row.as_str())
+                        .ok()
+                        .map(|row| (path, row))
                 })
                 .collect()
         })

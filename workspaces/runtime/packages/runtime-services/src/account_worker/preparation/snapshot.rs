@@ -4,9 +4,9 @@ use crate::provider_adapter::{ProviderKind, codex_user_mcp_servers};
 use crate::{model_catalog::ModelCatalogService, thread_prepare as thread, turn_prepare as turn};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, de::DeserializeOwned};
-use studio_json::Map;
 use std::path::{Path, PathBuf};
 use std::{future::Future, pin::Pin};
+use studio_json::Map;
 use studio_runtime_process::ProviderLaunchSpec;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -177,8 +177,9 @@ impl PreparationResources {
             thread_config: Map<String, Value>,
             tools: Vec<thread::ToolDefinition>,
         }
-        let mut data: Bundled = studio_json::from_str(include_str!("../preparation-resources.json"))
-            .map_err(|_| invalid("preparation resources"))?;
+        let mut data: Bundled =
+            studio_json::from_str(include_str!("../preparation-resources.json"))
+                .map_err(|_| invalid("preparation resources"))?;
         let mut legacy_tools: Vec<thread::ToolDefinition> = studio_json::from_str(include_str!(
             "../../../../../../../.agents/skills/codex-workspace/references/native-tools.json"
         ))

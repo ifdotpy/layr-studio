@@ -1,6 +1,6 @@
 //! Pure gates against captured legacy decisions.
-use studio_json::{Value, json};
 use std::time::{Duration, Instant};
+use studio_json::{Value, json};
 use studio_runtime_services::submit_gates::{
     AuthorizationRecords, AuthorizationSnapshot, CatalogIdentity, CatalogObservation,
     ExecutionDenial, ExecutionSettings, ExecutionSnapshot, authorize_events, select_execution,
@@ -319,9 +319,10 @@ fn submit_gates_python_corpus() {
                         let mut case = fixtures["seeds"]["authorization"].clone();
                         case["records"]["agents"]["sender"]["rootId"] = root.clone();
                         case["records"]["agents"]["sender"]["deletedAt"] = json!(deleted);
-                        let mut payload: Value =
-                            studio_json::from_str(case["events"][0]["text"].as_str().expect("text"))
-                                .expect("payload");
+                        let mut payload: Value = studio_json::from_str(
+                            case["events"][0]["text"].as_str().expect("text"),
+                        )
+                        .expect("payload");
                         payload["sender"] = sender.clone();
                         case["events"][0]["text"] = json!(payload.to_string());
                         if broadcast {

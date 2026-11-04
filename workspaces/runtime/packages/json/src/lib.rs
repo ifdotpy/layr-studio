@@ -262,13 +262,35 @@ impl Error {
 
 impl Error {
     #[inline]
-    pub fn is_eof(&self) -> bool { self.classify() == error::Category::Eof }
+    pub fn is_eof(&self) -> bool {
+        self.classify() == error::Category::Eof
+    }
     #[inline]
-    pub fn is_syntax(&self) -> bool { self.classify() == error::Category::Syntax }
+    pub fn is_syntax(&self) -> bool {
+        self.classify() == error::Category::Syntax
+    }
     #[inline]
-    pub fn line(&self) -> usize { match self { Self::Serde(e) => e.line(), #[cfg(feature = "sonic-backend")] Self::Sonic(_) => 0, #[cfg(feature = "simd-backend")] Self::Simd(_) => 0 } }
+    pub fn line(&self) -> usize {
+        match self {
+            Self::Serde(e) => e.line(),
+            #[cfg(feature = "sonic-backend")]
+            Self::Sonic(_) => 0,
+            #[cfg(feature = "simd-backend")]
+            Self::Simd(_) => 0,
+        }
+    }
     #[inline]
-    pub fn column(&self) -> usize { match self { Self::Serde(e) => e.column(), #[cfg(feature = "sonic-backend")] Self::Sonic(_) => 0, #[cfg(feature = "simd-backend")] Self::Simd(_) => 0 } }
+    pub fn column(&self) -> usize {
+        match self {
+            Self::Serde(e) => e.column(),
+            #[cfg(feature = "sonic-backend")]
+            Self::Sonic(_) => 0,
+            #[cfg(feature = "simd-backend")]
+            Self::Simd(_) => 0,
+        }
+    }
     #[inline]
-    pub fn io(error: std::io::Error) -> Self { Self::Serde(serde_json::Error::io(error)) }
+    pub fn io(error: std::io::Error) -> Self {
+        Self::Serde(serde_json::Error::io(error))
+    }
 }

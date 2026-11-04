@@ -1,8 +1,8 @@
 use crate::projection_fixtures as projections;
 use projections::full_rebuild;
 use rusqlite::{Connection, params};
-use studio_json::{Value, json};
 use std::{fs, path::Path};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     account_session_runtime::AccountSessionPort,
     agent_lifecycle_runtime::{self, LifecycleEffect, LifecyclePorts},

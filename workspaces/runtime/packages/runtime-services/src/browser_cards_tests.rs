@@ -2,10 +2,10 @@
 
 use super::{CardSource, card_id, load, poll_once, save};
 use crate::linux_vm_guest::{GuestError, GuestRpc};
-use studio_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Answer, Approval, ApprovalState, BrowserCard, BrowserOutcome, BrowserPhase, BrowserSource,
     CloseReason, Decision, Principal, Timestamp,

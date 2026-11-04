@@ -54,7 +54,7 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
         "status" => {}
         _ => return Err(USAGE.into()),
     }
-    println!("{}", serde_json::to_string_pretty(&settings)?);
+    println!("{}", studio_json::to_string_pretty(&settings)?);
     if command == "status"
         && let Ok(position) = std::fs::read_to_string(state.join("backup/state.json"))
     {

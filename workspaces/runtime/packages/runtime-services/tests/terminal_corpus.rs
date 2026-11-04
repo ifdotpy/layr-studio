@@ -122,7 +122,10 @@ fn assert_python_rows(store: &RuntimeStore, expected: &Tables) {
     let connection = store.test_reader().expect("read Rust state");
     let archive = store.test_terminal_output().expect("read archive");
     for (table, rows) in [
-        ("user_terminals", studio_json::json!(expected.user_terminals)),
+        (
+            "user_terminals",
+            studio_json::json!(expected.user_terminals),
+        ),
         (
             "user_terminal_output",
             studio_json::json!(expected.user_terminal_output),

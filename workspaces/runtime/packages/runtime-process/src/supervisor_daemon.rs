@@ -9,7 +9,6 @@ use crate::{
     SUPERVISOR_PROTOCOL_VERSION, SupervisorEventV2, SupervisorHandshakeV2,
 };
 use serde::Serialize;
-use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs::{self, OpenOptions},
@@ -26,6 +25,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{
     Command, ConnectionCapabilities, HANDLE_LIMIT, Ownership, Request, StartMatch, WriteDecision,
 };

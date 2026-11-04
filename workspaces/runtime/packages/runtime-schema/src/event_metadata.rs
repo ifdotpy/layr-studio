@@ -1,8 +1,8 @@
 //! Persisted queue metadata. Unknown fields remain open for future producers.
 use crate::{delivery::DeliveryMoment, queue_command::Field, raw_json::RawJson};
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value};
 use std::collections::BTreeMap;
+use studio_json::{Map, Value};
 
 /// Retains the accepted historical spelling while using the delivery owner for policy.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -212,7 +212,9 @@ mod tests {
         let raw = r#"{"future":{"z":  1,"a":2}}"#;
         let record: EventMetadataRecord = studio_json::from_str(raw).unwrap();
         assert_eq!(studio_json::to_string(&record).unwrap(), raw);
-        assert!(studio_json::from_str::<EventMetadataRecord>(r#"{"future":1,"future":2}"#).is_err());
+        assert!(
+            studio_json::from_str::<EventMetadataRecord>(r#"{"future":1,"future":2}"#).is_err()
+        );
     }
 
     #[test]

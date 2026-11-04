@@ -4,8 +4,8 @@ use crate::{
     task_record::TaskId,
 };
 use serde::{Deserialize, Serialize};
-use studio_json::{Number, Value};
 use std::collections::BTreeMap;
+use studio_json::{Number, Value};
 
 /// Persisted work version, bounded to the JSON safe integer range.
 pub type WorkItemVersion = RuleInteger<0, 9007199254740991>;

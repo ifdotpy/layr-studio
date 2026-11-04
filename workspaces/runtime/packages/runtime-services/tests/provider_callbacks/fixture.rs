@@ -1,8 +1,8 @@
 //! Shared callback fixture written through current owner contracts.
 use rusqlite::{Transaction, params, types::Value as SqlValue};
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{
     EventKind, EventStatus, RequestIdentity, ToolRequestKind, ToolRequestStatus,
 };

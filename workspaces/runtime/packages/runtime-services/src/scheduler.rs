@@ -1772,8 +1772,8 @@ mod child_turn_parent_tests {
 #[cfg(test)]
 mod child_result_coalesce_tests {
     use super::*;
-    use studio_json::json;
     use std::collections::BTreeMap;
+    use studio_json::json;
     use studio_runtime_store::{
         CHILD_RESULT_COALESCE_DEFAULT, CHILD_RESULT_COALESCE_MAX, OrchestrationSettingsRepository,
     };

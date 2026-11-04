@@ -1038,8 +1038,8 @@ fn add_regenerable(state: &Path, cwd: &Path, paths: &[String]) -> Result<()> {
             all.push(path.clone());
         }
     }
-    let value =
-        studio_json::to_string(&all).map_err(|error| NativeLayrError::Refused(error.to_string()))?;
+    let value = studio_json::to_string(&all)
+        .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     super::run(state, cwd, &["config", "regenerable", &value])?;
     Ok(())
 }

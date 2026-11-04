@@ -16,12 +16,12 @@ use crate::{
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json, OwnedRawJson as RawValue};
 use std::{
     collections::BTreeMap,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use studio_json::{OwnedRawJson as RawValue, Value, json};
 use studio_runtime_providers::{Method, RequestId};
 use studio_runtime_schema::persistence::{RequestIdentity, SafetyRetryCertainty};
 use studio_runtime_store::request_results::{Admission, AdmittedRequest, RequestResults};
@@ -906,8 +906,7 @@ async fn advance_stage(
                         return Err(Error::ProviderRejected);
                     }
                     operation.input = Some(
-                        studio_json::to_raw_value(&input)
-                            .map_err(|_| Error::InvalidStoredState)?,
+                        studio_json::to_raw_value(&input).map_err(|_| Error::InvalidStoredState)?,
                     );
                     operation.initial.stage = if stage == Stage::Items {
                         Stage::Interrupt
@@ -1137,9 +1136,7 @@ async fn persist_stage_receipt(
         not_sent_reason: receipt
             .not_sent_reason()
             .map(|reason| format!("{reason:?}")),
-        result: Some(
-            studio_json::to_raw_value(&result).map_err(|_| Error::InvalidStoredState)?,
-        ),
+        result: Some(studio_json::to_raw_value(&result).map_err(|_| Error::InvalidStoredState)?),
     };
     let id = operation.initial.id.clone();
     let expected_agent = operation.initial.agent.clone();
@@ -1181,8 +1178,7 @@ async fn persist_stage_receipt(
                 if let Some(value) = reply.as_ref() {
                     current.responses.insert(
                         stage.as_str().into(),
-                        studio_json::to_raw_value(value)
-                            .map_err(|_| Error::InvalidStoredState)?,
+                        studio_json::to_raw_value(value).map_err(|_| Error::InvalidStoredState)?,
                     );
                 }
                 if certainty_unknown {

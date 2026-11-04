@@ -1,7 +1,7 @@
 //! Sign-in accounts in the account list and their cleanup after a sign-in
 //! that never received a provider identity.
-use studio_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_services::account_driver::{AccountDriver, CodexLoginRequest, LoginReservation};
 
 const REQUEST: &str = "4b154e4b-80bb-4f1f-b07f-dcaa15563190";

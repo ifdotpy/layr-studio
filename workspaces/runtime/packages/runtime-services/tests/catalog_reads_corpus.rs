@@ -24,7 +24,8 @@ fn managed_tool_catalog_serializes_the_full_selected_inventory() {
         definitions: vec![ToolDefinition {
             name: "fixture-tool".into(),
             description: "fixture description".into(),
-            input_schema: studio_json::from_value(json!({"type":"object"})).expect("fixture schema"),
+            input_schema: studio_json::from_value(json!({"type":"object"}))
+                .expect("fixture schema"),
             extra: studio_json::from_value(json!({"strict":true})).expect("fixture extension"),
         }],
         saved_thread_id: None,

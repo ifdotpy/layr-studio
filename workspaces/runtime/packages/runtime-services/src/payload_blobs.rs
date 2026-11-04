@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value, json};
 use thiserror::Error;
 
 const EXTERNALIZE_THRESHOLD: usize = 64 * 1024;

@@ -3,8 +3,8 @@
 //! projection, not a replacement for the lossless provider error JSON record.
 use serde::de::value::{Error, StrDeserializer};
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 
 // Reserved for the complete original provider value; marks the normalized wire form.
 const STUDIO_RAW_EVIDENCE: &str = "studioRawEvidence";
@@ -42,7 +42,10 @@ impl PartialEq for NativeProviderError {
             && self.data.as_ref().map(|value| value.as_str())
                 == other.data.as_ref().map(|value| value.as_str())
             && self.additional_details.as_ref().map(|value| value.as_str())
-                == other.additional_details.as_ref().map(|value| value.as_str())
+                == other
+                    .additional_details
+                    .as_ref()
+                    .map(|value| value.as_str())
     }
 }
 
@@ -625,7 +628,11 @@ mod tests {
         assert_eq!(error.code, None);
         assert_eq!(error.extra.get("studioRawEvidence"), Some(&receipt));
         assert_eq!(error.data.as_ref().unwrap().as_str(), r#"{"trace":"x"}"#);
-        assert!(studio_json::to_string(&error).unwrap().contains("discarded"));
+        assert!(
+            studio_json::to_string(&error)
+                .unwrap()
+                .contains("discarded")
+        );
     }
 
     #[test]

@@ -11,8 +11,8 @@ use ring::{
     signature::{Ed25519KeyPair, KeyPair},
 };
 use serde::Deserialize;
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use studio_request_signing::SigningInput;
 
 pub trait Vault: Send + Sync {

@@ -589,9 +589,9 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     };
     assert_eq!(recovered, delivered, "recovery returns the saved receipt");
     let first_receipt: studio_json::Value =
-        studio_json::from_str(first_receipt.value.get()).expect("first receipt");
+        studio_json::from_str(first_receipt.value.as_str()).expect("first receipt");
     let recovered_receipt: studio_json::Value =
-        studio_json::from_str(recovered_receipt.value.get()).expect("recovered receipt");
+        studio_json::from_str(recovered_receipt.value.as_str()).expect("recovered receipt");
     assert_eq!(first_receipt["id"], recovered_receipt["id"]);
     let read_event_id = remote_event_id.clone();
     let (event_count, event_status, inbox_count, result) = support::read(

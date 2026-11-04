@@ -5,11 +5,11 @@ use axum::{
     http::Request,
 };
 use fixture::*;
-use studio_json::{Value, json};
 use std::sync::{
     Arc, Condvar, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::claude_login::{
     AUTHORIZATION_NOT_CONFIRMED, FAILED, ports::LoginEvent,

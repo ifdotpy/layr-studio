@@ -2,8 +2,8 @@
 //! A record keeps the receipt and a digest; the reply body is a payload blob.
 use crate::{MAX_INLINE_READ_REPLY_BYTES, StoreResult, sha256_hex};
 use rusqlite::{Transaction, params};
-use studio_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_account_transfers")? {

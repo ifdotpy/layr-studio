@@ -150,8 +150,8 @@ fn optional_hash<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use studio_json::json;
     use sha2::{Digest, Sha256};
+    use studio_json::json;
 
     #[test]
     fn login_schema_constraints_are_tracked() {

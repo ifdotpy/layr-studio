@@ -7,9 +7,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::{SYNC_ENTITY_SCOPE, SYNC_PROTOCOL_VERSION};
 use studio_runtime_services::sync_documents::{self, DraftWrite};
 use studio_runtime_services::sync_entity_context::{RoomDirectory, RoomSources};
@@ -1034,8 +1034,8 @@ mod vault_maintenance_tests {
     };
     use axum::Json;
     use axum::response::IntoResponse;
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_store::{ProjectsRepository, RuntimeStore, SyncDocumentsRepository};
 
     #[test]

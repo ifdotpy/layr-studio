@@ -214,11 +214,12 @@ impl WorkItemsRepository {
         for (id, raw) in rows {
             // Release historically repairs fields such as a negative version before
             // the checked write, so this mutation boundary must retain raw input.
-            let mut record: Value =
-                studio_json::from_str(&raw).map_err(|_| crate::StoreError::InvalidStoredObject {
+            let mut record: Value = studio_json::from_str(&raw).map_err(|_| {
+                crate::StoreError::InvalidStoredObject {
                     table: "runtime_work",
                     id: id.clone(),
-                })?;
+                }
+            })?;
             if record.get("id").and_then(Value::as_str) != Some(id.as_str())
                 || record.get("owner").and_then(Value::as_str) != Some(owner_id)
             {

@@ -15,8 +15,8 @@ use base64::Engine;
 use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::persistence::{OutboxStatus, ServerDeliveryState, ServerFetchState};
 use studio_runtime_store::multi_server_delivery::{SavedRemoteReply, remote_operation_key};
 use studio_runtime_store::remote_outbox::{RemoteEffect, RemoteEntry, RemoteOutbox};
@@ -355,7 +355,8 @@ fn receipt(outcome: &ExchangeOutcome, key: &str) -> Value {
     match outcome {
         ExchangeOutcome::Applied(reply) => {
             // RawValue contains valid JSON from the paired transport.
-            let value: Value = studio_json::from_str(reply.value.as_str()).expect("valid raw reply");
+            let value: Value =
+                studio_json::from_str(reply.value.as_str()).expect("valid raw reply");
             json!({"requestId":key,"outcome":"applied","value":value})
         }
         ExchangeOutcome::NotApplied(error) => {

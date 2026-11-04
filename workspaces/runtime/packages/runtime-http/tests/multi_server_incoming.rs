@@ -5,8 +5,8 @@ use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use futures_util::future::BoxFuture;
-use studio_json::Value;
 use std::sync::{Arc, atomic::Ordering};
+use studio_json::Value;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::multi_server_auth::{AccessError, OwnerObservation};
 use studio_runtime_services::multi_server_pairing::{MultiServerBoundary, OwnerLookup};
@@ -278,7 +278,8 @@ async fn access_snapshot_projects_legacy_missing_fields_as_null() {
     let response = receiver.app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
-    let _: studio_runtime_http::generated::AccessSnapshot = studio_json::from_slice(&bytes).unwrap();
+    let _: studio_runtime_http::generated::AccessSnapshot =
+        studio_json::from_slice(&bytes).unwrap();
     let body: Value = studio_json::from_slice(&bytes).unwrap();
     let client = body["clients"]
         .as_array()

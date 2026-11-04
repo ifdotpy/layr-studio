@@ -1,7 +1,7 @@
 //! Claude failure metadata. The JSON schema owns allowed values and bounds.
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value};
 use std::{collections::BTreeMap, sync::OnceLock};
+use studio_json::{Map, Value};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

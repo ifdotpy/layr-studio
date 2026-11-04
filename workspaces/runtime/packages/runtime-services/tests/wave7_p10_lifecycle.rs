@@ -1,12 +1,12 @@
 use crate::projection_fixtures as projections;
 use rusqlite::{Connection, params};
-use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
     path::Path,
     sync::{Arc, Mutex},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::{RequestId, RequestTicket};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use studio_runtime_services::{
@@ -1181,16 +1181,17 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
     // legacy comparison intact and check the added projections independently.
     let rows = saved["sync"].as_array().expect("sync rows");
     for legacy in rows.iter().filter(|row| row[0] == "agent" && row[5] == 0) {
-        let full: Value =
-            studio_json::from_str(legacy[4].as_str().expect("legacy payload")).expect("legacy JSON");
+        let full: Value = studio_json::from_str(legacy[4].as_str().expect("legacy payload"))
+            .expect("legacy JSON");
         for collection in ["agentSummary", "agentDetail"] {
             let row = rows
                 .iter()
                 .find(|row| row[0] == collection && row[1] == legacy[1])
                 .expect("agent projection exists");
             assert_eq!(row[5], 0, "live projection");
-            let payload: Value = studio_json::from_str(row[4].as_str().expect("projection payload"))
-                .expect("projection JSON");
+            let payload: Value =
+                studio_json::from_str(row[4].as_str().expect("projection payload"))
+                    .expect("projection JSON");
             assert_eq!(payload["value"]["id"], full["value"]["id"]);
             if collection == "agentSummary" {
                 assert_eq!(payload["value"]["status"], full["value"]["status"]);

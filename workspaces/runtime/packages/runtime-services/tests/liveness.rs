@@ -1,6 +1,6 @@
 //! Liveness detection must never change a chat or its pending input.
-use studio_json::json;
 use std::sync::Arc;
+use studio_json::json;
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository};
 
 async fn seeded(now: f64) -> (tempfile::TempDir, Arc<RuntimeStore>) {

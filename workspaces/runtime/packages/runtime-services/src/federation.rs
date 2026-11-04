@@ -3,9 +3,9 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::OptionalExtension;
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::federation_ingress::{
     FederationInvitation, FederationRequest, InvitationScope,
 };

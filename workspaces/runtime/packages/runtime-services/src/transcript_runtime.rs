@@ -1,9 +1,9 @@
 //! Committed managed transcript projection shared by HTTP history and sync pull.
 use crate::{event_write::truthy, transcript::TranscriptError};
 use rusqlite::{Connection, OptionalExtension, params};
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_schema::DeliveryMoment;
 use studio_runtime_store::{
     AnalyticsRepository, RuntimeStore, TranscriptRepository, system_reads as records,

@@ -209,8 +209,8 @@ pub(crate) fn publish_owner(transaction: &Transaction<'_>, agent_id: &str) -> St
 mod tests {
     use super::*;
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
-    use studio_json::json;
     use std::cell::Cell;
+    use studio_json::json;
 
     thread_local! { static AGENT_PUBLICATIONS: Cell<usize> = const { Cell::new(0) }; }
     fn trace_agent_publication(event: TraceEvent<'_>) {

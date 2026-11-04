@@ -1,11 +1,11 @@
 //! Fake clocks and pressure sources exercise durable monitor admission and I/O.
 #![allow(clippy::unwrap_used)]
 use crate::monitor_fixtures as fixtures;
-use studio_json::{Value, json};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+use studio_json::{Value, json};
 use studio_runtime_schema::shell_policy::Settings;
 use studio_runtime_services::{
     monitor_driver::{self, MonitorNative, Submission},

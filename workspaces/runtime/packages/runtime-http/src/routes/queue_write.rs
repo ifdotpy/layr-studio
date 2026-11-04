@@ -55,8 +55,8 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
 

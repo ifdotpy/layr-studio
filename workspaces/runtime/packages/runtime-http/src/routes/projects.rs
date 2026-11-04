@@ -6,9 +6,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use studio_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 use studio_runtime_schema::model_catalog::ModelCatalog;
 use studio_runtime_schema::peer_team_ingress::{
@@ -1823,11 +1823,11 @@ mod local_registration_tests {
             );
         }
     }
-    use studio_json::json;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use studio_json::json;
     use studio_runtime_services::account_policy::AccountPolicyState;
     use studio_runtime_services::{
         multi_server_auth::AccessError,

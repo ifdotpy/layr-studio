@@ -2,13 +2,13 @@
 //! last good catalog of the account can validate the requested model.
 #![allow(clippy::disallowed_methods)]
 
-use studio_json::json;
 use std::collections::HashMap;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
+use studio_json::json;
 use studio_runtime_providers::{Method, ProviderKind, RequestId, RequestTicket};
 use studio_runtime_schema::shared_values::{
     MODEL_CATALOG_CACHE_TTL_SECONDS, MODEL_CATALOG_LAST_GOOD_MAX_AGE_SECONDS,

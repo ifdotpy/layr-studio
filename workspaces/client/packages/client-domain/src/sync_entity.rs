@@ -125,7 +125,8 @@ mod tests {
             json!({"op":"upsert","collection":"future","id":"a:b","seq":1,"value":{"nested":[null,{"x":true}]},"future":42}),
             json!({"op":"delete","collection":"future","id":"a","seq":2,"future":true}),
         ] {
-            let change: EntityChange = studio_json::from_value(value.clone()).expect("valid change");
+            let change: EntityChange =
+                studio_json::from_value(value.clone()).expect("valid change");
             assert_eq!(studio_json::to_value(&change).expect("serialize"), value);
             assert!(!change.scope().is_empty());
         }

@@ -1,8 +1,8 @@
 use crate::analytics_fixtures as common;
-use studio_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, atomic::AtomicBool};
+use studio_json::{Value, json};
 use studio_runtime_services::analytics_history::{
     self as history, BatchLimits, HistoryError, HistorySnapshot, RolloutPath,
 };

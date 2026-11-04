@@ -1578,8 +1578,8 @@ mod tests {
     fn mac_handoff_survives_p03_precommit_and_postcommit_restarts() {
         use super::{SystemFollowup, send_system_followup};
         use crate::linux_vm_guest::{GuestError, GuestRpc};
-        use studio_json::Value;
         use std::time::Duration;
+        use studio_json::Value;
 
         struct Guest(std::sync::Mutex<usize>);
         impl GuestRpc for Guest {
@@ -2116,7 +2116,8 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("chat projection reads");
-        let payload: studio_json::Value = studio_json::from_str(&payload).expect("projection parses");
+        let payload: studio_json::Value =
+            studio_json::from_str(&payload).expect("projection parses");
         assert_eq!(
             payload["value"]["tail"]
                 .as_str()

@@ -2008,8 +2008,8 @@ mod account_wake_index_tests {
         account_wake_invalid_target_query, account_wake_pending_agents_query,
     };
     use rusqlite::Connection;
-    use studio_json::json;
     use std::collections::BTreeMap;
+    use studio_json::json;
 
     #[test]
     fn thread_preparation_receipt_requires_typed_scope() {

@@ -4,8 +4,8 @@ use crate::agent_management::{
 };
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 use studio_runtime_store::{RuntimeStore, Transaction, agent_management as repository};
 
 pub type TransactionGuard = Box<dyn FnOnce(&Transaction<'_>) -> Result<(), ManagementError> + Send>;
@@ -723,8 +723,8 @@ mod lifecycle_identity_tests {
 #[cfg(test)]
 mod archive_finished_tests {
     use super::*;
-    use studio_json::json;
     use std::sync::Arc;
+    use studio_json::json;
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, Table, WorkItemRecord};
 
     #[tokio::test]

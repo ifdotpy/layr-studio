@@ -6,10 +6,10 @@ use crate::federation_messaging::{
 use crate::remote_transport::{self as transport, RemoteIdentity};
 use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, Transaction, params};
-use studio_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use studio_json::{Value, json};
 use studio_runtime_schema::delivery::DeliveryMoment;
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,

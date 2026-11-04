@@ -99,9 +99,10 @@ async fn directories(
                         status: String,
                         revoked: Option<f64>,
                     }
-                    let client: AccessSelection = studio_json::from_value(client).map_err(|_| {
-                        ApiError::stored(records::invalid("runtime_access_clients", &server_id))
-                    })?;
+                    let client: AccessSelection =
+                        studio_json::from_value(client).map_err(|_| {
+                            ApiError::stored(records::invalid("runtime_access_clients", &server_id))
+                        })?;
                     return Ok::<bool, ApiError>(
                         client.kind == "server"
                             && client.status == "paired"
@@ -626,9 +627,9 @@ mod diagnostics_http_tests {
     use axum::extract::ConnectInfo;
     use axum::http::{Request, StatusCode};
     use rusqlite::Connection;
-    use studio_json::{Value, json};
     use std::path::Path;
     use std::time::SystemTime;
+    use studio_json::{Value, json};
     use studio_runtime_services::diagnostics::{
         ProviderDiagnosticsPort, ProviderDiagnosticsSnapshot, SupervisorDiagnosticsPort,
         SupervisorDiagnosticsSnapshot,
@@ -820,7 +821,8 @@ mod diagnostics_http_tests {
         let typed: crate::generated::ExecutionLedger =
             studio_json::from_value(executions.clone()).expect("typed execution ledger");
         assert_eq!(
-            studio_json::to_value(typed).expect("ledger serializes")["runs"][0]["restartRecovery"]["supervisor"],
+            studio_json::to_value(typed).expect("ledger serializes")["runs"][0]["restartRecovery"]
+                ["supervisor"],
             json!({"generation": 96})
         );
 

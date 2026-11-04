@@ -721,5 +721,7 @@ fn invalid(object: &'static str, id: &str) -> VoiceError {
 mod ingress_tests;
 
 impl From<studio_json::error::Error> for VoiceError {
-    fn from(value: studio_json::error::Error) -> Self { Self::Json(value.into()) }
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
+    }
 }

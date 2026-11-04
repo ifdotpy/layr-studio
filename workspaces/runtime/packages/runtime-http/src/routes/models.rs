@@ -444,9 +444,9 @@ fn append_worker_models(
 mod tests {
     use super::{PENDING_MESSAGE, account_catalog, account_context};
     use axum::http::StatusCode;
-    use studio_json::{Value, json};
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use studio_json::{Value, json};
     use studio_runtime_providers::ProviderKind;
     use studio_runtime_services::account_policy::AccountsSnapshot;
     use studio_runtime_services::model_catalog::ModelCatalogService;

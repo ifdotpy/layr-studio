@@ -1,8 +1,8 @@
 //! Checked, bounded snapshots and write intents shared by continuation policies.
 //! Stored JSON is retained verbatim except for the fields a decision changes.
-use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::continuation_snapshot::{
     CapacityContinuation, CapacityContinuationStatus, ContinuationAgent, ContinuationRecord,
     ContinuationSnapshotRecord, PreparationSettings, UsageContinuation, UsageContinuationCause,

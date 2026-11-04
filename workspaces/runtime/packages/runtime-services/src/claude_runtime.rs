@@ -8,8 +8,8 @@ use crate::claude_controls::{
         ControlSession,
     },
 };
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 
 const MAX_CONTROL_BYTES: usize = 2 * 1024 * 1024;

@@ -682,8 +682,8 @@ mod tests {
         CursorKind, GitError, parse_task_cursor, run_git_program, run_git_program_timeout,
         task_feed_response,
     };
-    use studio_json::json;
     use std::time::Duration;
+    use studio_json::json;
 
     #[test]
     fn review_inbox_keeps_typed_work_root_and_missing_root() {

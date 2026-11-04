@@ -1,7 +1,7 @@
 //! Project folder identity at creation and in agent projections.
 use serde::Serialize;
-use studio_json::Value;
 use std::path::Path;
+use studio_json::Value;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(transparent)]

@@ -2,9 +2,9 @@
 
 use crate::multi_server_fixtures as common;
 use common::*;
-use studio_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_services::multi_server_auth::{
     AccessSnapshot, OwnerObservation, SignedRequest, authorize_at,
 };
@@ -68,9 +68,7 @@ fn message_command(
 }
 
 fn applied(value: &Value) -> ExchangeOutcome {
-    ExchangeOutcome::Applied(AppliedReply::new(
-        studio_json::to_raw_value(value).unwrap(),
-    ))
+    ExchangeOutcome::Applied(AppliedReply::new(studio_json::to_raw_value(value).unwrap()))
 }
 
 /// Restore receipt owners captured after the historical migration.
@@ -1843,7 +1841,10 @@ async fn python_exec_receipt_row_probes_once_and_settles_from_the_reply() {
         // The migration preserves the old root and assigns the probe an operation.
         reply.request_id = "python-exec".into();
         let expected = if name == "applied" || name == "commandNotApplied" {
-            Some(studio_json::from_str::<RemoteReply>(reply.value.as_ref().unwrap().as_str()).unwrap())
+            Some(
+                studio_json::from_str::<RemoteReply>(reply.value.as_ref().unwrap().as_str())
+                    .unwrap(),
+            )
         } else {
             None
         };
@@ -2644,7 +2645,10 @@ fn discovery_includes_local_other_port_and_only_online_owner_nodes() {
         "https://local.fixture.ts.net",
     )
     .expect("status");
-    assert_eq!(studio_json::json!(snapshot.candidates()), data["candidates"]);
+    assert_eq!(
+        studio_json::json!(snapshot.candidates()),
+        data["candidates"]
+    );
     let decision = studio_runtime_services::multi_server_discovery::decide_probe(
         &snapshot,
         "https://peer.fixture.ts.net",

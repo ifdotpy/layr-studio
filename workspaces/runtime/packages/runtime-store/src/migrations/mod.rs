@@ -379,10 +379,10 @@ mod projection_copy_tests {
                         studio_runtime_schema::work_item_record::WorkItem,
                     >(&raw)
                     .is_ok_and(|record| record.id().as_ref() == id),
-                    "runtime_plans" => {
-                        studio_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
-                            .is_ok_and(|record| record.id() == id)
-                    }
+                    "runtime_plans" => studio_json::from_str::<
+                        studio_runtime_schema::plan_record::PlanRecord,
+                    >(&raw)
+                    .is_ok_and(|record| record.id() == id),
                     "runtime_annotations" => studio_json::from_str::<
                         studio_runtime_schema::annotation_record::AnnotationRecord,
                     >(&raw)

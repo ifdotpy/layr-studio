@@ -1,13 +1,13 @@
 //! Host-side project vault records and setup facts. Guest RPC and the local Desk executable are
 //! separate effect boundaries; paper words and private key material are never read here.
 
-use studio_json::{Map, Value, json};
 use sha2::Digest;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
+use studio_json::{Map, Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 use thiserror::Error;
 
@@ -768,10 +768,10 @@ mod tests {
         setup_facts, store_site, suggested_prefix, valid_prefix, valid_profile, valid_region, view,
         writer_command,
     };
-    use studio_json::{Value, json};
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::fs;
+    use studio_json::{Value, json};
 
     fn state() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();

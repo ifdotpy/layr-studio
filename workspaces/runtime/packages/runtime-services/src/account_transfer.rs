@@ -3,8 +3,8 @@
 //! Submission is durable before an effect is dispatched. Unknown outcomes never
 //! authorize another send; receipts retain their exact transport identity.
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 use thiserror::Error;
 
 use crate::account_session_runtime::{
@@ -1075,7 +1075,8 @@ impl Snapshot {
         let response = result.result.value().ok_or_else(refused)?;
         let saved_params: Value =
             studio_json::from_str(saved.params.as_str()).map_err(|_| refused())?;
-        let next_params: Value = studio_json::from_str(next.params.as_str()).map_err(|_| refused())?;
+        let next_params: Value =
+            studio_json::from_str(next.params.as_str()).map_err(|_| refused())?;
         let valid_scope =
             |scope: &studio_runtime_schema::provider_call_contract::ConnectionScope| {
                 scope.account == account.as_str()
@@ -2362,8 +2363,8 @@ impl Decision {
         Ok(())
     }
     pub fn encoded(&self) -> Result<String, TransferError> {
-        let encoded =
-            studio_json::to_string(&self.operation).map_err(|_| invalid("account transfer", "/"))?;
+        let encoded = studio_json::to_string(&self.operation)
+            .map_err(|_| invalid("account transfer", "/"))?;
         if encoded.len() > MAX_RECORD_BYTES {
             return Err(invalid("account transfer", "/resourceLimit"));
         }
@@ -2997,8 +2998,8 @@ mod provider_receipt_tests {
                     ));
                 }
             };
-            let params = studio_json::to_raw_value(&params)
-                .map_err(|_| invalid("provider payload", "/"))?;
+            let params =
+                studio_json::to_raw_value(&params).map_err(|_| invalid("provider payload", "/"))?;
             self.typed_provider_intent(agent, operation, scope, method, &params)
         }
 

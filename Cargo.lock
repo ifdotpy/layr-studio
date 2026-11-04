@@ -6689,7 +6689,7 @@ dependencies = [
 name = "studio-diagnostics"
 version = "0.1.0"
 dependencies = [
- "serde_json",
+ "studio-json",
 ]
 
 [[package]]
@@ -6714,9 +6714,9 @@ dependencies = [
  "objc2-ui-kit",
  "objc2-web-kit",
  "serde",
- "serde_json",
  "sha2 0.11.1",
  "studio-client-core",
+ "studio-json",
  "tauri",
  "tauri-build",
  "tokio",
@@ -6727,7 +6727,7 @@ name = "studio-operations"
 version = "0.1.0"
 dependencies = [
  "serde",
- "serde_json",
+ "studio-json",
  "studio-test-deps",
 ]
 
@@ -6735,8 +6735,8 @@ dependencies = [
 name = "studio-operator-cli"
 version = "0.1.0"
 dependencies = [
- "serde_json",
  "studio-client-core",
+ "studio-json",
  "tempfile",
  "tokio",
 ]
@@ -6752,7 +6752,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
- "serde_json",
+ "studio-json",
  "tokio",
 ]
 
@@ -6763,7 +6763,7 @@ dependencies = [
  "notify",
  "rusqlite",
  "rustix",
- "serde_json",
+ "studio-json",
  "studio-runtime-proc-sys",
  "studio-runtime-process",
  "studio-runtime-store",
@@ -6901,8 +6901,8 @@ dependencies = [
  "rusqlite",
  "rustix",
  "serde",
- "serde_json",
  "sha2 0.11.1",
+ "studio-json",
  "studio-runtime-http",
  "studio-runtime-process",
  "studio-runtime-providers",

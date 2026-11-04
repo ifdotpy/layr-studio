@@ -184,7 +184,9 @@ fn byte_pages(
     };
     let mut bytes = 0;
     for document in documents {
-        let size = studio_json::to_vec(&document).map_err(ApiError::json)?.len();
+        let size = studio_json::to_vec(&document)
+            .map_err(ApiError::json)?
+            .len();
         if !batch.documents.is_empty() && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2 {
             batch.through = batch.documents.last().ok_or_else(data_error)?.seq;
             let next = EntityChangeBatch {

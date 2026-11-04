@@ -5,12 +5,12 @@
 //! client is the phone browser, which cannot reach the tool's loopback port.
 #![cfg(unix)]
 
-use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Approval, ApprovalState, BrowserCard, BrowserOutcome, BrowserPhase, BrowserRedirect,
     BrowserSource, Request,

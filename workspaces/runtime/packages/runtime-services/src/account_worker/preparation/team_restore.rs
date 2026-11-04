@@ -97,7 +97,8 @@ pub(super) fn snapshot(tx: &Transaction<'_>, actor: &Value) -> Result<Option<Val
     let results = query
         .query_map([id], |row| row.get::<_, String>(0))?
         .map(|row| {
-            studio_json::from_str::<Value>(&row?).map_err(|_| refusal("invalid result event".into()))
+            studio_json::from_str::<Value>(&row?)
+                .map_err(|_| refusal("invalid result event".into()))
         })
         .collect::<Result<Vec<_>, WorkerError>>()?;
     if !lead && !has_children && monitors.is_empty() {

@@ -1,12 +1,12 @@
 //! Pure projections used by the skills and capabilities discovery endpoints.
 
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
-use studio_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use tokio::time::Instant;
 
@@ -456,11 +456,11 @@ mod tests {
         apply_capability_result, capabilities_base, host_finder_view, skills_for_cwd,
         vm_finder_view,
     };
-    use studio_json::json;
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
     };
+    use studio_json::json;
 
     use tokio::time::Instant;
 

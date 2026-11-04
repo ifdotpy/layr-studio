@@ -354,5 +354,7 @@ mod origin_tests {
 }
 
 impl From<studio_json::error::Error> for CallbackError {
-    fn from(value: studio_json::error::Error) -> Self { Self::from(studio_json::Error::from(value)) }
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::from(studio_json::Error::from(value))
+    }
 }

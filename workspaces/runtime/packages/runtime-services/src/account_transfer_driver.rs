@@ -6,9 +6,9 @@ use crate::account_transfer::{
     Action, Command, Decision, EXECUTOR_REQUIRED, Snapshot, Ticket, TransferError,
 };
 use serde::Serialize;
-use studio_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use studio_json::Value;
 use studio_runtime_store::{
     AccountTransferRepository as Repository, AgentId, AgentRepository, RuntimeStore, Transaction,
 };
@@ -924,7 +924,8 @@ fn inline_reply(
         serde::Serialize::serialize(&(reference), studio_json::value::Serializer).map_err(lost)?;
     let bytes = crate::payload_blobs::load_blob(root, &reference)
         .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
-    let value = studio_json::from_slice(&bytes).map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
+    let value = studio_json::from_slice(&bytes)
+        .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
     *result = studio_runtime_store::transfer_record::ProviderResult::Inline {
         kind,
         value: Some(value),
@@ -1252,8 +1253,8 @@ pub async fn execute_member(
 mod request_tests {
     use super::request as request_async;
     use super::*;
-    use studio_json::json;
     use std::future::Future;
+    use studio_json::json;
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository};
 
     fn run_async<F: Future>(future: F) -> F::Output {

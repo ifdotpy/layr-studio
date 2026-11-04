@@ -1,7 +1,6 @@
 //! Ports shared by sign-in's actor, scripted tests and the owned stream child.
 use super::{LoginError, LoginSnapshot};
 use crate::account_driver::{AccountDriver, AuthMetadata, ProviderAuthReader};
-use studio_json::{Map, Value};
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -10,6 +9,7 @@ use std::{
     pin::Pin,
     time::Duration,
 };
+use studio_json::{Map, Value};
 
 pub type FutureResult<'a, T> = Pin<Box<dyn Future<Output = Result<T, LoginError>> + Send + 'a>>;
 pub struct LoginCommand {

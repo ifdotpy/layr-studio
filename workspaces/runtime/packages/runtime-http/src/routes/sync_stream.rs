@@ -4548,7 +4548,9 @@ mod tests {
             current.cursor.as_ref().map(|cursor| cursor.seq),
             Some(cursor.seq)
         );
-        let snapshot_bytes = studio_json::to_vec(&snapshot).expect("snapshot bytes").len();
+        let snapshot_bytes = studio_json::to_vec(&snapshot)
+            .expect("snapshot bytes")
+            .len();
         let current_bytes = studio_json::to_vec(&current).expect("resume bytes").len();
         assert!(current_bytes * 10 < snapshot_bytes);
         store.transaction(|tx| {

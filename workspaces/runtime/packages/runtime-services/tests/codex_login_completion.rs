@@ -2,8 +2,8 @@
 //! `account/login/completed` notification, and a receipt whose completion was
 //! lost cannot stay active forever. A receipt is never ready for an account id
 //! other than the one it expects.
-use studio_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_services::account_driver::{
     AccountDriver, CODEX_LOGIN_RECEIPT_LIFETIME_SECONDS, CodexLoginRequest, LOGIN_EXPIRED_ERROR,
     LoginReservation,

@@ -116,8 +116,11 @@ fn oracle() -> Vec<Case> {
 }
 macro_rules! owner {
     ($case:expr) => {
-        studio_json::from_str(&format!("{{\"compactions\":0,{}", &$case.owner.as_str()[1..]))
-            .expect("owner")
+        studio_json::from_str(&format!(
+            "{{\"compactions\":0,{}",
+            &$case.owner.as_str()[1..]
+        ))
+        .expect("owner")
     };
 }
 fn monitor_record(value: &Monitor) -> studio_runtime_store::MonitorRecord {
@@ -144,8 +147,11 @@ fn python_written_records_and_real_rules_functions_match() {
                     .workers
                     .iter()
                     .map(|worker| {
-                        studio_json::from_str(&format!("{{\"compactions\":0,{}", &worker.as_str()[1..]))
-                            .expect("worker")
+                        studio_json::from_str(&format!(
+                            "{{\"compactions\":0,{}",
+                            &worker.as_str()[1..]
+                        ))
+                        .expect("worker")
                     })
                     .collect();
                 agents.push(owner!(case));

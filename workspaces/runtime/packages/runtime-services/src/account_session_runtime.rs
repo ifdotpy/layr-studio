@@ -373,11 +373,11 @@ mod limits_freshness_tests {
     use super::{
         AccountSessionError, AccountSessionFuture, AccountSessionPort, LimitsSnapshot, limits,
     };
-    use studio_json::{Value, json};
     use std::sync::{
         Mutex,
         atomic::{AtomicUsize, Ordering},
     };
+    use studio_json::{Value, json};
 
     const NOW: f64 = 1_000.0;
 
@@ -2436,11 +2436,11 @@ mod historical_receipt_tests {
 mod persistence_tests {
     #![allow(clippy::unwrap_used)]
     use super::{AccountSessionError, persist_limits};
-    use studio_json::{Value, json};
     use std::{
         collections::BTreeMap,
         sync::{Arc, Mutex},
     };
+    use studio_json::{Value, json};
     use studio_runtime_store::{RuntimeStore, SyncDocumentsRepository};
 
     fn stored_workspace(store: &RuntimeStore) -> Value {
@@ -2471,8 +2471,11 @@ mod persistence_tests {
                 let raw = studio_json::OwnedRawJson::from_string(
                     json!({"accountKey":"other","at":1.0,"data":{"accountId":"other"}}).to_string(),
                 )?;
-                let view =
-                    studio_runtime_schema::usage_limits::RateLimitView::read(raw.as_str(), "other", 1.0)?;
+                let view = studio_runtime_schema::usage_limits::RateLimitView::read(
+                    raw.as_str(),
+                    "other",
+                    1.0,
+                )?;
                 SyncDocumentsRepository::put_entity(tx, "rateLimit", "other", view, false)?;
                 Ok(())
             })
@@ -2589,7 +2592,6 @@ mod limits_runtime_tests {
     };
     use crate::{account_driver::AccountDriver, account_policy::AccountPolicyState};
     use futures_util::FutureExt;
-    use studio_json::{Value, json};
     use std::{
         collections::VecDeque,
         fs,
@@ -2599,6 +2601,7 @@ mod limits_runtime_tests {
         },
         time::Duration,
     };
+    use studio_json::{Value, json};
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
     use studio_runtime_store::RuntimeStore;
     use tokio::sync::oneshot;

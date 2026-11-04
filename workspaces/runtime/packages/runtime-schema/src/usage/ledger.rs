@@ -4,8 +4,8 @@ use crate::provider_kind::ProviderKind;
 use crate::queue_command::Field;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 
 /// Budget fault while at least one provider response has unresolved usage.
 pub const MISSING_FINAL_USAGE: &str = "missingFinalUsage";

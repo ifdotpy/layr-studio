@@ -6,12 +6,12 @@ use rusqlite::{
     types::{Value as SqlValue, ValueRef},
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{
     EVENT_KIND_EXIT, EVENT_KIND_STDERR, EVENT_KIND_STDOUT, EventKind, HANDLE_LIMIT, HandleSnapshot,
     NativeId, ReceiptSnapshot, Refusal, WriteDecision,
@@ -1083,9 +1083,11 @@ mod tests {
             let raw = journal
                 .provider_operation_status("account:a", "outbox:effect")
                 .expect("status");
-            studio_json::from_str::<Status>(&studio_json::to_string(&raw).expect("serialize status"))
-                .expect("typed status")
-                .state
+            studio_json::from_str::<Status>(
+                &studio_json::to_string(&raw).expect("serialize status"),
+            )
+            .expect("typed status")
+            .state
         };
         assert_eq!(status(), State::Unknown);
         let message = crate::projection_value(&Message {

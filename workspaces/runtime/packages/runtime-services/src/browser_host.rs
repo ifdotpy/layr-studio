@@ -2038,9 +2038,10 @@ mod tests {
 
     #[test]
     fn launcher_accepts_guest_reply_without_open() {
-        let reply: LauncherReply =
-            studio_json::from_str(r#"{"ok":true,"id":"card","host":"example.test","joined":false}"#)
-                .expect("guest reply");
+        let reply: LauncherReply = studio_json::from_str(
+            r#"{"ok":true,"id":"card","host":"example.test","joined":false}"#,
+        )
+        .expect("guest reply");
         assert!(reply.ok);
         assert_eq!(reply.host.as_deref(), Some("example.test"));
         assert_eq!(reply.open, None);

@@ -228,9 +228,9 @@ pub fn read_entries(tx: &Transaction<'_>) -> Result<Vec<Entry>, StoreError> {
         .iter()
         .filter_map(|raw| {
             studio_json::from_str::<
-                    studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
-                >(raw)
-                .ok()
+                studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+            >(raw)
+            .ok()
         })
         .filter_map(|record| entry_of(&record.0))
         .collect())

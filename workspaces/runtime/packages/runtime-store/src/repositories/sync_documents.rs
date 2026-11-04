@@ -170,10 +170,12 @@ impl SyncDocumentsRepository {
             )
             .optional()?;
         let mut envelope: Value = match raw {
-            Some(raw) => studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
-                scope: collection.to_owned(),
-                id: id.to_owned(),
-            })?,
+            Some(raw) => {
+                studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
+                    scope: collection.to_owned(),
+                    id: id.to_owned(),
+                })?
+            }
             None => json!({"collection":collection,"id":id,"value":{}}),
         };
         if envelope.get("collection").and_then(Value::as_str) != Some(collection)

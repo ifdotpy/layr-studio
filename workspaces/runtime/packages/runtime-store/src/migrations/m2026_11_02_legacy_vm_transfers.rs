@@ -8,8 +8,8 @@ use crate::{
     transfer_record::{TransferRecord, TransferStatus},
 };
 use rusqlite::{Transaction, params};
-use studio_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_account_transfers")? {

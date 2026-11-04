@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
-use studio_json::{Map, Value};
 use std::borrow::Cow;
+use studio_json::{Map, Value};
 use thiserror::Error;
 
 /// Largest accepted UTF-8 JSON payload, excluding its LF or CRLF delimiter.

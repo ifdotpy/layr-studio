@@ -263,8 +263,8 @@ mod replay_tests {
         extract::ConnectInfo,
         http::Request,
     };
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_services::account_policy::AccountPolicyState;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
@@ -413,9 +413,11 @@ mod replay_tests {
                 "defaultAccountKey":"target","logins":{},"accounts":{"target":{
                     "id":"target","provider":"codex","home":root.path(),"label":"Target",
                     "source":"fixture","status":status,"disconnected":disconnected}}});
-            let policy =
-                AccountPolicyState::from_startup(Some(&studio_json::to_vec(&registry).unwrap()), [])
-                    .unwrap();
+            let policy = AccountPolicyState::from_startup(
+                Some(&studio_json::to_vec(&registry).unwrap()),
+                [],
+            )
+            .unwrap();
             crate::router(crate::HttpState::new(
                 "token".into(),
                 "fixture".into(),

@@ -393,7 +393,9 @@ mod projection_tests {
         assert!(
             studio_json::from_str::<Radio>(&canonical.replace(",\"direct\":false", "")).is_err()
         );
-        assert!(studio_json::from_str::<Radio>(&canonical.replace("\"active\":null,", "")).is_err());
+        assert!(
+            studio_json::from_str::<Radio>(&canonical.replace("\"active\":null,", "")).is_err()
+        );
     }
 
     #[test]

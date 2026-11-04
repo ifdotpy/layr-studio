@@ -113,7 +113,8 @@ mod receipt_tests {
         let array = format!(r#"{{"project":"/home","request":{request},"location":[]}}"#);
         assert!(studio_json::from_str::<LocationPayload>(&array).is_err());
         assert!(
-            studio_json::from_str::<LocationPayload>(r#"{"project":"/home","request":[]}"#).is_err()
+            studio_json::from_str::<LocationPayload>(r#"{"project":"/home","request":[]}"#)
+                .is_err()
         );
     }
 
@@ -177,9 +178,10 @@ mod receipt_tests {
             r#"{"serverId":"peer","gitOrigin":"origin"}"#,
         ] {
             let parsed: LocationValue = studio_json::from_str(raw).expect("location value");
-            let actual: Value =
-                studio_json::from_str(&studio_json::to_string(&parsed).expect("serialize location"))
-                    .expect("serialized value");
+            let actual: Value = studio_json::from_str(
+                &studio_json::to_string(&parsed).expect("serialize location"),
+            )
+            .expect("serialized value");
             assert_eq!(
                 actual,
                 studio_json::from_str::<Value>(raw).expect("expected value")
@@ -222,8 +224,8 @@ mod receipt_tests {
 
     #[test]
     fn managed_location_snapshot_accepts_unsigned_payload() {
-        let fixture: Value =
-            studio_json::from_str(include_str!("../tests/relocation/oracle.json")).expect("fixture");
+        let fixture: Value = studio_json::from_str(include_str!("../tests/relocation/oracle.json"))
+            .expect("fixture");
         let case = &fixture["cases"][0];
         let mut raw = case["outbox"].clone();
         raw["body"]["payload"]
@@ -237,8 +239,8 @@ mod receipt_tests {
 
     #[test]
     fn hidden_project_completes_pending_location_once() {
-        let fixture: Value =
-            studio_json::from_str(include_str!("../tests/relocation/oracle.json")).expect("fixture");
+        let fixture: Value = studio_json::from_str(include_str!("../tests/relocation/oracle.json"))
+            .expect("fixture");
         let case = &fixture["cases"][0];
         let raw = case["outbox"].clone();
         let key = raw["id"].as_str().expect("operation").to_owned();

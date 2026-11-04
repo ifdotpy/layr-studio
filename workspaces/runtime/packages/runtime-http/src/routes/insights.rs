@@ -5,9 +5,9 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use studio_json::Value;
 use std::collections::BTreeMap;
 use std::time::Instant;
+use studio_json::Value;
 use studio_runtime_services::analytics::{self, AnalyticsOptions};
 use studio_runtime_services::costs::{self, CostsError};
 
@@ -283,11 +283,11 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, extract::ConnectInfo, http::Request};
-    use studio_json::{Value, json};
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
     };
+    use studio_json::{Value, json};
     use studio_runtime_store::{
         RuntimeStore, StoreError,
         analytics_capture::{AnalyticsCaptureRepository, CaptureTable},

@@ -624,8 +624,8 @@ mod tests {
         use axum::body::{Body, to_bytes};
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use studio_json::{Value, json};
         use std::sync::Arc;
+        use studio_json::{Value, json};
         use studio_runtime_store::RuntimeStore;
         use tower::ServiceExt;
 
@@ -748,9 +748,9 @@ mod tests {
             let value: Value = studio_json::from_str(raw).unwrap();
             let expected = value.get("turnId").cloned().unwrap_or(Value::Null);
             let payload: super::ReportedChangePayload = studio_json::from_str(raw).unwrap();
-            let actual = payload
-                .turn_id
-                .map_or(Value::Null, |raw| studio_json::from_str(raw.as_str()).unwrap());
+            let actual = payload.turn_id.map_or(Value::Null, |raw| {
+                studio_json::from_str(raw.as_str()).unwrap()
+            });
             assert_eq!(actual, expected);
         }
         assert!(
@@ -767,8 +767,8 @@ mod tests {
         use axum::body::{Body, to_bytes};
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use studio_json::{Value, json};
         use std::sync::Arc;
+        use studio_json::{Value, json};
         use studio_runtime_store::{RuntimeStore, StoreError};
         use tower::ServiceExt;
 
@@ -827,8 +827,8 @@ mod tests {
         use axum::body::{Body, to_bytes};
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use studio_json::{Value, json};
         use std::sync::Arc;
+        use studio_json::{Value, json};
         use studio_runtime_store::{RuntimeStore, StoreError};
         use tower::ServiceExt;
 

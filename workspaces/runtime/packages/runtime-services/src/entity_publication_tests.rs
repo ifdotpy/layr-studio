@@ -4,8 +4,8 @@
 //! publication fails them.
 
 use super::test_support::{chat_view, client_entity, seed_chat, store};
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 
 const CHAT: &str = "published-chat";

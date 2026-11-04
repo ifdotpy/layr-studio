@@ -1,12 +1,12 @@
 //! Current account registry codec and atomic replacement; account order is durable UI state.
 use serde::Deserialize;
 use serde::ser::{Serialize, SerializeMap, Serializer};
-use studio_json::{Map, Value};
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use studio_json::{Map, Value};
 
 fn registry_violation(value: &Value) -> Result<Option<(String, String)>, ()> {
     studio_runtime_schema::first_error("account-registry/AccountRegistryRecord", value)

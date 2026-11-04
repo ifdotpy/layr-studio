@@ -25,10 +25,10 @@
 use crate::account_driver::AccountDriver;
 use crate::continuation::ContinuationError;
 use rusqlite::OptionalExtension;
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_schema::ProviderKind;
 use studio_runtime_schema::shared_values::{
     ACCOUNT_RUNNING_TURNS_DEFAULT_CLAUDE, ACCOUNT_RUNNING_TURNS_DEFAULT_CODEX,
@@ -1097,8 +1097,8 @@ mod tests {
     #[tokio::test]
     async fn provider_identity_gate_refuses_missing_account_without_admission() {
         use super::{AccountDriver, ContinuationError, StartGate, StartSources};
-        use studio_json::json;
         use std::sync::Arc;
+        use studio_json::json;
         use studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION;
         use studio_runtime_store::RuntimeStore;
         let root = tempfile::tempdir().expect("state directory");

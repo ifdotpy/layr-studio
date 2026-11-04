@@ -1,5 +1,5 @@
-use studio_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
+use studio_json::{Value, json};
 
 #[derive(Clone, Copy)]
 pub enum SyncRecoveryKind {

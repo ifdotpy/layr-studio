@@ -2,8 +2,8 @@ use super::{SchedulerRepository, select_turn_batch};
 use crate::records::{AgentId, AgentRecord, AgentRepository, AgentStatus};
 use crate::{QueueEvent, QueueEventId};
 use rusqlite::Connection;
-use studio_json::json;
 use std::collections::BTreeMap;
+use studio_json::json;
 
 fn database() -> Connection {
     let connection = Connection::open_in_memory().expect("memory database opens");

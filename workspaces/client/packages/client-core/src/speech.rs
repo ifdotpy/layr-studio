@@ -2,13 +2,13 @@
 //! Speech framework program that the Electron app packages.
 use crate::protocol::{Request, Response};
 use serde::Deserialize;
-use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use tokio::{io::AsyncBufReadExt, sync::broadcast};
 
 #[derive(Default, Deserialize)]

@@ -1,5 +1,5 @@
-use studio_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, AgentRepository, MonitorRecord, RuntimeStore, Table};
 
 pub fn monitor(root: &Path) -> MonitorRecord {

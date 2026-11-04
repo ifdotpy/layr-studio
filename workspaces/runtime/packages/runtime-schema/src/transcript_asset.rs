@@ -3,9 +3,9 @@ use crate::raw_object::{self, RawObjectFields};
 use crate::stored_record::StoredJsonInteger;
 use serde::de::{Error, MapAccess};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use studio_json::OwnedRawJson as RawValue;
 use studio_json::{Number, Value};
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
@@ -131,10 +131,12 @@ impl PartialEq for TranscriptAssetView {
             && self.hash == other.hash
             && self.created == other.created
             && self.extra.len() == other.extra.len()
-            && self
-                .extra
-                .iter()
-                .all(|(key, value)| other.extra.get(key).is_some_and(|v| v.as_str() == value.as_str()))
+            && self.extra.iter().all(|(key, value)| {
+                other
+                    .extra
+                    .get(key)
+                    .is_some_and(|v| v.as_str() == value.as_str())
+            })
     }
 }
 

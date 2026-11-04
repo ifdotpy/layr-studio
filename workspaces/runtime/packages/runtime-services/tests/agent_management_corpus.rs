@@ -1,5 +1,5 @@
-use studio_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_services::{
     agent_lifecycle_runtime::{self, LifecycleEffect, LifecyclePorts},
     agent_management::{Action, ManagementError, ManagementSnapshot, Records, decide},
@@ -240,7 +240,8 @@ async fn run_lifecycle_end_state(case: &Value) -> (Value, Value) {
     .await;
     let saved = store.test_reader().expect("read final store");
     let rows = repository::read(&saved).expect("complete final rows");
-    let final_state = studio_json::to_value(Records { tables: rows }).expect("serialize final rows");
+    let final_state =
+        studio_json::to_value(Records { tables: rows }).expect("serialize final rows");
     let result = match result {
         Ok(result) => json!({"result":result}),
         Err(error) => json!({"error":error.to_string()}),

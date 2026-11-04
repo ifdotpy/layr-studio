@@ -1,4 +1,3 @@
-use studio_json::{Value, json};
 use std::{
     path::Path,
     sync::{
@@ -6,6 +5,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use studio_json::{Value, json};
 use studio_runtime_services::{
     continuation::{ContinuationError, Snapshot},
     continuation_runtime::{self, Completion, WakePort},

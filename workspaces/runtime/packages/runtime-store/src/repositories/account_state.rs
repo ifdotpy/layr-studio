@@ -146,7 +146,8 @@ pub fn normalized_limits_view(
         let value: Legacy = match studio_json::from_str::<Projected<'_>>(entity.value.as_str()) {
             Ok(view) => studio_json::from_str(view.observation.as_str()),
             Err(_) => studio_json::from_str(entity.value.as_str()),
-        }.ok()?;
+        }
+        .ok()?;
         (value.response.account_key == account)
             .then(|| RateLimitView::from_observation(value.response, now))
     })();

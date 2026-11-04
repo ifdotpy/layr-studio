@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use iroh::endpoint::{Connection, ConnectionError, VarInt};
 use serde::Deserialize;
-use serde_json::json;
+use studio_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
@@ -50,7 +50,7 @@ pub async fn listen(listener: UnixListener, links: Arc<Links>) {
     }
 }
 
-async fn reply<W: AsyncWrite + Unpin>(writer: &mut W, value: &serde_json::Value) {
+async fn reply<W: AsyncWrite + Unpin>(writer: &mut W, value: &studio_json::Value) {
     let mut line = value.to_string().into_bytes();
     line.push(b'\n');
     writer.write_all(&line).await.ok();
@@ -66,7 +66,7 @@ async fn handle(stream: UnixStream, links: Arc<Links>) {
         .read_until(b'\n', &mut line)
         .await;
     let head = match read {
-        Ok(_) if line.ends_with(b"\n") => serde_json::from_slice::<OutboundHead>(&line).ok(),
+        Ok(_) if line.ends_with(b"\n") => studio_json::from_slice::<OutboundHead>(&line).ok(),
         _ => None,
     };
     let Some(head) = head.filter(|head| head.timeout > 0.0 && head.timeout <= MAX_TIMEOUT_SECONDS)

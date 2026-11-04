@@ -1,9 +1,9 @@
 //! Checked persisted transcript shells; provider extension fields stay opaque.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
-use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
+use studio_json::OwnedRawJson as RawValue;
+use studio_json::Value;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]

@@ -19,8 +19,8 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use strum::VariantNames;
+use studio_json::Value;
 
 use crate::approvals;
 use crate::records::{AgentExecutionMode, AgentId, AgentStatus};

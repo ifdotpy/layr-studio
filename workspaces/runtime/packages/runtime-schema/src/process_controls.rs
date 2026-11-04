@@ -653,8 +653,8 @@ mod tests {
         let result = json!({"requestId":"request", "status":"completed", "processes":[], "response": {
             "kind":"monitor_input", "monitorId":"monitor", "status":"acknowledged"
         }, "legacy":null});
-        let typed =
-            studio_json::from_str::<ProcessActionResult>(&result.to_string()).expect("valid result");
+        let typed = studio_json::from_str::<ProcessActionResult>(&result.to_string())
+            .expect("valid result");
         let receipt = ProcessReceipt::found(typed);
         let ProcessReceipt::Found(found) = &receipt else {
             panic!("expected found receipt")

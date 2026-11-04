@@ -8,8 +8,8 @@ use crate::managed_host_tools::{
     Actor, AgentAncestry, DispatchedOperation, Error, OperationResult, agent_ancestry,
 };
 use rusqlite::Transaction;
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::persistence::{
     NativeReleasePhase, OutboxKind, OutboxStatus, OwnerKind, RecoveryReceiptStatus,
@@ -666,8 +666,9 @@ pub(crate) async fn finish_recovery(
                     let saved = RequestResults::admitted_result(tx, &auth.admission)
                         .map_err(studio_runtime_store::StoreError::from)?
                         .ok_or(Error::Stale)?;
-                    let saved: ResultEnvelope<ManualReply> = studio_json::from_str(&saved.result)
-                        .map_err(studio_runtime_store::StoreError::from)?;
+                    let saved: ResultEnvelope<ManualReply> =
+                        studio_json::from_str(&saved.result)
+                            .map_err(studio_runtime_store::StoreError::from)?;
                     saved.reply.into_receipt()?
                 }
             };
@@ -928,8 +929,8 @@ mod tests {
     use crate::account_session_runtime::{
         AccountSessionFuture, ConnectionScope, ProviderRequest, ProviderResponse, SessionReceipt,
     };
-    use studio_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
     use studio_runtime_schema::persistence::RequestIdentity;
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository};
@@ -1509,8 +1510,10 @@ mod tests {
                 )?;
                 Ok::<_, Error>((
                     auth,
-                    RecoverySnapshot::from_record(studio_json::from_str(&raw).expect("worker JSON"))
-                        .expect("snapshot"),
+                    RecoverySnapshot::from_record(
+                        studio_json::from_str(&raw).expect("worker JSON"),
+                    )
+                    .expect("snapshot"),
                 ))
             })
             .await

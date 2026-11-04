@@ -5,8 +5,8 @@ use crate::federation_messaging::{
 };
 use crate::remote_transport::{self as transport, RemoteIdentity};
 use rusqlite::{OptionalExtension, Transaction, params};
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,
 };

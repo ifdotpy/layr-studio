@@ -12,7 +12,7 @@ use std::{
 };
 
 use serde::{Deserialize, de::IgnoredAny};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_services::{
     native_runtime::{
@@ -118,7 +118,7 @@ fn probe_result<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ()> {
 }
 fn companion_ready(bytes: &[u8]) -> Result<(), ()> {
     let JsonObject(ready): JsonObject<CompanionReady> =
-        serde_json::from_slice(bytes).map_err(|_| ())?;
+        studio_json::from_slice(bytes).map_err(|_| ())?;
     (ready.kind == "connection/ready" && ready.selected_version == 1.0)
         .then_some(())
         .ok_or(())
@@ -144,7 +144,7 @@ async fn check_bundle(
         if !help.contains(&format!("Usage: {name}")) || !help.contains("--listen") {
             return Err(CompatibilityRefusal::CompanionCheck);
         }
-        let hello = serde_json::to_vec(&json!({
+        let hello = studio_json::to_vec(&json!({
             "type":"connection/hello",
             "supportedVersions":[1],
             "requiredCapabilities":[],
@@ -207,7 +207,7 @@ fn schema_check(directory: &Path) -> Result<Value, CompatibilityRefusal> {
         }
         let bytes = fs::read(path).map_err(|_| CompatibilityRefusal::ProtocolSchema)?;
         let value: Value =
-            serde_json::from_slice(&bytes).map_err(|_| CompatibilityRefusal::ProtocolSchema)?;
+            studio_json::from_slice(&bytes).map_err(|_| CompatibilityRefusal::ProtocolSchema)?;
         value
             .as_object()
             .ok_or(CompatibilityRefusal::ProtocolSchema)?;
@@ -330,7 +330,7 @@ fn request(id: u64, method: &str, params: Value) -> Value {
 }
 
 async fn write_frame(input: &mut tokio::process::ChildStdin, value: &Value) -> Result<(), ()> {
-    let mut bytes = serde_json::to_vec(value).map_err(|_| ())?;
+    let mut bytes = studio_json::to_vec(value).map_err(|_| ())?;
     if bytes.len() > MAX_FRAME_BYTES {
         return Err(());
     }
@@ -538,8 +538,8 @@ impl Drop for ProbeHome {
 #[cfg(all(test, unix))]
 mod tests {
     use super::SystemCompatibilityProbe;
-    use serde_json::json;
     use std::{fs, os::unix::fs::PermissionsExt};
+    use studio_json::json;
     use studio_runtime_services::{
         native_runtime::{CompatibilityProbe, CompatibilityResult},
         provider_binaries::NativePlatform,
@@ -547,8 +547,8 @@ mod tests {
 
     #[test]
     fn probe_response_admission_matches_legacy_value_handling() {
-        fn legacy(line: &[u8]) -> Result<Option<serde_json::Value>, ()> {
-            let value: serde_json::Value = serde_json::from_slice(line).map_err(|_| ())?;
+        fn legacy(line: &[u8]) -> Result<Option<studio_json::Value>, ()> {
+            let value: studio_json::Value = studio_json::from_slice(line).map_err(|_| ())?;
             if value.get("method").is_some() {
                 return if value.get("id").is_some() {
                     Err(())
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn probe_payload_views_match_legacy_admission() {
         use super::{ConfigResult, InitializeResult, LoadedResult, companion_ready, probe_result};
-        use serde_json::Value;
+        use studio_json::Value;
         for raw in [
             r#"{"type":"connection/ready","selectedVersion":1,"capabilities":[null,{},1]}"#,
             r#"{"type":"connection/ready","selectedVersion":1.0,"capabilities":[]}"#,
@@ -601,7 +601,7 @@ mod tests {
             r#"{"unknown":1e400}"#,
             "{",
         ] {
-            let parsed: Result<Value, _> = serde_json::from_str(raw);
+            let parsed: Result<Value, _> = studio_json::from_str(raw);
             if let Ok(value) = parsed {
                 let ready = value.get("type").and_then(Value::as_str) == Some("connection/ready")
                     && value.get("selectedVersion").and_then(Value::as_f64) == Some(1.0)
@@ -699,9 +699,9 @@ printf '%s\n' '{{"id":3,"result":{loaded}}}'
             .expect("make fixture executable");
     }
 
-    fn error_notification_schema() -> serde_json::Value {
-        let mut leaf: serde_json::Value =
-            serde_json::from_str(studio_runtime_schema::provider_errors::CODEX_ERROR_SCHEMA)
+    fn error_notification_schema() -> studio_json::Value {
+        let mut leaf: studio_json::Value =
+            studio_json::from_str(studio_runtime_schema::provider_errors::CODEX_ERROR_SCHEMA)
                 .expect("vendor error leaf");
         let definitions = leaf
             .as_object_mut()
@@ -725,8 +725,9 @@ printf '%s\n' '{{"id":3,"result":{loaded}}}'
             "thread/settings/update",
             "model/list",
         ];
-        let usage: serde_json::Value =
-            serde_json::from_str(studio_runtime_schema::usage::CODEX_USAGE_SCHEMA).expect("vendor");
+        let usage: studio_json::Value =
+            studio_json::from_str(studio_runtime_schema::usage::CODEX_USAGE_SCHEMA)
+                .expect("vendor");
         for (name, value) in [
             (
                 "ClientRequest.json",

@@ -691,7 +691,8 @@ mod tests {
     #[test]
     fn typed_work_requires_nullable_gate_and_rejects_unknown_fields() {
         assert!(
-            studio_json::from_str::<super::WorkRequest>(r#"{"action":"set_default_gate"}"#).is_err()
+            studio_json::from_str::<super::WorkRequest>(r#"{"action":"set_default_gate"}"#)
+                .is_err()
         );
         assert!(
             studio_json::from_str::<super::WorkRequest>(
@@ -720,8 +721,8 @@ mod tests {
 mod managed_work_port_tests {
     use super::managed_work_port;
     use crate::router::HttpState;
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_services::provider_callbacks::WorkActionOutcome;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
 

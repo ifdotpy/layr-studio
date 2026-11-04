@@ -15,8 +15,8 @@ use std::{
 };
 
 use rusqlite::OptionalExtension;
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::persistence::{OutboxKind, RequestIdentity};
 #[cfg(test)]
@@ -843,8 +843,8 @@ pub async fn is_monitor_approval(
             if speech.agent != agent_id || speech.kind != "orchestrator" {
                 return Ok(false);
             }
-            let metadata: ApprovalSpeechMetadata =
-                studio_json::from_str(&speech.payload).map_err(|_| VoiceProviderError::Operation)?;
+            let metadata: ApprovalSpeechMetadata = studio_json::from_str(&speech.payload)
+                .map_err(|_| VoiceProviderError::Operation)?;
             let Some(request_id) = metadata.request_id.as_deref() else {
                 return Ok(false);
             };
@@ -1937,7 +1937,8 @@ async fn attach_start_context(
             if scope.connection != context.connection_id || scope.generation != context.generation {
                 return Err(VoiceProviderError::ContextChanged);
             }
-            let scope = studio_json::to_string(&scope).map_err(|_| VoiceProviderError::Operation)?;
+            let scope =
+                studio_json::to_string(&scope).map_err(|_| VoiceProviderError::Operation)?;
             let updated = transaction.execute(
                 "UPDATE voice_sessions SET connection_id=?1,provider_scope=?6 \
              WHERE id=?2 AND agent=?3 AND native_thread=?4 AND account_key=?5 \

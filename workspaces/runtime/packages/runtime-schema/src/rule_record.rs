@@ -1,8 +1,8 @@
 //! Typed persisted rules, including open extension fields.
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Serialize};
-use studio_json::{Number, Value};
 use std::borrow::Cow;
+use studio_json::{Number, Value};
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(transparent)]

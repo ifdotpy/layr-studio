@@ -7,10 +7,10 @@ pub use crate::sync_views::{
     project_persisted_record,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use studio_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::SYNC_ENTITY_SCOPE;
 pub use studio_runtime_schema::shared_values::{SYNC_BATCH_LIMIT, SYNC_ENTITY_PAGE_LIMIT};
 use studio_runtime_store::{
@@ -452,9 +452,9 @@ pub fn maintain_entity_projections_with_server_id(
                     continue;
                 }
                 if collection == "room" {
-                    let Ok(room) =
-                        studio_json::from_str::<studio_runtime_schema::room_record::RoomRecord>(raw)
-                    else {
+                    let Ok(room) = studio_json::from_str::<
+                        studio_runtime_schema::room_record::RoomRecord,
+                    >(raw) else {
                         continue;
                     };
                     if room.id != *id {
@@ -4749,8 +4749,8 @@ mod work_parity_tests {
     use super::{EntityChanges, publish_entity_changes};
     use crate::sync_views::{WorkView, work_views};
     use serde::Deserialize;
-    use studio_json::{Value, json, OwnedRawJson as RawValue};
     use std::collections::{BTreeMap, BTreeSet};
+    use studio_json::{OwnedRawJson as RawValue, Value, json};
     use studio_runtime_store::{RuntimeStore, StoreError, WorkItemsRepository};
 
     #[tokio::test]

@@ -2,7 +2,6 @@
 //! never a private key or an arbitrary network authority.
 use crate::server_keys::{self, Credential, Group, TextField, Vault, field};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use studio_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{
@@ -11,6 +10,7 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use studio_json::{Value, json};
 use studio_request_signing::header;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 

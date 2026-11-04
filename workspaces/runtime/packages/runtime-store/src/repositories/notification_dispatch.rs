@@ -144,7 +144,8 @@ impl NotificationDispatchRepository {
             )
             .optional()?;
         raw.map(|raw| {
-            let value: Value = studio_json::from_str(&raw).map_err(|_| invalid_record(table, id))?;
+            let value: Value =
+                studio_json::from_str(&raw).map_err(|_| invalid_record(table, id))?;
             if !value.is_object() || value.get("id").and_then(Value::as_str) != Some(id) {
                 return Err(invalid_record(table, id));
             }

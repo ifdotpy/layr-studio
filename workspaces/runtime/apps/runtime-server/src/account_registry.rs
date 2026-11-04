@@ -1481,7 +1481,7 @@ impl AccountRegistry {
             let account = effect
                 .agent
                 .get("accountKey")
-                .and_then(serde_json::Value::as_str)
+                .and_then(studio_json::Value::as_str)
                 .unwrap_or("default");
             let Some(worker) = self.workers.get(account) else {
                 continue;
@@ -2068,12 +2068,12 @@ impl InterruptTransport for RuntimeRadioInterrupt {
         let agent = effect
             .agent
             .get("id")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .ok_or(ProjectsError::Invalid("radio participant missing"))?;
         let thread = effect
             .agent
             .get("threadId")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .ok_or(ProjectsError::Invalid("radio thread missing"))?;
         let command = AccountCommand::RadioInterrupt {
             agent_id: agent.to_owned(),
@@ -2222,9 +2222,9 @@ mod bounded_reconcile_tests {
         );
         store.transaction(|tx| {
             for id in ["bad-mode", "healthy-mode", "absent-mode", "null-mode"] {
-                let mut agent = serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"queued","autoWake":true,"inFlight":false,"accountKey":"default"});
-                if id == "healthy-mode" { agent["workspaceMode"] = serde_json::json!("shared"); }
-                if id == "null-mode" { agent["workspaceMode"] = serde_json::Value::Null; }
+                let mut agent = studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"queued","autoWake":true,"inFlight":false,"accountKey":"default"});
+                if id == "healthy-mode" { agent["workspaceMode"] = studio_json::json!("shared"); }
+                if id == "null-mode" { agent["workspaceMode"] = studio_json::Value::Null; }
                 AgentRepository::put(tx, &AgentRecord::from_value(agent)?)?;
                 tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES (?1,?1,'user','fixture','pending',0,1)", [id])?;
             }
@@ -2232,7 +2232,7 @@ mod bounded_reconcile_tests {
         }).await.expect("pending candidates");
         store.transaction(|tx| {
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode',7) WHERE id='bad-mode'", [])?;
-            tx.execute("INSERT INTO runtime_work(id,record) VALUES('bad-work',?1)", [serde_json::json!({"id":"bad-work","owner":"bad-mode"}).to_string()])?;
+            tx.execute("INSERT INTO runtime_work(id,record) VALUES('bad-work',?1)", [studio_json::json!({"id":"bad-work","owner":"bad-mode"}).to_string()])?;
             Ok(())
         }).await.expect("existing corrupt mode");
         let connection = store.test_reader().expect("fixture connection");
@@ -2516,8 +2516,8 @@ mod tests {
     };
 
     use super::{RegistryChanges, RegistryHints, changed_accounts};
-    use serde_json::json;
     use std::sync::Arc;
+    use studio_json::json;
     use studio_runtime_store::{
         AgentRecord, ObservedTable, RuntimeStore, SchedulerRepository, Table, TableChange,
     };
@@ -2808,7 +2808,7 @@ mod tests {
                 expected_scope: None,
                 deleted_actor_session: None,
                 method: studio_runtime_providers::Method::from_wire("thread/list").unwrap(),
-                params: serde_json::json!({"limit":1}),
+                params: studio_json::json!({"limit":1}),
                 deadline: std::time::Instant::now() + Duration::from_secs(1),
             })
             .await

@@ -1,8 +1,6 @@
 //! Desktop backend ownership rules ported from desktop/backend.ts.
 use crate::backend::Backend;
 use serde::Deserialize;
-#[cfg(test)]
-use studio_json::Value;
 use std::{
     collections::BTreeMap,
     env,
@@ -19,6 +17,8 @@ use std::{
     time::Duration,
 };
 use studio_client_domain::json_object::optional_field;
+#[cfg(test)]
+use studio_json::Value;
 use tokio::time::{Instant, sleep};
 
 // Desktop HTTP identity mirrors backend.ts; backend.test.ts checks parity.
@@ -609,8 +609,10 @@ mod tests {
             );
         }
         assert!(
-            studio_json::from_value::<SavedRecovery>(studio_json::json!({"supervisorEnabled":"yes"}))
-                .is_err()
+            studio_json::from_value::<SavedRecovery>(
+                studio_json::json!({"supervisorEnabled":"yes"})
+            )
+            .is_err()
         );
         for invalid in [
             studio_json::json!({"environment":null}),

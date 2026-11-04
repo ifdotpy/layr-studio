@@ -4,7 +4,6 @@ use crate::{
     native::{self, ConnectionConfig},
     protocol::{self, NativeFrame, NativeResponse, Request},
 };
-use studio_json::Value;
 use std::{
     collections::HashMap,
     sync::{
@@ -12,6 +11,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+use studio_json::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot},

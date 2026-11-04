@@ -105,7 +105,8 @@ fn competing_preparations_cannot_roll_back_either_receipt_order() {
             "events":[{"id":format!("event-{index}")}]
         }));
         let snapshot = studio_json::from_value(fixture["snapshot"].clone()).expect("snapshot");
-        let events: Vec<Event> = studio_json::from_value(fixture["events"].clone()).expect("events");
+        let events: Vec<Event> =
+            studio_json::from_value(fixture["events"].clone()).expect("events");
         preparations.push(compile(&snapshot, &events).expect("prepared"));
     }
     assert!(preparations[0].manifest.versions != preparations[1].manifest.versions);
@@ -118,7 +119,8 @@ fn competing_preparations_cannot_roll_back_either_receipt_order() {
         }));
         let snapshot =
             studio_json::from_value(fixture["snapshot"].clone()).expect("successive snapshot");
-        let events: Vec<Event> = studio_json::from_value(fixture["events"].clone()).expect("events");
+        let events: Vec<Event> =
+            studio_json::from_value(fixture["events"].clone()).expect("events");
         preparations.push(compile(&snapshot, &events).expect("successive preparation"));
         let sequences: Vec<ReceiptSequence> =
             crate::turn_fixtures::load(include_bytes!("turn_prepare/receipt_sequences.json"));

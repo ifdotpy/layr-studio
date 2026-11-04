@@ -254,7 +254,9 @@ mod strict_profile_tests {
 
     #[test]
     fn profile_input_is_closed_and_bounded() {
-        assert!(studio_json::from_str::<super::ProfileInput>(r#"{"name":"n","model":"m"}"#).is_ok());
+        assert!(
+            studio_json::from_str::<super::ProfileInput>(r#"{"name":"n","model":"m"}"#).is_ok()
+        );
         assert!(studio_json::from_str::<super::ProfileInput>(r#"{"action":null}"#).is_err());
         assert!(studio_json::from_str::<super::ProfileInput>(r#"{"role":null}"#).is_err());
         assert!(studio_json::from_str::<super::ProfileInput>(r#"{"instructions":null}"#).is_err());

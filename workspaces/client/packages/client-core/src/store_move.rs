@@ -6,13 +6,13 @@ use crate::protocol::Request;
 use base64::Engine;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Deserialize;
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
+use studio_json::{Value, json};
 
 /// Draft documents per page of the server pull. Unit: documents.
 const DRAFT_PAGE: usize = 100;

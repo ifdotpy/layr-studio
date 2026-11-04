@@ -13,8 +13,8 @@
 //! later run of the same rule followed with a success is not on the list.
 mod causes;
 pub use causes::{json_cause, store_causes, store_error_kind};
-use studio_json::{Value, json};
 use std::collections::BTreeSet;
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     BACKEND_RESTARTED_TURN_ERROR, LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
     MONITOR_OWNER_STOPPED_ERROR, PROVIDER_DISCONNECTED_TURN_ERROR, PROVIDER_RESUME_UNKNOWN_ERROR,
@@ -348,7 +348,16 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
                     let pointer = (path != ".").then(|| format!("/{path}"));
                     push(
                         &mut rows,
-                        invalid_monitor(&id, now, pointer, causes::json_cause_parts(error.inner().line(), error.inner().column(), error.inner().classify())),
+                        invalid_monitor(
+                            &id,
+                            now,
+                            pointer,
+                            causes::json_cause_parts(
+                                error.inner().line(),
+                                error.inner().column(),
+                                error.inner().classify(),
+                            ),
+                        ),
                     );
                     continue;
                 }

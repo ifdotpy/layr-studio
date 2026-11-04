@@ -1,7 +1,7 @@
 //! Scripted provider consumer with real SQLite and frozen legacy actor records.
 #![allow(clippy::unwrap_used)]
-use studio_json::{Value, json};
 use std::sync::OnceLock;
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, Method, RequestFrame, RequestId, ResponseBody};
 use studio_runtime_services::provider_callbacks::*;
 use studio_runtime_store::RuntimeStore;

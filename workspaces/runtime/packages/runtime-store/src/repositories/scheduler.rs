@@ -1,8 +1,8 @@
 //! Durable pending-event selection and claim primitives for the scheduler.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Value, json};
 
 use crate::records::{AgentId, AgentRecord, AgentRepository, AgentStatus, get_json_record};
 
@@ -164,8 +164,8 @@ mod tests {
     use super::{interrupt_uncertain, same_recovery_scope, same_typed_attempt};
     use crate::records::{AgentId, AgentRecord, AgentRepository, AgentStatus};
     use rusqlite::Connection;
-    use studio_json::json;
     use std::collections::BTreeMap;
+    use studio_json::json;
 
     #[test]
     fn recovery_and_interrupt_policies_keep_exact_scope() {

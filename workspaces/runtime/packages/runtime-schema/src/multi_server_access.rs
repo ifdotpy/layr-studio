@@ -448,7 +448,8 @@ mod tests {
         let prefix = r#"{"id":"peer","clientId":"client","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired""#;
         for suffix in ["}", r#", "grant":null}"#, r#", "grant":"observe"}"#] {
             assert!(
-                studio_json::from_str::<PersistedAccessClient>(&format!("{prefix}{suffix}")).is_ok()
+                studio_json::from_str::<PersistedAccessClient>(&format!("{prefix}{suffix}"))
+                    .is_ok()
             );
         }
         for suffix in [r#", "grant":"other"}"#, r#", "extra":true}"#] {

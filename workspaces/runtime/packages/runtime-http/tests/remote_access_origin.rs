@@ -6,9 +6,9 @@
 use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
-use studio_json::Value;
 use std::path::Path;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_schema::multi_server_protocol::REMOTE_ACCESS_FILE;
 use studio_runtime_services::remote_access::RemoteAccess;
@@ -46,7 +46,10 @@ async fn send(app: &axum::Router, path: &str) -> (StatusCode, Value) {
     let response = app.clone().oneshot(forwarded(path)).await.unwrap();
     let status = response.status();
     let body = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-    (status, studio_json::from_slice(&body).unwrap_or(Value::Null))
+    (
+        status,
+        studio_json::from_slice(&body).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]

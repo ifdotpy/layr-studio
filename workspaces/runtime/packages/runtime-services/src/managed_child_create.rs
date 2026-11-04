@@ -8,8 +8,8 @@
 
 use crate::event_write;
 use rusqlite::{OptionalExtension, Transaction};
-use studio_json::{Value, json};
 use std::path::{Path, PathBuf};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::path_identity::CanonicalPath;

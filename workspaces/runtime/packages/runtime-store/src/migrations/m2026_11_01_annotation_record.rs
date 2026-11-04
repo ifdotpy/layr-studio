@@ -24,8 +24,14 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         });
         let normalized = studio_json::to_string(&fields)?;
         if fields != original
-            || (studio_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(&raw).is_err()
-                && studio_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(&normalized).is_ok())
+            || (studio_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(
+                &raw,
+            )
+            .is_err()
+                && studio_json::from_str::<
+                    studio_runtime_schema::annotation_record::AnnotationRecord,
+                >(&normalized)
+                .is_ok())
         {
             tx.execute(
                 "UPDATE runtime_annotations SET record=?2 WHERE id=?1",

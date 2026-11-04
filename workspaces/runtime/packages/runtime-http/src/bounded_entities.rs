@@ -2,9 +2,9 @@
 
 use crate::router::HttpState;
 use rusqlite::OptionalExtension;
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_services::resource_notify::{self, BoundedSource};
 use studio_runtime_services::usage::PricingRefreshOutcome;
 use studio_runtime_store::{ObservedTable, RuntimeStore, StoreError, SyncDocumentsRepository};
@@ -2282,8 +2282,9 @@ mod tests {
         let store = state.store.as_ref().unwrap();
         store
             .transaction(|tx| {
-                let old =
-                    studio_json::from_str(r#"{"accountKey":"default","data":{"accountId":"old"}}"#)?;
+                let old = studio_json::from_str(
+                    r#"{"accountKey":"default","data":{"accountId":"old"}}"#,
+                )?;
                 SyncDocumentsRepository::put_entity(
                     tx,
                     "rateLimit",
@@ -2302,8 +2303,9 @@ mod tests {
         assert_eq!(*refresh.0.lock().unwrap(), ["default"]);
         store
             .transaction(|tx| {
-                let new =
-                    studio_json::from_str(r#"{"accountKey":"default","data":{"accountId":"new"}}"#)?;
+                let new = studio_json::from_str(
+                    r#"{"accountKey":"default","data":{"accountId":"new"}}"#,
+                )?;
                 SyncDocumentsRepository::put_entity(
                     tx,
                     "rateLimit",

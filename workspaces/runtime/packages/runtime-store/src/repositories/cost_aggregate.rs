@@ -1432,8 +1432,8 @@ mod tests {
     use crate::analytics_capture::{AnalyticsCaptureRepository, CaptureTable};
     use crate::{RuntimeStore, StoreError};
     use rusqlite::Connection;
-    use studio_json::json;
     use std::path::Path;
+    use studio_json::json;
 
     fn scope_fixture(size: usize) -> Connection {
         use serde::Deserialize;

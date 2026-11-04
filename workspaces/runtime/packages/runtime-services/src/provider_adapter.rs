@@ -12,12 +12,12 @@ use crate::claude_bridge::{BridgeSnapshot, ClaudeLaunchProfile, ResolvedBridge};
 use crate::continuation_runtime::classify_usage_failure;
 use crate::thread_prepare::{Snapshot, TurnInput};
 use crate::usage_resume::Cause as UsageCause;
-use studio_json::{Map, Value, json};
 use std::{
     collections::BTreeMap,
     env,
     path::{Path, PathBuf},
 };
+use studio_json::{Map, Value, json};
 use studio_runtime_process::ProviderLaunchSpec;
 use studio_runtime_providers::Method;
 pub use studio_runtime_providers::{ProviderCapability, ProviderKind};

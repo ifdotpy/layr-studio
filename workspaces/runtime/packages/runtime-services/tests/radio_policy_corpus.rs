@@ -1,6 +1,6 @@
 //! Differential radio-turn policy cases from Python-created room state.
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 use studio_runtime_services::radio::{
     RadioAuthorizationRecords, RadioAuthorizationSnapshot, RadioDenial, RadioTurnDecision,
 };

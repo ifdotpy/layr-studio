@@ -3,9 +3,9 @@
 use super::*;
 use crate::provider_shared::{request_frame, response_value};
 use crate::transport::{MAX_FRAME_BYTES, read_frame, write_frame};
-use studio_json::Value;
 use std::collections::BTreeMap;
 use std::io::Cursor;
+use studio_json::Value;
 
 #[test]
 fn journal_v2_protocol_embeds_raw_json_without_numeric_conversion() {

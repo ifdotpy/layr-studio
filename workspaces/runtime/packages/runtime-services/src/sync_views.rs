@@ -1,8 +1,8 @@
 //! Canonical renderer entity views built from records and explicit context.
 
-use studio_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{StoreError, StoreResult};
@@ -1252,9 +1252,10 @@ mod projection_plan_tests {
             );
             let record: studio_runtime_schema::complaint_record::ComplaintRecord =
                 studio_json::from_str(&raw).unwrap();
-            let encoded =
-                studio_json::to_string(&super::project_complaint_record(&record, &context).unwrap())
-                    .unwrap();
+            let encoded = studio_json::to_string(
+                &super::project_complaint_record(&record, &context).unwrap(),
+            )
+            .unwrap();
             let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
             assert_eq!(
                 actual,
@@ -1519,8 +1520,8 @@ mod projection_plan_tests {
 #[cfg(test)]
 mod work_views_tests {
     use super::work_views;
-    use studio_json::{Value, json};
     use std::collections::BTreeMap;
+    use studio_json::{Value, json};
 
     #[test]
     fn work_views_build_results_decisions_and_releases() {

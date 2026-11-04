@@ -3980,8 +3980,8 @@ mod actor_tests {
         write_action_as_agent, write_as_agent,
     };
     use rusqlite::Connection;
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::{
         AgentId, AgentRecord, AgentRepository, RuntimeStore, WorkItemsRepository,

@@ -1,8 +1,8 @@
 //! Remove retired fields from durable paired and discovered identities.
 use crate::{StoreError, StoreResult};
 use rusqlite::Transaction;
-use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
+use studio_json::OwnedRawJson as RawValue;
 use studio_runtime_schema::multi_server_access::{
     AccessGrant, CLIENT_FIELDS, GRANT_OBSERVE, PersistedAccessClient,
 };
@@ -44,11 +44,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                     object: table,
                     id: id.clone(),
                 })?;
-            let _: PersistedAccessClient =
-                studio_json::from_str(&normalized).map_err(|_| StoreError::InvalidStoredRecord {
+            let _: PersistedAccessClient = studio_json::from_str(&normalized).map_err(|_| {
+                StoreError::InvalidStoredRecord {
                     object: table,
                     id: id.clone(),
-                })?;
+                }
+            })?;
             if normalized != raw {
                 tx.execute(
                     &format!("UPDATE {table} SET record=?2 WHERE id=?1"),

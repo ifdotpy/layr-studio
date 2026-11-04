@@ -1,7 +1,7 @@
 //! Persisted request envelope; method-specific payloads remain open JSON.
 use crate::{persistence::RequestCardStatus, provider_input::RequestId};
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, OwnedRawJson as RawValue};
+use studio_json::{OwnedRawJson as RawValue, Value};
 
 /// Named envelope fields, also used to reject unknown legacy migration keys.
 pub const FIELDS: &[&str] = &[
@@ -173,9 +173,7 @@ pub struct RequestAnswer {
     pub answer: RawValue,
 }
 
-fn request_params<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<RawValue, D::Error> {
+fn request_params<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<RawValue, D::Error> {
     let raw = RawValue::deserialize(deserializer)?;
     studio_json::from_str::<crate::request_projection::RequestParams>(raw.as_str())
         .map_err(serde::de::Error::custom)?;

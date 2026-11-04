@@ -83,10 +83,10 @@ mod tests {
         QueueEvent, QueueEventId, QueueEventRepository, TaskRecord, TaskRepository,
     };
     use rusqlite::Connection;
-    use studio_json::Value;
-    use studio_json::json;
     use std::fs;
     use std::path::Path;
+    use studio_json::Value;
+    use studio_json::json;
     use sync_documents::SyncDocumentsRepository;
 
     fn database_with(requirements: &crate::schema::SchemaRequirements) -> Connection {

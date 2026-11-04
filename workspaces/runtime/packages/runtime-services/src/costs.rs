@@ -1997,9 +1997,9 @@ fn pricing_provider(provider: ProviderKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{CostsError, read_local_claude_usage, session_cost};
-    use studio_json::{Value, json};
     use std::collections::BTreeMap;
     use std::fs;
+    use studio_json::{Value, json};
     use studio_runtime_store::analytics_capture::{AnalyticsCaptureRepository, CaptureTable};
     use studio_runtime_store::cost_aggregate::{CostMember, CostTokens};
     use studio_runtime_store::{RuntimeStore, StoreError};

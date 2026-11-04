@@ -9,10 +9,10 @@ use crate::{
     SupervisorHandle, SupervisorHandshakeV2, SupervisorHandshakeV2Result,
 };
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
+use studio_json::Value;
 
 const BACKEND_ONLY_ENVIRONMENT: &[&str] = &[
     "CODEX_AGENTS_BACKEND_ID",

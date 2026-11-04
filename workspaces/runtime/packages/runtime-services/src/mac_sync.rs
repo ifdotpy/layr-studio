@@ -16,8 +16,8 @@ use studio_runtime_store::path_identity::CanonicalPath;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use nix::fcntl::{Flock, FlockArg};
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use thiserror::Error;
 
 use crate::{

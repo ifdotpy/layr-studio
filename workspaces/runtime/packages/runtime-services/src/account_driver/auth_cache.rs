@@ -91,8 +91,8 @@ impl CredentialFormat {
     /// which is a state of its own so that a repaired file is a change.
     fn identity(self, bytes: &[u8]) -> Option<u64> {
         use serde::Deserialize;
-        use studio_json::Value;
         use std::hash::{Hash, Hasher};
+        use studio_json::Value;
         #[derive(Deserialize)]
         struct Account {
             #[serde(rename = "oauthAccount")]

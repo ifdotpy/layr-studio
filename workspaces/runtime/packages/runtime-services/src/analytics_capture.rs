@@ -5,8 +5,8 @@
 use crate::analytics_measurements::{item_sizes, payload_size};
 use crate::notification_dispatch::NotificationStreamMetrics;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::json_compat::python_json_compact_serialized;
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::ledger::{

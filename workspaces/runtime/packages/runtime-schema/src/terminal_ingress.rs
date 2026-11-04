@@ -158,8 +158,10 @@ mod tests {
         assert!(studio_json::from_value::<TerminalResize>(json!({"id":"i", "cols":null})).is_err());
         assert!(studio_json::from_value::<TerminalClose>(json!({"id":"i", "extra":true})).is_err());
         assert!(
-            studio_json::from_value::<TerminalInput>(json!({"id":"i", "text":"x", "request_id":""}))
-                .is_err()
+            studio_json::from_value::<TerminalInput>(
+                json!({"id":"i", "text":"x", "request_id":""})
+            )
+            .is_err()
         );
     }
 }

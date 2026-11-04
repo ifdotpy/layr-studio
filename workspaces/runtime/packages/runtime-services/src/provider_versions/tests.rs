@@ -550,7 +550,8 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         |row| Ok((row.get(0)?,row.get(1)?)),
     ).expect("changed workspace row");
     assert!(changed_row.0 > written.0);
-    let changed_payload: Value = studio_json::from_str(&changed_row.1).expect("changed entity JSON");
+    let changed_payload: Value =
+        studio_json::from_str(&changed_row.1).expect("changed entity JSON");
     assert_eq!(
         changed_payload["value"]["nativeNotices"][0],
         disconnected_warning

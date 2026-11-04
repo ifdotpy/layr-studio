@@ -74,11 +74,11 @@ inventory::submit! {
 mod tests {
     use super::*;
     use axum::{body::Body, extract::ConnectInfo, http::Request};
-    use studio_json::{Value, json};
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
     };
+    use studio_json::{Value, json};
     use studio_runtime_store::{
         RuntimeStore, StoreError,
         analytics_capture::{AnalyticsCaptureRepository, CaptureTable},

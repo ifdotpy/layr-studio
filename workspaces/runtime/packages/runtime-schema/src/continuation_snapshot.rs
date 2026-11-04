@@ -5,8 +5,8 @@ use crate::{
     shared_values::MAX_SAFE_INTEGER,
 };
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
-use studio_json::{Number, Value};
 use std::{borrow::Cow, collections::BTreeMap};
+use studio_json::{Number, Value};
 
 /// A JSON string limited in Unicode code points.
 #[derive(Clone, Debug, PartialEq, Serialize)]

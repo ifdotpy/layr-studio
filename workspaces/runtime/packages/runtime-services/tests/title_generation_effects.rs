@@ -1,10 +1,10 @@
 use futures_util::FutureExt;
-use studio_json::{Value, json};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
     time::SystemTime,
 };
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{
     OutboxKind, OutboxStatus, REQUEST_RESULT_TTL_MS, RequestIdentity, TitleStatus,
 };
@@ -389,8 +389,10 @@ async fn not_sent_retry_preserves_root_and_exact_reply_after_later_changes() {
         .expect("replay");
     assert!(!start);
     assert_eq!(
-        studio_json::from_str::<Value>(&studio_json::to_string(&replayed).expect("serialize replay"))
-            .expect("parse replay"),
+        studio_json::from_str::<Value>(
+            &studio_json::to_string(&replayed).expect("serialize replay")
+        )
+        .expect("parse replay"),
         expected
     );
     assert_eq!(

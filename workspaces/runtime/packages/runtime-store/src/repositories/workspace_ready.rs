@@ -2,9 +2,9 @@
 use crate::path_identity::{CanonicalPath, LexicalPath};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use studio_json::{Value, json};
 
 use crate::{
     AgentRecord, AgentRepository, CheckpointRecord, CheckpointsRepository, EventWriteRepository,

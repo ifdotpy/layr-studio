@@ -2,7 +2,6 @@
 use super::supervisor_daemon::{Error, Result, lock, now};
 use super::supervisor_identity::{RETRY, free_space, start_time};
 use process_wrap::std::{CommandWrap, ProcessGroup};
-use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
@@ -16,6 +15,7 @@ use std::{
     thread,
     time::Duration,
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{Command as SupervisorCommand, HANDLE_LIMIT};
 use studio_runtime_store::supervisor_journal::{AppendResult, SupervisorJournal};
 

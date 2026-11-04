@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use rusqlite::{Connection, types::Value as SqlValue};
-use studio_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 
 /// Analytics tables compared before and after a capture.
 pub const TABLES: [&str; 9] = [

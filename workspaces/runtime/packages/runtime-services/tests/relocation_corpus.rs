@@ -2,8 +2,8 @@
 use studio_runtime_schema::provider_kind::ProviderKind;
 
 use rusqlite::params;
-use studio_json::{Value, json};
 use std::{fs, path::PathBuf, process::Command, sync::Arc};
+use studio_json::{Value, json};
 use studio_runtime_services::{agent_move, project_locations};
 use studio_runtime_store::{
     AgentId, AgentMoveRepository, AgentRecord, AgentRepository, ProjectLocationsRepository,

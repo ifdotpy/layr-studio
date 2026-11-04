@@ -1,6 +1,6 @@
 use rusqlite::types::Value as SqlValue;
-use studio_json::{Value, json};
 use std::{fs, path::Path};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     host_project_runtime::PreparedHost,
     projects::ProjectsError,

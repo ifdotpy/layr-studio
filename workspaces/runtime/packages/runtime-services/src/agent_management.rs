@@ -1539,8 +1539,8 @@ fn restore(snapshot: &ManagementSnapshot, agent: &Agent) -> Result<Decision, Man
 #[cfg(test)]
 mod lifecycle_scope_parity_tests {
     use super::{Action, ManagementSnapshot, Records, decide_with_effects};
-    use studio_json::{Value, json};
     use std::collections::{BTreeMap, BTreeSet};
+    use studio_json::{Value, json};
 
     fn agent(id: &str, root: &str, parent: Option<&str>, lead: bool) -> Value {
         let mut record = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
@@ -1954,8 +1954,8 @@ mod lifecycle_scope_parity_tests {
 #[cfg(test)]
 mod archive_parity_tests {
     use super::{Action, ManagementSnapshot, Records, decide_with_effects};
-    use studio_json::{Value, json};
     use std::collections::BTreeMap;
+    use studio_json::{Value, json};
 
     /// A finished reviewer as the live state holds it after its result reached
     /// the lead: a native thread, finished tool requests, finished tasks.

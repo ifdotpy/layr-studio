@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -8,6 +7,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
+use studio_json::{Value, json};
 use studio_runtime_services::{
     account_driver::{AccountDriver, AuthMetadata, AuthProfile, ProviderAuthReader},
     claude_login::{

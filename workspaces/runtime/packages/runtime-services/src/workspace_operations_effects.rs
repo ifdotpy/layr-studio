@@ -3,8 +3,8 @@ use crate::checkpoints::{self, CheckpointsError};
 use crate::workspace_operations::{
     CompletedTurn, CompletionSnapshot, OperationSnapshot, WorkspaceOperationError,
 };
-use studio_json::Value;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_store::workspace_operations::WorkspaceOperationsRepository as Repository;
 use studio_runtime_store::{CaptureKind, CheckpointsRepository, RuntimeStore, StoreError};
 

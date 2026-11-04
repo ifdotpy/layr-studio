@@ -5,8 +5,8 @@ use super::{
 };
 use crate::{error::ApiError, generated, router::HttpState};
 use axum::{Extension, Json, extract::State, http::StatusCode};
-use studio_json::Value;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_services::{
     agent_lifecycle_runtime::{self, LifecyclePorts},
     agent_management::{Action, ManagementError},
@@ -131,16 +131,19 @@ async fn native_action(
                 let agent =
                     studio_runtime_services::event_write::checked_agent(connection, &agent_id)
                         .map_err(super::work_items::write_error)?;
-                let episode = agent
-                    .extra
-                    .get("idleCompactionEpisode")
-                    .filter(|value| !value.is_null())
-                    .cloned()
-                    .map(
-                        studio_json::from_value::<studio_runtime_services::idle_compaction::Episode>,
-                    )
-                    .transpose()
-                    .map_err(ApiError::json)?;
+                let episode =
+                    agent
+                        .extra
+                        .get("idleCompactionEpisode")
+                        .filter(|value| !value.is_null())
+                        .cloned()
+                        .map(
+                            studio_json::from_value::<
+                                studio_runtime_services::idle_compaction::Episode,
+                            >,
+                        )
+                        .transpose()
+                        .map_err(ApiError::json)?;
                 Ok::<_, ApiError>(
                     episode.is_some_and(|episode| episode.id == root)
                         || native_actions::idle_provenance(connection, &root)
@@ -772,7 +775,6 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
 mod native_review_preflight_tests {
     use super::*;
     use base64::Engine;
-    use studio_json::json;
     use std::{
         fs::File,
         io::Read,
@@ -782,6 +784,7 @@ mod native_review_preflight_tests {
             atomic::{AtomicUsize, Ordering},
         },
     };
+    use studio_json::json;
     use studio_runtime_services::vm_preparation;
     use studio_runtime_services::{
         account_session_runtime::{

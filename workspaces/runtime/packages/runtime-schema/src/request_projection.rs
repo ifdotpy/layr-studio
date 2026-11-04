@@ -1,8 +1,8 @@
 //! Typed known fields of provider request parameters and preview.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
+use studio_json::OwnedRawJson as RawValue;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -32,7 +32,11 @@ fields!(RequestParams {
     waiting: Object,
 });
 fields!(RequestPreview {
-    changes: RawValue, command: Command, cwd: String, permissions: Object, url: String,
+    changes: RawValue,
+    command: Command,
+    cwd: String,
+    permissions: Object,
+    url: String,
 });
 #[derive(Clone, Serialize)]
 pub struct QuestionOption {

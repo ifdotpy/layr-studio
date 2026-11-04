@@ -1,8 +1,8 @@
 //! Structured persisted tool results. Receipt payloads outside this contract stay opaque.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use studio_json::{Number, Value};
 use std::collections::BTreeMap;
+use studio_json::{Number, Value};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[schemars(rename = "PersistedToolContent")]

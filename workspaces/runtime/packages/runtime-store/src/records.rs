@@ -821,7 +821,8 @@ impl AgentRecord {
         self.usage_resume
             .value()
             .map(|value| serde::Serialize::serialize(value, studio_json::value::Serializer))
-            .transpose().map_err(Into::into)
+            .transpose()
+            .map_err(Into::into)
     }
 
     pub fn usage_resume_truthy(&self) -> bool {
@@ -1282,7 +1283,8 @@ impl AgentRecord {
             .get("activeExecution")
             .filter(|value| !value.is_null())
             .map(ActiveExecutionView::deserialize)
-            .transpose().map_err(Into::into)
+            .transpose()
+            .map_err(Into::into)
     }
 
     fn set_active_execution_field<T: Serialize>(
@@ -1772,8 +1774,7 @@ mod request_typed_tests {
         )
         .unwrap();
         let mut record: RequestRecord = studio_json::from_str(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{}}"#).unwrap();
-        record.params =
-            studio_json::OwnedRawJson::from_string(r#"{"command":42}"#.into()).unwrap();
+        record.params = studio_json::OwnedRawJson::from_string(r#"{"command":42}"#.into()).unwrap();
         assert!(Table::new(&db).put(&record).is_err());
         assert!(
             Table::<RequestRecord>::new(&db)

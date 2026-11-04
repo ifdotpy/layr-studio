@@ -224,7 +224,8 @@ mod tests {
     #[test]
     fn task_result_schema_openapi_copies_match_owner() {
         let document: Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
         check_schema_parity(&document).expect("task contract parity");
     }
 

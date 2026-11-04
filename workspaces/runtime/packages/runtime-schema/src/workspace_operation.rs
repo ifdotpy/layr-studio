@@ -1,8 +1,8 @@
 //! Persisted workspace operation and its open provider evidence.
 use crate::{json_object::JsonObject, queue_command::Field};
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value};
 use std::ops::{Deref, DerefMut};
+use studio_json::{Map, Value};
 
 macro_rules! wire_enum {
     ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {

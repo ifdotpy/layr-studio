@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(any(test, feature = "test-support"))]
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use studio_json::Value;
 #[cfg(test)]
 use studio_json::json;
-use sha2::{Digest, Sha256};
 use studio_runtime_schema::{
     resource_notification::ResourceNotifyRequest, resource_ref::ResourceRef,
 };

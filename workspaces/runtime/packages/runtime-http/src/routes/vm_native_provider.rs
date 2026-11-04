@@ -374,8 +374,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use studio_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::Method;
     use studio_runtime_services::account_session_runtime::{NotSentReason, RequestCertainty};
 

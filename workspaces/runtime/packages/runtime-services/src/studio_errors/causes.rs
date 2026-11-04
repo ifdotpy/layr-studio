@@ -43,7 +43,11 @@ pub fn json_cause(error: &studio_json::Error) -> Cause {
     json_cause_parts(error.line(), error.column(), error.classify())
 }
 
-pub(super) fn json_cause_parts(line: usize, column: usize, category: studio_json::error::Category) -> Cause {
+pub(super) fn json_cause_parts(
+    line: usize,
+    column: usize,
+    category: studio_json::error::Category,
+) -> Cause {
     Cause::Json {
         line,
         column,

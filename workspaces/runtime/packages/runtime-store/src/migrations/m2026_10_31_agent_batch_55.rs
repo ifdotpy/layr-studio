@@ -93,7 +93,8 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             record.remove("imageWorkspace");
         }
         if record.get("maxAgents").is_some_and(|v| {
-            studio_json::from_str::<Option<studio_runtime_schema::AgentCounter>>(v.as_str()).is_err()
+            studio_json::from_str::<Option<studio_runtime_schema::AgentCounter>>(v.as_str())
+                .is_err()
         }) {
             record.remove("maxAgents");
         }

@@ -1241,8 +1241,7 @@ fn unsafe_integer_location(
     let raw_text = raw.as_str();
     if raw_text.starts_with('{') {
         let values =
-            studio_json::from_str::<BTreeMap<String, studio_json::RawJson<'_>>>(raw_text)
-                .ok()?;
+            studio_json::from_str::<BTreeMap<String, studio_json::RawJson<'_>>>(raw_text).ok()?;
         for (name, child) in values {
             location.push(Value::String(name));
             let result = unsafe_integer_location(&child, location);

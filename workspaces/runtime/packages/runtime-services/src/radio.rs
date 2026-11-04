@@ -9,8 +9,8 @@
 //! event, question, transcript, and completed-turn records outside this input.
 
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::Value;
 use studio_runtime_store::path_identity::LexicalPath;
 use thiserror::Error;
 

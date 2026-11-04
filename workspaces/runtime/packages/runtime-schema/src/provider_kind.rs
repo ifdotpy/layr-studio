@@ -6,9 +6,9 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::fmt;
 use std::str::FromStr;
+use studio_json::Value;
 
 /// The provider that owns an account and every agent on it.
 #[derive(

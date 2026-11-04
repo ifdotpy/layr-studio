@@ -10,8 +10,8 @@ use crate::{
     recovery_runtime::RetainedRecoveryReader,
     task_settlement::{self, CommandCheck, TerminalReport},
 };
-use studio_json::json;
 use std::sync::Arc;
+use studio_json::json;
 use studio_runtime_store::RuntimeStore;
 
 /// Unit: wall time for the reads of one agent thread.

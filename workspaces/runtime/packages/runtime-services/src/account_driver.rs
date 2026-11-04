@@ -18,13 +18,13 @@ use process_wrap::std::CommandWrap;
 use process_wrap::std::ProcessGroup;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use studio_json::Value;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use studio_json::Value;
 use studio_runtime_providers::ProviderKind;
 #[cfg(test)]
 use studio_runtime_store::account_registry::atomic_replace_with;
@@ -3467,8 +3467,7 @@ mod tests {
                     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
                 };
                 for id in [None, Some(""), Some("a"), Some("other")] {
-                    let mut tokens =
-                        studio_json::json!({"access_token":format!("x.{token}.x"),"id_token":false});
+                    let mut tokens = studio_json::json!({"access_token":format!("x.{token}.x"),"id_token":false});
                     if let Some(id) = id {
                         tokens["account_id"] = Value::String(id.into());
                     }
@@ -3709,7 +3708,8 @@ mod tests {
         let mut explicit_legacy: Value =
             studio_json::from_slice(&registry(&fixture.path)).expect("registry");
         explicit_legacy["version"] = Value::from(1);
-        fs::write(&path, studio_json::to_vec(&explicit_legacy).expect("bytes")).expect("old source");
+        fs::write(&path, studio_json::to_vec(&explicit_legacy).expect("bytes"))
+            .expect("old source");
         drop(
             studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
                 .await
@@ -4463,8 +4463,11 @@ exit 0
             "_credentialIdentity".into(),
             Value::String("chatgpt:old-account".into()),
         );
-        fs::write(&path, studio_json::to_vec(&value).expect("encoded registry"))
-            .expect("write registry");
+        fs::write(
+            &path,
+            studio_json::to_vec(&value).expect("encoded registry"),
+        )
+        .expect("write registry");
         let reader = FakeReader(metadata(
             AuthStatus::Ready,
             Some("new-account"),

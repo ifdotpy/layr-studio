@@ -682,8 +682,8 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use studio_json::json;
     use std::collections::BTreeSet;
+    use studio_json::json;
 
     #[test]
     fn cache_policy_excludes_overlapping_terminal_detail() {

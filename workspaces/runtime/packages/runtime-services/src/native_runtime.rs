@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use studio_runtime_store::path_identity::CanonicalPath;
 
-use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value, json};
 use thiserror::Error;
 
 use crate::provider_binaries::{

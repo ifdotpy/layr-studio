@@ -1,6 +1,6 @@
 use futures_util::future::BoxFuture;
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_services::task_recovery::{TaskRecoveryDecision, TaskRecoverySnapshot};
 
 #[test]

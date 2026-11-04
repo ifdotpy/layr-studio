@@ -1,7 +1,7 @@
 //! Projection assertions shared by service and HTTP frozen corpora.
 
-use studio_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 /// Remove server projections that postdate the frozen Python agent oracle.
 pub(crate) fn normalize_frozen_projection(fields: &mut studio_json::Map<String, Value>) {

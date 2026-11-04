@@ -1,8 +1,8 @@
 //! Read-only validation of the open access records and SQL delivery projections.
 use crate::{StateCheckFailure, StateCheckTable, StoreError, StoreResult};
 use rusqlite::Connection;
-use studio_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>> {
     let mut result = Vec::new();

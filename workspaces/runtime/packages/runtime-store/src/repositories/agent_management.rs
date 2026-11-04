@@ -2,8 +2,8 @@
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{AgentRecord, AgentRepository, StoreError, StoreResult, Table, WorkItemRecord};
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Value, json};
 
 const RECORD_TABLES: &[&str] = &[
     "runtime_agents",

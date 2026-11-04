@@ -1,9 +1,9 @@
 //! Resolve file identities through the verified backend before any desktop action.
 use crate::{backend::Backend, protocol::Request};
 use serde::{Deserialize, de::IgnoredAny};
-use studio_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 use studio_client_domain::json_object::JsonObject as ObjectOnly;
+use studio_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {

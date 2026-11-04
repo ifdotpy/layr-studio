@@ -295,8 +295,8 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
-    use studio_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_schema::persistence::{REQUEST_RESULT_TTL_MS, RequestIdentity};
     use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
     use studio_runtime_services::commands::CommandError;

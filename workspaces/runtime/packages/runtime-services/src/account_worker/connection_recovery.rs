@@ -13,8 +13,8 @@ use crate::{
     recovery_store::LifecycleCompletionWriter,
     task_recovery_store::TaskCompletionWriter,
 };
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
 pub(super) struct Command {

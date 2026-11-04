@@ -7,8 +7,8 @@
 //! can disable access without a restart.
 
 use crate::remote_transport::validate_federation_origin;
-use studio_json::Value;
 use std::path::{Path, PathBuf};
+use studio_json::Value;
 use studio_runtime_schema::multi_server_protocol::{PUBLIC_ORIGIN_ENVIRONMENT, REMOTE_ACCESS_FILE};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

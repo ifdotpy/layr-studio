@@ -429,8 +429,7 @@ impl ManagedMonitorCreateAdapter {
 }
 
 fn monitor_reply(value: &impl serde::Serialize) -> Result<studio_json::OwnedRawJson, Error> {
-    studio_json::to_raw_value(value)
-        .map_err(|_| Error::Invalid("Monitor serialization failed"))
+    studio_json::to_raw_value(value).map_err(|_| Error::Invalid("Monitor serialization failed"))
 }
 
 fn child_creation_error(error: crate::managed_child_create::Error) -> Error {

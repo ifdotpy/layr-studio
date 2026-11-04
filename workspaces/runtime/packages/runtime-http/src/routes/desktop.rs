@@ -1,8 +1,8 @@
 use axum::Json;
 use axum::extract::State;
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::io::{self, Read};
+use studio_json::{Value, json};
 use studio_runtime_schema::desktop::DiskSpaceStatus;
 
 use crate::router::HttpState;
@@ -181,8 +181,8 @@ inventory::submit! {
 mod tests {
     use super::{backend_build_from, is_sha256_hex, sha256_reader};
     use axum::{body::to_bytes, extract::ConnectInfo, http::Request};
-    use studio_json::Value;
     use std::{io::Cursor, sync::Arc, time::Instant};
+    use studio_json::Value;
     use studio_runtime_services::provider_versions::{
         ActiveProviderConnections, Clock, ProviderPortError, ProviderProfile,
         ProviderVersionMonitor, ProviderVersionStore, UpstreamFetch, UpstreamReply, VersionFacts,

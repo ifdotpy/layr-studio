@@ -26,8 +26,9 @@ pub(super) fn topic(
                 .collect(),
         )),
         "profiles" => {
-            let profiles = studio_json::to_value(studio_runtime_store::ProfileRepository::list(tx)?)
-                .map_err(|_| Error::Invalid("Stored profiles are unreadable"))?;
+            let profiles =
+                studio_json::to_value(studio_runtime_store::ProfileRepository::list(tx)?)
+                    .map_err(|_| Error::Invalid("Stored profiles are unreadable"))?;
             Ok(json!({ "profiles": profiles }))
         }
         // The tool schema of existing threads still names this topic. It now

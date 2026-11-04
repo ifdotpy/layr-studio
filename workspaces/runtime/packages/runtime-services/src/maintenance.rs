@@ -173,8 +173,10 @@ mod tests {
                 .is_err()
         );
         assert!(
-            studio_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":false}"#)
-                .is_err()
+            studio_json::from_str::<RoomRecord>(
+                r#"{"id":"room","kind":"private","members":false}"#
+            )
+            .is_err()
         );
         assert!(studio_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":["agent"],"updated":1,"userHidden":false}"#).is_ok());
     }

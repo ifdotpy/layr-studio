@@ -5,12 +5,12 @@
     allow(dead_code, unused_imports, unused_variables)
 )]
 use crate::protocol::{Request, Response};
-use studio_json::Value;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
+use studio_json::Value;
 
 /// Native method owners for one gesture-bound sign-in flow. Unit: IPC method name.
 pub const SIGN_IN_PREPARE_METHOD: &str = "desktop.prepareSignIn";

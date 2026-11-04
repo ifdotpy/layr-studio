@@ -12,7 +12,6 @@ use ring::{
     rand::SystemRandom,
     signature::{Ed25519KeyPair, KeyPair},
 };
-use studio_json::{Value, json};
 use spki::{
     AlgorithmIdentifierRef, ObjectIdentifier, SubjectPublicKeyInfoRef,
     der::{Encode, asn1::BitStringRef},
@@ -23,6 +22,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex as StdMutex},
 };
+use studio_json::{Value, json};
 use studio_runtime_store::{FederationCredentialsRepository as Journal, RuntimeStore, StoreError};
 use thiserror::Error;
 use tokio::sync::Mutex;

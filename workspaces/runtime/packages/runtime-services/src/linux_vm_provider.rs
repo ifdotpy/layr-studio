@@ -12,7 +12,6 @@ use crate::linux_vm_guest::{GUEST_RPC_TIMEOUT_SECONDS, GuestError, GuestRpc};
 use base64::Engine as _;
 use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
-use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::Path,
@@ -22,6 +21,7 @@ use std::{
     },
     time::Duration,
 };
+use studio_json::{Value, json};
 use studio_runtime_process::{
     EventCursor, Generation, ProviderHandle, ProviderLaunchSpec,
     provider_seam::{
@@ -1733,8 +1733,8 @@ mod tests {
 
     use super::*;
     use crate::linux_vm_guest::GuestError;
-    use studio_json::json;
     use std::{collections::BTreeMap, sync::Mutex};
+    use studio_json::json;
     use studio_runtime_process::{
         Generation, OperationId, ProviderHandle,
         provider_seam::{

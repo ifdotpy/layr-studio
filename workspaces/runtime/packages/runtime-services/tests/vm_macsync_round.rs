@@ -3,13 +3,13 @@
 //! recovery after a guest answer that has no proven result.
 #![allow(clippy::unwrap_used)]
 
-use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_services::{
     linux_vm_guest::{GuestError, GuestRpc},
     mac_sync::{

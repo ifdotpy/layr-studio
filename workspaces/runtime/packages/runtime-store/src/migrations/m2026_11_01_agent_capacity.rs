@@ -1,7 +1,7 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
-use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
+use studio_json::OwnedRawJson as RawValue;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut query = tx.prepare("SELECT id,record FROM runtime_agents WHERE json_valid(record)")?;

@@ -1,8 +1,8 @@
 //! Mac folder sync configuration and conflict resolution routes.
 
 use axum::{Json, extract::State, http::StatusCode};
-use studio_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_services::{linux_vm_guest::UnixGuestRpc, mac_sync};
 use studio_runtime_store::{AgentId, AgentRepository, Transaction};
 

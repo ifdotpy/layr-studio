@@ -4,5 +4,5 @@ message: Pass the owned value directly instead of serializing and parsing JSON.
 severity: warning
 rule:
   any:
-    - pattern: serde_json::from_str(&serde_json::to_string($$$ARGS)?)
-    - pattern: serde_json::from_str(&serde_json::to_string($$$ARGS).unwrap())
+    - pattern: studio_json::from_str(&studio_json::to_string($$$ARGS)?)
+    - pattern: studio_json::from_str(&studio_json::to_string($$$ARGS).unwrap())

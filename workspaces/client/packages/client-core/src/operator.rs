@@ -8,8 +8,8 @@ use crate::{
     server_keys::{FileVault, Vault},
     server_transport::RemoteClient,
 };
-use studio_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, path::Path, sync::Arc};
+use studio_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},

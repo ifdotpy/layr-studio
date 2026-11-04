@@ -43,7 +43,8 @@ async fn fixture() -> (tempfile::TempDir, RuntimeStore, String, Operation) {
     let mut case = fixtures::corpus(root.path()).remove(0);
     case["actor"]["status"] = json!("waiting_on_monitor");
     let id = case["before"]["id"].as_str().expect("id").to_owned();
-    let operation = studio_json::from_value(case["before"]["operation"].clone()).expect("operation");
+    let operation =
+        studio_json::from_value(case["before"]["operation"].clone()).expect("operation");
     let store = fixtures::store(root.path(), "wake").await;
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     (root, store, id, operation)

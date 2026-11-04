@@ -53,8 +53,8 @@ async fn auth_repair_regression_native_signed_out_probe_settles_code_rejection()
 
 #[tokio::test]
 async fn auth_repair_regression_post_login_allows_only_fresh_safe_continuation() {
-    use studio_json::json;
     use std::{collections::BTreeMap, sync::Arc};
+    use studio_json::json;
     use studio_runtime_services::{
         account_driver::claude::auth_metadata_from_output,
         claude_login::{
@@ -497,8 +497,8 @@ exit 0
 #[cfg(unix)]
 #[tokio::test]
 async fn restarted_unknown_keeps_config_until_recorded_child_is_proven_gone() {
-    use studio_json::json;
     use std::{collections::BTreeMap, sync::Arc, time::Duration};
+    use studio_json::json;
     use studio_runtime_process::stream_child::{ChildSpec, StreamChild};
     use studio_runtime_services::claude_login::{
         LoginError, LoginSnapshot,

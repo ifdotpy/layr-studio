@@ -710,9 +710,9 @@ mod tests {
     use super::{BrowserAnswerContext, answer};
     use crate::browser_cards::fixture;
     use crate::linux_vm_guest::{GuestError, GuestRpc};
-    use studio_json::{Value, json};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use studio_json::{Value, json};
     use studio_runtime_schema::approvals::{ApprovalState, BrowserSource};
 
     struct FakeGuest {

@@ -3,8 +3,8 @@ use super::*;
 use crate::notification_dispatch::NotificationPostCommit;
 use crate::notification_runtime_effects::NotificationPostCommitSink;
 use crate::resource_notify::LiveDelta;
-use studio_json::json;
 use std::sync::{Arc, Mutex};
+use studio_json::json;
 
 #[derive(Default)]
 struct LiveSink {

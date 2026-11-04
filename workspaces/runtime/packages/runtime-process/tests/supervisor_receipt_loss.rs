@@ -1,13 +1,13 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 use crate::process_support as support;
-use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
 };
+use studio_json::{Value, json};
 use studio_runtime_process::{
     EventCursor, EventKind, OperationId, OperationStatusRequest, OperationStatusResult,
     SupervisorHandle, WriteRequest, WriteResult,

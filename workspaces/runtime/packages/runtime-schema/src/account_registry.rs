@@ -3,8 +3,8 @@ use crate::{
     claude_options::ClaudeOptionsRecord, json_object::JsonObject, provider_kind::ProviderKind,
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use studio_json::Number;
 use std::collections::BTreeMap;
+use studio_json::Number;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -307,8 +307,8 @@ fn running<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use studio_json::{Value, json};
     use sha2::{Digest, Sha256};
+    use studio_json::{Value, json};
 
     #[test]
     fn login_receipt_preserves_missing_and_null_fields() {

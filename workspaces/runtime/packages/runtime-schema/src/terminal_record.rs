@@ -1,8 +1,8 @@
 //! Typed persisted terminal record and its schema owner.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use studio_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 use crate::stored_record::StoredJsonInteger;
 

@@ -4345,9 +4345,7 @@ mod tests {
             admission,
             steer_id: "steer".into(),
             event_ids: vec!["e1".into()],
-            prepared_submission: Some(
-                studio_json::OwnedRawJson::from_string("{}".into()).unwrap(),
-            ),
+            prepared_submission: Some(studio_json::OwnedRawJson::from_string("{}".into()).unwrap()),
             events: vec![],
             submitted_at: 2.0,
         };
@@ -4680,8 +4678,10 @@ mod tests {
             .expect("item");
         assert_eq!(item.record.value()["text"], "beforeafter");
         assert!(
-            studio_json::from_str::<Value>(&studio_json::to_string(&streams).expect("stream state"))
-                .expect("JSON")["entries"][0]["base"]
+            studio_json::from_str::<Value>(
+                &studio_json::to_string(&streams).expect("stream state")
+            )
+            .expect("JSON")["entries"][0]["base"]
                 .is_null()
         );
     }
@@ -4753,8 +4753,10 @@ mod tests {
         assert_eq!(text(&transaction, "agent:short"), "snap");
         assert_eq!(base_rows(&transaction), 0);
         assert_eq!(
-            studio_json::from_str::<Value>(&studio_json::to_string(&streams).expect("stream state"))
-                .expect("JSON")["entries"][0]["base"],
+            studio_json::from_str::<Value>(
+                &studio_json::to_string(&streams).expect("stream state")
+            )
+            .expect("JSON")["entries"][0]["base"],
             "one"
         );
         dispatch(&transaction, &mut streams, 34, &delta("short", "two"), 5.0).expect("delta");
@@ -4836,5 +4838,7 @@ mod busy_stream_tests {
 }
 
 impl From<studio_json::error::Error> for NotificationDispatchError {
-    fn from(value: studio_json::error::Error) -> Self { Self::Json(value.into()) }
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
+    }
 }
