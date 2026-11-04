@@ -38,7 +38,7 @@ pub fn for_store(state: &Path, root: &Path) -> NativeLayrCapability {
         #[cfg(target_os = "linux")]
         linux_readiness_for_store(state, root)?;
         #[cfg(target_os = "macos")]
-        if !is_copy_on_write(root) {
+        if !super::import::is_copy_on_write(root) {
             return Err("The store requires a copy-on-write volume".into());
         }
         let _ = binary;
@@ -55,25 +55,6 @@ pub fn for_store(state: &Path, root: &Path) -> NativeLayrCapability {
                 .unwrap_or_else(|| "unavailable".into())
         )
     }))
-}
-
-#[cfg(target_os = "macos")]
-#[allow(
-    unsafe_code,
-    reason = "read the volume type without creating a probe file"
-)]
-fn is_copy_on_write(root: &Path) -> bool {
-    use std::os::fd::AsRawFd;
-    let Ok(file) = std::fs::File::open(root) else {
-        return false;
-    };
-    // SAFETY: fstatfs fills a valid structure and the descriptor remains open.
-    let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stats) } != 0 {
-        return false;
-    }
-    // SAFETY: f_fstypename is a NUL-terminated kernel-supplied name.
-    unsafe { std::ffi::CStr::from_ptr(stats.f_fstypename.as_ptr()) }.to_bytes() == b"apfs"
 }
 
 pub fn resolve_binary() -> Result<PathBuf, NativeLayrCapability> {

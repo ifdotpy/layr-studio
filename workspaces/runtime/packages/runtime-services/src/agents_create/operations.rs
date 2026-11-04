@@ -870,26 +870,33 @@ async fn create(
     let (native_store, project_path) = studio_runtime_process::blocking_pool::spawn_blocking(
         "agents-create/native-store",
         move || {
-            let root = if native_workspace {
+            let canonical = if native_workspace {
                 let root = crate::layr_native::settings::resolve_for_new_chat(
                     &state,
                     requested_store.as_deref().map(std::path::Path::new),
                 )
                 .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
-                crate::layr_native::settings::validate_root(&state, &root)
-                    .map_err(|e| OperationError::InvalidStore(e.to_string()))?
-                    .into_path_buf()
+                Some(
+                    crate::layr_native::settings::resolve_root(&root)
+                        .map_err(|e| OperationError::InvalidStore(e.to_string()))?,
+                )
             } else {
-                crate::layr_native::settings::store_for_validation(&state)
+                None
             };
+            let root = canonical
+                .as_ref()
+                .map(|root| root.as_path().to_owned())
+                .unwrap_or_else(|| crate::layr_native::settings::store_for_validation(&state));
             let project = crate::project_path::ProjectPath::new(requested_project.clone(), &root)
                 .map_err(OperationError::Invalid)?;
-            if native_workspace {
+            if let Some(canonical) = &canonical {
                 crate::layr_native::settings::check_project_overlap(
                     &root,
                     std::path::Path::new(&requested_project),
                 )
                 .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+                crate::layr_native::settings::validate_resolved_root(&state, canonical)
+                    .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
             }
             Ok::<_, OperationError>((root, project))
         },

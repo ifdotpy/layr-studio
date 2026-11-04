@@ -72,22 +72,25 @@ pub fn check_project_overlap(root: &Path, project: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_root(state: &Path, root: &Path) -> Result<CanonicalPath> {
+pub fn resolve_root(root: &Path) -> Result<CanonicalPath> {
     if !root.is_absolute() || !root.is_dir() {
         return Err(NativeLayrError::Refused(
             "The native Layr store root must be an existing absolute folder".into(),
         ));
     }
-    let root = CanonicalPath::existing(root)?;
+    Ok(CanonicalPath::existing(root)?)
+}
+
+pub fn validate_resolved_root(state: &Path, root: &CanonicalPath) -> Result<()> {
     let state = CanonicalPath::existing(state)?.into_path_buf();
     if (root.starts_with(&state) || state.starts_with(root.as_path()))
-        && !same_root(&root, &store_path(&state))
+        && !same_root(root, &store_path(&state))
     {
         return Err(NativeLayrError::Refused(
             "The native Layr store must be outside the Studio state directory".into(),
         ));
     }
-    let capability = super::capability::for_store(&state, &root);
+    let capability = super::capability::for_store(&state, root);
     if !capability.is_ready() {
         return Err(NativeLayrError::Refused(
             capability
@@ -96,6 +99,12 @@ pub fn validate_root(state: &Path, root: &Path) -> Result<CanonicalPath> {
                 .into(),
         ));
     }
+    Ok(())
+}
+
+pub fn validate_root(state: &Path, root: &Path) -> Result<CanonicalPath> {
+    let root = resolve_root(root)?;
+    validate_resolved_root(state, &root)?;
     Ok(root)
 }
 
