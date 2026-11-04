@@ -232,7 +232,16 @@ impl From<Error> for std::io::Error {
 
 #[inline]
 pub fn to_raw_value<T: Serialize + ?Sized>(value: &T) -> Result<OwnedRawJson> {
-    OwnedRawJson::from_string(to_string(value)?)
+    #[cfg(feature = "serde-backend")]
+    {
+        serde_json::value::to_raw_value(value)
+            .map(OwnedRawJson::from_raw)
+            .map_err(Error::from)
+    }
+    #[cfg(not(feature = "serde-backend"))]
+    {
+        OwnedRawJson::from_string(to_string(value)?)
+    }
 }
 
 impl Error {

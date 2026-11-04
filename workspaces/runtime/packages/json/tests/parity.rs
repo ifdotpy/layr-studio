@@ -227,3 +227,17 @@ fn owned_raw_json_value_conversion() {
     let parsed: studio_json::OwnedRawJson = studio_json::from_value(value).expect("from value");
     assert_eq!(parsed.as_str(), "{\"a\":1}");
 }
+
+#[cfg(feature = "serde-backend")]
+#[test]
+fn to_raw_value_matches_serde_bytes() {
+    for value in [
+        serde_json::json!(null),
+        serde_json::json!({"escaped": "a\n\"b", "numbers": [-0.0, 12, 1.25]}),
+        serde_json::json!([true, {"unicode": "żółć"}]),
+    ] {
+        let expected = serde_json::value::to_raw_value(&value).expect("serde raw");
+        let actual = studio_json::to_raw_value(&value).expect("facade raw");
+        assert_eq!(actual.as_str(), expected.get());
+    }
+}
