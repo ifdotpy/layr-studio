@@ -7,6 +7,7 @@ pub use crate::sync_views::{
     project_persisted_record,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
+use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -1097,7 +1098,7 @@ pub(crate) fn publish_agent_projection(
 }
 
 /// The client view of a plan row; None for a row without an id.
-pub(crate) fn plan_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
+pub(crate) fn plan_view(id: &str, raw: &str) -> StoreResult<Option<Box<RawValue>>> {
     let record: studio_runtime_store::PlanRecord =
         serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
             object: "plans",
@@ -1111,11 +1112,11 @@ pub(crate) fn plan_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
         crate::sync_views::SYNC_ARRAY_ITEMS,
         &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
     );
-    Ok(Some(serde_json::to_value(view)?))
+    Ok(Some(serde_json::value::to_raw_value(&view)?))
 }
 
 /// The client view of an annotation row; None for a row without an id.
-pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
+pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<Box<RawValue>>> {
     let record: studio_runtime_store::AnnotationRecord =
         serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
             object: "annotations",
@@ -1125,11 +1126,11 @@ pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<Value>>
         return Ok(None);
     }
     let view = record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
-    Ok(Some(serde_json::to_value(view)?))
+    Ok(Some(serde_json::value::to_raw_value(&view)?))
 }
 
 /// The client view of a rule row: its id, agent and name.
-pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<Value> {
+pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<Box<RawValue>> {
     let invalid = || StoreError::InvalidStoredRecord {
         object: "rules",
         id: id.to_owned(),
@@ -1139,7 +1140,9 @@ pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<Value> {
     if record.id != id {
         return Err(invalid());
     }
-    Ok(json!({"agent": record.agent, "id": id, "name": record.name}))
+    Ok(serde_json::value::to_raw_value(
+        &json!({"agent": record.agent, "id": id, "name": record.name}),
+    )?)
 }
 
 /// Seed root agent views and the task and monitor windows once, before the first SSE
