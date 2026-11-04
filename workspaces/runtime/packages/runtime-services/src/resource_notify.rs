@@ -5,7 +5,7 @@
 //! Restart or eviction permits another invalidation (never another store write).
 
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[cfg(any(test, feature = "test-support"))]
 use serde::Deserialize;
@@ -140,8 +140,11 @@ pub struct ResourceChanges<T = Value> {
     pub overflow: bool,
 }
 
-/// Buffered live deltas per subscriber (count). A subscriber that falls this far
-/// behind loses the oldest ones; the durable item catches it up.
+/// Buffered live events per subscriber (count). When a slow subscriber has this
+/// many, its queue is merged: contiguous deltas of one item become one delta and
+/// equal progress events become one. Only a queue that is still full after the
+/// merge (this many distinct items) loses its oldest event; the durable item
+/// catches that up.
 pub const LIVE_DELTA_CAPACITY: usize = 256;
 
 /// One model text delta of an item, sent in memory right after its commit. `offset` is the
@@ -161,10 +164,118 @@ pub enum LiveEvent {
     Progress(studio_runtime_schema::progress_selector::ProgressSelector),
 }
 
+/// The queue of one live subscriber. It has one reader, its [`LiveReceiver`].
+#[derive(Default)]
+struct LiveQueue {
+    events: Mutex<VecDeque<LiveEvent>>,
+    ready: tokio::sync::Notify,
+}
+
+impl LiveQueue {
+    fn push(&self, event: LiveEvent) {
+        let Ok(mut events) = self.events.lock() else {
+            return;
+        };
+        if events.len() >= LIVE_DELTA_CAPACITY {
+            merge_live_events(&mut events);
+        }
+        if events.len() >= LIVE_DELTA_CAPACITY {
+            events.pop_front();
+        }
+        append_live_event(&mut events, event);
+        drop(events);
+        self.ready.notify_one();
+    }
+
+    fn pop(&self) -> Option<LiveEvent> {
+        self.events.lock().ok()?.pop_front()
+    }
+}
+
+/// Add `event` to the queue. A delta that continues the last queued delta of the
+/// same item is appended to it.
+fn append_live_event(events: &mut VecDeque<LiveEvent>, event: LiveEvent) {
+    if let (Some(LiveEvent::Delta(last)), LiveEvent::Delta(next)) = (events.back_mut(), &event)
+        && continues(last, next)
+    {
+        last.text.push_str(&next.text);
+        return;
+    }
+    events.push_back(event);
+}
+
+fn continues(earlier: &LiveDelta, later: &LiveDelta) -> bool {
+    earlier.agent_id == later.agent_id
+        && earlier.item_id == later.item_id
+        && earlier.offset + earlier.text.chars().count() as u64 == later.offset
+}
+
+/// Merge a full queue: each delta joins the earlier queued delta of its item that
+/// it continues, and a progress event equal to an earlier one is dropped. Events
+/// of different items or selectors keep their order.
+fn merge_live_events(events: &mut VecDeque<LiveEvent>) {
+    let mut merged: VecDeque<LiveEvent> = VecDeque::with_capacity(events.len());
+    for event in events.drain(..) {
+        match &event {
+            LiveEvent::Delta(next) => {
+                let earlier = merged.iter_mut().rev().find_map(|queued| match queued {
+                    LiveEvent::Delta(queued)
+                        if queued.agent_id == next.agent_id && queued.item_id == next.item_id =>
+                    {
+                        Some(queued)
+                    }
+                    _ => None,
+                });
+                if let Some(earlier) = earlier
+                    && continues(earlier, next)
+                {
+                    earlier.text.push_str(&next.text);
+                    continue;
+                }
+            }
+            LiveEvent::Progress(selector) => {
+                if merged
+                    .iter()
+                    .any(|queued| matches!(queued, LiveEvent::Progress(queued) if queued == selector))
+                {
+                    continue;
+                }
+            }
+        }
+        merged.push_back(event);
+    }
+    *events = merged;
+}
+
+/// The live events of one sync stream. A slow reader gets merged events, not a
+/// closed stream (see [`LIVE_DELTA_CAPACITY`]).
+pub struct LiveReceiver {
+    queue: Arc<LiveQueue>,
+}
+
+impl LiveReceiver {
+    /// The next event; waits until one is published.
+    pub async fn recv(&mut self) -> LiveEvent {
+        loop {
+            if let Some(event) = self.queue.pop() {
+                return event;
+            }
+            // `notify_one` keeps a permit when no reader waits, so a push after
+            // the pop above still wakes this wait.
+            self.queue.ready.notified().await;
+        }
+    }
+
+    /// The next event if one is queued.
+    pub fn try_recv(&mut self) -> Option<LiveEvent> {
+        self.queue.pop()
+    }
+}
+
 /// One instance per HTTP state's workspace; it shares the existing commit cursor.
 pub struct ResourceNotifications {
     changes: Arc<ChangeNotificationHub>,
-    live: tokio::sync::broadcast::Sender<LiveEvent>,
+    live: Mutex<Vec<Weak<LiveQueue>>>,
     publications: Mutex<Publications>,
     // Share completed projections without holding the guard during reads.
     content: tokio::sync::Mutex<VecDeque<ContentVersion>>,
@@ -174,7 +285,7 @@ impl ResourceNotifications {
     pub fn new(changes: Arc<ChangeNotificationHub>) -> Self {
         Self {
             changes,
-            live: tokio::sync::broadcast::channel(LIVE_DELTA_CAPACITY).0,
+            live: Mutex::new(Vec::new()),
             content: tokio::sync::Mutex::new(VecDeque::new()),
             publications: Mutex::new(Publications {
                 receipts: VecDeque::new(),
@@ -188,18 +299,34 @@ impl ResourceNotifications {
 
     /// Send a committed text delta to every stream, without a store write or a timer.
     pub fn publish_live(&self, delta: LiveDelta) {
-        let _no_subscriber = self.live.send(LiveEvent::Delta(delta));
+        self.send_live(LiveEvent::Delta(delta));
     }
 
     pub fn publish_progress(
         &self,
         selector: studio_runtime_schema::progress_selector::ProgressSelector,
     ) {
-        let _no_subscriber = self.live.send(LiveEvent::Progress(selector));
+        self.send_live(LiveEvent::Progress(selector));
     }
 
-    pub fn subscribe_live(&self) -> tokio::sync::broadcast::Receiver<LiveEvent> {
-        self.live.subscribe()
+    fn send_live(&self, event: LiveEvent) {
+        let Ok(mut subscribers) = self.live.lock() else {
+            return;
+        };
+        subscribers.retain(|subscriber| {
+            subscriber.upgrade().is_some_and(|queue| {
+                queue.push(event.clone());
+                true
+            })
+        });
+    }
+
+    pub fn subscribe_live(&self) -> LiveReceiver {
+        let queue = Arc::new(LiveQueue::default());
+        if let Ok(mut subscribers) = self.live.lock() {
+            subscribers.push(Arc::downgrade(&queue));
+        }
+        LiveReceiver { queue }
     }
 
     /// One post-commit wake; exact entity-only writes do not move the broad cursor.
@@ -465,6 +592,71 @@ impl ResourceNotifications {
 mod tests {
     use super::*;
     use std::sync::mpsc;
+
+    fn delta(item: &str, offset: u64, text: &str) -> LiveEvent {
+        LiveEvent::Delta(LiveDelta {
+            agent_id: "agent".into(),
+            item_id: item.into(),
+            offset,
+            text: text.into(),
+        })
+    }
+
+    #[test]
+    fn slow_live_subscriber_gets_merged_events_in_order() {
+        use studio_runtime_schema::progress_selector::ProgressSelector;
+        let notifications = ResourceNotifications::new(Arc::new(ChangeNotificationHub::new()));
+        let mut slow = notifications.subscribe_live();
+        let auth = ProgressSelector::Auth { request_id: "login".into() };
+        // Two items interleave with progress, so only the merge of the full queue
+        // joins their runs. The loop fills the queue exactly.
+        for index in 0..(LIVE_DELTA_CAPACITY / 2) as u64 {
+            notifications.publish_live(LiveDelta {
+                agent_id: "agent".into(),
+                item_id: if index % 2 == 0 { "one" } else { "two" }.into(),
+                offset: index / 2,
+                text: "x".into(),
+            });
+            notifications.publish_progress(auth.clone());
+        }
+        // This push merges the full queue. A gap in the offsets starts a new run.
+        notifications.publish_live(LiveDelta {
+            agent_id: "agent".into(),
+            item_id: "one".into(),
+            offset: 1_000,
+            text: "gap".into(),
+        });
+        let mut events = Vec::new();
+        while let Some(event) = slow.try_recv() {
+            events.push(event);
+        }
+        let run = "x".repeat(LIVE_DELTA_CAPACITY / 4);
+        assert_eq!(
+            events,
+            vec![
+                delta("one", 0, &run),
+                LiveEvent::Progress(auth),
+                delta("two", 0, &run),
+                delta("one", 1_000, "gap"),
+            ]
+        );
+    }
+
+    #[test]
+    fn dropped_live_subscriber_is_removed() {
+        let notifications = ResourceNotifications::new(Arc::new(ChangeNotificationHub::new()));
+        drop(notifications.subscribe_live());
+        let mut kept = notifications.subscribe_live();
+        notifications.publish_live(LiveDelta {
+            agent_id: "agent".into(),
+            item_id: "one".into(),
+            offset: 0,
+            text: "a".into(),
+        });
+        assert_eq!(notifications.live.lock().unwrap().len(), 1);
+        assert_eq!(kept.try_recv(), Some(delta("one", 0, "a")));
+        assert_eq!(kept.try_recv(), None);
+    }
 
     #[tokio::test]
     async fn unrelated_content_reads_do_not_wait_for_a_projection() {

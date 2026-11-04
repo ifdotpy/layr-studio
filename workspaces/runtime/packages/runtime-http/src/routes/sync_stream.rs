@@ -1674,8 +1674,8 @@ struct ResourceStream {
     store: Option<Arc<RuntimeStore>>,
     changes: tokio::sync::watch::Receiver<ChangeSnapshot>,
     notifications: Arc<ResourceNotifications>,
-    /// Committed model text, in memory. A lagging stream drops frames; the durable item catches up.
-    live: tokio::sync::broadcast::Receiver<LiveEvent>,
+    /// Committed model text, in memory. A slow stream gets merged deltas.
+    live: studio_runtime_services::resource_notify::LiveReceiver,
     token_rates: Option<tokio::sync::watch::Receiver<Arc<TokenRates>>>,
     /// Last snapshot sent by this stream; clearing it makes the next frame a full snapshot.
     last_token_rates: Option<Arc<TokenRates>>,
@@ -1832,24 +1832,22 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
     Some(())
 }
 
-/// A lagged live receiver closes the stream so its client can recover its baseline.
+/// The next live event for the subscribed resources. It never ends the stream.
 async fn next_live_delta(
-    live: &mut tokio::sync::broadcast::Receiver<LiveEvent>,
+    live: &mut studio_runtime_services::resource_notify::LiveReceiver,
     resources: &[SubscribedResource],
 ) -> Option<LiveEvent> {
-    use tokio::sync::broadcast::error::RecvError;
     loop {
         match live.recv().await {
-            Ok(LiveEvent::Delta(delta))
+            LiveEvent::Delta(delta)
                 if resources.iter().any(|resource| {
                     matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id.as_str() == delta.agent_id)
                 }) =>
             {
                 return Some(LiveEvent::Delta(delta));
             }
-            Ok(LiveEvent::Progress(selector)) => return Some(LiveEvent::Progress(selector)),
-            Ok(_) => {}
-            Err(RecvError::Lagged(_) | RecvError::Closed) => return None,
+            LiveEvent::Progress(selector) => return Some(LiveEvent::Progress(selector)),
+            LiveEvent::Delta(_) => {}
         }
     }
 }
@@ -3022,7 +3020,7 @@ mod tests {
             .expect("start once");
         assert!(matches!(
             live.try_recv(),
-            Ok(studio_runtime_services::resource_notify::LiveEvent::Progress(
+            Some(studio_runtime_services::resource_notify::LiveEvent::Progress(
                 studio_runtime_schema::progress_selector::ProgressSelector::Auth { request_id }
             )) if request_id == id
         ));
@@ -3584,13 +3582,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lagged_live_receiver_closes_stream() {
+    async fn slow_stream_gets_merged_live_deltas() {
         let changes =
             Arc::new(studio_runtime_services::change_notifications::ChangeNotificationHub::new());
         let notifications = Arc::new(ResourceNotifications::new(changes.clone()));
         let tokens = TokenRateHub::new();
-        let stream = test_stream(&changes, &tokens, notifications.clone(), &[]);
-        for index in 0..=studio_runtime_services::resource_notify::LIVE_DELTA_CAPACITY {
+        let stream = test_stream(
+            &changes,
+            &tokens,
+            notifications.clone(),
+            &[json!({"kind":"transcript","agentId":"agent"})],
+        );
+        let count = 2 * studio_runtime_services::resource_notify::LIVE_DELTA_CAPACITY;
+        for index in 0..count {
             notifications.publish_live(LiveDelta {
                 agent_id: "agent".into(),
                 item_id: "item".into(),
@@ -3598,11 +3602,13 @@ mod tests {
                 text: "x".into(),
             });
         }
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), next_frame(stream))
-                .await
-                .expect("lag must terminate the stream")
-                .is_none()
+        let (frame, _) = tokio::time::timeout(Duration::from_millis(500), next_frame(stream))
+            .await
+            .expect("a slow stream stays open")
+            .expect("merged frame");
+        assert_eq!(
+            event_document(frame).await,
+            json!({"agentId":"agent","itemId":"item","offset":0,"text":"x".repeat(count)})
         );
     }
 
@@ -6192,7 +6198,7 @@ mod tests {
         changed("00000000-0000-4000-8000-000000000001");
         assert!(matches!(
             live.try_recv(),
-            Ok(studio_runtime_services::resource_notify::LiveEvent::Progress(
+            Some(studio_runtime_services::resource_notify::LiveEvent::Progress(
                 studio_runtime_schema::progress_selector::ProgressSelector::Auth { request_id }
             )) if request_id == "00000000-0000-4000-8000-000000000001"
         ));

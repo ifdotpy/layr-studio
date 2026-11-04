@@ -106,7 +106,7 @@ fn agent_update((db, agent): (Connection, AgentRecord)) -> (Connection, AgentRec
 
 fn subscribers() -> (
     ResourceNotifications,
-    Vec<tokio::sync::broadcast::Receiver<studio_runtime_services::resource_notify::LiveEvent>>,
+    Vec<studio_runtime_services::resource_notify::LiveReceiver>,
 ) {
     let notifications = ResourceNotifications::new(Arc::new(ChangeNotificationHub::new()));
     let receivers = (0..32).map(|_| notifications.subscribe_live()).collect();
@@ -118,11 +118,11 @@ fn subscribers() -> (
 fn fan_out(
     (notifications, mut receivers): (
         ResourceNotifications,
-        Vec<tokio::sync::broadcast::Receiver<studio_runtime_services::resource_notify::LiveEvent>>,
+        Vec<studio_runtime_services::resource_notify::LiveReceiver>,
     ),
 ) -> (
     ResourceNotifications,
-    Vec<tokio::sync::broadcast::Receiver<studio_runtime_services::resource_notify::LiveEvent>>,
+    Vec<studio_runtime_services::resource_notify::LiveReceiver>,
 ) {
     notifications.publish_live(LiveDelta {
         agent_id: "worker".into(),
