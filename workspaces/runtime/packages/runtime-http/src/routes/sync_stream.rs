@@ -120,6 +120,7 @@ impl ResourceIdentity for SubscribedResource {
             ResourceRef::TasksResource(_) => ResourceKind::Tasks,
             ResourceRef::WorkspaceResource(_) => ResourceKind::Workspace,
             ResourceRef::MultiServerResource(_) => ResourceKind::MultiServer,
+            ResourceRef::NativeLayrSettingsResource(_) => ResourceKind::Other,
             ResourceRef::AccountsResource(_)
             | ResourceRef::AuthProgressResource(_)
             | ResourceRef::DraftsResource(_)
@@ -175,6 +176,7 @@ fn authorize_resource(
         | ResourceRef::LimitsResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
+        | ResourceRef::NativeLayrSettingsResource(_)
         | ResourceRef::QueueResource(_)
         | ResourceRef::ReceiptsResource(_)
         | ResourceRef::RoomResource(_)
@@ -594,6 +596,7 @@ async fn sync_stream(
             | ResourceRef::LimitsResource(_)
             | ResourceRef::ModelsResource(_)
             | ResourceRef::MultiServerResource(_)
+            | ResourceRef::NativeLayrSettingsResource(_)
             | ResourceRef::QueueResource(_)
             | ResourceRef::ReceiptsResource(_)
             | ResourceRef::RoomResource(_)
@@ -849,6 +852,7 @@ pub(super) async fn append_progress_frames(
             | ResourceRef::LimitsResource(_)
             | ResourceRef::ModelsResource(_)
             | ResourceRef::MultiServerResource(_)
+            | ResourceRef::NativeLayrSettingsResource(_)
             | ResourceRef::QueueResource(_)
             | ResourceRef::ReceiptsResource(_)
             | ResourceRef::RoomResource(_)
@@ -1246,6 +1250,7 @@ pub(super) async fn draft_initial_snapshot(
         terminal_base_offset: None,
         transcript_changes: None,
         transcript_snapshot: None,
+        native_layr_settings: None,
         discovery_snapshot: None,
         voice_records: None,
         view_snapshot: None,
@@ -1628,6 +1633,23 @@ async fn attach_transient_snapshots(
     let Some(state) = state else { return };
     for (resource, entry) in event.resources.iter().zip(&mut event.resource_versions) {
         match resource {
+            ResourceRef::NativeLayrSettingsResource(_) => {
+                let state_dir = std::path::PathBuf::from(&state.state_dir);
+                entry.native_layr_settings = studio_runtime_process::blocking_pool::spawn_blocking(
+                    "native-layr/stream",
+                    move || {
+                        super::native_layr_settings::settings_response(
+                            &state_dir,
+                            studio_runtime_services::layr_native::capability::resolve_binary()
+                                .ok()
+                                .as_deref(),
+                        )
+                    },
+                )
+                .await
+                .ok()
+                .map(Some);
+            }
             ResourceRef::MultiServerResource(_) if cfg!(unix) => {
                 entry.discovery_snapshot = super::multi_server::read_snapshot(state)
                     .await
@@ -2213,6 +2235,7 @@ fn resource_changes_event(
                     seq: sequence,
                 }),
                 reply_kind: complete.then_some(crate::generated::SubscriptionReplyKind::Delta),
+                native_layr_settings: None,
                 discovery_snapshot: None,
                 voice_records: None,
                 view_snapshot: None,
@@ -6650,6 +6673,78 @@ mod tests {
 
     fn floating_test_rates(rate: u64) -> Value {
         json!({"records":[{"agentId":"agent","rootId":"agent","turnId":"turn","active":true,"estimated":false,"rate":rate as f64,"outputTokens":rate as f64}]})
+    }
+
+    #[tokio::test]
+    async fn state_stream_delivers_native_layr_settings_changes() {
+        let root = tempfile::tempdir().expect("state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        let http = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let resource = json!({"kind":"native-layr-settings"});
+        let mut state = test_stream(
+            &http.sync_changes,
+            &http.token_rates,
+            http.resource_notifications.clone(),
+            &[],
+        );
+        state.http_state = Some(http.clone());
+        state.store = Some(store);
+        subscription_frame(
+            &mut state,
+            SubscriptionChange {
+                generation: 1,
+                resources: fixture_resources(std::slice::from_ref(&resource)),
+                added: fixture_resources(std::slice::from_ref(&resource)),
+                token_rates: None,
+                since: BTreeMap::new(),
+                cache_policies: Vec::new(),
+            },
+        )
+        .await
+        .expect("subscription");
+        let ack = event_document(Ok(state.initial.pop_front().expect("acknowledgement"))).await;
+        assert_eq!(ack["gen"], 1);
+        let event = event_document(Ok(state.initial.pop_front().expect("baseline"))).await;
+        assert_eq!(
+            event["resourceVersions"][0]["nativeLayrSettings"]["storeRoot"],
+            json!(root.path().join("layr-native/store"))
+        );
+        let other = tempfile::tempdir().expect("other store");
+        tokio::fs::create_dir_all(root.path().join("layr-native"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            root.path().join("layr-native/settings.json"),
+            json!({"storeRoot":other.path()}).to_string(),
+        )
+        .await
+        .unwrap();
+        http.resource_notifications
+            .publish_once(
+                &serde_json::from_str(
+                    r#"{"requestId":"store-change","resources":[{"kind":"native-layr-settings"}]}"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let (frame, _) = next_frame(state).await.expect("settings update");
+        let event = event_document(frame).await;
+        assert_eq!(
+            event["resourceVersions"][0]["nativeLayrSettings"]["storeRoot"],
+            json!(
+                studio_runtime_store::path_identity::CanonicalPath::existing(other.path())
+                    .unwrap()
+                    .into_path_buf()
+            )
+        );
     }
 
     #[tokio::test]

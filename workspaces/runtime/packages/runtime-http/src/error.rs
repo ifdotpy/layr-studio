@@ -51,6 +51,12 @@ impl ApiError {
         error
     }
 
+    pub(crate) fn native_layr_store(message: impl Into<String>) -> Self {
+        let mut error = Self::not_applied(message);
+        error.code = Some(studio_runtime_schema::command::CommandErrorCode::NativeLayrStore);
+        error
+    }
+
     /// Mark a rejected preflight as safely retryable; callers must use this
     /// only when the operation has not been persisted or sent to a child.
     pub(crate) fn not_applied(message: impl Into<String>) -> Self {

@@ -51,10 +51,21 @@ pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
         NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
     })?;
     #[cfg(target_os = "linux")]
-    let socket = Some(super::selected_socket_path(state)?);
+    let socket = Some(super::socket_path_in_store(state, root));
     #[cfg(not(target_os = "linux"))]
     let socket: Option<std::path::PathBuf> = None;
-    verify_with_binary(state, root, &executable, socket.as_deref())
+    verify_with_binary(state, root, &executable, socket.as_deref(), true)
+}
+
+pub(super) fn readiness(state: &Path, root: &Path) -> Result<()> {
+    let executable = super::capability::resolve_binary().map_err(|c| {
+        NativeLayrError::Refused(c.message().unwrap_or("Layr is unavailable").into())
+    })?;
+    #[cfg(target_os = "linux")]
+    let socket = Some(super::socket_path_in_store(state, root));
+    #[cfg(not(target_os = "linux"))]
+    let socket: Option<PathBuf> = None;
+    verify_with_binary(state, root, &executable, socket.as_deref(), false).map(|_| ())
 }
 
 fn verify_with_binary(
@@ -62,6 +73,7 @@ fn verify_with_binary(
     root: &Path,
     executable: &Path,
     socket: Option<&Path>,
+    allow_upgrade: bool,
 ) -> Result<Option<String>> {
     let mut installed = inspect(executable, root)?;
     #[cfg(target_os = "linux")]
@@ -72,6 +84,7 @@ fn verify_with_binary(
     #[cfg(not(target_os = "linux"))]
     let _ = socket;
     if !installed.compatible
+        && allow_upgrade
         && settings::owns_store(state, root)
         && let Some(upgrade) = &installed.upgrade
         && upgrade.metadata_only
@@ -300,8 +313,10 @@ esac
         let binary = binary_path(&state);
         fs::write(&binary, script).expect("binary fixture");
         fs::set_permissions(binary, fs::Permissions::from_mode(0o755)).expect("executable");
-        verify_with_binary(&state, &root, &binary_path(&state), None).expect("metadata adoption");
-        verify_with_binary(&state, &root, &binary_path(&state), None).expect("repeat is a no-op");
+        verify_with_binary(&state, &root, &binary_path(&state), None, true)
+            .expect("metadata adoption");
+        verify_with_binary(&state, &root, &binary_path(&state), None, true)
+            .expect("repeat is a no-op");
         assert_eq!(
             fs::read_to_string(root.join("calls")).expect("calls"),
             "upgrade\n"
@@ -312,7 +327,7 @@ esac
         );
         let developer = fixture.path().join("developer-store");
         fs::create_dir(&developer).expect("developer store");
-        let error = verify_with_binary(&state, &developer, &binary_path(&state), None)
+        let error = verify_with_binary(&state, &developer, &binary_path(&state), None, true)
             .expect_err("operator store requires explicit upgrade")
             .to_string();
         assert!(error.contains("upgrade-store"));

@@ -27,7 +27,11 @@ export type NewChatSettings = Pick<
   | "daybreak_enabled"
   | "worker_defaults"
   | "review_defaults"
-> & { account_key?: string; workspaceMode: NewChatWorkspaceMode };
+> &
+  Pick<PostBody<"/api/leads">, "layrStoreRoot"> & {
+    account_key?: string;
+    workspaceMode: NewChatWorkspaceMode;
+  };
 
 export type NewChatSettingsDraft = Omit<NewChatSettings, "workspaceMode">;
 
@@ -134,6 +138,7 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   if (!record(value)) return false;
   const allowed = [
     "workspaceMode",
+    "layrStoreRoot",
     "account_key",
     "model",
     "effort",
@@ -146,6 +151,11 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   if (
     typeof value.workspaceMode !== "string" ||
     !(CHAT_WORKSPACE_MODES as readonly string[]).includes(value.workspaceMode)
+  )
+    return false;
+  if (
+    value.layrStoreRoot !== undefined &&
+    (typeof value.layrStoreRoot !== "string" || !value.layrStoreRoot.trim())
   )
     return false;
   if (
