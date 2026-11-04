@@ -2578,14 +2578,14 @@ mod tests {
             None,
         );
         let resource = SubscribedResource::new(
-            serde_json::from_str(r#"{"kind":"processes","agentId":"owner"}"#).unwrap(),
+            studio_json::from_str(r#"{"kind":"processes","agentId":"owner"}"#).unwrap(),
         )
         .unwrap();
         let mut stale = super::super::process_controls::read_listing(state.clone(), "owner".into())
             .await
             .unwrap();
         stale.processes[0].tail = "stale".into();
-        let old_bytes = serde_json::to_vec(&stale).unwrap();
+        let old_bytes = studio_json::to_vec(&stale).unwrap();
         let hub = Arc::new(ChangeNotificationHub::new());
         let notifications = Arc::new(ResourceNotifications::new(hub.clone()));
         let entered = Arc::new(tokio::sync::Notify::new());
@@ -2653,7 +2653,7 @@ mod tests {
         );
         super::super::subscriptions::attach_view_snapshots(Some(&state), &mut event).await;
         assert_eq!(
-            serde_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"]
+            studio_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"]
                 ["processes"][0]["tail"],
             "fresh"
         );

@@ -60,13 +60,8 @@ fn store(state: &HttpState) -> Result<Arc<RuntimeStore>, ApiError> {
     state.store.clone().ok_or_else(ApiError::internal)
 }
 fn provider(state: &HttpState, owner: &Value) -> Result<Arc<dyn AccountSessionPort>, ApiError> {
-<<<<<<< head
-    let agent: AgentRecord =
-        studio_json::from_value(owner.clone()).map_err(|_| ApiError::internal())?;
-=======
     let agent = <AgentRecord as serde::Deserialize>::deserialize(owner)
         .map_err(|_| ApiError::internal())?;
->>>>>>> main
     Ok(super::agent_management::native_action_provider(
         store(state)?.as_ref(),
         &agent,
@@ -838,9 +833,9 @@ mod typed_query_tests {
 
     #[test]
     fn provider_rejects_malformed_agent_fields() {
-        use serde_json::json;
+        use studio_json::json;
         let valid = json!({"compactions":0,"provider":"codex","id":"owner","rootId":"owner","epoch":1,"status":"idle","accountKey":"default"});
-        assert!(serde_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok());
+        assert!(studio_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok());
         assert!(
             <studio_runtime_store::AgentRecord as serde::Deserialize>::deserialize(&valid).is_ok()
         );
@@ -853,7 +848,7 @@ mod typed_query_tests {
             let mut malformed = valid.clone();
             malformed[field] = value;
             assert!(
-                serde_json::from_value::<studio_runtime_store::AgentRecord>(malformed.clone())
+                studio_json::from_value::<studio_runtime_store::AgentRecord>(malformed.clone())
                     .is_err(),
                 "owned {field}"
             );

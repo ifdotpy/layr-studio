@@ -414,10 +414,10 @@ pub(super) fn attach_sampled_process_snapshots(
         if !matches!(resource, ResourceRef::ProcessesResource(_)) || entry.view_snapshot.is_some() {
             continue;
         }
-        let Some(listing) = serde_json::to_string(resource)
+        let Some(listing) = studio_json::to_string(resource)
             .ok()
             .and_then(|key| samples.get(&key))
-            .and_then(|bytes| serde_json::from_slice(bytes).ok())
+            .and_then(|bytes| studio_json::from_slice(bytes).ok())
         else {
             continue;
         };
@@ -426,7 +426,7 @@ pub(super) fn attach_sampled_process_snapshots(
             ..Default::default()
         });
         entry.resource = Some(Some(resource.clone()));
-        if serde_json::to_vec(&entry)
+        if studio_json::to_vec(&entry)
             .map_or(true, |bytes| bytes.len() > SYNC_STREAM_EVENT_MAX_BYTES)
         {
             entry.view_snapshot = None;
@@ -717,18 +717,18 @@ mod tests {
     #[test]
     fn process_publication_uses_sampled_listing() {
         let resource: ResourceRef =
-            serde_json::from_str(r#"{"kind":"processes","agentId":"lead"}"#).unwrap();
+            studio_json::from_str(r#"{"kind":"processes","agentId":"lead"}"#).unwrap();
         let listing = json!({"responseTarget":null,"processes":[],"activities":[]});
-        let mut event: crate::generated::ResourceChangeEvent = serde_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"lead"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
+        let mut event: crate::generated::ResourceChangeEvent = studio_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"lead"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
         let samples = [(
-            serde_json::to_string(&resource).unwrap(),
-            serde_json::to_vec(&listing).unwrap(),
+            studio_json::to_string(&resource).unwrap(),
+            studio_json::to_vec(&listing).unwrap(),
         )]
         .into_iter()
         .collect();
         attach_sampled_process_snapshots(&mut event, &samples);
         assert_eq!(
-            serde_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"],
+            studio_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"],
             listing
         );
     }
@@ -750,11 +750,11 @@ mod tests {
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id, agent.to_string()])?;
                 let monitor_id = format!("monitor-{index}");
                 let monitor = json!({"id":monitor_id,"agent":id,"epoch":1,"status":"running","requestId":monitor_id,"created":1,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"echo ready","cwd":"","interactive":false,"livenessCommand":"","log":"","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","operation":{"accountKey":"default","connectionId":"connection","threadId":"thread","agent":id,"epoch":1}});
-                serde_json::from_value::<studio_runtime_store::MonitorRecord>(monitor.clone()).expect("valid monitor fixture");
+                studio_json::from_value::<studio_runtime_store::MonitorRecord>(monitor.clone()).expect("valid monitor fixture");
                 tx.execute("INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)", rusqlite::params![monitor_id, monitor.to_string()])?;
                 let task_id = format!("task-{index}");
                 let task = json!({"id":task_id,"agent":id,"created":1,"itemId":task_id,"turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"});
-                serde_json::from_value::<studio_runtime_store::TaskRecord>(task.clone()).expect("valid task fixture");
+                studio_json::from_value::<studio_runtime_store::TaskRecord>(task.clone()).expect("valid task fixture");
                 tx.execute("INSERT INTO runtime_tasks(id,record) VALUES(?1,?2)", rusqlite::params![task_id, task.to_string()])?;
             }
             Ok::<_, StoreError>(())
@@ -769,21 +769,21 @@ mod tests {
             None,
         );
         let resource: ResourceRef =
-            serde_json::from_str(r#"{"kind":"processes","agentId":"agent-0"}"#).unwrap();
+            studio_json::from_str(r#"{"kind":"processes","agentId":"agent-0"}"#).unwrap();
         let listing = super::super::process_controls::read_listing(state.clone(), "agent-0".into())
             .await
             .expect("listing fixture");
-        let bytes = serde_json::to_vec(&listing).unwrap();
-        let mut event: crate::generated::ResourceChangeEvent = serde_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"agent-0"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
+        let bytes = studio_json::to_vec(&listing).unwrap();
+        let mut event: crate::generated::ResourceChangeEvent = studio_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"agent-0"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
         if reuse {
-            let samples = [(serde_json::to_string(&resource).unwrap(), bytes)]
+            let samples = [(studio_json::to_string(&resource).unwrap(), bytes)]
                 .into_iter()
                 .collect();
             attach_sampled_process_snapshots(&mut event, &samples);
         } else {
             attach_view_snapshots(Some(&state), &mut event).await;
         }
-        let value = serde_json::to_value(event).unwrap();
+        let value = studio_json::to_value(event).unwrap();
         assert_eq!(
             value["resourceVersions"][0]["viewSnapshot"]["processes"]["processes"]
                 .as_array()
