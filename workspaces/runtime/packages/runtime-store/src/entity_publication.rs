@@ -305,36 +305,6 @@ pub(crate) fn pending(
     }
     let mut pending = PendingEntities::default();
     for ((source, _), id) in &ids {
-<<<<<<< head
-||||||| base
-        if *source != Source::Work {
-            continue;
-        }
-        if id.is_none() {
-            let mut statement = transaction.prepare(
-                "SELECT DISTINCT id FROM sync_entities WHERE collection IN ('work','workDetail') AND deleted=0 AND NOT EXISTS(SELECT 1 FROM runtime_work WHERE runtime_work.id=sync_entities.id)",
-            )?;
-            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-                pending.work.insert(row?);
-            }
-        }
-    }
-    for ((source, _), id) in &ids {
-=======
-        if *source != Source::Work {
-            continue;
-        }
-        if id.is_none() {
-            let mut statement = transaction.prepare_cached(
-                "SELECT DISTINCT id FROM sync_entities WHERE collection IN ('work','workDetail') AND deleted=0 AND NOT EXISTS(SELECT 1 FROM runtime_work WHERE runtime_work.id=sync_entities.id)",
-            )?;
-            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-                pending.work.insert(row?);
-            }
-        }
-    }
-    for ((source, _), id) in &ids {
->>>>>>> https/main
         if *source == Source::Agent {
             if let Some(id) = id {
                 let root: Option<String> = transaction
