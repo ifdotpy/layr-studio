@@ -20,8 +20,6 @@ impl EntityPublisher for DefaultPublisher {
             agents: pending.agents.clone(),
             requests: pending.requests.clone(),
             work: pending.work.clone(),
-            source_work_changes: Some(pending.work_changes.clone()),
-            work_refusal_owners: pending.work_refusal_owners.clone(),
             ..Default::default()
         };
         let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
@@ -105,6 +103,9 @@ pub(crate) mod test_support {
         let (collection, id) = (collection.to_owned(), id.to_owned());
         store
             .test_read_transaction(move |tx| {
+                if studio_runtime_store::WORK_COLLECTIONS.contains(&collection.as_str()) {
+                    return built_entity(tx, &collection, &id);
+                }
                 Ok(tx
                     .query_row(
                         "SELECT deleted,payload FROM sync_entities WHERE collection=?1 AND id=?2",
@@ -118,6 +119,45 @@ pub(crate) mod test_support {
                 let payload: Value = serde_json::from_str(&payload).expect("entity JSON");
                 (deleted, payload["value"].clone())
             })
+    }
+
+    /// The newest document of a collection built at read time, live or deleted, as a
+    /// reader that starts from cursor zero sees it.
+    fn built_entity(
+        connection: &rusqlite::Connection,
+        collection: &str,
+        id: &str,
+    ) -> Result<Option<(bool, String)>, StoreError> {
+        let (high, _) = studio_runtime_store::durable_seq::high_and_floor(connection)?;
+        let mut page = studio_runtime_store::EntityPage {
+            rows: Vec::new(),
+            max_sequence: high,
+            tombstone_floor: 0,
+            initial_high: 0,
+            checkpoint: 0,
+            reset: false,
+        };
+        let collections = serde_json::json!([collection]).to_string();
+        let mut found = None;
+        loop {
+            page = crate::entity_scope::continue_page(
+                connection,
+                &page,
+                Some(&collections),
+                None,
+                None,
+                true,
+                studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
+            )?;
+            for row in &page.rows {
+                if row.id == id {
+                    found = Some((row.deleted, row.payload.clone().unwrap_or_default()));
+                }
+            }
+            if page.checkpoint >= page.max_sequence {
+                return Ok(found);
+            }
+        }
     }
 
     /// The live client view of chat `id`.

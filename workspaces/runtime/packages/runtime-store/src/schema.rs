@@ -308,8 +308,15 @@ inventory::submit! {
 inventory::submit! {
     ConnectionFunctionRegistration("sync_entity_payload")
 }
-inventory::submit! { ConnectionFunctionRegistration(crate::entity_publication::WORK_HISTORY_FUNCTION) }
-inventory::submit! { ConnectionFunctionRegistration(crate::entity_publication::WORK_IDENTITY_FUNCTION) }
+
+/// Functions of the retired work journal triggers. Migration `2026-11-04-work-read-time`
+/// drops the triggers; until it runs on an old database, they call these no-ops.
+const RETIRED_WORK_JOURNAL_FUNCTIONS: [(&str, i32); 2] = [
+    ("sync_work_history_change", 3),
+    ("sync_work_identity_change", 2),
+];
+inventory::submit! { ConnectionFunctionRegistration(RETIRED_WORK_JOURNAL_FUNCTIONS[0].0) }
+inventory::submit! { ConnectionFunctionRegistration(RETIRED_WORK_JOURNAL_FUNCTIONS[1].0) }
 
 fn has_registered_connection_function(name: &str) -> bool {
     inventory::iter::<ConnectionFunctionRegistration>
@@ -318,7 +325,9 @@ fn has_registered_connection_function(name: &str) -> bool {
 }
 
 pub(crate) fn register_python_trigger_functions(connection: &Connection) -> StoreResult<()> {
-    crate::entity_publication::register_work_change_functions(connection)?;
+    for (name, arguments) in RETIRED_WORK_JOURNAL_FUNCTIONS {
+        connection.create_scalar_function(name, arguments, FunctionFlags::empty(), |_| Ok(0))?;
+    }
     connection.create_scalar_function(
         "sync_entity_payload",
         4,

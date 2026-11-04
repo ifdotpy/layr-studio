@@ -1269,7 +1269,7 @@ async fn read_entity_changes_typed(
             }
             let batch = match after {
                 Some(after) if after >= floor && after < sequence => {
-                    studio_runtime_services::work_scope::resume(
+                    studio_runtime_services::entity_scope::resume(
                         connection,
                         Some(after),
                         Some(

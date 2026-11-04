@@ -153,6 +153,56 @@ describe("complete bounded entity transfer", () => {
       ),
     ).rejects.toThrow();
   });
+  it("accepts documents of one change that share its number and rejects a decrease", async () => {
+    const shared: Batch = {
+      after: 0,
+      through: 2,
+      documents: [
+        {
+          op: "upsert",
+          collection: "workspace",
+          id: "a",
+          seq: 2,
+          value: { stateDir: "a" },
+        },
+        {
+          op: "upsert",
+          collection: "workspace",
+          id: "b",
+          seq: 2,
+          value: { stateDir: "b" },
+        },
+      ],
+    };
+    const complete = await new EntityTransferAssembler(
+      new MemoryStaging(),
+    ).receive(parts([shared])[0]!);
+    expect((await pages(complete))[0]?.documents.map((row) => row.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    const decreasing: Batch = {
+      ...shared,
+      documents: [...shared.documents]
+        .reverse()
+        .map((row, index) => ({ ...row, seq: 2 - index })),
+    };
+    await expect(
+      new EntityTransferAssembler(new MemoryStaging()).receive(
+        parts([decreasing])[0]!,
+      ),
+    ).rejects.toThrow();
+    const atAfter: Batch = {
+      after: 2,
+      through: 3,
+      documents: [{ ...shared.documents[0]!, seq: 2 }],
+    };
+    await expect(
+      new EntityTransferAssembler(new MemoryStaging()).receive(
+        parts([atAfter])[0]!,
+      ),
+    ).rejects.toThrow();
+  });
   it("preserves the single-row delta interval without a history snapshot", async () => {
     const assembler = new EntityTransferAssembler(new MemoryStaging());
     const [frame] = parts([batch(513, 1)]);

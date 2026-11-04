@@ -138,13 +138,10 @@ pub fn with_entity_delta(
     mut result: Value,
 ) -> Result<Value, StoreError> {
     const LIMIT: usize = studio_runtime_schema::shared_values::SYNC_ENTITY_PAGE_LIMIT as usize;
-    let rows = SyncDocumentsRepository::entities_after(connection, after, (LIMIT + 1) as i64)?;
+    let (rows, complete) = crate::entity_scope::delta_after(connection, after, LIMIT as i64)?;
     if !rows.is_empty() {
-        result["_syncEntities"] =
-            Value::Array(rows.iter().take(LIMIT).filter_map(entity_change).collect());
-        if rows.len() <= LIMIT
-            && SyncDocumentsRepository::entity_tombstone_floor(connection)? <= after
-        {
+        result["_syncEntities"] = Value::Array(rows.iter().filter_map(entity_change).collect());
+        if complete {
             result["_syncEntitiesAfter"] = serde_json::json!(after);
         }
     }
