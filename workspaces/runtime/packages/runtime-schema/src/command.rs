@@ -19,6 +19,7 @@ use crate::continuation_snapshot::BoundedVec;
 #[strum(serialize_all = "snake_case")]
 pub enum CommandErrorCode {
     ReceiptExpired,
+    NativeLayrStore,
 }
 
 /// Maximum length of a client id. Unit: characters.

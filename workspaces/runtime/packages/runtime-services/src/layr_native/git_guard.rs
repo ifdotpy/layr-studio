@@ -452,7 +452,7 @@ mod tests {
         for root in [&selected, &bound, &imported] {
             fs::create_dir_all(root.join("projects/project/lines/main")).expect("line");
         }
-        super::super::settings::configure(&state, Some(&selected)).expect("selected store");
+        super::super::settings::fixture_select(&state, &selected);
         for (root, receipt) in [
             (&bound, serde_json::json!({"storeRoot":bound})),
             (

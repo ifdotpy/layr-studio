@@ -639,6 +639,9 @@ export function createResourceEvents(options: ResourceEventsOptions) {
         version.draftChanges = revisionEntry?.draftChanges ?? undefined;
         version.draftSnapshot = revisionEntry?.draftSnapshot ?? undefined;
       }
+      if (resource.kind === "native-layr-settings")
+        version.nativeLayrSettings =
+          revisionEntry?.nativeLayrSettings ?? undefined;
       if (resource.kind === "multi-server")
         version.discoverySnapshot =
           revisionEntry?.discoverySnapshot ?? undefined;
