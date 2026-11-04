@@ -1,6 +1,6 @@
 //! Pure supervisor admission and journal decisions. No I/O or clock access.
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 
 /// Version of the maintained process supervisor wire protocol.
@@ -230,7 +230,7 @@ pub enum Command {
         operation_id: String,
         #[serde(rename = "nativeId")]
         native_id: Option<NativeId>,
-        message: serde_json::Map<String, Value>,
+        message: studio_json::Map<String, Value>,
     },
     #[serde(rename = "next")]
     Next { handle: String, cursor: u64 },
@@ -306,7 +306,7 @@ pub struct HandleSnapshot {
 }
 impl HandleSnapshot {
     pub fn from_record(record: Value) -> Result<Self, Refusal> {
-        let record: HandleRecord = serde_json::from_value(record)
+        let record: HandleRecord = studio_json::from_value(record)
             .map_err(|_| Refusal("Invalid supervisor handles record"))?;
         Self::checked(record)
     }
@@ -411,7 +411,7 @@ impl HandleSnapshot {
         };
         let mut outbound = message.clone();
         if rpc {
-            outbound["id"] = serde_json::to_value(&remote_id)
+            outbound["id"] = studio_json::to_value(&remote_id)
                 .map_err(|_| Refusal("Invalid supervisor native id"))?;
         }
         Ok(WriteDecision::Accept {
@@ -441,12 +441,12 @@ fn deserialize_stored_response<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Value>, D::Error> {
     Option::<String>::deserialize(deserializer)?
-        .map(|raw| serde_json::from_str(&raw).map_err(serde::de::Error::custom))
+        .map(|raw| studio_json::from_str(&raw).map_err(serde::de::Error::custom))
         .transpose()
 }
 impl ReceiptSnapshot {
     pub fn from_record(record: Value) -> Result<Self, Refusal> {
-        let record: ReceiptRecord = serde_json::from_value(record)
+        let record: ReceiptRecord = studio_json::from_value(record)
             .map_err(|_| Refusal("Invalid supervisor operations record"))?;
         Self::checked(record)
     }
@@ -466,7 +466,7 @@ impl ReceiptSnapshot {
                 .transpose()
                 .map_err(|_| invalid())?,
             response: response
-                .map(|raw| serde_json::from_str(&raw))
+                .map(|raw| studio_json::from_str(&raw))
                 .transpose()
                 .map_err(|_| invalid())?,
             response_sequence: response_sequence
@@ -544,7 +544,7 @@ pub fn compare_start(expected: &str, actual: Option<&str>) -> StartMatch {
 mod start_identity_tests {
     #![allow(clippy::unwrap_used)]
     use super::{HandleSnapshot, ReceiptSnapshot, StartMatch, compare_start, is_native_start};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn receipt_response_requires_acknowledgement_and_preserves_partial_records() {

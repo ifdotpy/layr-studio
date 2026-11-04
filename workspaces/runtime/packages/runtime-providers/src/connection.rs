@@ -1,6 +1,6 @@
 //! Pure, deterministic provider connection state machine.
 
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use studio_runtime_schema::provider_method_policy::{
     is_thread_serialized, thread_serialization_rule,
@@ -764,7 +764,7 @@ fn validate_request_encoding(
 mod request_body_tests {
     use super::*;
     use crate::{ClientName, ProviderKind, initialize_params};
-    use serde_json::json;
+    use studio_json::json;
 
     fn written_request(actions: &[Action]) -> &RequestFrame {
         let mut requests = actions.iter().filter_map(|action| match action {

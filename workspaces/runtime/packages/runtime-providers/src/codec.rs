@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use std::borrow::Cow;
 use thiserror::Error;
 
@@ -306,7 +306,7 @@ pub enum CodecError {
 }
 
 fn decode_frame(line: &[u8]) -> Result<Frame, CodecError> {
-    serde_json::from_slice::<WireObject<'_>>(line)
+    studio_json::from_slice::<WireObject<'_>>(line)
         .map_err(|error| CodecError::MalformedJson(error.to_string()))?
         .into_frame()
 }
@@ -314,7 +314,7 @@ fn decode_frame(line: &[u8]) -> Result<Frame, CodecError> {
 /// Decode a compatibility probe reply, retaining its historical permissive
 /// notification handling and last-duplicate JSON semantics.
 pub fn decode_probe_response(line: &[u8], expected: u64) -> Result<Option<Value>, CodecError> {
-    let value: Value = serde_json::from_slice(line)
+    let value: Value = studio_json::from_slice(line)
         .map_err(|error| CodecError::MalformedJson(error.to_string()))?;
     if !value.is_object() {
         return Err(CodecError::MalformedFrame("expected object"));
@@ -437,7 +437,7 @@ pub fn decode_journal_value(cursor: u64, generation: u64, payload: &Value) -> De
     let payload = match decoded {
         Ok(frame) => DecodedJournalPayload::Frame(frame),
         Err(error) => DecodedJournalPayload::RawStdout {
-            bytes: serde_json::to_vec(payload).unwrap_or_default(),
+            bytes: studio_json::to_vec(payload).unwrap_or_default(),
             error,
         },
     };
@@ -501,7 +501,7 @@ fn decode_journal_frame(bytes: &[u8]) -> Result<Frame, CodecError> {
     }
 }
 
-fn serialize_error(error: serde_json::Error) -> CodecError {
+fn serialize_error(error: studio_json::Error) -> CodecError {
     CodecError::Serialization(error.to_string())
 }
 
@@ -516,7 +516,7 @@ pub fn encode_line(frame: &Frame) -> Result<Vec<u8>, CodecError> {
 pub fn encode_line_into(frame: &Frame, output: &mut Vec<u8>) -> Result<(), CodecError> {
     output.clear();
     let view = FrameView::new(frame);
-    if let Err(error) = serde_json::to_writer(&mut *output, &view) {
+    if let Err(error) = studio_json::to_writer(&mut *output, &view) {
         output.clear();
         return Err(serialize_error(error));
     }
