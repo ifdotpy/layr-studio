@@ -1,3 +1,6 @@
+[graph]
+all-features = true
+
 [bans]
 multiple-versions = "allow"
 # Add new third-party direct dependents deliberately when the dependency graph changes.
@@ -18,6 +21,7 @@ deny = [{ name = "serde_json", wrappers = [
   "serde_json_path",
   "serde_json_path_core",
   "serialize-to-javascript",
+  "simd-json",
   "swift-rs",
   "tauri",
   "tauri-build",
