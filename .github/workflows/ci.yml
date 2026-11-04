@@ -36,6 +36,8 @@ jobs:
         run: pnpm run contracts:check
       - name: Rust formatting
         run: cargo fmt --check
+      - name: Cargo dependency bans
+        run: cargo fetch --locked && just deny-bans
       - name: Rust Clippy
         run: node workspaces/tooling/apps/repository-checks/clippy-ratchet.ts
       - name: Rust compiler policy witnesses
