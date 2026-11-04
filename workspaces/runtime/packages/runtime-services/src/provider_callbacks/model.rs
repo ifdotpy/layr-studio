@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, RequestId, ResponseBody};
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::{StoreError, system_reads};
@@ -52,8 +52,8 @@ impl From<studio_runtime_store::approvals::ApprovalError> for CallbackError {
         }
     }
 }
-impl From<serde_json::Error> for CallbackError {
-    fn from(_: serde_json::Error) -> Self {
+impl From<studio_json::Error> for CallbackError {
+    fn from(_: studio_json::Error) -> Self {
         Self::Invalid("Invalid callback object")
     }
 }
@@ -273,7 +273,7 @@ impl Input {
                 request.params.clone(),
             ),
             Frame::UnknownMethod(request) if request.fields.contains_key("id") => (
-                serde_json::from_value(request.fields["id"].clone())?,
+                studio_json::from_value(request.fields["id"].clone())?,
                 request.method.clone(),
                 request.fields.get("params").cloned(),
             ),
@@ -351,4 +351,8 @@ mod origin_tests {
         context.agent = "another-agent".into();
         assert_ne!(origin, ReplyIdentity::new(&context, &rpc).key());
     }
+}
+
+impl From<studio_json::error::Error> for CallbackError {
+    fn from(value: studio_json::error::Error) -> Self { Self::from(studio_json::Error::from(value)) }
 }

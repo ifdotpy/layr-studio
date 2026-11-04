@@ -15,7 +15,7 @@ use crate::provider_callbacks::{
     ManagedToolRuntimePorts, dispatch_with_managed_tools,
 };
 use rusqlite::{Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -42,7 +42,7 @@ fn template() -> &'static Template {
     TEMPLATE.get_or_init(|| {
         let scratch = tempfile::tempdir().unwrap();
         let cwd = scratch.path().to_string_lossy().into_owned();
-        let base: Value = serde_json::from_str(&BASE_AGENT.replace("@cwd", &cwd)).unwrap();
+        let base: Value = studio_json::from_str(&BASE_AGENT.replace("@cwd", &cwd)).unwrap();
         let actor = |index: usize, id: &str, name: &str, parent: Option<&str>, lead: bool| {
             let mut record = base.clone();
             record["id"] = json!(id);
@@ -61,7 +61,7 @@ fn template() -> &'static Template {
                 actor(1, WORKER, "Callback worker", Some(LEAD), false),
                 actor(2, FOREIGN, "Other team", None, true),
             ],
-            "monitor": serde_json::from_str::<Value>(&FIXTURE_MONITOR.replace("@cwd", &cwd)).unwrap(),
+            "monitor": studio_json::from_str::<Value>(&FIXTURE_MONITOR.replace("@cwd", &cwd)).unwrap(),
             "managedToolCases": [{"actor": "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331", "tool": "orchestration_send", "arguments": {"agent_id": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "text": "descendant input"}, "callId": "managed-0"}, {"actor": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "tool": "orchestration_send", "arguments": {"agent_id": "parent", "text": "parent alias"}, "callId": "managed-1"}, {"actor": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "tool": "orchestration_send", "arguments": {"agent_id": "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331", "text": "parent id"}, "callId": "managed-2"}, {"actor": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "tool": "orchestration_send", "arguments": {"agent_id": "broadcast", "text": "team notice"}, "callId": "managed-3"}, {"actor": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "tool": "orchestration_send", "arguments": {"agent_id": "787d59cc-071a-4918-990a-cb1dffba4e2f", "text": "peer refusal"}, "callId": "managed-4"}, {"actor": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "tool": "orchestration_complaint", "arguments": {"action": "submit", "text": "Need help"}, "callId": "managed-5"}, {"actor": "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331", "tool": "orchestration_complaint", "arguments": {"action": "read", "complaint_id": "ccba5086-ee65-562b-9703-fd2fc708bad4"}, "callId": "managed-6"}, {"actor": "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331", "tool": "orchestration_complaint", "arguments": {"action": "respond", "complaint_id": "ccba5086-ee65-562b-9703-fd2fc708bad4", "text": "Investigating", "status": "in_progress"}, "callId": "managed-7"}, {"actor": "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331", "tool": "orchestration_context", "arguments": {"topic": "monitor", "id": "6a1cbd51-e035-54ce-af5c-7fd9850e3065"}, "callId": "managed-9"}, {"actor": "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331", "tool": "orchestration_cancel_monitor", "arguments": {"monitor_id": "6a1cbd51-e035-54ce-af5c-7fd9850e3065"}, "callId": "managed-10"}],
             "managedRootDeletedRefusal": {"actor": "415ccbb7-cd04-444e-8599-af5c52da8e5e", "tool": "orchestration_complaint", "callId": "deleted-root", "arguments": {"action": "read"}},
         });
@@ -1210,8 +1210,8 @@ fn application_table_snapshot(store: &RuntimeStore) -> Vec<(String, Vec<String>)
                         ValueRef::Real(value) => format!("r:{value:?}"),
                         ValueRef::Text(value) if name == "runtime_monitors" && column == 1 => {
                             let monitor: studio_runtime_store::MonitorRecord =
-                                serde_json::from_slice(value).unwrap();
-                            format!("t:{}", serde_json::to_string(&monitor).unwrap())
+                                studio_json::from_slice(value).unwrap();
+                            format!("t:{}", studio_json::to_string(&monitor).unwrap())
                         }
                         ValueRef::Text(value) => format!("t:{}", String::from_utf8_lossy(value)),
                         ValueRef::Blob(value) => format!("b:{value:?}"),
@@ -1326,7 +1326,7 @@ async fn managed_monitor_create_persists_one_start_intent_and_replays_exactly() 
         })
         .unwrap();
     assert_eq!(count, count_before + 1);
-    let saved: Value = serde_json::from_str(
+    let saved: Value = studio_json::from_str(
         &store
             .test_reader()
             .unwrap()
@@ -1384,7 +1384,7 @@ async fn managed_monitor_create_persists_one_start_intent_and_replays_exactly() 
     .unwrap();
     FAIL_MANAGED_WORKSPACE_PREPARATION.with(|fail| fail.set(false));
     assert_eq!(
-        serde_json::from_str::<Value>(adapter_replay.get()).unwrap(),
+        studio_json::from_str::<Value>(adapter_replay.as_str()).unwrap(),
         saved
     );
 
@@ -1401,7 +1401,7 @@ async fn managed_monitor_create_persists_one_start_intent_and_replays_exactly() 
         })
         .unwrap();
     assert_eq!(replayed_count, count_before + 1);
-    let replayed: Value = serde_json::from_str(
+    let replayed: Value = studio_json::from_str(
         &store
             .test_reader()
             .unwrap()
@@ -1472,7 +1472,7 @@ async fn send_remote_routing_refusals_write_nothing() {
                     [&actor_id],
                     |row| row.get(0),
                 )?;
-                let mut actor: Value = serde_json::from_str(&raw).unwrap();
+                let mut actor: Value = studio_json::from_str(&raw).unwrap();
                 for (key, value) in flags.as_object().unwrap() {
                     actor[key] = value.clone();
                 }
@@ -2007,7 +2007,7 @@ async fn remote_origin_search_and_monitor_context_stay_local() {
                 [&agent_id],
                 |row| row.get(0),
             )?;
-            let mut actor: Value = serde_json::from_str(&raw).unwrap();
+            let mut actor: Value = studio_json::from_str(&raw).unwrap();
             actor["remoteOrigin"] = json!(true);
             tx.execute(
                 "UPDATE runtime_agents SET record=?2 WHERE id=?1",
@@ -3750,7 +3750,7 @@ fn tool_reply(decision: CallbackDecision) -> (bool, Value) {
     let text = actual["contentItems"][0]["text"].as_str().unwrap();
     (
         actual["success"] == true,
-        serde_json::from_str(text).unwrap_or_else(|_| json!(text)),
+        studio_json::from_str(text).unwrap_or_else(|_| json!(text)),
     )
 }
 
@@ -4036,7 +4036,7 @@ async fn lead_archive_and_restore_run_through_the_lifecycle_owner() {
     .await;
     assert!(success, "{batch}");
     let report: crate::agent_management_store::ArchiveFinishedResult =
-        serde_json::from_value(batch.clone()).expect("typed archive summary");
+        studio_json::from_value(batch.clone()).expect("typed archive summary");
     assert_eq!(report.archived, 1);
     let (success, replay) = manage(
         "manage-archive-finished",
@@ -4098,7 +4098,7 @@ async fn archive_finished_runs_for_codex_and_claude_leads_through_tool_dispatch(
         );
         assert!(success, "{provider} lead: {value}");
         let report: crate::agent_management_store::ArchiveFinishedResult =
-            serde_json::from_value(value.clone()).expect("typed archive summary");
+            studio_json::from_value(value.clone()).expect("typed archive summary");
         assert_eq!(report.archived, 1, "{provider} lead: {value}");
         let worker = studio_runtime_store::AgentRepository::get(
             &store.test_reader().unwrap(),
@@ -4170,7 +4170,7 @@ async fn archive_finished_reason_survives_dispatch_and_receipt_replay() {
         let before_replay = worker_record();
         if let Some(reason) = expected_reason {
             let report: crate::agent_management_store::ArchiveFinishedResult =
-                serde_json::from_value(value.clone()).expect("archive summary");
+                studio_json::from_value(value.clone()).expect("archive summary");
             assert_eq!(report.archived, 1);
             assert_eq!(before_replay["agentArchive"]["reason"], reason);
             let replay =

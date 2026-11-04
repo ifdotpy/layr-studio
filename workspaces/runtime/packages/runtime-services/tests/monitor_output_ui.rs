@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     monitor_policy::MonitorError, monitor_runtime, process_controls, task_output,
 };
@@ -13,10 +13,10 @@ fn monitor_budget_and_task_file_survive_renderer_projections() {
     let record: studio_runtime_store::MonitorRecord =
         serde::Deserialize::deserialize(&raw).unwrap();
     let projected = studio_runtime_services::sync_policy::project_monitor_record(&record).unwrap();
-    let projected = serde::Serialize::serialize(&projected, serde_json::value::Serializer).unwrap();
+    let projected = serde::Serialize::serialize(&projected, studio_json::value::Serializer).unwrap();
     assert_eq!(projected["outputWakeBudget"], budget);
     assert_eq!(projected["outputPatterns"], json!(["ready"]));
-    let task: studio_runtime_store::TaskRecord = serde_json::from_str(r#"{"id":"task","agent":"owner","created":1,"itemId":"task:abc","kind":"tool","status":"running","turnId":"turn","type":"dynamicToolCall","name":"job","outputFile":"logs/out.txt"}"#).unwrap();
+    let task: studio_runtime_store::TaskRecord = studio_json::from_str(r#"{"id":"task","agent":"owner","created":1,"itemId":"task:abc","kind":"tool","status":"running","turnId":"turn","type":"dynamicToolCall","name":"job","outputFile":"logs/out.txt"}"#).unwrap();
     let process = process_controls::project(
         studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask,
         &task,

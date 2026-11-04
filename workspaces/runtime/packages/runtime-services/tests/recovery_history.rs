@@ -1,5 +1,5 @@
 use futures_util::future::BoxFuture;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::VecDeque,
     sync::{
@@ -323,7 +323,7 @@ async fn unreadable_turn_retains_every_effect_and_active_turn_is_not_completion(
 
 #[tokio::test]
 async fn complete_history_outputs_and_calls_match_python() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/history_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/history_oracle.json"))
         .expect("frozen recovery cases");
     assert_eq!(cases.len(), 12);
     for case in cases {
@@ -494,7 +494,7 @@ async fn exact_start_reports_only_explicit_not_applied_receipts_as_negative_proo
 
 #[tokio::test]
 async fn legacy_start_matches_python_complete_history() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/start_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/start_oracle.json"))
         .expect("frozen recovery cases");
     for case in cases.iter().filter(|c| c["history_case"] == true) {
         let mut reader = Reader {

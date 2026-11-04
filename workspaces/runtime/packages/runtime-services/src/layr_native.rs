@@ -1,5 +1,5 @@
 //! Host Layr workspaces. The Studio state directory owns the store and guard.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_store::path_identity::CanonicalPath;
 
@@ -198,14 +198,14 @@ pub use runtime::{
 };
 
 /// Thread commands must resolve Studio's host binary before any user Cargo installation.
-pub fn thread_environment(state_root: &Path) -> serde_json::Map<String, Value> {
+pub fn thread_environment(state_root: &Path) -> studio_json::Map<String, Value> {
     thread_environment_in_store(state_root, &store_path(state_root))
 }
 
 pub fn thread_environment_for_record(
     state_root: &Path,
     record: &Value,
-) -> Result<serde_json::Map<String, Value>, NativeLayrError> {
+) -> Result<studio_json::Map<String, Value>, NativeLayrError> {
     Ok(thread_environment_in_store(
         state_root,
         &settings::record_store(state_root, record)?,
@@ -215,7 +215,7 @@ pub fn thread_environment_for_record(
 pub(crate) fn thread_environment_in_store(
     state_root: &Path,
     root: &Path,
-) -> serde_json::Map<String, Value> {
+) -> studio_json::Map<String, Value> {
     let bin = binary_path(state_root);
     let path = format!(
         "{}:{}",
@@ -231,7 +231,7 @@ pub(crate) fn thread_environment_in_store(
 /// The state of the folder overlay at `folder` in the line at `cwd` (`overlay list --json`).
 #[cfg(test)]
 pub(crate) fn overlay_folder_state(state: &Path, cwd: &Path, folder: &str) -> Option<String> {
-    let overlays: Value = serde_json::from_str(
+    let overlays: Value = studio_json::from_str(
         &runtime::run(state, cwd, &["overlay", "list", "--json"]).expect("overlay list"),
     )
     .expect("overlay list JSON");
@@ -243,7 +243,7 @@ pub(crate) fn overlay_folder_state(state: &Path, cwd: &Path, folder: &str) -> Op
 }
 
 #[cfg(test)]
-fn transport_environment(state_root: &Path, uses_service: bool) -> serde_json::Map<String, Value> {
+fn transport_environment(state_root: &Path, uses_service: bool) -> studio_json::Map<String, Value> {
     transport_environment_in_store(state_root, &store_path(state_root), uses_service)
 }
 
@@ -251,8 +251,8 @@ fn transport_environment_in_store(
     state_root: &Path,
     root: &Path,
     uses_service: bool,
-) -> serde_json::Map<String, Value> {
-    let mut environment = serde_json::Map::from_iter([
+) -> studio_json::Map<String, Value> {
+    let mut environment = studio_json::Map::from_iter([
         ("LAYR_ROOT".into(), json!(root)),
         (
             "LAYR_DIRECT".into(),
@@ -458,7 +458,7 @@ mod receipt_tests {
             overlay_folder_state(state.path(), &main, "node_modules").as_deref(),
             Some("cache")
         );
-        let real_git: PathBuf = serde_json::from_slice(
+        let real_git: PathBuf = studio_json::from_slice(
             &fs::read(binary_path(state.path()).with_file_name("git-real.json"))
                 .expect("saved real Git path"),
         )
@@ -645,8 +645,8 @@ mod receipt_tests {
 pub(crate) fn reviewer_environment(
     state_dir: &Path,
     scratch: &str,
-) -> serde_json::Map<String, Value> {
-    let mut environment = serde_json::Map::new();
+) -> studio_json::Map<String, Value> {
+    let mut environment = studio_json::Map::new();
     environment.insert("PATH".into(), thread_environment(state_dir)["PATH"].clone());
     environment.insert("HOME".into(), json!(scratch));
     environment.insert("TMPDIR".into(), json!(scratch));
@@ -1162,7 +1162,7 @@ esac
             .as_str()
             .expect("archive must keep a durable ref");
         let main = Path::new(lead["cwd"].as_str().expect("fixture operation succeeds"));
-        let pins: Value = serde_json::from_str(
+        let pins: Value = studio_json::from_str(
             &run(
                 state.path(),
                 main,

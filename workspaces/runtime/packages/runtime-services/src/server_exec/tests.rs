@@ -23,7 +23,7 @@ fn output_tail_append_does_not_move_retained_bytes() {
 
 /// Frozen results from the former backend for the same buffer and request inputs.
 fn oracle() -> Value {
-    serde_json::from_str(include_str!("../../tests/server_exec/expected.json")).unwrap()
+    studio_json::from_str(include_str!("../../tests/server_exec/expected.json")).unwrap()
 }
 
 fn hex(value: &Value) -> Vec<u8> {

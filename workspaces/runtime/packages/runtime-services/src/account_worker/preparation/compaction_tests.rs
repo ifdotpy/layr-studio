@@ -84,7 +84,7 @@ async fn post_compaction_roster_uses_live_store_and_stops_after_delivery() {
             tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('uncollected','lead','child_result','result','pending',1,1)", [])?;
             for (index, actor) in ["lead", "parent", "monitor-owner"].into_iter().enumerate() {
                 let mut record = AgentRepository::get(tx, &actor.into())?.expect("actor exists").value();
-                let intent: TurnIntent = serde_json::from_value(json!({"agent_id":actor,"epoch":1,
+                let intent: TurnIntent = studio_json::from_value(json!({"agent_id":actor,"epoch":1,
                     "attempt_id":"prepare","account_key":"default","provider":provider,
                     "thread_id":format!("{actor}-thread"),"cwd":"/work","model":null,
                     "events":[{"id":"wake","kind":"user","text":"continue","created":1.0,"epoch":1,"error":null,"metadata":{}}]})).expect("turn intent deserializes");
@@ -153,7 +153,7 @@ async fn aggregate_spill_is_materialized_before_compilation_is_persisted() {
     let store = RuntimeStore::open(Some(directory.path()))
         .await
         .expect("runtime store opens");
-    let snapshot: turn::PreparationSnapshot = serde_json::from_value(json!({
+    let snapshot: turn::PreparationSnapshot = studio_json::from_value(json!({
         "actor":{"id":"lead","root_id":"lead","epoch":["thread",1],"is_lead":true,
             "forked_from":null,"prepared_context":null,"delivered_mode":null},
         "root":{"concurrency":32,"mode_revision":0},"delivered_manifests":[],"plan":null,
@@ -162,7 +162,7 @@ async fn aggregate_spill_is_materialized_before_compilation_is_persisted() {
         "prepared_at":1.0,"operation_id":"prepare"
     }))
     .expect("preparation snapshot deserializes");
-    let events: Vec<turn::Event> = serde_json::from_value(json!([{
+    let events: Vec<turn::Event> = studio_json::from_value(json!([{
         "id":"wake","kind":"user","text":"continue","created":1.0,
         "metadata":{"assets":[],"accepted_at":null,"extra":{}},
         "preserve_progress":false,"preserve_complaint":false
@@ -197,7 +197,7 @@ async fn aggregate_spill_is_materialized_before_compilation_is_persisted() {
                 |row| row.get(0),
             )?;
             assert_eq!(
-                serde_json::from_str::<Value>(&raw).expect("stored event metadata parses")["studioInput"],
+                studio_json::from_str::<Value>(&raw).expect("stored event metadata parses")["studioInput"],
                 reference
             );
             Ok(())

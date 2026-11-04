@@ -14,7 +14,7 @@ use crate::radio::{
 use crate::sync_views::RoomViewContext;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use studio_runtime_schema::peer_team_ingress::{RadioCreate, RadioManage};
@@ -41,7 +41,7 @@ pub use lifecycle::{
     shared_turn_active, tick,
 };
 
-pub type RadioReply = Box<serde_json::value::RawValue>;
+pub type RadioReply = studio_json::OwnedRawJson;
 
 fn radio_signature(body: &impl Serialize) -> Result<String, ProjectsError> {
     #[derive(Serialize)]
@@ -185,7 +185,7 @@ pub async fn manage(
                     "{} · Shared chat",
                     team_row["name"].as_str().unwrap_or_default()
                 ));
-                record.created = serde_json::Number::from_f64(now);
+                record.created = studio_json::Number::from_f64(now);
                 record.user_hidden = Field::Value(false);
                 Room {
                     record,
@@ -277,7 +277,7 @@ pub async fn manage(
                 }
             }
             save(db, &mut room, &prepared, now)?;
-            let result = serde_json::value::to_raw_value(&FreshRadioReply { room })
+            let result = studio_json::to_raw_value(&FreshRadioReply { room })
                 .map_err(studio_runtime_store::StoreError::from)?;
             event_write::settle_request(db, &admitted, Some("owner-api"), &result)
                 .map_err(studio_runtime_store::StoreError::from)?;
@@ -508,14 +508,14 @@ pub async fn create_with(
             record.members = Some(ids.iter().map(|id| id.0.clone()).collect());
             record.project_path = Field::Value(path);
             record.custom_name = Field::Value(name);
-            record.created = serde_json::Number::from_f64(now);
+            record.created = studio_json::Number::from_f64(now);
             record.user_hidden = Field::Value(false);
             let mut room = Room {
                 record,
                 radio: Radio::new(namespace.to_string(), true),
             };
             save(db, &mut room, &prepared, now)?;
-            let result = serde_json::value::to_raw_value(&FreshRadioReply { room })
+            let result = studio_json::to_raw_value(&FreshRadioReply { room })
                 .map_err(studio_runtime_store::StoreError::from)?;
             event_write::settle_request(db, &admitted, Some("owner-api"), &result)
                 .map_err(studio_runtime_store::StoreError::from)?;
@@ -543,7 +543,7 @@ mod tests {
         let body = json!({"action":"radio","radio_action":"open","path":"/project","team_id":"a8b5b7aa-6459-4023-b148-0ad5a4f0ba56","request_id":root});
         let signature = event_write::request_signature(&json!({"operation":"radio","body":body}));
         let raw = r#"{"room":{"id":"radio:old","radio":{"active":null}}}"#;
-        let saved: RadioReply = serde_json::from_str(raw).expect("legacy replay fixture");
+        let saved: RadioReply = studio_json::from_str(raw).expect("legacy replay fixture");
         let root_for_write = root.clone();
         store
             .transaction(move |db| {
@@ -567,12 +567,12 @@ mod tests {
             .await
             .expect("legacy replay fixture");
         let typed = serde::Deserialize::deserialize(body).expect("radio request");
-        assert_eq!(manage(store, &typed).await.unwrap().get(), raw);
+        assert_eq!(manage(store, &typed).await.unwrap().as_str(), raw);
     }
 
     #[test]
     fn radio_manage_signature_keeps_legacy_bytes() {
-        let open: RadioManage = serde_json::from_str(r#"{"action":"radio","radio_action":"open","path":"/雪","team_id":"a","request_id":"r"}"#).unwrap();
+        let open: RadioManage = studio_json::from_str(r#"{"action":"radio","radio_action":"open","path":"/雪","team_id":"a","request_id":"r"}"#).unwrap();
         assert_eq!(
             radio_signature(&open).unwrap(),
             "79861ed12b8ecafd42a69bab685830e22640972dda84e61829c92fe13c0e7466"
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn radio_create_signature_keeps_legacy_bytes() {
-        let create: RadioCreate = serde_json::from_str(r#"{"action":"radio","radio_action":"create","path":"/雪","request_id":"r","name":"radio","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]}"#).unwrap();
+        let create: RadioCreate = studio_json::from_str(r#"{"action":"radio","radio_action":"create","path":"/雪","request_id":"r","name":"radio","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]}"#).unwrap();
         assert_eq!(
             radio_signature(&create).unwrap(),
             "54b0ecf63dd218e41c2527481874e4bbc21256734cba68c42d14d780e7bcdca9"
@@ -591,11 +591,11 @@ mod tests {
     #[test]
     fn radio_reply_preserves_opaque_replay_and_radio_fields() {
         let raw = r#"{"room":{"id":"radio:test","kind":"private","extra":null,"radio":{"teamId":"test","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"seen":{},"future":{"x":null}}}}"#;
-        let reply: RadioReply = serde_json::from_str(raw).expect("legacy reply");
-        let encoded = serde_json::to_string(&reply).expect("encode reply");
+        let reply: RadioReply = studio_json::from_str(raw).expect("legacy reply");
+        let encoded = studio_json::to_string(&reply).expect("encode reply");
         assert_eq!(encoded, raw);
-        let original: Value = serde_json::from_str(raw).expect("original JSON");
-        let actual: Value = serde_json::from_str(&encoded).expect("encoded JSON");
+        let original: Value = studio_json::from_str(raw).expect("original JSON");
+        let actual: Value = studio_json::from_str(&encoded).expect("encoded JSON");
         assert_eq!(actual, original);
         assert!(actual["room"].get("missing").is_none());
         let mut stored = original["room"].clone();
@@ -603,7 +603,7 @@ mod tests {
         stored["radio"]["direct"] = json!(false);
         let checked = Room::checked("radio:test", &stored.to_string()).expect("canonical room");
         let round_trip: Value =
-            serde_json::from_str(&serde_json::to_string(&checked).expect("encode room"))
+            studio_json::from_str(&studio_json::to_string(&checked).expect("encode room"))
                 .expect("decode room");
         assert_eq!(round_trip, stored);
         let duplicate = stored

@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::fs;
 use studio_runtime_services::context_repair::{
     self, ConnectionIdentity, DeliveredManifestWriter, HistoryReadFuture, HistoryReader,

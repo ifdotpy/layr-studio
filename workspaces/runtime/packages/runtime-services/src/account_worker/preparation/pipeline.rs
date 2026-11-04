@@ -609,8 +609,8 @@ fn changed_fields(
 ) -> Result<Vec<String>, WorkerError> {
     let snapshot = |_| invalid("preparation snapshot");
     let (Value::Object(before), Value::Object(after)) = (
-        serde_json::to_value(before).map_err(snapshot)?,
-        serde_json::to_value(after).map_err(snapshot)?,
+        studio_json::to_value(before).map_err(snapshot)?,
+        studio_json::to_value(after).map_err(snapshot)?,
     ) else {
         return Ok(Vec::new());
     };
@@ -760,7 +760,7 @@ fn native_turn_params(
     snapshot: &mut thread::Snapshot,
     input: &thread::TurnInput,
     program: Option<&str>,
-) -> Result<serde_json::Map<String, Value>, WorkerError> {
+) -> Result<studio_json::Map<String, Value>, WorkerError> {
     let enabled = std::mem::replace(
         &mut snapshot.settings.daybreak_enabled,
         thread::Stored::Present(Some(false)),
@@ -1445,7 +1445,7 @@ fn vm_reviewer_permissions(record: &Value) -> Option<Value> {
 }
 
 fn apply_vm_reviewer_permissions(
-    params: &mut serde_json::Map<String, Value>,
+    params: &mut studio_json::Map<String, Value>,
     vm_reviewer: Option<&Value>,
 ) {
     if let Some(Value::Object(permissions)) = vm_reviewer {
@@ -2210,7 +2210,7 @@ fn materialize(root: &std::path::Path, relative: &str, body: &str) -> Result<Str
 /// The compilation owns the stamp of every row it prepares. A stamp from an earlier
 /// attempt that never delivered (a rejected steer batch has another first event) is
 /// replaced, never kept next to the new identity.
-fn stamp(meta: &mut Value, patch: &serde_json::Map<String, Value>) -> Option<()> {
+fn stamp(meta: &mut Value, patch: &studio_json::Map<String, Value>) -> Option<()> {
     let object = meta.as_object_mut()?;
     object.remove("transcriptItemId");
     object.remove("contextManifest");
@@ -2283,7 +2283,7 @@ mod stamp_tests {
     fn stale_stamp_of_an_undelivered_batch_is_replaced_not_kept() {
         let mut meta = json!({"delivery":"current_turn","transcriptItemId":"a:fbce",
             "contextManifest":{"sequence":284},"modelEventProjection":1});
-        let patch = serde_json::Map::from_iter([
+        let patch = studio_json::Map::from_iter([
             ("modelEventProjection".into(), json!(1)),
             ("transcriptItemId".into(), json!("a:ee89")),
         ]);
@@ -2343,14 +2343,14 @@ mod daybreak_tests {
                 role: thread::Role::Implementer,
                 is_lead: false,
                 needs_title: false,
-                claude_options: serde_json::Map::new(),
+                claude_options: studio_json::Map::new(),
                 daybreak_enabled: thread::Stored::Present(Some(enabled)),
                 cyber_access_program: thread::Stored::Absent,
             },
             guidance: thread::GuidanceBundle {
                 instructions: String::new(),
                 role: String::new(),
-                thread_config: serde_json::Map::new(),
+                thread_config: studio_json::Map::new(),
                 browser: None,
             },
             catalog: thread::CatalogSnapshot {
@@ -2519,7 +2519,7 @@ mod daybreak_tests {
             }))
         );
 
-        let mut yolo_turn = serde_json::Map::from_iter([
+        let mut yolo_turn = studio_json::Map::from_iter([
             ("approvalPolicy".into(), json!("never")),
             ("sandboxPolicy".into(), json!({"type":"dangerFullAccess"})),
         ]);

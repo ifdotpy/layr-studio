@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::Path;
 use studio_runtime_services::claude_input_recovery::runtime::freeze_start;
 use studio_runtime_store::{RuntimeStore, StoreError};
@@ -59,7 +59,7 @@ async fn freeze(store: &RuntimeStore, case: Value, rollback: bool) -> Result<(),
                 tx,
                 "agent",
                 case["attempt"]["id"].as_str().expect("attempt"),
-                serde_json::from_value(case["transport"].clone())?,
+                studio_json::from_value(case["transport"].clone())?,
                 &case["params"],
                 case["text"].as_str().expect("text"),
             )?;
@@ -79,7 +79,7 @@ fn row(db: &rusqlite::Connection, table: &str, id: &str) -> Value {
             |row| row.get(0),
         )
         .expect("record");
-    let mut record = serde_json::from_str(&text).expect("json");
+    let mut record = studio_json::from_str(&text).expect("json");
     studio_runtime_store::agent_volatile::merge_if_agent(db, table, id, &mut record)
         .expect("volatile agent fields");
     record

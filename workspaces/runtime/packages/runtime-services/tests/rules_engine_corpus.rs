@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::value::RawValue;
+use studio_json::OwnedRawJson as RawValue;
 use studio_runtime_services::rules_engine::{
     CheckResult, RuleDecision, RuleSnapshot, TickObservation, active_workers,
 };
@@ -11,10 +11,10 @@ struct Case {
     operation: String,
     #[serde(deserialize_with = "legacy_rule")]
     rule: RuleRecord,
-    owner: Box<RawValue>,
+    owner: RawValue,
     now: f64,
     fingerprint: Option<(i64, u64, u64)>,
-    workers: Vec<Box<RawValue>>,
+    workers: Vec<RawValue>,
     monitors: Vec<Monitor>,
     event: Option<Event>,
     result: Option<ResultFixture>,
@@ -23,16 +23,16 @@ struct Case {
 
 // One frozen legacy witness predates the stored file-rule defaults.
 fn legacy_rule<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<RuleRecord, D::Error> {
-    let raw = Box::<RawValue>::deserialize(deserializer)?;
-    let text = raw.get();
+    let raw = RawValue::deserialize(deserializer)?;
+    let text = raw.as_str();
     if text.contains("\"fileGeneration\"") {
-        serde_json::from_str(text).map_err(serde::de::Error::custom)
+        studio_json::from_str(text).map_err(serde::de::Error::custom)
     } else {
         let migrated = format!(
             "{{\"fileGeneration\":0,\"stallTimeoutSeconds\":1800,\"stallWakeGeneration\":-1,\"livenessCommand\":\"\",{}",
             &text[1..]
         );
-        serde_json::from_str(&migrated).map_err(serde::de::Error::custom)
+        studio_json::from_str(&migrated).map_err(serde::de::Error::custom)
     }
 }
 
@@ -111,17 +111,17 @@ struct WorkerOutput {
 }
 
 fn oracle() -> Vec<Case> {
-    serde_json::from_str(include_str!("rules_engine/expected.json"))
+    studio_json::from_str(include_str!("rules_engine/expected.json"))
         .expect("frozen rules decisions")
 }
 macro_rules! owner {
     ($case:expr) => {
-        serde_json::from_str(&format!("{{\"compactions\":0,{}", &$case.owner.get()[1..]))
+        studio_json::from_str(&format!("{{\"compactions\":0,{}", &$case.owner.as_str()[1..]))
             .expect("owner")
     };
 }
 fn monitor_record(value: &Monitor) -> studio_runtime_store::MonitorRecord {
-    let mut record: studio_runtime_store::MonitorRecord = serde_json::from_str(r#"{"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":"","interactive":false,"livenessCommand":"","log":"watch.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}"#).expect("monitor fixture");
+    let mut record: studio_runtime_store::MonitorRecord = studio_json::from_str(r#"{"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":"","interactive":false,"livenessCommand":"","log":"watch.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}"#).expect("monitor fixture");
     assert_eq!(value.status, "running");
     record.id = value.id.clone();
     record.agent = value.agent.clone();
@@ -144,7 +144,7 @@ fn python_written_records_and_real_rules_functions_match() {
                     .workers
                     .iter()
                     .map(|worker| {
-                        serde_json::from_str(&format!("{{\"compactions\":0,{}", &worker.get()[1..]))
+                        studio_json::from_str(&format!("{{\"compactions\":0,{}", &worker.as_str()[1..]))
                             .expect("worker")
                     })
                     .collect();
@@ -190,8 +190,8 @@ fn python_written_records_and_real_rules_functions_match() {
 
 // Only generated JSON is decoded; arbitrary output and event text remain exact.
 fn compare_payload(actual: &str, expected: &str, low_workers: bool) {
-    let mut actual: Payload = serde_json::from_str(actual).expect("actual payload");
-    let mut expected: Payload = serde_json::from_str(expected).expect("expected payload");
+    let mut actual: Payload = studio_json::from_str(actual).expect("actual payload");
+    let mut expected: Payload = studio_json::from_str(expected).expect("expected payload");
     if low_workers
         && actual
             .output
@@ -199,10 +199,10 @@ fn compare_payload(actual: &str, expected: &str, low_workers: bool) {
             .is_some_and(|output| !output.is_empty())
     {
         let a: WorkerOutput =
-            serde_json::from_str(actual.output.take().as_deref().expect("output"))
+            studio_json::from_str(actual.output.take().as_deref().expect("output"))
                 .expect("worker output");
         let b: WorkerOutput =
-            serde_json::from_str(expected.output.take().as_deref().expect("output"))
+            studio_json::from_str(expected.output.take().as_deref().expect("output"))
                 .expect("worker output");
         assert_eq!(a, b);
     }
@@ -221,8 +221,8 @@ fn compare_record(actual: &RuleRecord, expected: &RuleRecord, low_workers: bool)
     if low_workers && actual.last_output.is_some() && expected.last_output.is_some() {
         let a = actual.last_output.take().expect("output");
         let b = expected.last_output.take().expect("output");
-        let a: WorkerOutput = serde_json::from_str(a.as_str()).expect("worker output");
-        let b: WorkerOutput = serde_json::from_str(b.as_str()).expect("worker output");
+        let a: WorkerOutput = studio_json::from_str(a.as_str()).expect("worker output");
+        let b: WorkerOutput = studio_json::from_str(b.as_str()).expect("worker output");
         assert_eq!(a, b);
     }
     assert_eq!(actual, expected);
@@ -278,10 +278,10 @@ fn malformed_stored_fields_are_located_and_never_panic() {
     let seed = include_str!("rules_engine/seed.json");
     #[derive(Deserialize)]
     struct Seed {
-        rule: Box<RawValue>,
+        rule: RawValue,
     }
-    let seed: Seed = serde_json::from_str(seed).expect("seed");
-    let rule = seed.rule.get();
+    let seed: Seed = studio_json::from_str(seed).expect("seed");
+    let rule = seed.rule.as_str();
     for (field, original, invalid) in [
         ("checks", "0", "-1"),
         ("checks", "0", "true"),
@@ -304,7 +304,7 @@ fn malformed_stored_fields_are_located_and_never_panic() {
             1,
         );
         assert_ne!(input, rule, "fixture field {field}");
-        let mut deserializer = serde_json::Deserializer::from_str(&input);
+        let mut deserializer = studio_json::Deserializer::from_str(&input);
         let error = serde_path_to_error::deserialize::<_, RuleRecord>(&mut deserializer)
             .expect_err("malformed record refused");
         assert!(
@@ -331,7 +331,7 @@ fn malformed_stored_fields_are_located_and_never_panic() {
             .expect("field");
         let input = rule.replacen(line, "", 1);
         assert!(
-            serde_json::from_str::<RuleRecord>(&input).is_err(),
+            studio_json::from_str::<RuleRecord>(&input).is_err(),
             "missing {field}"
         );
     }
@@ -352,7 +352,7 @@ fn sampled_configuration_and_exact_completion_identity_are_checked() {
     assert!(snapshot.current(&due.rule, &owner!(due)));
     let mut unrelated_path = due.rule.clone();
     unrelated_path.kind =
-        serde_json::from_str(r#"{"kind":"interval","path":"/disposable/unused"}"#)
+        studio_json::from_str(r#"{"kind":"interval","path":"/disposable/unused"}"#)
             .expect("interval kind");
     let interval = RuleSnapshot::from_stored(&unrelated_path, owner!(due)).expect("open record");
     assert_eq!(interval.fingerprint_path(due.now), None);

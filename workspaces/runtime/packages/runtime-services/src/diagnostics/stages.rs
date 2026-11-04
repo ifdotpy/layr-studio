@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 const HISTOGRAM_BOUNDS_MS: [u64; 8] = [1, 5, 10, 25, 50, 100, 500, 1_000];
 const STAGE_NAMES: [&str; 37] = [

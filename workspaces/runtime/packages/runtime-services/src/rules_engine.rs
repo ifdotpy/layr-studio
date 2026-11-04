@@ -1,7 +1,7 @@
 //! Rule decisions on checked persisted records. No clock, filesystem, store or provider I/O.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -665,7 +665,7 @@ impl RuleSnapshot {
                     '\u{2028}', '\u{2029}',
                 ])
                 .next()
-                .and_then(|line| serde_json::from_str::<WakeDirective>(line).ok())
+                .and_then(|line| studio_json::from_str::<WakeDirective>(line).ok())
                 .is_some_and(|payload| payload.wake_agent == Some(false));
             next.in_flight = false;
             next.last_exit_code = result.code;
@@ -812,11 +812,11 @@ fn invalid(object: &str, value: &Value, location: &str) -> RuleError {
 struct WakeDirective {
     wake_agent: Option<bool>,
 }
-fn seconds(value: &serde_json::Number) -> f64 {
+fn seconds(value: &studio_json::Number) -> f64 {
     value.as_f64().expect("JSON number is finite")
 }
-fn time_number(value: f64) -> Result<serde_json::Number, RuleError> {
-    serde_json::Number::from_f64(value).ok_or(RuleError::Observation("non-finite time"))
+fn time_number(value: f64) -> Result<studio_json::Number, RuleError> {
+    studio_json::Number::from_f64(value).ok_or(RuleError::Observation("non-finite time"))
 }
 fn rule_integer<const MIN: i64, const MAX: u64>(
     value: u64,
@@ -893,7 +893,7 @@ mod tests {
 
     #[test]
     fn completed_check_wake_preserves_unicode_text() {
-        let seed: Value = serde_json::from_str(include_str!("../tests/rules_engine/seed.json"))
+        let seed: Value = studio_json::from_str(include_str!("../tests/rules_engine/seed.json"))
             .expect("rule seed");
         let decision = RuleSnapshot::from_records(&seed["rule"], seed["owner"].clone())
             .expect("snapshot")
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn launch_intent_requires_integer_on_decode() {
-        let seed: Value = serde_json::from_str(include_str!("../tests/rules_engine/seed.json"))
+        let seed: Value = studio_json::from_str(include_str!("../tests/rules_engine/seed.json"))
             .expect("rule seed");
         let mut rule = seed["rule"].clone();
         rule["inFlight"] = json!(true);
@@ -927,7 +927,7 @@ mod tests {
 
     #[test]
     fn from_records_reports_invalid_field_path() {
-        let seed: Value = serde_json::from_str(include_str!("../tests/rules_engine/seed.json"))
+        let seed: Value = studio_json::from_str(include_str!("../tests/rules_engine/seed.json"))
             .expect("frozen rule seed");
         let mut rule = seed["rule"].clone();
         rule["kind"] = json!(42);
@@ -942,7 +942,7 @@ mod tests {
     /// of [`OwnerHold`] is one of them, and no other code is stored.
     #[test]
     fn owner_hold_codes_match_the_persisted_rule_schema() {
-        let seed: Value = serde_json::from_str(include_str!("../tests/rules_engine/seed.json"))
+        let seed: Value = studio_json::from_str(include_str!("../tests/rules_engine/seed.json"))
             .expect("frozen rule seed");
         let mut rule = seed["rule"].clone();
         rule["status"] = json!("paused");
@@ -969,7 +969,7 @@ mod tests {
     /// tick pauses it; an idle owner's event rule still does.
     #[test]
     fn an_event_of_a_held_owner_starts_no_check() {
-        let seed: Value = serde_json::from_str(include_str!("../tests/rules_engine/seed.json"))
+        let seed: Value = studio_json::from_str(include_str!("../tests/rules_engine/seed.json"))
             .expect("frozen rule seed");
         let mut rule = seed["rule"].clone();
         rule["kind"] = json!("event");

@@ -107,7 +107,7 @@ impl ControlStorage for StoredControls {
                         return Err(ControlError::Changed);
                     }
                     let ticket =
-                        serde_json::to_value(&binding).map_err(|_| ControlError::Changed)?;
+                        studio_json::to_value(&binding).map_err(|_| ControlError::Changed)?;
                     let mut writes = match snapshot.reserve(&request, now()) {
                         Ok(writes) => writes,
                         Err(ControlError::Unknown) => {

@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
@@ -444,7 +444,7 @@ impl StoreChats {
         let [raw] = rows.as_slice() else {
             return None;
         };
-        let agent: Value = serde_json::from_str(raw).ok()?;
+        let agent: Value = studio_json::from_str(raw).ok()?;
         if truthy(agent.get("deletedAt")) {
             return None;
         }
@@ -787,7 +787,7 @@ impl HostBridge {
         let path = directory.join("requests.json");
         let queue = std::fs::read(&path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<Queue>(&bytes).ok())
+            .and_then(|bytes| studio_json::from_slice::<Queue>(&bytes).ok())
             .unwrap_or_default();
         let (changed, _) = watch::channel(queue.seq);
         Ok(Arc::new(Self {
@@ -841,7 +841,7 @@ impl HostBridge {
         });
         if let Err(error) = write_atomic(
             &self.path,
-            serde_json::to_string(queue).unwrap_or_default().as_bytes(),
+            studio_json::to_string(queue).unwrap_or_default().as_bytes(),
             0o600,
         ) {
             eprintln!("browser host queue write failed: {error}");
@@ -1450,7 +1450,7 @@ impl HostBridge {
                 json!({"ok": false, "code": "invalid_request", "message": "Send one JSON line within 5 seconds"})
             }
         };
-        let mut bytes = serde_json::to_vec(&reply).unwrap_or_default();
+        let mut bytes = studio_json::to_vec(&reply).unwrap_or_default();
         bytes.push(b'\n');
         drop(
             tokio::time::timeout(Duration::from_secs(READ_SECONDS), writer.write_all(&bytes)).await,
@@ -1471,7 +1471,7 @@ impl HostBridge {
         if line.len() > LINE_LIMIT || !line.ends_with(b"\n") {
             return json!({"ok": false, "code": "invalid_request", "message": "Send one JSON line of at most 16 KB"});
         }
-        let Ok(request) = serde_json::from_slice::<LauncherRequest>(line) else {
+        let Ok(request) = studio_json::from_slice::<LauncherRequest>(line) else {
             return json!({"ok": false, "code": "invalid_request", "message": "The browser request is invalid"});
         };
         if request.v != 1 {
@@ -1527,7 +1527,7 @@ impl HostBridge {
         .await;
         let request: Option<ControlRequest> = match read {
             Ok(Ok(_)) if line.len() <= CONTROL_LINE_LIMIT && line.ends_with(b"\n") => {
-                serde_json::from_slice(&line).ok()
+                studio_json::from_slice(&line).ok()
             }
             _ => None,
         };
@@ -1566,7 +1566,7 @@ impl HostBridge {
                 },
             },
         };
-        let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
+        let mut bytes = studio_json::to_vec(&response).unwrap_or_default();
         bytes.push(b'\n');
         drop(
             tokio::time::timeout(Duration::from_secs(READ_SECONDS), writer.write_all(&bytes)).await,
@@ -1781,7 +1781,7 @@ pub fn session_environment(state_root: &Path) -> BTreeMap<String, String> {
 /// reads this file when it starts a session; its own process environment stays unchanged.
 pub fn publish(bridge_root: &Path, state_root: &Path) -> std::io::Result<()> {
     let environment = session_environment(state_root);
-    let mut text = serde_json::to_string(&environment).map_err(std::io::Error::other)?;
+    let mut text = studio_json::to_string(&environment).map_err(std::io::Error::other)?;
     text.push('\n');
     std::fs::create_dir_all(bridge_root)?;
     write_atomic(&bridge_root.join(SESSION_FILE), text.as_bytes(), 0o600)
@@ -1862,7 +1862,7 @@ pub fn shim(
         let mut stream = std::os::unix::net::UnixStream::connect(socket)?;
         stream.set_read_timeout(Some(Duration::from_secs(15)))?;
         stream.set_write_timeout(Some(Duration::from_secs(15)))?;
-        let mut bytes = serde_json::to_vec(&request)?;
+        let mut bytes = studio_json::to_vec(&request)?;
         bytes.push(b'\n');
         stream.write_all(&bytes)?;
         let mut data = Vec::new();
@@ -1874,14 +1874,14 @@ pub fn shim(
             }
             data.extend_from_slice(&block[..count]);
         }
-        serde_json::from_slice(&data).map_err(std::io::Error::other)
+        studio_json::from_slice(&data).map_err(std::io::Error::other)
     };
     let reply = match exchange() {
         Ok(reply) => reply,
         Err(error) => {
             let kind = if error
                 .get_ref()
-                .is_some_and(|inner| inner.is::<serde_json::Error>())
+                .is_some_and(|inner| inner.is::<studio_json::Error>())
             {
                 "ValueError"
             } else {
@@ -2029,8 +2029,8 @@ mod tests {
                 session: session.map(str::to_owned),
             };
             assert_eq!(
-                serde_json::to_vec(&request).expect("typed request"),
-                serde_json::to_vec(&json!({"v":1,"url":"https://example.test","session":session}))
+                studio_json::to_vec(&request).expect("typed request"),
+                studio_json::to_vec(&json!({"v":1,"url":"https://example.test","session":session}))
                     .expect("original request")
             );
         }
@@ -2039,7 +2039,7 @@ mod tests {
     #[test]
     fn launcher_accepts_guest_reply_without_open() {
         let reply: LauncherReply =
-            serde_json::from_str(r#"{"ok":true,"id":"card","host":"example.test","joined":false}"#)
+            studio_json::from_str(r#"{"ok":true,"id":"card","host":"example.test","joined":false}"#)
                 .expect("guest reply");
         assert!(reply.ok);
         assert_eq!(reply.host.as_deref(), Some("example.test"));
@@ -2095,7 +2095,7 @@ mod tests {
     #[test]
     fn joined_queue_state_matches_shared_wire_owner() {
         assert_eq!(
-            serde_json::to_string(&QueueState::Joined).expect("state"),
+            studio_json::to_string(&QueueState::Joined).expect("state"),
             format!("\"{JOINED}\"")
         );
     }
@@ -2103,7 +2103,7 @@ mod tests {
     #[test]
     fn queue_rejects_unknown_item_fields() {
         let raw = r#"{"seq":1,"items":{"i":{"id":"i","agentId":"a","uid":1,"url":"https://example.test","host":"example.test","state":"pending","createdAt":1,"expiresAt":2,"seq":1,"unexpected":true}}}"#;
-        assert!(serde_json::from_str::<Queue>(raw).is_err());
+        assert!(studio_json::from_str::<Queue>(raw).is_err());
     }
 
     /// A saved card with a loopback redirect in `state`.

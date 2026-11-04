@@ -1,7 +1,7 @@
 //! Verified Claude account writes. Auth metadata is supplied by the owned probe;
 //! these methods never invoke a provider or read credential files.
 use super::*;
-use serde_json::{Map, json};
+use studio_json::{Map, json};
 use studio_runtime_providers::ProviderKind;
 
 #[derive(Debug, thiserror::Error)]
@@ -47,7 +47,7 @@ fn native_signed_out_status(stdout: &[u8]) -> bool {
         #[serde(flatten)]
         metadata: Map<String, Value>,
     }
-    let Ok(status) = serde_json::from_slice::<Status>(stdout) else {
+    let Ok(status) = studio_json::from_slice::<Status>(stdout) else {
         return false;
     };
     !status.logged_in

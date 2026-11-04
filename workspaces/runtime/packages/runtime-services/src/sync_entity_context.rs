@@ -2,9 +2,9 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 use std::collections::HashMap;
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{StoreResult, system_reads as records};
@@ -80,7 +80,7 @@ fn account_destinations(
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
-    let entity: Entity = serde_json::from_str(&raw)?;
+    let entity: Entity = studio_json::from_str(&raw)?;
     Ok(entity
         .value
         .accounts
@@ -176,7 +176,7 @@ pub(crate) fn agent_view_contexts(
                 .collect::<Result<Vec<_>, _>>()?
             {
                 if let Ok(record) =
-                    serde_json::from_str::<studio_runtime_store::MonitorRecord>(&raw)
+                    studio_json::from_str::<studio_runtime_store::MonitorRecord>(&raw)
                     && lead_set.contains(record.agent.as_str())
                 {
                     monitor_agents.insert(record.agent);
@@ -461,7 +461,7 @@ impl RoomSources {
 
 fn room_rows<T: DeserializeOwned>(rows: &[(String, String)], table: &str) -> StoreResult<Vec<T>> {
     rows.iter()
-        .map(|(id, raw)| serde_json::from_str(raw).map_err(|_| records::invalid(table, id)))
+        .map(|(id, raw)| studio_json::from_str(raw).map_err(|_| records::invalid(table, id)))
         .collect()
 }
 
@@ -607,11 +607,11 @@ impl RoomDirectory {
                 let _deliveries: std::collections::BTreeMap<
                     String,
                     studio_runtime_schema::persistence::RecipientDelivery,
-                > = serde_json::from_str(&deliveries)
+                > = studio_json::from_str(&deliveries)
                     .map_err(|_| records::invalid("runtime_chat_messages", &key))?;
                 let seq = studio_runtime_schema::room_record::ChatSequence::from_i64(seq)
                     .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
-                let created = serde_json::Number::from_f64(created)
+                let created = studio_json::Number::from_f64(created)
                     .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
                 Ok::<_, studio_runtime_store::StoreError>(
                     studio_runtime_schema::room_record::RoomLastMessage {
@@ -893,7 +893,7 @@ mod room_preparation_tests {
             .map(|(id, raw)| {
                 (
                     id.as_str(),
-                    serde_json::from_str::<Value>(raw).expect("agent JSON"),
+                    studio_json::from_str::<Value>(raw).expect("agent JSON"),
                 )
             })
             .collect::<Vec<_>>();
@@ -969,7 +969,7 @@ mod room_preparation_tests {
             .map(|(id, raw)| {
                 (
                     id.as_str(),
-                    serde_json::from_str::<Value>(raw).expect("agent JSON"),
+                    studio_json::from_str::<Value>(raw).expect("agent JSON"),
                 )
             })
             .collect::<Vec<_>>();

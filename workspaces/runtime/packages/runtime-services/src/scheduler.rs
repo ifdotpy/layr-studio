@@ -1,6 +1,6 @@
 //! Durable claim and settlement operations owned by the account turn worker.
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::{
     provider_errors::{KnownCodexErrorKind, known_error_kind},
     provider_lifecycle::{CodexTurnStatus, TerminalTurnStatus, TurnLifecycle, TurnPhase},
@@ -257,7 +257,7 @@ fn project_changed_agents(
             }
             Err(error) => error,
         };
-        let parsed = serde_json::from_str::<Value>(&raw).ok();
+        let parsed = studio_json::from_str::<Value>(&raw).ok();
         let Some(parsed) = parsed else {
             return Err(error);
         };
@@ -362,7 +362,7 @@ fn clear_startup_agent_state(transaction: &rusqlite::Transaction<'_>) -> Result<
 
     for (id, raw) in records {
         let mut agent: Value =
-            serde_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
+            studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
                 scope: "runtime_agents".into(),
                 id: id.clone(),
             })?;
@@ -408,7 +408,7 @@ fn preparation_eligible(agent: &Value) -> bool {
     let error = agent.get("error").and_then(Value::as_str);
     let busy_provider = crate::event_write::truthy(agent.get("threadId"))
         && error
-            .and_then(|value| serde_json::from_str::<Value>(value).ok())
+            .and_then(|value| studio_json::from_str::<Value>(value).ok())
             .zip(studio_runtime_providers::ProviderKind::of_record(agent).ok())
             .is_some_and(|(value, kind)| {
                 crate::provider_adapter::adapter(kind).is_busy_error(&value)
@@ -534,7 +534,7 @@ pub(crate) fn settle_terminal_in_transaction(
     };
 
     let input =
-        serde_json::json!({"agent":identity.agent_id,"epoch":identity.epoch,"params":params});
+        studio_json::json!({"agent":identity.agent_id,"epoch":identity.epoch,"params":params});
     if let Some(saved) = ExecutionHistoryRepository::replay(
         transaction,
         &identity.attempt_id,
@@ -648,7 +648,7 @@ pub(crate) fn settle_terminal_in_transaction(
             &identity.attempt_id,
             studio_runtime_schema::persistence::ExecutionReceiptKind::TerminalInput,
             input,
-            serde_json::json!(result),
+            studio_json::json!(result),
         )?;
     }
     Ok(result)
@@ -684,7 +684,7 @@ fn terminal_outcome(
         TerminalTurnStatus::Failed => (
             AgentStatus::Failed,
             Some(visible_error.cloned().unwrap_or_else(
-                || serde_json::json!({"message":"Codex ended this turn with an error."}),
+                || studio_json::json!({"message":"Codex ended this turn with an error."}),
             )),
         ),
         TerminalTurnStatus::Interrupted => (AgentStatus::Interrupted, error.cloned()),
@@ -829,7 +829,7 @@ pub(crate) fn claim_selected_event_in_transaction(
                     .metadata
                     .get(&event.id.0)
                     .cloned()
-                    .unwrap_or_else(|| serde_json::json!({})),
+                    .unwrap_or_else(|| studio_json::json!({})),
             })
             .collect(),
         radio_authorized: true,
@@ -890,7 +890,7 @@ fn claim_intent_selected(
                     .metadata
                     .get(&event.id.0)
                     .cloned()
-                    .unwrap_or_else(|| serde_json::json!({})),
+                    .unwrap_or_else(|| studio_json::json!({})),
             })
             .collect(),
         radio_authorized: false,
@@ -933,7 +933,7 @@ pub async fn settle_start_outcome(
 #[cfg(test)]
 mod terminal_policy_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn terminal_refusal_visibility_preserves_native_outcome_and_saved_turn_scope() {
         for info in [
@@ -1057,7 +1057,7 @@ mod invalid_record_recovery_tests {
             )
             .expect("original malformed row remains available for repair");
         let preserved =
-            serde_json::from_str::<Value>(&raw).expect("malformed fixture remains valid JSON");
+            studio_json::from_str::<Value>(&raw).expect("malformed fixture remains valid JSON");
         assert_eq!(preserved["rootId"], 17);
         assert_eq!(preserved["inFlight"], true);
         assert_eq!(preserved["startAttempt"]["submitted"], true);
@@ -1070,7 +1070,7 @@ mod invalid_record_recovery_tests {
             )
             .expect("healthy neighboring agent remains stored");
         let healthy =
-            serde_json::from_str::<Value>(&healthy).expect("healthy fixture is valid JSON");
+            studio_json::from_str::<Value>(&healthy).expect("healthy fixture is valid JSON");
         assert_eq!(healthy["inFlight"], true);
         assert_eq!(healthy["startAttempt"]["id"], "live-attempt");
     }
@@ -1079,7 +1079,7 @@ mod invalid_record_recovery_tests {
 #[cfg(test)]
 mod child_turn_parent_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     const TURN: &str = "turn-1";
 
@@ -1175,7 +1175,7 @@ mod child_turn_parent_tests {
                 (
                     id,
                     status,
-                    serde_json::from_str(&text).expect("payload JSON"),
+                    studio_json::from_str(&text).expect("payload JSON"),
                 )
             })
             .collect()
@@ -1332,10 +1332,10 @@ mod child_turn_parent_tests {
         let events = parent_events(&store);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0, "child:child:turn-1");
-        let payload: serde_json::Value = events[0].2.clone();
+        let payload: studio_json::Value = events[0].2.clone();
         assert_eq!(payload["result"], "done");
         let stall: studio_runtime_schema::agent_progress::AgentStall =
-            serde_json::from_value(payload["stall"].clone()).expect("test fixture value");
+            studio_json::from_value(payload["stall"].clone()).expect("test fixture value");
         assert_eq!(stall.task_id, "task");
         assert!(stall.since >= 1.0);
         assert!(finish(&store, &intent, "completed").await);
@@ -1497,7 +1497,7 @@ mod child_turn_parent_tests {
         let params = json!({"threadId":"thread","turn":{"id":TURN,"status":"futureStatus",
             "error":{"codexErrorInfo":"cyberPolicy"},"futureReceipt":{"opaque":[1,2,3]}}});
         let before = child(&store);
-        let bytes = serde_json::to_vec(&params).expect("raw notification");
+        let bytes = studio_json::to_vec(&params).expect("raw notification");
         assert!(
             !settle_terminal_attempt(&store, &intent.identity(), &params)
                 .await
@@ -1510,13 +1510,13 @@ mod child_turn_parent_tests {
         );
         assert!(parent_events(&store).is_empty());
         assert_eq!(
-            serde_json::to_vec(&params).expect("raw notification"),
+            studio_json::to_vec(&params).expect("raw notification"),
             bytes
         );
         store
             .transaction(move |tx| {
                 assert!(
-                    ExecutionHistoryRepository::receipt::<serde_json::Value>(
+                    ExecutionHistoryRepository::receipt::<studio_json::Value>(
                         tx,
                         &intent.attempt_id,
                         studio_runtime_schema::persistence::ExecutionReceiptKind::TerminalInput
@@ -1772,7 +1772,7 @@ mod child_turn_parent_tests {
 #[cfg(test)]
 mod child_result_coalesce_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use std::collections::BTreeMap;
     use studio_runtime_store::{
         CHILD_RESULT_COALESCE_DEFAULT, CHILD_RESULT_COALESCE_MAX, OrchestrationSettingsRepository,

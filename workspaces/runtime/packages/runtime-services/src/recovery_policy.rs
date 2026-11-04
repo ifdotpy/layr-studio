@@ -1,7 +1,7 @@
 //! Recovery eligibility is a read decision. Silence never authorizes input replay.
 use crate::event_write::truthy;
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_schema::recovery_record::{RecoveryAgentRecord, RecoveryFields, RecoverySource};
@@ -127,7 +127,7 @@ impl RecoverySnapshot {
             restart_recovery: Option<Marker>,
             context_repair_wait: Option<serde::de::IgnoredAny>,
         }
-        serde_json::from_str::<Record>(&self.agent.to_string())
+        studio_json::from_str::<Record>(&self.agent.to_string())
             .ok()
             .is_some_and(|record| {
                 record
@@ -364,7 +364,7 @@ struct UncleanHold {
 }
 
 fn unclean_start_candidate(raw: &str) -> bool {
-    let Ok(candidate) = serde_json::from_str::<UncleanStartCandidate>(raw) else {
+    let Ok(candidate) = studio_json::from_str::<UncleanStartCandidate>(raw) else {
         return false;
     };
     let attempt = &candidate.start_attempt;
@@ -478,7 +478,7 @@ fn eligibility(a: &Value, typed: &RecoveryAgentRecord) -> Eligibility {
     let busy_provider = typed.thread_id.as_deref().is_some_and(|s| !s.is_empty())
         && a["error"]
             .as_str()
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .and_then(|s| studio_json::from_str::<Value>(s).ok())
             .zip(studio_runtime_providers::ProviderKind::of_record(a).ok())
             .is_some_and(|(error, kind)| {
                 crate::provider_adapter::adapter(kind).is_busy_error(&error)
@@ -817,7 +817,7 @@ mod unbounded_batch_tests {
 #[cfg(test)]
 mod connection_recovery_identity_tests {
     use super::connection_recovery_id;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn capacity_normalization_keeps_connection_recovery_identity() {
@@ -846,18 +846,18 @@ mod connection_recovery_identity_tests {
 #[cfg(test)]
 mod disconnect_text_tests {
     use super::{Eligibility, RecoverySnapshot};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::{
         PROVIDER_DISCONNECTED_TURN_ERROR, VM_PROVIDER_DISCONNECTED_TURN_ERROR,
     };
 
-    fn interrupted(error: &str) -> serde_json::Value {
+    fn interrupted(error: &str) -> studio_json::Value {
         json!({"compactions":0,"id":"agent-1","rootId":"agent-1","epoch":4,"accountKey":"acct","status":"interrupted",
                "inFlight":false,"autoWake":false,"threadId":"thread-1","turnId":"turn-1",
                "error":error})
     }
 
-    fn eligibility(record: &serde_json::Value) -> Eligibility {
+    fn eligibility(record: &studio_json::Value) -> Eligibility {
         RecoverySnapshot::from_record(record.clone())
             .expect("recovery record")
             .eligibility()
@@ -920,10 +920,10 @@ mod disconnect_text_tests {
         for (name, error, turn, expected) in cases {
             let raw = format!(
                 r#"{{"compactions":0,"id":"agent-1","rootId":"agent-1","source":"managed","epoch":4,"accountKey":"default","status":"interrupted","inFlight":false,"autoWake":false,"threadId":"thread-1","turnId":{},"error":{}}}"#,
-                serde_json::to_string(&turn).unwrap(),
-                serde_json::to_string(error).unwrap()
+                studio_json::to_string(&turn).unwrap(),
+                studio_json::to_string(error).unwrap()
             );
-            let record = serde_json::from_str(&raw).unwrap();
+            let record = studio_json::from_str(&raw).unwrap();
             let view = crate::sync_views::agent_entity_view(&record, &Default::default()).unwrap();
             let published = <Published as serde::Deserialize>::deserialize(view).unwrap();
             let actual = published.manual_connection_check.available;
@@ -938,7 +938,7 @@ mod disconnect_text_tests {
 
         let base = format!(
             r#"{{"compactions":0,"id":"agent-1","rootId":"agent-1","epoch":4,"accountKey":"default","status":"interrupted","inFlight":false,"autoWake":false,"threadId":"thread-1","turnId":"turn-1","error":{}}}"#,
-            serde_json::to_string(PROVIDER_DISCONNECTED_TURN_ERROR).unwrap()
+            studio_json::to_string(PROVIDER_DISCONNECTED_TURN_ERROR).unwrap()
         );
         for (name, raw) in [
             ("queued", base.replace("\"interrupted\"", "\"queued\"")),
@@ -955,14 +955,14 @@ mod disconnect_text_tests {
                 base.replace("\"threadId\":", "\"startAttempt\":{},\"threadId\":"),
             ),
         ] {
-            let record = serde_json::from_str(&raw).unwrap();
+            let record = studio_json::from_str(&raw).unwrap();
             let view = crate::sync_views::agent_entity_view(&record, &Default::default()).unwrap();
             let published = <Published as serde::Deserialize>::deserialize(view).unwrap();
             assert!(!published.manual_connection_check.available, "{name}");
         }
         let receipt = format!(
             r#""connectionCheck":{{"at":10,"epoch":4,"accountKey":"default","threadId":"thread-1","turnId":"turn-1","previousError":{},"nativeState":"idle"}},"#,
-            serde_json::to_string(PROVIDER_DISCONNECTED_TURN_ERROR).unwrap()
+            studio_json::to_string(PROVIDER_DISCONNECTED_TURN_ERROR).unwrap()
         );
         for (name, value, expected) in [
             ("matching", receipt.clone(), true),
@@ -976,7 +976,7 @@ mod disconnect_text_tests {
             ("old account", receipt.replace("default", "other"), false),
         ] {
             let raw = base.replacen('{', &format!("{{{value}"), 1);
-            let record = serde_json::from_str(&raw).unwrap();
+            let record = studio_json::from_str(&raw).unwrap();
             let view = crate::sync_views::agent_entity_view(&record, &Default::default()).unwrap();
             let published = <Published as serde::Deserialize>::deserialize(view).unwrap();
             assert_eq!(
@@ -1004,7 +1004,7 @@ mod disconnect_text_tests {
 #[cfg(test)]
 mod reattached_turn_tests {
     use super::RecoverySnapshot;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     /// The live cutover 4 shape: a restart turn adopted on reattach to the same
     /// provider generation whose turn/completed never reached a committed worker.

@@ -564,7 +564,7 @@ mod tests {
             message: Some("paused 雪".into()),
             output_wakes_paused: Some(true),
         };
-        let encoded = serde_json::to_string(&payload).expect("encode event");
+        let encoded = studio_json::to_string(&payload).expect("encode event");
         assert!(encoded.contains("watch-雪"));
         assert!(!encoded.contains(": "));
     }

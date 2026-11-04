@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::{
@@ -41,7 +41,7 @@ fn python_corpus() -> ([Vec<u8>; 2], Value) {
         .get_or_init(|| {
             (
                 crate::media_auth_fixtures::state_bytes(include_str!("wave9_safety_state.json")),
-                serde_json::from_str(include_str!("wave9_safety_expected.json"))
+                studio_json::from_str(include_str!("wave9_safety_expected.json"))
                     .expect("frozen safety corpus"),
             )
         })
@@ -81,7 +81,7 @@ impl AccountSessionPort for Session<'_> {
                 )
                 .map_err(|_| AccountSessionError::Persistence)?;
             let intent: Value =
-                serde_json::from_str(&raw).map_err(|_| AccountSessionError::Persistence)?;
+                studio_json::from_str(&raw).map_err(|_| AccountSessionError::Persistence)?;
             assert_eq!(intent["dispatch"], "intent");
             assert_eq!(intent["rpcMethod"], request.method.as_str());
             assert_eq!(intent["operationId"], request.operation);
@@ -391,7 +391,7 @@ impl AccountSessionPort for StartBlockingSession {
                 )
                 .map_err(|_| AccountSessionError::Persistence)?;
             let intent: Value =
-                serde_json::from_str(&raw).map_err(|_| AccountSessionError::Persistence)?;
+                studio_json::from_str(&raw).map_err(|_| AccountSessionError::Persistence)?;
             assert_eq!(intent["dispatch"], "intent");
             assert_eq!(intent["rpcMethod"], request.method.as_str());
             let stage = intent["stage"].as_str().unwrap_or_default();
@@ -773,7 +773,7 @@ async fn action_runs_python_corpus_stage_path_and_commits_each_intent_before_dis
             |row| row.get::<_, String>(0),
         )
         .expect("retry receipt");
-    let operation: Value = serde_json::from_str(&raw).expect("stored receipt");
+    let operation: Value = studio_json::from_str(&raw).expect("stored receipt");
     assert_eq!(
         operation["responses"]
             .as_object()
@@ -822,7 +822,7 @@ fn present_instructions<'de, D: serde::Deserializer<'de>>(
 
 fn normalized_provider_params(params: Value) -> Value {
     let mut params: ComparedProviderParams =
-        serde_json::from_value(params).expect("provider comparison params");
+        studio_json::from_value(params).expect("provider comparison params");
     if let Some(instructions) = &mut params.developer_instructions {
         // Source headers carry the checkout's absolute path. Their skill identity
         // and the complete guidance body remain part of the assertion.
@@ -850,7 +850,7 @@ fn normalized_provider_params(params: Value) -> Value {
             })
             .collect();
     }
-    serde_json::to_value(params).expect("normalized provider comparison params")
+    studio_json::to_value(params).expect("normalized provider comparison params")
 }
 
 #[test]
@@ -988,7 +988,7 @@ async fn late_provider_receipt_preserves_concurrent_cancel_and_does_not_advance(
             |row| row.get(0),
         )
         .expect("cancelled retry record");
-    let operation: Value = serde_json::from_str(&raw).expect("retry record");
+    let operation: Value = studio_json::from_str(&raw).expect("retry record");
     assert_eq!(operation["stage"], "cancelled");
     assert_eq!(operation["receipts"]["turns"][0]["certainty"], "written");
     assert_eq!(
@@ -1153,7 +1153,7 @@ async fn accepted_start_after_concurrent_stop_stages_interrupt_then_commits_life
                 [],
                 |row| row.get(0),
             )?;
-            let mut agent: Value = serde_json::from_str(&raw).expect("agent record");
+            let mut agent: Value = studio_json::from_str(&raw).expect("agent record");
             agent["epoch"] = json!(8);
             agent["status"] = json!("paused");
             agent["autoWake"] = json!(false);
@@ -1239,7 +1239,7 @@ async fn rejected_safety_start_settles_the_empty_event_attempt() {
             |row| row.get(0),
         )
         .expect("settled agent");
-    let agent: Value = serde_json::from_str(&raw).expect("agent JSON");
+    let agent: Value = studio_json::from_str(&raw).expect("agent JSON");
     assert_eq!(agent["status"], "failed");
     assert_eq!(agent["inFlight"], false);
     assert_eq!(agent["startAttempt"]["executionOutcome"], "rejected");
@@ -1250,7 +1250,7 @@ async fn rejected_safety_start_settles_the_empty_event_attempt() {
             |row| row.get(0),
         )
         .expect("failed retry");
-    let retry: Value = serde_json::from_str(&retry).expect("retry JSON");
+    let retry: Value = studio_json::from_str(&retry).expect("retry JSON");
     assert_eq!(retry["stage"], "failed");
     assert_eq!(retry["dispatch"], "rejected");
 }
@@ -1410,7 +1410,7 @@ async fn crash_after_unknown_receipt_before_terminal_stage_never_dispatches_afte
                 [],
                 |row| row.get(0),
             )?;
-            let mut operation: Value = serde_json::from_str(&raw).expect("retry JSON");
+            let mut operation: Value = studio_json::from_str(&raw).expect("retry JSON");
             assert_eq!(operation["stage"], "turns");
             assert_eq!(operation["dispatch"], "intent");
             operation["receipts"]["turns"] = json!([{
@@ -1476,7 +1476,7 @@ async fn crash_after_unknown_receipt_before_terminal_stage_never_dispatches_afte
             |row| row.get(0),
         )
         .expect("recovered retry");
-    let operation: Value = serde_json::from_str(&raw).expect("retry JSON");
+    let operation: Value = studio_json::from_str(&raw).expect("retry JSON");
     assert_eq!(operation["stage"], "unknown");
     assert_eq!(operation["dispatch"], "unknown");
 }
@@ -1515,7 +1515,7 @@ async fn unknown_receipt_commits_terminal_stage_atomically_and_is_never_resent()
             .optional()
             .expect("committed retry reads");
         if let Some(raw) = raw {
-            let operation: Value = serde_json::from_str(&raw).expect("committed retry JSON");
+            let operation: Value = studio_json::from_str(&raw).expect("committed retry JSON");
             if operation["receipts"]["turns"][0]["certainty"] == "unknown" {
                 observed
                     .lock()
@@ -1682,7 +1682,7 @@ async fn not_sent_retries_same_operation_id_and_records_each_receipt() {
                 |row| row.get(0),
             )
             .expect("retry receipt");
-        let operation: Value = serde_json::from_str(&raw).expect("stored operation");
+        let operation: Value = studio_json::from_str(&raw).expect("stored operation");
         assert_eq!(
             operation["receipts"][stage]
                 .as_array()
@@ -1863,7 +1863,7 @@ async fn restart_applies_persisted_written_receipt_without_redispatch() {
                     [],
                     |row| row.get(0),
                 )?;
-                let mut operation: Value = serde_json::from_str(&raw).expect("operation");
+                let mut operation: Value = studio_json::from_str(&raw).expect("operation");
                 operation["responses"][&stage] = response.clone();
                 operation["receipts"][&stage] = json!([{
                     "operation":operation_id_for_transaction.clone(),
@@ -1883,7 +1883,7 @@ async fn restart_applies_persisted_written_receipt_without_redispatch() {
                         [],
                         |row| row.get(0),
                     )?;
-                    let mut agent: Value = serde_json::from_str(&raw).expect("agent record");
+                    let mut agent: Value = studio_json::from_str(&raw).expect("agent record");
                     agent["startAttempt"]["requestTicket"] = json!(request_id);
                     agent["startAttempt"]["connectionGeneration"] = json!(1);
                     tx.execute(

@@ -1,6 +1,6 @@
 //! Account limits belong to the durable account journal, not thread dispatch.
 use serde::Deserialize;
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_schema::persistence::{OutboxKind, OwnerKind};
 use studio_runtime_services::notification_dispatch::{
     DispatchOutcome, NotificationSettlement, NotificationStreamBuffer, ProviderDeliveryIdentity,
@@ -31,7 +31,7 @@ async fn live_limits_thread_dispatch_records_only_the_ignored_receipt() {
     let notification = json!({"method":"account/rateLimits/updated","params":{
         "threadId":"thread","rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":9000.0}}
     }});
-    let mut bytes = serde_json::to_vec(&notification).expect("notification JSON");
+    let mut bytes = studio_json::to_vec(&notification).expect("notification JSON");
     bytes.push(b'\n');
     let frame = match studio_runtime_providers::decode_journal_entry_borrowed(1, 1, &bytes).payload
     {

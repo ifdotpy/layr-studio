@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 /// Bytes of merged stdout and stderr that a Git read keeps (Python `bounded_command`).

@@ -16,9 +16,9 @@
 //! the second rule with a background terminal list that the account worker
 //! reads from the live provider.
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, RuntimeStore, StoreError, StoreResult, TaskId,
     TaskRecord, TaskRepository, truthy,
@@ -497,7 +497,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("task row");
-        serde_json::from_str(&raw).expect("task json")
+        studio_json::from_str(&raw).expect("task json")
     }
 
     fn checks(store: &RuntimeStore) -> Vec<CommandCheck> {

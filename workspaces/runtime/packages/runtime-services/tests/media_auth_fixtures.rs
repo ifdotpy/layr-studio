@@ -15,7 +15,7 @@ struct Databases {
 const DATABASE_NAMES: [&str; 2] = ["canvas.sqlite3", "analytics.sqlite3"];
 
 pub(crate) fn write_state(root: &Path, fixture: &str) {
-    let databases: Databases = serde_json::from_str(fixture).expect("frozen database SQL");
+    let databases: Databases = studio_json::from_str(fixture).expect("frozen database SQL");
     for (name, sql) in DATABASE_NAMES
         .into_iter()
         .zip([databases.canvas, databases.analytics])

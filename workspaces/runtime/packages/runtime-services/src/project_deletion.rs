@@ -6,7 +6,7 @@ use crate::{
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -535,7 +535,7 @@ fn retire_rooms(
     let mut retired = BTreeSet::new();
     for (id, raw) in rows {
         let mut room: studio_runtime_schema::room_record::RoomRecord =
-            serde_json::from_str(&raw).map_err(StoreError::from)?;
+            studio_json::from_str(&raw).map_err(StoreError::from)?;
         if room.id != id {
             return Err(StoreError::InvalidStoredRecord {
                 object: "runtime_rooms",
@@ -560,7 +560,7 @@ fn retire_rooms(
                 .is_some_and(|root| root != "all" && agents.contains(root));
         if bound || broadcast {
             room.project_deleted_at = Some(
-                serde_json::Number::from_f64(now)
+                studio_json::Number::from_f64(now)
                     .ok_or(StoreError::RecordContract("invalid project deletion time"))?,
             );
             studio_runtime_store::Table::new(tx).put(&room)?;

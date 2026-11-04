@@ -15,7 +15,7 @@ use crate::{
     task_recovery::{TaskRecoverySnapshot, recover_task},
     task_recovery_store::{TaskCompletionWriter, TaskRecoveryStore},
 };
-use serde_json::Value;
+use studio_json::Value;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -160,7 +160,7 @@ impl RecoveryJob {
         // Diagnostic timestamps change after each probe; they must not reset
         // pacing. Only durable operation identity creates a new check.
         studio_runtime_store::sha256_hex(
-            serde_json::json!([
+            studio_json::json!([
                 kind,
                 a["id"],
                 a["epoch"],
@@ -269,8 +269,8 @@ fn load_recovery_jobs_in(
         for (id, task, agent, agent_id) in rows {
             cursor.tasks = id.clone();
             let task: studio_runtime_store::TaskRecord =
-                serde_json::from_str(&task).map_err(|_| invalid_record("runtime_tasks", &id))?;
-            let mut agent: Value = serde_json::from_str(&agent)
+                studio_json::from_str(&task).map_err(|_| invalid_record("runtime_tasks", &id))?;
+            let mut agent: Value = studio_json::from_str(&agent)
                 .map_err(|_| invalid_record("runtime_agents", &agent_id))?;
             studio_runtime_store::agent_volatile::merge(db, &agent_id, &mut agent)?;
             let (aliases, receipts) = crate::task_recovery_store::receipt_state(db, &agent, &task)?;
@@ -298,7 +298,7 @@ fn load_recovery_jobs_in(
         for (id, raw) in rows {
             cursor.agents = id.clone();
             let mut record: Value =
-                serde_json::from_str(&raw).map_err(|_| invalid_record("runtime_agents", &id))?;
+                studio_json::from_str(&raw).map_err(|_| invalid_record("runtime_agents", &id))?;
             studio_runtime_store::agent_volatile::merge(db, &id, &mut record)?;
             let snapshot = RecoverySnapshot::from_record(record)
                 .map_err(|_| invalid_record("runtime_agents", &id))?;
@@ -357,7 +357,7 @@ impl RecoveryRuntime {
                 .await?;
                 Ok(RecoveryEffectResult::plain(if changed {
                     RecoveryOutcome::Applied(crate::recovery::RecoveryReceipt::Applied(
-                        serde_json::json!({"status":"checked"}),
+                        studio_json::json!({"status":"checked"}),
                     ))
                 } else {
                     RecoveryOutcome::Unconfirmed
@@ -556,8 +556,8 @@ fn invalid_record(table: &'static str, id: &str) -> RecoveryError {
 mod task_identity_tests {
     #[test]
     fn typed_task_preserves_recovery_key() {
-        let agent = serde_json::json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"completed","accountKey":"default","provider":"codex","threadId":"thread","turnId":null,"inFlight":false});
-        let task = serde_json::from_str(r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"}"#).expect("task fixture");
+        let agent = studio_json::json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"completed","accountKey":"default","provider":"codex","threadId":"thread","turnId":null,"inFlight":false});
+        let task = studio_json::from_str(r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"}"#).expect("task fixture");
         let snapshot =
             crate::task_recovery::TaskRecoverySnapshot::from_records(agent, task, vec![], vec![])
                 .expect("recovery snapshot");

@@ -4,7 +4,7 @@
 
 use crate::event_write::truthy;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::time::Instant;
 use studio_runtime_store::path_identity::LexicalPath;
@@ -339,7 +339,7 @@ pub fn authorize_events(snapshot: &AuthorizationSnapshot) -> Result<(), EventDen
 /// Project one stored event to what authorization reads. Python treats
 /// invalid or non-object event payloads as empty objects.
 fn project_event(event: &StoredEvent, event_meta: &BTreeMap<String, String>) -> EventSnapshot {
-    let payload = serde_json::from_str::<Value>(&event.text)
+    let payload = studio_json::from_str::<Value>(&event.text)
         .ok()
         .filter(Value::is_object)
         .unwrap_or(json!({}));
@@ -352,7 +352,7 @@ fn project_event(event: &StoredEvent, event_meta: &BTreeMap<String, String>) -> 
         "followup" => {
             let metadata = event_meta
                 .get(&event.id)
-                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .and_then(|raw| studio_json::from_str::<Value>(raw).ok())
                 .filter(Value::is_object)
                 .unwrap_or(json!({}));
             EventSnapshot::Followup {
@@ -428,7 +428,7 @@ impl AuthorizationScope {
     /// `from_records`, which refuses them.
     pub fn add_private_members(&mut self, rooms: &BTreeMap<String, String>) {
         for raw in rooms.values() {
-            let Ok(row) = serde_json::from_str::<Value>(raw) else {
+            let Ok(row) = studio_json::from_str::<Value>(raw) else {
                 continue;
             };
             if row.get("kind").and_then(Value::as_str) == Some("private") {
@@ -478,7 +478,7 @@ pub(crate) fn decode_authority_rows<T: serde::de::DeserializeOwned>(
 ) -> BTreeMap<String, Result<T, SnapshotError>> {
     rows.into_iter()
         .map(|(key, raw)| {
-            let row = serde_json::from_str(&raw).map_err(|_| invalid(&key));
+            let row = studio_json::from_str(&raw).map_err(|_| invalid(&key));
             (key, row)
         })
         .collect()
@@ -515,7 +515,7 @@ fn invalid(location: impl Into<String>) -> SnapshotError {
     }
 }
 fn object(raw: &str, location: &str) -> Result<Value, SnapshotError> {
-    let value: Value = serde_json::from_str(raw).map_err(|_| invalid(location))?;
+    let value: Value = studio_json::from_str(raw).map_err(|_| invalid(location))?;
     if !value.is_object() {
         return Err(invalid(location));
     }
@@ -735,7 +735,7 @@ pub struct CatalogIdentity {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSettings {
-    stored: serde_json::Map<String, Value>,
+    stored: studio_json::Map<String, Value>,
     settings: ExecutionSettings,
 }
 
@@ -768,7 +768,7 @@ impl ExecutionSnapshot {
         fn default_account() -> String {
             "default".into()
         }
-        let row: Record = serde_json::from_value(record.clone())
+        let row: Record = studio_json::from_value(record.clone())
             .map_err(|_| invalid("agent/executionSettings"))?;
         if row.account_key != account.account_key {
             return Err(invalid("agent/accountKey"));
@@ -787,7 +787,7 @@ impl ExecutionSnapshot {
                     .ok_or_else(|| invalid("agent"))?
                     .extend(stored.clone());
                 let settings =
-                    serde_json::from_value(merged).map_err(|_| invalid("agent/pendingSettings"))?;
+                    studio_json::from_value(merged).map_err(|_| invalid("agent/pendingSettings"))?;
                 Ok(PendingSettings { stored, settings })
             })
             .transpose()?;
@@ -1095,7 +1095,7 @@ mod tests {
     use super::*;
     #[test]
     fn private_room_members_require_a_string_array() {
-        let mut records: AuthorizationRecords = serde_json::from_str(r#"{
+        let mut records: AuthorizationRecords = studio_json::from_str(r#"{
             "recipient_id":"lead", "agents":{"lead":"{\"id\":\"lead\",\"rootId\":\"lead\",\"isLead\":true}"},
             "rooms":{},"complaints":{},"event_meta":{},"events":[],"projects":{},"resolved_paths":{}
         }"#).unwrap();
@@ -1159,7 +1159,7 @@ mod tests {
     }
     #[test]
     fn peer_pair_requires_distinct_checked_leads() {
-        let records: AuthorizationRecords = serde_json::from_value(json!({
+        let records: AuthorizationRecords = studio_json::from_value(json!({
             "recipient_id":"left", "agents": {
                 "left":json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":"left","rootId":"left","isLead":true,"cwd":"/project"}).to_string(),
                 "right":json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":"right","rootId":"right","isLead":true,"cwd":"/project"}).to_string()

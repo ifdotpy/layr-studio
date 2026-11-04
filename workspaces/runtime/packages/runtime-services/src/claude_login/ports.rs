@@ -1,7 +1,7 @@
 //! Ports shared by sign-in's actor, scripted tests and the owned stream child.
 use super::{LoginError, LoginSnapshot};
 use crate::account_driver::{AccountDriver, AuthMetadata, ProviderAuthReader};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use std::{
     collections::BTreeMap,
     ffi::OsString,

@@ -1,4 +1,4 @@
-use serde_json::json;
+use studio_json::json;
 use std::{
     path::Path,
     sync::{Arc, Mutex},
@@ -51,7 +51,7 @@ fn snapshot(store: &RuntimeStore) -> RecoverySnapshot {
     )
     .expect("valid recovery fixture")
     .expect("valid recovery fixture");
-    RecoverySnapshot::from_record(serde_json::from_str(&raw).expect("valid recovery fixture"))
+    RecoverySnapshot::from_record(studio_json::from_str(&raw).expect("valid recovery fixture"))
         .expect("valid recovery fixture")
 }
 struct Completion;
@@ -59,7 +59,7 @@ impl CompletionWriter for Completion {
     fn start_held(
         &mut self,
         _: &Transaction<'_>,
-        _: &serde_json::Value,
+        _: &studio_json::Value,
         _: &str,
         _: &str,
     ) -> Result<(), RecoveryError> {
@@ -98,7 +98,7 @@ impl studio_runtime_services::recovery_store::RecoveryDelivery for NoRecoveryDel
     fn start_held(
         &mut self,
         _: &Transaction<'_>,
-        _: &serde_json::Value,
+        _: &studio_json::Value,
         _: &str,
         _: &str,
     ) -> Result<(), RecoveryError> {
@@ -107,8 +107,8 @@ impl studio_runtime_services::recovery_store::RecoveryDelivery for NoRecoveryDel
     fn terminal(
         &mut self,
         _: &Transaction<'_>,
-        _: &mut serde_json::Value,
-        _: &serde_json::Value,
+        _: &mut studio_json::Value,
+        _: &studio_json::Value,
         _: studio_runtime_services::recovery::CompletionMode,
     ) -> Result<(), RecoveryError> {
         Ok(())
@@ -386,8 +386,8 @@ async fn recovery_transaction_restart_matrix() {
 }
 
 async fn queued_active_snapshot(store: &Arc<RuntimeStore>) -> RecoverySnapshot {
-    let cases: Vec<serde_json::Value> =
-        serde_json::from_str(include_str!("recovery/cases.json")).expect("recovery corpus");
+    let cases: Vec<studio_json::Value> =
+        studio_json::from_str(include_str!("recovery/cases.json")).expect("recovery corpus");
     let mut agent = cases
         .iter()
         .find(|case| case["name"] == "queued-active")
@@ -397,7 +397,7 @@ async fn queued_active_snapshot(store: &Arc<RuntimeStore>) -> RecoverySnapshot {
     agent["compactions"] = json!(0);
     agent["connectionRecovery"]["requestState"] = json!("pending");
     agent["connectionRecovery"]["requestBasis"] = json!([]);
-    agent["connectionRecovery"]["requestReceipt"] = serde_json::Value::Null;
+    agent["connectionRecovery"]["requestReceipt"] = studio_json::Value::Null;
     lifecycle_transaction(store, move |tx| {
         let record = studio_runtime_store::AgentRecord::from_value(agent.clone())
             .expect("valid agent fixture");
@@ -495,7 +495,7 @@ async fn queued_active_wait_terminal_is_reconciled_and_saved() {
     );
     let after = snapshot(&store).record().clone();
     assert_eq!(after["status"], "completed");
-    assert_eq!(after["turnId"], serde_json::Value::Null);
+    assert_eq!(after["turnId"], studio_json::Value::Null);
     assert_eq!(after["connectionRecovery"]["requestState"], "result");
     assert_eq!(
         after["connectionRecovery"]["requestReceipt"]["status"],
@@ -510,14 +510,14 @@ enum Corpus {
     Absence,
 }
 
-fn frozen_cases(corpus: Corpus) -> Vec<serde_json::Value> {
+fn frozen_cases(corpus: Corpus) -> Vec<studio_json::Value> {
     let agent_output = matches!(corpus, Corpus::Start);
     let corpus = match corpus {
         Corpus::Start => include_str!("recovery/start_oracle.json"),
         Corpus::Absence => include_str!("recovery/absence_oracle.json"),
     };
-    let mut cases: Vec<serde_json::Value> =
-        serde_json::from_str(corpus).expect("frozen recovery cases");
+    let mut cases: Vec<studio_json::Value> =
+        studio_json::from_str(corpus).expect("frozen recovery cases");
     // Start/absence receipts in these frozen cases use the Codex thread API.
     // Adapt their agent input and expected agent output, leaving receipts intact.
     for case in &mut cases {
@@ -525,7 +525,7 @@ fn frozen_cases(corpus: Corpus) -> Vec<serde_json::Value> {
         case["agent"]["compactions"] = json!(0);
         if let Some(history) = case["agent"]
             .get_mut("accountHistory")
-            .and_then(serde_json::Value::as_array_mut)
+            .and_then(studio_json::Value::as_array_mut)
         {
             for entry in history {
                 entry["provider"] = json!(studio_runtime_schema::ProviderKind::Codex);
@@ -538,7 +538,7 @@ fn frozen_cases(corpus: Corpus) -> Vec<serde_json::Value> {
     }
     cases
 }
-async fn seed_agent(store: &Arc<RuntimeStore>, agent: &serde_json::Value) {
+async fn seed_agent(store: &Arc<RuntimeStore>, agent: &studio_json::Value) {
     let agent = agent.clone();
     lifecycle_transaction(store, move |tx| {
         let agent = studio_runtime_store::AgentRecord::from_value(agent)?;
@@ -553,9 +553,9 @@ async fn seed_agent(store: &Arc<RuntimeStore>, agent: &serde_json::Value) {
     .expect("seed");
 }
 struct StartReader {
-    replies: std::collections::VecDeque<serde_json::Value>,
+    replies: std::collections::VecDeque<studio_json::Value>,
     observation: studio_runtime_services::recovery_absence::RecoveryObservation,
-    state: serde_json::Value,
+    state: studio_json::Value,
 }
 impl studio_runtime_services::recovery_history::RecoveryReader for StartReader {
     fn observation(
@@ -571,7 +571,7 @@ impl studio_runtime_services::recovery_history::RecoveryReader for StartReader {
         &'a mut self,
         scope: &ConnectionScope,
         method: studio_runtime_services::recovery_history::HistoryMethod,
-        _: serde_json::Value,
+        _: studio_json::Value,
         _: std::time::Instant,
     ) -> futures_util::future::BoxFuture<
         'a,
@@ -608,13 +608,13 @@ impl studio_runtime_services::recovery_history::RecoveryReader for StartReader {
 }
 #[derive(Default)]
 struct HoldWriter {
-    stopped: Arc<Mutex<Vec<serde_json::Value>>>,
+    stopped: Arc<Mutex<Vec<studio_json::Value>>>,
 }
 impl CompletionWriter for HoldWriter {
     fn start_held(
         &mut self,
         tx: &Transaction<'_>,
-        agent: &serde_json::Value,
+        agent: &studio_json::Value,
         reason: &str,
         event_id: &str,
     ) -> Result<(), RecoveryError> {
@@ -650,7 +650,7 @@ async fn legacy_start_absence_matches_python_writes_and_visible_wait() {
         seed_agent(&store, &case["agent"]).await;
         let before = snapshot(&store);
         let observation: studio_runtime_services::recovery_absence::RecoveryObservation =
-            serde_json::from_value(case["observation"].clone()).expect("observation");
+            studio_json::from_value(case["observation"].clone()).expect("observation");
         let mut reader = StartReader {
             replies: case["replies"].as_array().expect("pages").clone().into(),
             state: case["state"].clone(),
@@ -697,7 +697,7 @@ async fn legacy_start_absence_matches_python_writes_and_visible_wait() {
         crate::normalize_agent_nulls(&mut after);
         if let Some(created) = expected
             .pointer("/startAttempt/created")
-            .and_then(serde_json::Value::as_f64)
+            .and_then(studio_json::Value::as_f64)
         {
             expected["startAttempt"]["created"] = json!(created);
         }
@@ -739,7 +739,7 @@ async fn a_replaced_host_provider_does_not_restore_an_uncertain_vm_input() {
         seed_agent(&store, &agent).await;
         let before = snapshot(&store);
         let mut observation: studio_runtime_services::recovery_absence::RecoveryObservation =
-            serde_json::from_value(case["observation"].clone()).expect("observation");
+            studio_json::from_value(case["observation"].clone()).expect("observation");
         observation.scope.connection = "replacement-host".into();
         observation.scope.generation = 2;
         observation.supervisor = None;
@@ -831,7 +831,7 @@ async fn start_absence_failpoints_roll_back_restore_wait_and_hold() {
             let op = if table == "turns" { "INSERT" } else { "UPDATE" };
             store.transaction(move |tx| {tx.execute_batch(&format!("CREATE TRIGGER recovery_fail {timing} {op} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END;"))?;Ok(())}).await.expect("trigger");
             let observation: studio_runtime_services::recovery_absence::RecoveryObservation =
-                serde_json::from_value(case["observation"].clone()).expect("observation");
+                studio_json::from_value(case["observation"].clone()).expect("observation");
             let current_observation = observation.clone();
             let current: Arc<ObservationSource> =
                 Arc::new(move |_: &ConnectionScope| Some(current_observation.clone()));
@@ -930,7 +930,7 @@ async fn restart_not_applied_failpoints_roll_back_event_and_agent_together() {
                 .await
                 .expect("trigger");
             let observation: studio_runtime_services::recovery_absence::RecoveryObservation =
-                serde_json::from_value(case["observation"].clone()).expect("observation");
+                studio_json::from_value(case["observation"].clone()).expect("observation");
             let current_observation = observation.clone();
             let current: Arc<ObservationSource> =
                 Arc::new(move |_: &ConnectionScope| Some(current_observation.clone()));
@@ -993,26 +993,26 @@ struct TaskWriter;
 impl studio_runtime_services::task_recovery_store::TaskCompletionWriter for TaskWriter {
     fn resolve_receipt<'a>(
         &'a self,
-        _: Arc<serde_json::Value>,
-    ) -> futures_util::future::BoxFuture<'a, Result<serde_json::Value, RecoveryError>> {
+        _: Arc<studio_json::Value>,
+    ) -> futures_util::future::BoxFuture<'a, Result<studio_json::Value, RecoveryError>> {
         Box::pin(async { panic!("no receipt") })
     }
     fn complete<'a>(
         &'a self,
         _: &'a studio_runtime_services::task_recovery::TaskRecoverySnapshot,
         _: &'a ConnectionScope,
-        _: serde_json::Value,
+        _: studio_json::Value,
     ) -> futures_util::future::BoxFuture<'a, Result<bool, RecoveryError>> {
         Box::pin(async { panic!("no terminal item") })
     }
 }
-async fn seed_task(store: &Arc<RuntimeStore>, case: &serde_json::Value) {
+async fn seed_task(store: &Arc<RuntimeStore>, case: &studio_json::Value) {
     seed_agent(store, &case["agent"]).await;
     let case = case.clone();
     lifecycle_transaction(store, move |tx| {
         tx.execute(
             "INSERT INTO runtime_tasks(id,record) VALUES('agent:item',?1)",
-            [serde_json::to_string(&super::task_record(&case["task"]))
+            [studio_json::to_string(&super::task_record(&case["task"]))
                 .expect("serialize canonical task fixture")],
         )?;
         tx.execute(
@@ -1027,7 +1027,7 @@ async fn seed_task(store: &Arc<RuntimeStore>, case: &serde_json::Value) {
     .await
     .expect("seed task");
 }
-fn task_rows(store: &RuntimeStore) -> Vec<serde_json::Value> {
+fn task_rows(store: &RuntimeStore) -> Vec<studio_json::Value> {
     ["runtime_tasks", "runtime_items"]
         .iter()
         .map(|table| {
@@ -1040,13 +1040,13 @@ fn task_rows(store: &RuntimeStore) -> Vec<serde_json::Value> {
                     |r| r.get(0),
                 )
                 .expect("row");
-            serde_json::from_str(&raw).expect("json")
+            studio_json::from_str(&raw).expect("json")
         })
         .collect()
 }
 struct TaskReader {
     observation: studio_runtime_services::recovery_absence::RecoveryObservation,
-    options: serde_json::Value,
+    options: studio_json::Value,
     page: usize,
 }
 impl studio_runtime_services::recovery_history::RecoveryReader for TaskReader {
@@ -1078,7 +1078,7 @@ impl studio_runtime_services::recovery_history::RecoveryReader for TaskReader {
         &'a mut self,
         scope: &ConnectionScope,
         method: studio_runtime_services::recovery_history::HistoryMethod,
-        _: serde_json::Value,
+        _: studio_json::Value,
         _: std::time::Instant,
     ) -> futures_util::future::BoxFuture<
         'a,
@@ -1110,7 +1110,7 @@ impl studio_runtime_services::recovery_history::RecoveryReader for TaskReader {
                         .get("pages")
                         .cloned()
                         .unwrap_or(json!([o.get("terminals").cloned().unwrap_or(json!([]))]));
-                    let body = json!({"data":pages[self.page],"nextCursor":if self.page+1<pages.as_array().expect("pages").len(){json!("next")}else{serde_json::Value::Null}});
+                    let body = json!({"data":pages[self.page],"nextCursor":if self.page+1<pages.as_array().expect("pages").len(){json!("next")}else{studio_json::Value::Null}});
                     self.page += 1;
                     body
                 }
@@ -1131,7 +1131,7 @@ async fn task_absence_consumer_matches_python_lost_and_persists_named_hold() {
         let store = open_store(root.path()).await;
         seed_task(&store, &case).await;
         let observation: RecoveryObservation =
-            serde_json::from_value(case["observation"].clone()).expect("observation");
+            studio_json::from_value(case["observation"].clone()).expect("observation");
         let before = TaskRecoverySnapshot::from_records(
             snapshot(&store).record().clone(),
             super::task_record(&case["task"]),
@@ -1156,7 +1156,7 @@ async fn task_absence_consumer_matches_python_lost_and_persists_named_hold() {
         let mut first = observation.clone();
         first.quiet = case["options"]
             .get("quiet")
-            .and_then(serde_json::Value::as_bool)
+            .and_then(studio_json::Value::as_bool)
             .unwrap_or(true);
         let mut reader = TaskReader {
             observation: first,
@@ -1190,7 +1190,7 @@ async fn task_absence_consumer_matches_python_lost_and_persists_named_hold() {
                 |r| r.get(0),
             )
             .expect("visible task");
-        let projected: serde_json::Value = serde_json::from_str(&projected).expect("projection");
+        let projected: studio_json::Value = studio_json::from_str(&projected).expect("projection");
         assert_eq!(projected["value"]["status"], rows[0]["status"]);
         // Error is an existing task-detail field, deliberately absent from TaskEntityDto.
         let detail = studio_runtime_store::WorkspaceViewsRepository::task(
@@ -1279,7 +1279,7 @@ async fn task_absence_failpoints_and_stale_proofs_preserve_rows() {
             let renderer = projection(&store);
             store.transaction(move |tx|{tx.execute_batch(&format!("CREATE TRIGGER recovery_fail {timing} {} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END;", if table=="sync_entities" {"INSERT"} else {"UPDATE"}))?;Ok(())}).await.expect("trigger");
             let observation: RecoveryObservation =
-                serde_json::from_value(case["observation"].clone()).expect("observation");
+                studio_json::from_value(case["observation"].clone()).expect("observation");
             let current_observation = observation.clone();
             let current: Arc<ObservationSource> =
                 Arc::new(move |_: &ConnectionScope| Some(current_observation.clone()));
@@ -1329,7 +1329,7 @@ async fn task_absence_failpoints_and_stale_proofs_preserve_rows() {
         }Ok(())}).await.expect("change");
         let rows = task_rows(&store);
         let observation: RecoveryObservation =
-            serde_json::from_value(case["observation"].clone()).expect("observation");
+            studio_json::from_value(case["observation"].clone()).expect("observation");
         let mut current_observation = observation.clone();
         if change == "quiet" {
             current_observation.quiet = false;
@@ -1382,7 +1382,7 @@ async fn held_task_rechecks_current_receipts_before_later_absence_recovery() {
     )
     .expect("snapshot");
     let observation: RecoveryObservation =
-        serde_json::from_value(case["observation"].clone()).expect("observation");
+        studio_json::from_value(case["observation"].clone()).expect("observation");
     let current_observation = observation.clone();
     let current: Arc<ObservationSource> =
         Arc::new(move |_: &ConnectionScope| Some(current_observation.clone()));
@@ -1510,7 +1510,7 @@ async fn an_adopted_turn_that_finished_while_the_worker_was_dead_is_reconciled()
         after["status"], "queued",
         "the pending input runs next, as after any finished turn"
     );
-    assert_eq!(after["turnId"], serde_json::Value::Null);
+    assert_eq!(after["turnId"], studio_json::Value::Null);
     assert_eq!(after["lastCompletedTurn"], "turn");
     assert_eq!(events(&store), vec![("event".into(), "pending".into())]);
     assert_eq!(after["autoWake"], true, "the worker keeps its permission");

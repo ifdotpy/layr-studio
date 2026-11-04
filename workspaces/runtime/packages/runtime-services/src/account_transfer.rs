@@ -3,7 +3,7 @@
 //! Submission is durable before an effect is dispatched. Unknown outcomes never
 //! authorize another send; receipts retain their exact transport identity.
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -66,7 +66,7 @@ impl TransferDispatch {
             Self::Receipt(receipt) => {
                 let result = match result {
                     Some(value) if !value.is_null() => Field::Value(
-                        serde_json::value::to_raw_value(value)
+                        studio_json::to_raw_value(value)
                             .map_err(|_| invalid("provider payload", "/"))?,
                     ),
                     Some(_) | None => Field::Null,
@@ -143,7 +143,7 @@ fn read_result(response: Option<&ProviderResponse>) -> Result<ReadResult, Transf
         Some(ProviderResponse::Rejected(value)) => (ResponseKind::Rejected, value),
         None => return Ok((Field::Null, None)),
     };
-    let bytes = serde_json::to_vec(value).map_err(|_| invalid("provider payload", "/"))?;
+    let bytes = studio_json::to_vec(value).map_err(|_| invalid("provider payload", "/"))?;
     let (body, spill) = if bytes.len() > studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES {
         let digest = studio_runtime_store::sha256_hex(&bytes);
         let blob = PayloadBlob {
@@ -164,7 +164,7 @@ fn read_result(response: Option<&ProviderResponse>) -> Result<ReadResult, Transf
             ProviderResult::Inline {
                 kind,
                 value: Some(
-                    serde_json::value::to_raw_value(value)
+                    studio_json::to_raw_value(value)
                         .map_err(|_| invalid("provider payload", "/"))?,
                 ),
             },
@@ -367,7 +367,7 @@ pub(crate) fn read_record(
     if raw.len() > MAX_RECORD_BYTES {
         return Err(invalid(object, "/resourceLimit"));
     }
-    let value: Value = serde_json::from_str(raw).map_err(|_| invalid(object, "/"))?;
+    let value: Value = studio_json::from_str(raw).map_err(|_| invalid(object, "/"))?;
     validate(schema, object, &value)?;
     Ok(value)
 }
@@ -377,7 +377,7 @@ impl Snapshot {
         agents: impl IntoIterator<Item = (String, String)>,
     ) -> Result<Self, TransferError> {
         read_record(raw, "PersistedAccountTransferRecord", "account transfer")?;
-        let operation = serde_json::from_str(raw).map_err(|_| invalid("account transfer", "/"))?;
+        let operation = studio_json::from_str(raw).map_err(|_| invalid("account transfer", "/"))?;
         Self::from_parts(operation, raw.len(), agents.into_iter().map(Ok))
     }
 
@@ -410,7 +410,7 @@ impl Snapshot {
             }
             read_record(&raw, "PersistedAgentRecord", "transfer agent")?;
             let agent: studio_runtime_store::AgentRecord =
-                serde_json::from_str(&raw).map_err(|_| invalid("transfer agent", "/"))?;
+                studio_json::from_str(&raw).map_err(|_| invalid("transfer agent", "/"))?;
             if agent.id.0 != id || records.insert(id, agent).is_some() {
                 return Err(invalid("transfer agent", "/id"));
             }
@@ -480,8 +480,8 @@ impl Snapshot {
         agents: BTreeMap<String, studio_runtime_store::AgentRecord>,
         followups: Vec<Followup>,
     ) -> Decision {
-        let changed = serde_json::to_vec(&operation).ok()
-            != serde_json::to_vec(&self.operation).ok()
+        let changed = studio_json::to_vec(&operation).ok()
+            != studio_json::to_vec(&self.operation).ok()
             || agents != self.agents
             || !followups.is_empty();
         Decision {
@@ -732,7 +732,7 @@ impl Snapshot {
                             m.error = Field::Value("The saved transfer source is incomplete; its original state was retained".into());
                             let original = serde::Serialize::serialize(
                                 &(&lazy),
-                                serde_json::value::Serializer,
+                                studio_json::value::Serializer,
                             )
                             .map_err(|_| invalid("transfer agent", "/lazyAccountTransfer"))?;
                             append_history(
@@ -956,7 +956,7 @@ impl Snapshot {
         operation: &str,
         scope: studio_runtime_schema::provider_call_contract::ConnectionScope,
         method: studio_runtime_store::transfer_record::TransferMethod,
-        params: &serde_json::value::RawValue,
+        params: &studio_json::OwnedRawJson,
     ) -> Result<Decision, TransferError> {
         use studio_runtime_schema::queue_command::Field;
         use studio_runtime_store::transfer_record::{ProviderIntent, TransferMethod};
@@ -966,7 +966,7 @@ impl Snapshot {
             .get(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         let params_value: Value =
-            serde_json::from_str(params.get()).map_err(|_| invalid("provider payload", "/"))?;
+            studio_json::from_str(params.as_str()).map_err(|_| invalid("provider payload", "/"))?;
         if !self.pending()
             || member.phase != Phase::Reading
             || operation.is_empty()
@@ -989,7 +989,7 @@ impl Snapshot {
             params: params.to_owned(),
         };
         if let Some(saved) = member.provider_intent.value() {
-            let saved_params: Value = serde_json::from_str(saved.params.get())
+            let saved_params: Value = studio_json::from_str(saved.params.as_str())
                 .map_err(|_| invalid("provider payload", "/"))?;
             if !(saved.operation == intent.operation
                 && saved.account.is_missing()
@@ -1074,8 +1074,8 @@ impl Snapshot {
         let ticket = result.receipt.ticket.value().ok_or_else(refused)?;
         let response = result.result.value().ok_or_else(refused)?;
         let saved_params: Value =
-            serde_json::from_str(saved.params.get()).map_err(|_| refused())?;
-        let next_params: Value = serde_json::from_str(next.params.get()).map_err(|_| refused())?;
+            studio_json::from_str(saved.params.as_str()).map_err(|_| refused())?;
+        let next_params: Value = studio_json::from_str(next.params.as_str()).map_err(|_| refused())?;
         let valid_scope =
             |scope: &studio_runtime_schema::provider_call_contract::ConnectionScope| {
                 scope.account == account.as_str()
@@ -1137,7 +1137,7 @@ impl Snapshot {
         let account = intent.account.value().ok_or(TransferError::Refused(
             "The transfer is not ready for a provider read",
         ))?;
-        let params: Value = serde_json::from_str(intent.params.get())
+        let params: Value = studio_json::from_str(intent.params.as_str())
             .map_err(|_| invalid("provider payload", "/"))?;
         let method = intent.method.as_str();
         let source_guard = matches!(
@@ -1178,7 +1178,7 @@ impl Snapshot {
             .value()
             .and_then(|intents| intents.get(&intent.operation))
         {
-            let saved_params: Value = serde_json::from_str(saved.params.get())
+            let saved_params: Value = studio_json::from_str(saved.params.as_str())
                 .map_err(|_| invalid("provider payload", "/"))?;
             if saved.operation != intent.operation
                 || saved.account != intent.account
@@ -1350,7 +1350,7 @@ impl Snapshot {
     /// # use studio_runtime_services::account_transfer::Snapshot;
     /// # use studio_runtime_services::account_session_runtime::RequestCertainty;
     /// # fn old_bag(snapshot: &Snapshot) {
-    /// snapshot.provider_receipt("agent", "operation", serde_json::Value::Null, None, RequestCertainty::Written);
+    /// snapshot.provider_receipt("agent", "operation", studio_json::Value::Null, None, RequestCertainty::Written);
     /// # }
     /// ```
     pub fn provider_receipt(
@@ -1412,7 +1412,7 @@ impl Snapshot {
             {
                 current.phase = Phase::Ready;
                 current.result = Field::Value(
-                    serde_json::value::to_raw_value(&written_result)
+                    studio_json::to_raw_value(&written_result)
                         .map_err(|_| invalid("provider payload", "/"))?,
                 );
                 current.error = Field::Null;
@@ -1457,7 +1457,7 @@ impl Snapshot {
             .value()
             .ok_or(TransferError::Refused("The transfer receipt is missing"))?;
         let result: Value =
-            serde_json::from_str(result.get()).map_err(|_| invalid("provider payload", "/"))?;
+            studio_json::from_str(result.as_str()).map_err(|_| invalid("provider payload", "/"))?;
         let target_thread = result
             .pointer("/thread/id")
             .and_then(Value::as_str)
@@ -1631,7 +1631,7 @@ impl Snapshot {
         &self,
         ticket: &Ticket,
         method: studio_runtime_store::transfer_record::TransferMethod,
-        params: &serde_json::value::RawValue,
+        params: &studio_json::OwnedRawJson,
     ) -> Result<Decision, TransferError> {
         use studio_runtime_schema::queue_command::Field;
         use studio_runtime_store::transfer_record::TransferMethod;
@@ -1653,7 +1653,7 @@ impl Snapshot {
             ));
         }
         let params_value: Value =
-            serde_json::from_str(params.get()).map_err(|_| invalid("provider payload", "/"))?;
+            studio_json::from_str(params.as_str()).map_err(|_| invalid("provider payload", "/"))?;
         if !matches!(
             method,
             TransferMethod::Start | TransferMethod::Fork | TransferMethod::ClaudeImport
@@ -1721,7 +1721,7 @@ impl Snapshot {
         result: Option<studio_runtime_store::transfer_record::ProviderPayload>,
     ) -> Result<Decision, TransferError> {
         let result: Option<Value> = result
-            .map(|raw| serde_json::from_str(raw.get()))
+            .map(|raw| studio_json::from_str(raw.as_str()))
             .transpose()
             .map_err(|_| invalid("provider payload", "/"))?;
         use studio_runtime_schema::queue_command::Field;
@@ -1739,7 +1739,7 @@ impl Snapshot {
         }
         self.check_ticket_agent(ticket)?;
         if let Some(saved) = member.result.value() {
-            let saved: Value = serde_json::from_str(saved.get())
+            let saved: Value = studio_json::from_str(saved.as_str())
                 .map_err(|_| invalid("account transfer", "/members/result"))?;
             if result.as_ref() == Some(&saved) {
                 return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
@@ -1770,7 +1770,7 @@ impl Snapshot {
             {
                 member.phase = Phase::Ready;
                 member.result = Field::Value(
-                    serde_json::value::to_raw_value(&result)
+                    studio_json::to_raw_value(&result)
                         .map_err(|_| invalid("provider payload", "/"))?,
                 );
                 member.error = Field::Null;
@@ -2134,11 +2134,11 @@ pub fn before_start(agent: &studio_runtime_store::AgentRecord) -> Result<(), Tra
     Ok(())
 }
 fn numeric_field_is_nonzero(
-    field: &studio_runtime_schema::queue_command::Field<serde_json::Number>,
+    field: &studio_runtime_schema::queue_command::Field<studio_json::Number>,
 ) -> bool {
     field
         .value()
-        .and_then(serde_json::Number::as_f64)
+        .and_then(studio_json::Number::as_f64)
         .is_some_and(|value| value != 0.0)
 }
 fn payload_field_is_truthy(
@@ -2148,7 +2148,7 @@ fn payload_field_is_truthy(
 ) -> bool {
     field
         .value()
-        .and_then(|raw| serde_json::from_str(raw.get()).ok())
+        .and_then(|raw| studio_json::from_str(raw.as_str()).ok())
         .is_some_and(|value| studio_runtime_store::truthy(Some(&value)))
 }
 
@@ -2164,8 +2164,8 @@ fn payload_fields_equal(
     match (left, right) {
         (Field::Missing, Field::Missing) | (Field::Null, Field::Null) => true,
         (Field::Value(left), Field::Value(right)) => {
-            let left = serde_json::from_str::<Value>(left.get());
-            let right = serde_json::from_str::<Value>(right.get());
+            let left = studio_json::from_str::<Value>(left.as_str());
+            let right = studio_json::from_str::<Value>(right.as_str());
             matches!((left, right), (Ok(left), Ok(right)) if left == right)
         }
         (Field::Missing | Field::Null, Field::Value(_) | Field::Missing | Field::Null)
@@ -2218,8 +2218,8 @@ fn read_receipts_equal(
                         && match (av, bv) {
                             (None, None) => true,
                             (Some(a), Some(b)) => {
-                                serde_json::from_str::<Value>(a.get()).ok()
-                                    == serde_json::from_str::<Value>(b.get()).ok()
+                                studio_json::from_str::<Value>(a.as_str()).ok()
+                                    == studio_json::from_str::<Value>(b.as_str()).ok()
                             }
                             _ => false,
                         }
@@ -2332,7 +2332,7 @@ impl Decision {
         if !self.changed {
             return Ok(());
         }
-        let now = serde_json::Number::from_f64(now)
+        let now = studio_json::Number::from_f64(now)
             .ok_or(TransferError::Refused("Invalid transfer timestamp"))?;
         self.operation.updated = Field::Value(now);
         let operation = &self.operation;
@@ -2363,7 +2363,7 @@ impl Decision {
     }
     pub fn encoded(&self) -> Result<String, TransferError> {
         let encoded =
-            serde_json::to_string(&self.operation).map_err(|_| invalid("account transfer", "/"))?;
+            studio_json::to_string(&self.operation).map_err(|_| invalid("account transfer", "/"))?;
         if encoded.len() > MAX_RECORD_BYTES {
             return Err(invalid("account transfer", "/resourceLimit"));
         }
@@ -2677,8 +2677,8 @@ mod provider_receipt_tests {
     #[test]
     fn public_scope_defaults_to_team_when_missing() {
         use studio_runtime_store::transfer_record::TransferScope;
-        let base = serde_json::json!({"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"waiting","sourceAccountKey":"source"}}});
-        let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
+        let base = studio_json::json!({"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"waiting","sourceAccountKey":"source"}}});
+        let agent = studio_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
         let snapshot =
             super::Snapshot::read(&base.to_string(), [("agent".into(), agent.to_string())])
                 .unwrap();
@@ -2689,7 +2689,7 @@ mod provider_receipt_tests {
     fn typed_preparation_failure_distinguishes_missing_and_null_source() {
         use studio_runtime_schema::queue_command::Field;
         let raw = r#"{"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"reading","sourceAccountKey":"source","source":null}}}"#;
-        let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
+        let agent = studio_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
         let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
         assert!(
             snapshot
@@ -2718,10 +2718,10 @@ mod provider_receipt_tests {
 
     #[test]
     fn enrollment_reads_typed_pending_settings_and_captures_source() {
-        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"}"#).unwrap();
+        let mut agent: studio_runtime_store::AgentRecord = studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"}"#).unwrap();
         agent.extra.insert(
             "pendingSettings".into(),
-            serde_json::json!({"model":"stale"}),
+            studio_json::json!({"model":"stale"}),
         );
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
@@ -2772,7 +2772,7 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_accepts_a_provider_error_such_as_a_usage_limit() {
         // A chat that hit its account limit is the main reason to move it.
-        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"source","epoch":0,"status":"failed","compactions":0,"error":{"message":"You've hit your weekly limit","codexErrorInfo":"rateLimitExceeded","studioRawEvidence":{"message":"You've hit your weekly limit"}}}"#).unwrap();
+        let mut agent: studio_runtime_store::AgentRecord = studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"source","epoch":0,"status":"failed","compactions":0,"error":{"message":"You've hit your weekly limit","codexErrorInfo":"rateLimitExceeded","studioRawEvidence":{"message":"You've hit your weekly limit"}}}"#).unwrap();
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
         super::typed_enroll(
@@ -2800,11 +2800,11 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_preserves_known_and_legacy_worker_defaults() {
         for defaults in [
-            serde_json::json!({"model":"m","effort":null,"fastMode":false}),
-            serde_json::json!({"model":"legacy"}),
+            studio_json::json!({"model":"m","effort":null,"fastMode":false}),
+            studio_json::json!({"model":"legacy"}),
         ] {
             let mut agent: studio_runtime_store::AgentRecord =
-                serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}"#).unwrap();
+                studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}"#).unwrap();
             agent.worker_defaults = serde::Deserialize::deserialize(defaults.clone()).unwrap();
             let id = "move".to_owned().try_into().unwrap();
             let target = "target".to_owned().try_into().unwrap();
@@ -2825,7 +2825,7 @@ mod provider_receipt_tests {
             assert_eq!(
                 serde::Serialize::serialize(
                     &(&source.worker_defaults),
-                    serde_json::value::Serializer
+                    studio_json::value::Serializer
                 )
                 .unwrap(),
                 defaults
@@ -2836,12 +2836,12 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_reads_typed_worker_defaults_without_projecting_agent() {
         let mut agent: studio_runtime_store::AgentRecord =
-            serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"workerDefaults":{"model":"typed","effort":null,"fastMode":false}}"#)
+            studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"workerDefaults":{"model":"typed","effort":null,"fastMode":false}}"#)
             .unwrap();
         // A stale extension must not replace the typed owner during enrollment.
         agent.extra.insert(
             "workerDefaults".into(),
-            serde_json::json!({"model":"stale"}),
+            studio_json::json!({"model":"stale"}),
         );
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
@@ -2866,7 +2866,7 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_provider_change_writes_typed_settings() {
         let mut agent: studio_runtime_store::AgentRecord =
-            serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"cyberAccessProgram":"other","claudeOptions":{"configDir":"profile"}}"#)
+            studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"cyberAccessProgram":"other","claudeOptions":{"configDir":"profile"}}"#)
             .unwrap();
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
@@ -2891,7 +2891,7 @@ mod provider_receipt_tests {
     #[test]
     fn typed_boundary_exposes_agent_and_public_transfer() {
         let raw = r#"{"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"waiting","sourceAccountKey":"source"}}}"#;
-        let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
+        let agent = studio_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
         let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
         assert_eq!(snapshot.typed_public_view().total, 1);
         let mut agent = snapshot.agent("agent").unwrap().clone();
@@ -2924,7 +2924,7 @@ mod provider_receipt_tests {
     fn typed_decision_preserves_member_order() {
         let raw = r#"{"id":"move","leadId":"z","targetAccountKey":"target","status":"pending","created":1,"members":{"z":{"phase":"waiting","sourceAccountKey":"source"},"a":{"phase":"waiting","sourceAccountKey":"source"}}}"#;
         let agent = |id: &str| {
-            (id.to_owned(), serde_json::json!({"id":id,"rootId":"z","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}).to_string())
+            (id.to_owned(), studio_json::json!({"id":id,"rootId":"z","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}).to_string())
         };
         let snapshot = super::Snapshot::read(raw, [agent("z"), agent("a")]).unwrap();
         let decision = snapshot.decide(super::Command::Restart).unwrap();
@@ -2944,14 +2944,14 @@ mod provider_receipt_tests {
 
     #[test]
     fn spilled_provider_reply_has_stable_bytes_and_digest() {
-        let response = super::ProviderResponse::Reply(serde_json::json!("x".repeat(65537)));
+        let response = super::ProviderResponse::Reply(studio_json::json!("x".repeat(65537)));
         let (result, spill) = super::read_result(Some(&response)).expect("large reply");
         let (digest, bytes) = spill.expect("large reply spills");
         assert_eq!(
             digest,
             "7d695b80524fb81f4595aeb033d2661666a31db1feb18e1e3a8589cd6e7c2fe9"
         );
-        assert_eq!(bytes, serde_json::to_vec(&"x".repeat(65537)).unwrap());
+        assert_eq!(bytes, studio_json::to_vec(&"x".repeat(65537)).unwrap());
         assert_eq!(result.value().unwrap().value_blob().unwrap().sha256, digest);
     }
     use super::*;
@@ -2997,7 +2997,7 @@ mod provider_receipt_tests {
                     ));
                 }
             };
-            let params = serde_json::value::to_raw_value(&params)
+            let params = studio_json::to_raw_value(&params)
                 .map_err(|_| invalid("provider payload", "/"))?;
             self.typed_provider_intent(agent, operation, scope, method, &params)
         }
@@ -3021,7 +3021,7 @@ mod provider_receipt_tests {
                 scope: serde::Deserialize::deserialize(scope).map_err(|_| refusal())?,
                 method: serde::Deserialize::deserialize(Value::String(method.into()))
                     .map_err(|_| refusal())?,
-                params: serde_json::value::to_raw_value(&params)
+                params: studio_json::to_raw_value(&params)
                     .map_err(|_| invalid("provider payload", "/"))?,
             };
             self.typed_provider_read_intent(agent, &intent)
@@ -3168,11 +3168,11 @@ mod provider_receipt_tests {
 
     fn after(decision: Decision) -> Snapshot {
         Snapshot::read(
-            &serde_json::to_string(&decision.operation).unwrap(),
+            &studio_json::to_string(&decision.operation).unwrap(),
             decision
                 .agents
                 .into_iter()
-                .map(|(id, agent)| (id, serde_json::to_string(&agent).unwrap())),
+                .map(|(id, agent)| (id, studio_json::to_string(&agent).unwrap())),
         )
         .expect("test fixture operation succeeds")
     }
@@ -3263,7 +3263,7 @@ mod provider_receipt_tests {
         let summary = decision.agents["agent"].account_transfer.value().unwrap();
         let progress = progress_view(Some(summary), snapshot.can_cancel());
         let encoded =
-            serde::Serialize::serialize(&(progress), serde_json::value::Serializer).unwrap();
+            serde::Serialize::serialize(&(progress), studio_json::value::Serializer).unwrap();
         assert!(!matches!(
             encoded["actions"].as_str(),
             Some("cancel" | "retry_cancel")
@@ -3331,7 +3331,7 @@ mod provider_receipt_tests {
                     .provider_receipts
                     .value()
                     .unwrap()[0]),
-                serde_json::value::Serializer
+                studio_json::value::Serializer
             )
             .unwrap(),
             json!({"operation":"transfer:agent:thread-start", "scope":{"account":"target","connection":"connection-1","generation":1},
@@ -3359,7 +3359,7 @@ mod provider_receipt_tests {
             reading
                 .prepared_member(
                     "agent",
-                    serde_json::from_str(r#"{"model":"model-b"}"#).unwrap(),
+                    studio_json::from_str(r#"{"model":"model-b"}"#).unwrap(),
                     None,
                 )
                 .expect("test fixture operation succeeds"),
@@ -3436,7 +3436,7 @@ mod provider_receipt_tests {
             ("/source/cwd", json!("/other-workspace")),
         ] {
             let mut operation =
-                serde::Serialize::serialize(&(&ready.operation), serde_json::value::Serializer)
+                serde::Serialize::serialize(&(&ready.operation), studio_json::value::Serializer)
                     .unwrap();
             *operation["members"]["agent"]
                 .pointer_mut(path)
@@ -3446,7 +3446,7 @@ mod provider_receipt_tests {
                 ready
                     .agents
                     .iter()
-                    .map(|(id, agent)| (id.clone(), serde_json::to_string(agent).unwrap())),
+                    .map(|(id, agent)| (id.clone(), studio_json::to_string(agent).unwrap())),
             )
             .expect("typed modified snapshot");
             assert!(
@@ -3667,7 +3667,7 @@ mod provider_receipt_tests {
                 .expect("test fixture operation succeeds"),
         );
         assert_eq!(
-            serde_json::from_str::<Value>(
+            studio_json::from_str::<Value>(
                 recorded
                     .operation
                     .members
@@ -3677,7 +3677,7 @@ mod provider_receipt_tests {
                     .value()
                     .unwrap()[op_id]
                     .params
-                    .get()
+                    .as_str()
             )
             .unwrap()["limit"],
             100
@@ -3698,7 +3698,7 @@ mod provider_receipt_tests {
                     .value()
                     .unwrap()[op_id]
                     .result),
-                serde_json::value::Serializer
+                studio_json::value::Serializer
             )
             .unwrap(),
             response
@@ -3875,7 +3875,7 @@ mod provider_receipt_tests {
                 .expect("test fixture operation succeeds"),
         );
         assert_eq!(
-            serde_json::from_str::<Value>(
+            studio_json::from_str::<Value>(
                 intent
                     .operation
                     .members
@@ -3885,7 +3885,7 @@ mod provider_receipt_tests {
                     .value()
                     .unwrap()[operation]
                     .params
-                    .get()
+                    .as_str()
             )
             .unwrap(),
             params
@@ -3911,7 +3911,7 @@ mod provider_receipt_tests {
             Phase::Reading
         );
         assert_eq!(
-            serde_json::from_str::<Value>(
+            studio_json::from_str::<Value>(
                 recorded
                     .operation
                     .members
@@ -3925,7 +3925,7 @@ mod provider_receipt_tests {
                     .unwrap()
                     .value()
                     .unwrap()
-                    .get()
+                    .as_str()
             )
             .unwrap()["data"],
             json!([])

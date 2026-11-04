@@ -8,7 +8,7 @@ use crate::federation_delivery::{
 use crate::federation_effects::{self, FederationAction, OriginObservation, SignedRequest};
 use crate::remote_transport::RemoteTransportError;
 use futures_util::future::BoxFuture;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::federation_ingress::{FederationInvitation, FederationRequest};
 use studio_runtime_store::{RuntimeStore, StoreError};
@@ -57,7 +57,7 @@ impl FederationTransport for Loopback {
             .await
             .map_err(|_| RemoteTransportError::InvalidInput)?;
             Ok(FederationTransportResponse {
-                body: serde_json::to_vec(&answer).expect("answer JSON"),
+                body: studio_json::to_vec(&answer).expect("answer JSON"),
                 link_advert: None,
             })
         })
@@ -100,7 +100,7 @@ async fn manage(
     origin: Option<&str>,
 ) -> Result<Value, FederationError> {
     let request: FederationRequest =
-        serde_json::from_str(&body.to_string()).expect("request parses");
+        studio_json::from_str(&body.to_string()).expect("request parses");
     manage_with_origin(Arc::clone(store), &request, origin).await
 }
 
@@ -127,7 +127,7 @@ async fn invite(server: &Arc<RuntimeStore>, project: &str) -> FederationInvitati
     )
     .await
     .expect("project invitation");
-    serde_json::from_str(&created["invitation"].to_string()).expect("invitation parses")
+    studio_json::from_str(&created["invitation"].to_string()).expect("invitation parses")
 }
 
 async fn accept(

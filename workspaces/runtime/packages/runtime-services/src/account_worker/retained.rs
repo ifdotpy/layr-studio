@@ -1070,7 +1070,7 @@ pub(crate) fn valid_actorless_request_shape(
 }
 
 fn valid_page_read_shape(
-    params: &serde_json::Map<String, Value>,
+    params: &studio_json::Map<String, Value>,
     required: &[&str],
     limit: u64,
 ) -> bool {
@@ -1502,7 +1502,7 @@ mod validation_tests {
     }
 
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn account_refresh_is_never_a_volatile_read() {

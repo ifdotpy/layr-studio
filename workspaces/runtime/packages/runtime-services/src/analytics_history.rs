@@ -9,7 +9,7 @@ use crate::analytics_capture::{
 };
 use crate::analytics_rollout::{RolloutAction, RolloutContext};
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_store::path_identity::CanonicalPath;
 mod read_proof;
@@ -455,7 +455,7 @@ fn read_history_checkpoint_stage(
     let Some(raw) = raw else {
         return Ok((None, None));
     };
-    if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+    if let Ok(value) = studio_json::from_str::<Value>(&raw) {
         let valid = CaptureTable::History.validate(&value).is_ok()
             && value.get("id").and_then(Value::as_str) == Some(key);
         if valid {
@@ -834,7 +834,7 @@ impl SessionHeader {
 }
 
 pub(crate) fn native_rollout_header_matches(header: &[u8], thread: &str) -> bool {
-    serde_json::from_slice::<studio_runtime_schema::json_object::JsonObject<SessionHeader>>(header)
+    studio_json::from_slice::<studio_runtime_schema::json_object::JsonObject<SessionHeader>>(header)
         .ok()
         .is_some_and(|header| header.0.is_session() && header.0.first_id(thread))
 }
@@ -1015,7 +1015,7 @@ pub fn prepare(
         digest.update(&line);
         consumed += line.len() as u64;
         count += 1;
-        let record = match serde_json::from_slice::<Value>(&line) {
+        let record = match studio_json::from_slice::<Value>(&line) {
             Ok(v) if v.is_object() => v,
             _ => {
                 increment(&mut snapshot.state, "malformedLines", 1)?;
@@ -1480,7 +1480,7 @@ mod invalid_record_tests {
             r#"{"type":"session_meta","payload":{"id":"","forked_from_id":null,"timestamp":7,"context_window":null}}"#,
             r#"{"type":"session_meta","payload":{"id":"t","forked_from_id":false,"timestamp":"time","context_window":4}}"#,
         ] {
-            let value: Value = serde_json::from_str(raw).expect("valid fixture");
+            let value: Value = studio_json::from_str(raw).expect("valid fixture");
             let header = SessionHeader::from_value(&value);
             let session = value["type"] == "session_meta";
             assert_eq!(

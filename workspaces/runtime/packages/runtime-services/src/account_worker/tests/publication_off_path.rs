@@ -1,7 +1,7 @@
 use super::*;
 use crate::notification_dispatch::NotificationPostCommit;
 use crate::notification_runtime_effects::NotificationPostCommitSink;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus};
 

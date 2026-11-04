@@ -4,7 +4,7 @@
 //! publication fails them.
 
 use super::test_support::{chat_view, client_entity, seed_chat, store};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 
@@ -53,8 +53,8 @@ async fn agent_limit_failure_republishes_account_recovery() {
         .as_secs_f64();
     store.transaction(move |tx| {
         let observation = json!({"accountKey":"default","at":now,"data":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":now+3600.0}}}});
-        let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
-        let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "default", now)?;
+        let raw = studio_json::OwnedRawJson::from_string(observation.to_string())?;
+        let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(raw.as_str(), "default", now)?;
         crate::account_session_runtime::limits::populate_agents(tx, &mut view, now)?;
         studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
         Ok(())
@@ -896,7 +896,7 @@ async fn work_detail_refusal_is_derived_on_every_publish() {
                     tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
                         row.get(0)
                     })?;
-                let record: Value = serde_json::from_str(&raw).expect("stored work record");
+                let record: Value = studio_json::from_str(&raw).expect("stored work record");
                 Ok(crate::work_write::current_submission_refusal(tx, &record)
                     .expect("derived refusal"))
             })
@@ -1584,7 +1584,7 @@ pub(crate) fn reconcile_work_history(
         .optional()?;
     match raw {
         Some(raw) => {
-            studio_runtime_store::work_history::reconcile(tx, id, &serde_json::from_str(&raw)?)
+            studio_runtime_store::work_history::reconcile(tx, id, &studio_json::from_str(&raw)?)
         }
         None => Ok(()),
     }
@@ -2144,7 +2144,7 @@ fn assert_published_list(store: &studio_runtime_store::RuntimeStore) {
                 })?
                 .map(|row| {
                     let (id, payload) = row?;
-                    let payload: Value = serde_json::from_str(&payload).expect("entity JSON");
+                    let payload: Value = studio_json::from_str(&payload).expect("entity JSON");
                     Ok((id, payload["value"].clone()))
                 })
                 .collect::<Result<std::collections::BTreeMap<_, _>, StoreError>>()?;

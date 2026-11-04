@@ -1,6 +1,6 @@
 //! Bounded Claude task output reads from workspaces and the current user's CLI directory.
 use crate::workspace_files::WorkspaceContext;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;

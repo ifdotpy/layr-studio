@@ -1,7 +1,7 @@
 //! Injection seam for effects owned by other notification subsystems.
 use super::{DispatchOutcome, NotificationDispatchError, ProviderDeliveryIdentity};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use studio_runtime_store::Transaction;
@@ -17,7 +17,7 @@ impl SharedJson {
     }
 
     pub fn agent_projection(agent: &Value) -> Self {
-        let mut projection = serde_json::Map::new();
+        let mut projection = studio_json::Map::new();
         for field in [
             "id",
             "name",
@@ -310,9 +310,9 @@ mod finite_observation_tests {
         for time in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert!(ObservationTime::new(time).is_none());
         }
-        assert!(serde_json::from_str::<ObservationTime>("null").is_err());
+        assert!(studio_json::from_str::<ObservationTime>("null").is_err());
         assert_eq!(
-            serde_json::from_str::<ObservationTime>("1.5")
+            studio_json::from_str::<ObservationTime>("1.5")
                 .unwrap()
                 .get(),
             1.5

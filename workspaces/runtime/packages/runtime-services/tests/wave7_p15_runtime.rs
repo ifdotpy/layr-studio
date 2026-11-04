@@ -2,7 +2,7 @@
 use crate::monitor_runtime_fixtures as fixtures;
 
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::monitor_record::{
     MonitorCancelStatus, MonitorInputStatus as AttemptStatus, MonitorQueueEvent,
@@ -83,7 +83,7 @@ async fn stored_monitor_inputs_remain_visible_through_process_receipt() {
             "INSERT INTO request_results(id,signature,result,created) VALUES(?1,'http-input-v1:hash',?2,?3)",
             rusqlite::params![
                 format!("monitor-http-input:{id}"),
-                serde_json::to_string(&studio_runtime_store::request_results::ResultEnvelope { actor: Some("agent".to_owned()), reply: receipt, references: vec![] }).expect("receipt"),
+                studio_json::to_string(&studio_runtime_store::request_results::ResultEnvelope { actor: Some("agent".to_owned()), reply: receipt, references: vec![] }).expect("receipt"),
                 chrono::Utc::now().timestamp_millis()
             ],
         )
@@ -165,9 +165,9 @@ struct RuleCase {
 struct RuleCaseRaw<'a> {
     name: String,
     #[serde(borrow)]
-    owner: &'a serde_json::value::RawValue,
+    owner: &'a studio_json::value::RawValue,
     #[serde(borrow)]
-    rule: &'a serde_json::value::RawValue,
+    rule: &'a studio_json::value::RawValue,
     now: f64,
     event: Option<RuleEventFixture>,
 }
@@ -182,14 +182,14 @@ fn rule_case(name: &str) -> RuleCase {
         "\"owner\": {",
         "\"owner\": {\"compactions\":0,\"provider\":\"codex\",",
     );
-    let cases: Vec<RuleCaseRaw<'_>> = serde_json::from_str(&json).expect("frozen rule cases");
+    let cases: Vec<RuleCaseRaw<'_>> = studio_json::from_str(&json).expect("frozen rule cases");
     let case = cases
         .into_iter()
         .find(|case| case.name == name)
         .unwrap_or_else(|| panic!("rule case {name}"));
     RuleCase {
-        owner: serde_json::from_str(case.owner.get()).expect("rule owner"),
-        rule: serde_json::from_str(case.rule.get()).expect("rule"),
+        owner: studio_json::from_str(case.owner.get()).expect("rule owner"),
+        rule: studio_json::from_str(case.rule.get()).expect("rule"),
         now: case.now,
         event: case.event,
     }
@@ -451,7 +451,7 @@ async fn transient_rule_submit_failure_reconciles_the_saved_launch_identity() {
         )
         .expect("saved launch intent");
     let reserved: studio_runtime_schema::rule_record::LaunchIntent =
-        serde_json::from_str(&reserved_json).expect("typed launch intent");
+        studio_json::from_str(&reserved_json).expect("typed launch intent");
     assert!(runtime.last_tick_error().is_some());
 
     *port
@@ -871,7 +871,7 @@ async fn monitor_completion_commits_the_python_rule_result_and_wake_atomically()
         kind: String,
         text: WakeText,
     }
-    let cases: Vec<CompletionCase> = serde_json::from_str(
+    let cases: Vec<CompletionCase> = studio_json::from_str(
         &include_str!("wave7_p15_support/completions.json")
             .replace("@FIXTURE_ROOT@", &root.path().to_string_lossy())
             .replace(
@@ -941,7 +941,7 @@ async fn monitor_completion_commits_the_python_rule_result_and_wake_atomically()
                 Ok(Wake {
                     id: row.get(0)?,
                     kind: row.get(1)?,
-                    text: serde_json::from_str(&text).expect("wake text"),
+                    text: studio_json::from_str(&text).expect("wake text"),
                 })
             })
             .expect("events")
@@ -953,7 +953,7 @@ async fn monitor_completion_commits_the_python_rule_result_and_wake_atomically()
             .map(|wake| Wake {
                 id: wake.id.clone(),
                 kind: wake.kind.clone(),
-                text: serde_json::from_str(&wake.text).expect("wake text"),
+                text: studio_json::from_str(&wake.text).expect("wake text"),
             })
             .collect();
         assert_eq!(wakes, expected);
@@ -1982,7 +1982,7 @@ async fn bounded_probes_preserve_room_for_the_largest_exit_receipt() {
             |row| row.get(0),
         )
         .expect("saved operation");
-    let operation = serde_json::from_str(&operation_json).expect("monitor operation");
+    let operation = studio_json::from_str(&operation_json).expect("monitor operation");
     let id_for_queue_reset = id.to_owned();
     store
         .transaction_with(move |tx| {

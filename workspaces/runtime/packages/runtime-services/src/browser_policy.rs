@@ -723,13 +723,13 @@ mod tests {
     #[test]
     fn sign_in_links_follow_the_shared_corpus() {
         // The owner (vm-guest/browser_policy.py) checks the same file.
-        let corpus: Vec<serde_json::Value> =
-            serde_json::from_str(include_str!("../../../apps/vm-guest/sign_in_links.json"))
+        let corpus: Vec<studio_json::Value> =
+            studio_json::from_str(include_str!("../../../apps/vm-guest/sign_in_links.json"))
                 .expect("corpus");
         assert!(corpus.len() > 20);
         for case in corpus {
             let expected: Vec<String> =
-                serde_json::from_value(case["links"].clone()).expect("links");
+                studio_json::from_value(case["links"].clone()).expect("links");
             assert_eq!(
                 sign_in_links(case["text"].as_str().expect("text")),
                 expected,

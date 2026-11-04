@@ -16,7 +16,7 @@ use studio_runtime_store::path_identity::CanonicalPath;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use nix::fcntl::{Flock, FlockArg};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -50,7 +50,7 @@ pub enum MacSyncError {
     #[error("Folder sync state could not be read or written")]
     Io(#[source] std::io::Error),
     #[error("Folder sync state is invalid")]
-    Json(#[source] serde_json::Error),
+    Json(#[source] studio_json::Error),
     /// A legacy recovery record lacks the original request and its proven result.
     #[error(
         "Linux guest sync.mac.apply: outcome_unknown for legacy operation {operation} ({paths} paths); sync waits for receipt reconciliation"
@@ -295,7 +295,7 @@ pub fn resolve(
                 }
                 Some(mut entry) => {
                     entry.b = Some(main_state.clone());
-                    manifest[rel] = serde_json::to_value(entry).map_err(MacSyncError::Json)?;
+                    manifest[rel] = studio_json::to_value(entry).map_err(MacSyncError::Json)?;
                 }
             }
             held.as_object_mut()
@@ -750,13 +750,13 @@ fn upload_archive(guest: &dyn GuestRpc, path: &Path, operation: &str) -> Result<
 
 fn read_json(path: &Path, default: Value) -> Result<Value, MacSyncError> {
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(MacSyncError::Json),
+        Ok(bytes) => studio_json::from_slice(&bytes).map_err(MacSyncError::Json),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(default),
         Err(error) => Err(MacSyncError::Io(error)),
     }
 }
 fn save_json(path: &Path, value: &Value) -> Result<(), MacSyncError> {
-    let bytes = serde_json::to_vec(value).map_err(MacSyncError::Json)?;
+    let bytes = studio_json::to_vec(value).map_err(MacSyncError::Json)?;
     crate::atomic_file::replace(path, &bytes, Some(0o600), false).map_err(MacSyncError::Io)
 }
 fn hex_sha(bytes: &[u8]) -> String {

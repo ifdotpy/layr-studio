@@ -13,7 +13,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_schema::agent_limits::{
     DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_SUBAGENT_CONCURRENCY, MAX_SUBAGENT_CONCURRENCY,
@@ -47,7 +47,7 @@ pub enum StatusError {
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("The caller identity changed")]
     Stale,
     #[error("Invalid status arguments")]
@@ -63,7 +63,7 @@ pub enum RulesServiceError {
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -113,7 +113,7 @@ fn raw_rule_reply(
     value: &impl Serialize,
 ) -> Result<studio_runtime_schema::raw_json::RawJson, RulesServiceError> {
     Ok(studio_runtime_schema::raw_json::RawJson(
-        serde_json::value::to_raw_value(value)?,
+        studio_json::to_raw_value(value)?,
     ))
 }
 
@@ -421,7 +421,7 @@ fn status_snapshot(
     };
     let old_records = previous
         .as_deref()
-        .map(serde_json::from_str::<Vec<Value>>)
+        .map(studio_json::from_str::<Vec<Value>>)
         .transpose()
         .map_err(|_| {
             StatusError::Store(StoreError::InvalidStoredRecord {
@@ -460,7 +460,7 @@ fn status_snapshot(
         .cloned()
         .collect::<Vec<_>>();
 
-    let records = serde_json::to_string(&active_records)?;
+    let records = studio_json::to_string(&active_records)?;
 
     let mut result = json!({
         "apiVersion": 2,
@@ -565,7 +565,7 @@ fn worker_defaults(root: &AgentRecord) -> Value {
         ),
     ]);
     let supplied = root.worker_defaults.value().and_then(|value| {
-        serde::Serialize::serialize(&(value), serde_json::value::Serializer).ok()
+        serde::Serialize::serialize(&(value), studio_json::value::Serializer).ok()
     });
     if let Some(supplied) = supplied.as_ref().and_then(Value::as_object) {
         defaults.extend(supplied.clone());
@@ -820,7 +820,7 @@ fn is_terminal_monitor(monitor: &MonitorRecord) -> bool {
 }
 
 fn digest(value: &Value) -> Result<String, StatusError> {
-    let encoded = serde_json::to_vec(value)?;
+    let encoded = studio_json::to_vec(value)?;
     let hash = Sha256::digest(encoded);
     Ok(data_encoding::HEXLOWER.encode(&hash[..12]))
 }
@@ -833,7 +833,7 @@ struct StatusCursor {
 }
 
 fn encode_cursor(offset: usize, revision: &str) -> Result<String, StatusError> {
-    Ok(URL_SAFE.encode(serde_json::to_vec(&StatusCursor {
+    Ok(URL_SAFE.encode(studio_json::to_vec(&StatusCursor {
         offset,
         revision: revision.to_owned(),
     })?))
@@ -844,7 +844,7 @@ fn decode_cursor(cursor: &str, revision: &str) -> Result<usize, StatusError> {
         .decode(cursor)
         .map_err(|_| StatusError::InvalidCursor)?;
     let value: StatusCursor =
-        serde_json::from_slice(&decoded).map_err(|_| StatusError::InvalidCursor)?;
+        studio_json::from_slice(&decoded).map_err(|_| StatusError::InvalidCursor)?;
     if value.revision != revision {
         return Err(StatusError::InvalidCursor);
     }
@@ -872,7 +872,7 @@ fn rules_request_signature(
     actor_epoch: u64,
     data: Option<&Value>,
 ) -> Result<String, RulesServiceError> {
-    let content = serde_json::to_vec(&json!({
+    let content = studio_json::to_vec(&json!({
         "actor": actor_id,
         "epoch": actor_epoch,
         "data": data,
@@ -1214,7 +1214,7 @@ pub async fn rules(
                             {
                                 let generation = old.file_generation.get().saturating_add(1);
                                 old.file_activity_at = Some(
-                                    serde_json::Number::from_f64(now)
+                                    studio_json::Number::from_f64(now)
                                         .ok_or(RulesServiceError::Invalid("time"))?,
                                 );
                                 old.fingerprint = fingerprint;
@@ -1231,7 +1231,7 @@ pub async fn rules(
                                 .epoch
                                 .try_into()
                                 .map_err(|_| RulesServiceError::Invalid("rule"))?;
-                            old.next_at = serde_json::Number::from_f64(
+                            old.next_at = studio_json::Number::from_f64(
                                 now + old.interval_seconds.get() as f64,
                             )
                             .ok_or(RulesServiceError::Invalid("time"))?;
@@ -1449,7 +1449,7 @@ fn save_rule(
     }
     if low_workers {
         record.next_at =
-            serde_json::Number::from_f64(save.now).ok_or(RulesServiceError::Invalid("time"))?;
+            studio_json::Number::from_f64(save.now).ok_or(RulesServiceError::Invalid("time"))?;
     }
     RulesRepository::put(tx, &record)?;
     raw_rule_reply(&record)
@@ -1482,7 +1482,7 @@ mod tests {
         WatchAction, model_directory, rules,
     };
     use rusqlite::params;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::{
         AgentRecord, AgentRepository, RulesRepository, RuntimeStore, StoreError,
     };
@@ -1706,16 +1706,16 @@ mod tests {
     #[test]
     fn stored_rule_reply_remains_opaque_on_replay() {
         let reply: super::RulesReply =
-            serde_json::from_str(r#"{"value":{"legacy": [1, 2], "future":true}}"#)
+            studio_json::from_str(r#"{"value":{"legacy": [1, 2], "future":true}}"#)
                 .expect("stored reply");
-        assert_eq!(reply.value.0.get(), r#"{"legacy": [1, 2], "future":true}"#);
-        let encoded = serde_json::to_string(&reply).expect("reply serializes");
-        assert!(encoded.contains(reply.value.0.get()));
+        assert_eq!(reply.value.0.as_str(), r#"{"legacy": [1, 2], "future":true}"#);
+        let encoded = studio_json::to_string(&reply).expect("reply serializes");
+        assert!(encoded.contains(reply.value.0.as_str()));
     }
 
     #[test]
     fn managed_rule_wire_rejects_invalid_typed_fields() {
-        assert!(serde_json::from_str::<super::ManagedRuleWire>(r#"{"kind":true}"#).is_err());
+        assert!(studio_json::from_str::<super::ManagedRuleWire>(r#"{"kind":true}"#).is_err());
     }
 
     #[tokio::test]
@@ -1734,7 +1734,7 @@ mod tests {
         )
         .await
         .expect("defaults");
-        let saved_value: Value = serde_json::from_str(saved.value.0.get()).expect("rule reply");
+        let saved_value: Value = studio_json::from_str(saved.value.0.as_str()).expect("rule reply");
         assert_eq!(saved_value["kind"], "interval");
         assert_eq!(saved_value["event"], "worker_completed");
         assert_eq!(saved_value["at"], 160.0);
@@ -1786,7 +1786,7 @@ mod tests {
         .await
         .expect("replay generated rule");
         assert_eq!(first.value, replay.value);
-        let first_value: Value = serde_json::from_str(first.value.0.get()).expect("rule reply");
+        let first_value: Value = studio_json::from_str(first.value.0.as_str()).expect("rule reply");
         assert!(first_value["id"].is_string());
         assert_eq!(first_value["fingerprint"], json!([123, 4, 5]));
         let mut explicit_save = generated.clone();
@@ -1842,7 +1842,7 @@ mod tests {
         .expect("saved rule remains");
         assert_eq!(
             persisted_after_mismatch,
-            serde_json::from_str(saved.value.0.get()).expect("rule reply")
+            studio_json::from_str(saved.value.0.as_str()).expect("rule reply")
         );
         store
             .transaction_with(move |tx| {

@@ -6,7 +6,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use rustls_pki_types::{PrivatePkcs8KeyDer, SubjectPublicKeyInfoDer, pem::PemObject};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use spki::{ObjectIdentifier, SubjectPublicKeyInfoRef};
 use std::collections::HashMap;
 use std::fmt;
@@ -162,7 +162,7 @@ pub fn peer_link_config_line(
         ed25519_public_key(peer)?;
     }
     let identity = read_multi_server_identity(state_root)?;
-    serde_json::to_string(&serde_json::json!({
+    studio_json::to_string(&studio_json::json!({
         "listen": listen,
         "privateKey": identity.private_key,
         "publicKey": identity.public_key,
@@ -229,7 +229,7 @@ pub(crate) fn read_multi_server_identity(
         if bytes.len() > MAX_IDENTITY_BYTES {
             return Err(RemoteTransportError::IdentityStorage);
         }
-        let record: StoredMultiServerIdentity = serde_json::from_slice(&bytes).map_err(|_| {
+        let record: StoredMultiServerIdentity = studio_json::from_slice(&bytes).map_err(|_| {
             RemoteTransportError::InvalidStoredObject {
                 table: "multi-server/identity.json",
                 key: "serverId".to_owned(),
@@ -260,7 +260,7 @@ pub async fn load_federation_identity(
         return Err(invalid());
     };
     let identity: StoredFederationIdentity =
-        serde_json::from_str(&record).map_err(|_| invalid())?;
+        studio_json::from_str(&record).map_err(|_| invalid())?;
     RemoteIdentity::from_key_fields(
         identity.state_id,
         identity.label,
@@ -506,7 +506,7 @@ pub fn verify_multi_server_reply(
     expected_public_key: &str,
 ) -> RemoteTransportResult<studio_runtime_store::multi_server_delivery::RemoteReply> {
     verify_multi_server_identity(response_body, expected_server_id, expected_public_key)?;
-    serde_json::from_slice(response_body).map_err(|_| RemoteTransportError::InvalidResponse)
+    studio_json::from_slice(response_body).map_err(|_| RemoteTransportError::InvalidResponse)
 }
 
 fn verify_multi_server_identity(
@@ -518,25 +518,25 @@ fn verify_multi_server_identity(
     #[serde(rename_all = "camelCase")]
     struct Identity {
         #[serde(default, deserialize_with = "present")]
-        server_id: Option<Box<serde_json::value::RawValue>>,
+        server_id: Option<studio_json::OwnedRawJson>,
         #[serde(default, deserialize_with = "present")]
-        public_key: Option<Box<serde_json::value::RawValue>>,
-        identity: Option<Box<serde_json::value::RawValue>>,
+        public_key: Option<studio_json::OwnedRawJson>,
+        identity: Option<studio_json::OwnedRawJson>,
     }
     fn present<'de, D: serde::Deserializer<'de>>(
         d: D,
-    ) -> Result<Option<Box<serde_json::value::RawValue>>, D::Error> {
-        <Box<serde_json::value::RawValue> as serde::Deserialize>::deserialize(d).map(Some)
+    ) -> Result<Option<studio_json::OwnedRawJson>, D::Error> {
+        <studio_json::OwnedRawJson as serde::Deserialize>::deserialize(d).map(Some)
     }
     fn matches(identity: &Identity, server: &str, key: &str) -> bool {
         [
-            (identity.server_id.as_deref(), server),
-            (identity.public_key.as_deref(), key),
+            (identity.server_id.as_ref(), server),
+            (identity.public_key.as_ref(), key),
         ]
         .into_iter()
         .all(|(value, expected)| {
             value.is_none_or(|value| {
-                serde_json::from_str::<String>(value.get()).ok().as_deref() == Some(expected)
+                studio_json::from_str::<String>(value.as_str()).ok().as_deref() == Some(expected)
             })
         })
     }
@@ -551,16 +551,16 @@ fn verify_multi_server_identity(
         return Err(RemoteTransportError::InvalidResponse);
     }
     let identity: Identity =
-        serde_json::from_slice(response_body).map_err(|_| RemoteTransportError::InvalidResponse)?;
+        studio_json::from_slice(response_body).map_err(|_| RemoteTransportError::InvalidResponse)?;
     if !matches(&identity, expected_server_id, expected_public_key) {
         return Err(RemoteTransportError::InvalidSignature);
     }
     if let Some(nested) = identity
         .identity
-        .as_deref()
-        .filter(|value| value.get().trim_start().starts_with('{'))
+        .as_ref()
+        .filter(|value| value.as_str().trim_start().starts_with('{'))
     {
-        let nested: Identity = serde_json::from_str(nested.get())
+        let nested: Identity = studio_json::from_str(nested.as_str())
             .map_err(|_| RemoteTransportError::InvalidResponse)?;
         if !matches(&nested, expected_server_id, expected_public_key) {
             return Err(RemoteTransportError::InvalidSignature);
@@ -645,7 +645,7 @@ fn verify_federation_response_value(
         .get("signature")
         .and_then(Value::as_str)
         .ok_or(RemoteTransportError::InvalidSignature)?;
-    let proof = serde_json::json!({
+    let proof = studio_json::json!({
         "stateId": state_value,
         "timestamp": timestamp,
         "nonce": nonce,
@@ -662,7 +662,7 @@ fn verify_federation_response_value(
 
 fn parse_exact_json(bytes: &[u8]) -> RemoteTransportResult<Value> {
     reject_unrepresentable_integer_tokens(bytes)?;
-    serde_json::from_slice(bytes).map_err(|_| RemoteTransportError::InvalidResponse)
+    studio_json::from_slice(bytes).map_err(|_| RemoteTransportError::InvalidResponse)
 }
 
 fn reject_unrepresentable_integer_tokens(bytes: &[u8]) -> RemoteTransportResult<()> {
@@ -765,7 +765,7 @@ pub async fn exchange_multi_server(
     let fingerprint = multi_server_request_fingerprint_normalized(&method, input.url, input.body)?;
     let invitation_response = method == "POST"
         && target == "/api/multi-server"
-        && serde_json::from_slice::<Value>(input.body)
+        && studio_json::from_slice::<Value>(input.body)
             .ok()
             .and_then(|body| {
                 body.get("action")
@@ -792,7 +792,7 @@ pub async fn exchange_multi_server(
     match reserved {
         studio_runtime_store::OutboundReservation::Complete(value) => {
             let bytes =
-                serde_json::to_vec(&value).map_err(|_| RemoteTransportError::InvalidResponse)?;
+                studio_json::to_vec(&value).map_err(|_| RemoteTransportError::InvalidResponse)?;
             return verify_multi_server_response(
                 &bytes,
                 input.server_id,
@@ -804,7 +804,7 @@ pub async fn exchange_multi_server(
             });
         }
         studio_runtime_store::OutboundReservation::Redacted => {
-            return Ok(serde_json::json!({"outcome":"redacted"}));
+            return Ok(studio_json::json!({"outcome":"redacted"}));
         }
         studio_runtime_store::OutboundReservation::Unknown => {
             return Err(RemoteTransportError::ExchangeUnknown);
@@ -947,7 +947,7 @@ async fn exchange_multi_server_with(
     let fingerprint = multi_server_request_fingerprint_normalized(&method, input.url, input.body)?;
     let invitation_response = method == "POST"
         && target == "/api/multi-server"
-        && serde_json::from_slice::<Value>(input.body)
+        && studio_json::from_slice::<Value>(input.body)
             .ok()
             .and_then(|body| {
                 body.get("action")
@@ -974,7 +974,7 @@ async fn exchange_multi_server_with(
     match reserved {
         studio_runtime_store::OutboundReservation::Complete(value) => {
             let bytes =
-                serde_json::to_vec(&value).map_err(|_| RemoteTransportError::InvalidResponse)?;
+                studio_json::to_vec(&value).map_err(|_| RemoteTransportError::InvalidResponse)?;
             return verify_multi_server_response(
                 &bytes,
                 input.server_id,
@@ -986,7 +986,7 @@ async fn exchange_multi_server_with(
             });
         }
         studio_runtime_store::OutboundReservation::Redacted => {
-            return Ok(serde_json::json!({"outcome":"redacted"}));
+            return Ok(studio_json::json!({"outcome":"redacted"}));
         }
         studio_runtime_store::OutboundReservation::Unknown => {
             return Err(RemoteTransportError::ExchangeUnknown);
@@ -1418,7 +1418,7 @@ impl PeerLinkClient {
         {
             return Ok(None);
         }
-        let head = serde_json::json!({
+        let head = studio_json::json!({
             "address": address,
             "publicKey": request.public_key,
             "method": request.method,
@@ -1427,7 +1427,7 @@ impl PeerLinkClient {
             "bodyLength": request.body.len(),
             "timeout": request.timeout.as_secs_f64(),
         });
-        let mut encoded = serde_json::to_vec(&head).map_err(|_| PeerLinkFailure { sent: false })?;
+        let mut encoded = studio_json::to_vec(&head).map_err(|_| PeerLinkFailure { sent: false })?;
         encoded.push(b'\n');
         if connection.write_all(&encoded).is_err() || connection.write_all(request.body).is_err() {
             // studio-peer-link forwards only a complete local request body.
@@ -1442,7 +1442,7 @@ impl PeerLinkClient {
         if line.len() > Self::MAX_REPLY_LINE || line.last() != Some(&b'\n') {
             return Err(PeerLinkFailure { sent: true });
         }
-        let reply: Value = serde_json::from_slice(&line[..line.len() - 1])
+        let reply: Value = studio_json::from_slice(&line[..line.len() - 1])
             .map_err(|_| PeerLinkFailure { sent: true })?;
         if reply.get("failure").is_some() {
             let sent = reply.get("sent") != Some(&Value::Bool(false));
@@ -1746,7 +1746,7 @@ pub(crate) mod tests {
     };
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use studio_runtime_store::{RemoteTransportRepository, RuntimeStore};
@@ -1927,7 +1927,7 @@ pub(crate) mod tests {
                 .expect("identity directory is private");
         }
         let identity_path = directory.join("identity.json");
-        let record = serde_json::json!({
+        let record = studio_json::json!({
             "serverId":"fixture-server",
             "label":"Fixture",
             "privateKey":String::from_utf8(pkcs8_pem()).expect("fixture PEM is UTF-8"),
@@ -1935,7 +1935,7 @@ pub(crate) mod tests {
         });
         fs::write(
             &identity_path,
-            serde_json::to_vec(&record).expect("fixture record serializes"),
+            studio_json::to_vec(&record).expect("fixture record serializes"),
         )
         .expect("fixture identity writes");
         #[cfg(unix)]
@@ -2056,7 +2056,7 @@ pub(crate) mod tests {
         });
         assert_eq!(
             verify_federation_response(
-                &serde_json::to_vec(&wrapper).expect("response wrapper serializes"),
+                &studio_json::to_vec(&wrapper).expect("response wrapper serializes"),
                 &spki_pem(),
                 Some("peer-state"),
                 1_700_000_000,
@@ -2239,7 +2239,7 @@ pub(crate) mod tests {
             expected_public_key: &public_key,
             timeout: Duration::from_secs(2),
         };
-        let response = serde_json::to_vec(
+        let response = studio_json::to_vec(
             &json!({"serverId":"server-peer","publicKey":public_key,"renamed":true}),
         )
         .expect("reply");
@@ -2336,7 +2336,7 @@ pub(crate) mod tests {
         let public_key = spki_pem();
         let request = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let now = crate::event_write::unix_time().expect("clock") as i64;
-        let body = serde_json::to_vec(&json!({"action":"create_invite","requestId":request}))
+        let body = studio_json::to_vec(&json!({"action":"create_invite","requestId":request}))
             .expect("request");
         let input = MultiServerExchangeInput {
             server_id: "server-peer",
@@ -2349,7 +2349,7 @@ pub(crate) mod tests {
             expected_public_key: &public_key,
             timeout: Duration::from_secs(2),
         };
-        let response=serde_json::to_vec(&json!({"serverId":"server-peer","publicKey":public_key,"invitation":{"token":"fixture-secret"}})).expect("reply");
+        let response=studio_json::to_vec(&json!({"serverId":"server-peer","publicKey":public_key,"invitation":{"token":"fixture-secret"}})).expect("reply");
         let mut sends = 0;
         let first = super::exchange_multi_server_with(
             &store,
@@ -2409,7 +2409,7 @@ pub(crate) mod tests {
             "serverId":"server-peer",
             "identity":{"publicKey":public_key}
         });
-        let body = serde_json::to_vec(&response).expect("response serializes");
+        let body = studio_json::to_vec(&response).expect("response serializes");
         assert_eq!(
             verify_multi_server_response(&body, "server-peer", &spki_pem())
                 .expect("matching peer identity verifies"),
@@ -2423,7 +2423,7 @@ pub(crate) mod tests {
         ] {
             let mut mismatch = response.clone();
             mismatch["identity"][field] = json!(wrong);
-            let body = serde_json::to_vec(&mismatch).expect("response serializes");
+            let body = studio_json::to_vec(&mismatch).expect("response serializes");
             assert!(
                 matches!(
                     verify_multi_server_response(&body, "server-peer", &spki_pem()),
@@ -2645,7 +2645,7 @@ pub(crate) mod tests {
                 let mut reader = BufReader::new(stream);
                 let mut line = Vec::new();
                 reader.read_until(b'\n', &mut line).expect("request head");
-                let head: Value = serde_json::from_slice(&line[..line.len() - 1])
+                let head: Value = studio_json::from_slice(&line[..line.len() - 1])
                     .expect("Python-format request head");
                 assert_eq!(head["address"], "100.81.2.3:4621");
                 let body_len = head["bodyLength"].as_u64().expect("body length") as usize;
@@ -2783,7 +2783,7 @@ pub(crate) mod tests {
     #[cfg(unix)]
     #[test]
     fn peer_link_client_uses_the_python_unix_framing_with_a_local_fake_peer() {
-        use serde_json::Value;
+        use studio_json::Value;
         use std::io::{BufRead, BufReader, Read, Write};
         use std::os::unix::net::UnixListener;
         use std::time::Duration;
@@ -2808,7 +2808,7 @@ pub(crate) mod tests {
                 .read_until(b'\n', &mut line)
                 .expect("request head reads");
             let head: Value =
-                serde_json::from_slice(&line[..line.len() - 1]).expect("Python-format head parses");
+                studio_json::from_slice(&line[..line.len() - 1]).expect("Python-format head parses");
             assert_eq!(head["address"], "100.80.1.2:4621");
             assert_eq!(head["publicKey"], "fixture-peer-key");
             assert_eq!(head["method"], "POST");
@@ -2868,7 +2868,7 @@ pub(crate) mod tests {
     #[cfg(unix)]
     #[test]
     fn peer_link_unsent_failure_allows_https_fallback_and_marks_route_down() {
-        use serde_json::Value;
+        use studio_json::Value;
         use std::io::{BufRead, BufReader, Read, Write};
         use std::os::unix::net::UnixListener;
         use std::time::Duration;
@@ -2890,7 +2890,7 @@ pub(crate) mod tests {
             let mut reader = BufReader::new(stream);
             let mut line = Vec::new();
             reader.read_until(b'\n', &mut line).expect("head reads");
-            let head: Value = serde_json::from_slice(&line[..line.len() - 1])
+            let head: Value = studio_json::from_slice(&line[..line.len() - 1])
                 .expect("Python peer-link head parses");
             let body_length = head["bodyLength"].as_u64().expect("body size") as usize;
             let mut body = vec![0; body_length];

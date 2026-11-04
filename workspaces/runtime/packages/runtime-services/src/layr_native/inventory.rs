@@ -1,6 +1,6 @@
 //! Read-only Git facts for native migration admission and operator reports.
 use super::{NativeLayrError, import::Plan};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{path::Path, time::Duration};
 
 type Result<T> = std::result::Result<T, NativeLayrError>;

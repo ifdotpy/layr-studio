@@ -53,7 +53,7 @@ async fn auth_repair_regression_native_signed_out_probe_settles_code_rejection()
 
 #[tokio::test]
 async fn auth_repair_regression_post_login_allows_only_fresh_safe_continuation() {
-    use serde_json::json;
+    use studio_json::json;
     use std::{collections::BTreeMap, sync::Arc};
     use studio_runtime_services::{
         account_driver::claude::auth_metadata_from_output,
@@ -429,7 +429,7 @@ async fn restart_adopts_registered_add_after_final_receipt_failure() {
         .as_str()
         .expect("valid fixture");
     let metadata=studio_runtime_services::account_driver::claude::auth_metadata_from_output(br#"{"loggedIn":true,"authMethod":"claude.ai","email":"fixture@example.test","subscriptionType":"max"}"#,true);
-    f.accounts.register_claude_verified(serde_json::json!({"configDir":config,"binaryPath":"/fixture/scripted","customModels":[]}).as_object().expect("valid fixture").clone(),"Claude Code",&f.directory,&metadata).expect("valid fixture");
+    f.accounts.register_claude_verified(studio_json::json!({"configDir":config,"binaryPath":"/fixture/scripted","customModels":[]}).as_object().expect("valid fixture").clone(),"Claude Code",&f.directory,&metadata).expect("valid fixture");
     s.shutdown().await.expect("valid fixture");
     let restart = f.open().await;
     assert_eq!(
@@ -497,7 +497,7 @@ exit 0
 #[cfg(unix)]
 #[tokio::test]
 async fn restarted_unknown_keeps_config_until_recorded_child_is_proven_gone() {
-    use serde_json::json;
+    use studio_json::json;
     use std::{collections::BTreeMap, sync::Arc, time::Duration};
     use studio_runtime_process::stream_child::{ChildSpec, StreamChild};
     use studio_runtime_services::claude_login::{
@@ -630,7 +630,7 @@ exit 0
                     let config = f.directory.join("reauth-config");
                     std::fs::create_dir(&config).expect("reauth config");
                     let metadata = studio_runtime_services::account_driver::claude::auth_metadata_from_output(br#"{"loggedIn":true,"authMethod":"claude.ai","email":"fixture@example.test","subscriptionType":"max"}"#,true);
-                    Some(f.accounts.register_claude_verified(serde_json::json!({"configDir":config,"binaryPath":script,"customModels":[]}).as_object().expect("options").clone(),"Fixture",&f.directory,&metadata).expect("registered fixture"))
+                    Some(f.accounts.register_claude_verified(studio_json::json!({"configDir":config,"binaryPath":script,"customModels":[]}).as_object().expect("options").clone(),"Fixture",&f.directory,&metadata).expect("registered fixture"))
                 } else {
                     None
                 };
@@ -711,7 +711,7 @@ exit 0
 fn seed_legacy_receipts(f: &Fixture, key: &str) {
     for request in [ID, "987edcdc-0e86-4fdf-a1c6-1513517d3ad0"] {
         let snapshot = studio_runtime_services::claude_login::LoginSnapshot::from_record(
-            serde_json::json!({"requestId":request,"accountKey":key,"status":"pending","email":"fixture@example.test"}),
+            studio_json::json!({"requestId":request,"accountKey":key,"status":"pending","email":"fixture@example.test"}),
         )
         .expect("legacy receipt");
         f.receipts.save(&snapshot).expect("seed receipt");
@@ -810,7 +810,7 @@ async fn add_label_and_email_admission_refusals_write_nothing() {
 
 #[tokio::test]
 async fn legacy_reauth_resolves_free_lease_or_explicit_exact_cancel() {
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_services::claude_login::LoginError;
     const OTHER: &str = "987edcdc-0e86-4fdf-a1c6-1513517d3ad0";
     for explicit in [false, true] {
@@ -990,7 +990,7 @@ async fn unknown_receipt_cancel_write_failures_reopen_without_resend() {
 
 #[tokio::test]
 async fn native_login_pins_uuid_and_reauth_refuses_another_organization() {
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_services::claude_login::ports::LoginEvent;
     let f = Fixture::new();
     let s = f.open().await;
@@ -1058,7 +1058,7 @@ async fn native_login_pins_uuid_and_reauth_refuses_another_organization() {
 
 #[test]
 fn login_snapshot_preserves_legacy_extensions_redaction_and_replay() {
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_services::claude_login::{LoginError, LoginSnapshot};
     let legacy = json!({"requestId":ID,"accountKey":"account","status":"pending","email":"person@example.test","verificationUrl":"secret","vendor":{"nested":true}});
     let snapshot = LoginSnapshot::from_record(legacy).expect("legacy record");

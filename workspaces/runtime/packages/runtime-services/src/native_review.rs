@@ -2,7 +2,7 @@
 //! on retry. Workspace/catalog checks stay with the ordinary creation owner.
 use crate::native_actions::{NativeError, Result, bounded, checked_agent, decode};
 use rusqlite::Transaction;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::creation_intent::EffortSelection;
 use studio_runtime_schema::start_attempt::ReviewTarget as Target;
@@ -320,7 +320,7 @@ pub fn reserve(
     let brief = ["id", "name", "status", "model", "effort", "fastMode"]
         .into_iter()
         .map(|k| (k.to_owned(), child.get(k).cloned().unwrap_or(Value::Null)))
-        .collect::<serde_json::Map<_, _>>();
+        .collect::<studio_json::Map<_, _>>();
     let response = json!({"requestId":plan.key,"agentId":id,"status":"queued","reviewModel":child["model"],
         "reviewEffort":child.get("nativeEffort").unwrap_or(&child["effort"]),"agents":[brief],"delivery":DELIVERY});
     child["nativeReview"] = json!({"target":plan.target,"requestId":plan.key,"actorId":actor_id,

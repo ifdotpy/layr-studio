@@ -15,7 +15,7 @@ use base64::Engine;
 use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_schema::persistence::{OutboxStatus, ServerDeliveryState, ServerFetchState};
 use studio_runtime_store::multi_server_delivery::{SavedRemoteReply, remote_operation_key};
@@ -202,7 +202,7 @@ impl FetchPayload {
         let Some(raw) = raw else {
             return Ok(None);
         };
-        let request: ExportRequest = serde_json::from_str(raw).map_err(StoreError::from)?;
+        let request: ExportRequest = studio_json::from_str(raw).map_err(StoreError::from)?;
         match state {
             ServerFetchState::Preparing => Ok(Some(Self::Preparing(request))),
             ServerFetchState::Fetching => Ok(Some(Self::Fetching(request))),
@@ -246,7 +246,7 @@ fn refuse<T>(message: impl Into<String>) -> Result<T, Step> {
 /// A written tool result that carries the paired receipt or local value.
 fn written(value: &Value) -> DispatchedOperation {
     let mut result = OperationResult::reply(value);
-    if let Some(probe) = output_metadata(result.value.get()) {
+    if let Some(probe) = output_metadata(result.value.as_str()) {
         result.output_expires_at = probe.output_expires_at;
         result.handle = probe.handle;
         result.output_ref = probe.output_ref;
@@ -263,8 +263,8 @@ struct OutputProbe {
     handle: bool,
     #[serde(default, deserialize_with = "present")]
     output_ref: bool,
-    value: Option<Box<serde_json::value::RawValue>>,
-    result: Option<Box<serde_json::value::RawValue>>,
+    value: Option<studio_json::OwnedRawJson>,
+    result: Option<studio_json::OwnedRawJson>,
 }
 
 fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
@@ -274,12 +274,12 @@ fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D:
 fn numeric_expiry<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<f64>, D::Error> {
-    let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
-    Ok(serde_json::from_str(raw.get()).ok())
+    let raw = studio_json::OwnedRawJson::deserialize(deserializer)?;
+    Ok(studio_json::from_str(raw.as_str()).ok())
 }
 
 fn output_metadata(raw: &str) -> Option<OutputProbe> {
-    let probe: OutputProbe = serde_json::from_str(raw).ok()?;
+    let probe: OutputProbe = studio_json::from_str(raw).ok()?;
     if probe.output_expires_at.is_some() && (probe.handle || probe.output_ref) {
         return Some(probe);
     }
@@ -287,7 +287,7 @@ fn output_metadata(raw: &str) -> Option<OutputProbe> {
         .into_iter()
         .flatten()
         .find_map(|nested| {
-            let inner: OutputProbe = serde_json::from_str(nested.get()).ok()?;
+            let inner: OutputProbe = studio_json::from_str(nested.as_str()).ok()?;
             (inner.output_expires_at.is_some() && (inner.handle || inner.output_ref))
                 .then_some(inner)
         })
@@ -355,7 +355,7 @@ fn receipt(outcome: &ExchangeOutcome, key: &str) -> Value {
     match outcome {
         ExchangeOutcome::Applied(reply) => {
             // RawValue contains valid JSON from the paired transport.
-            let value: Value = serde_json::from_str(reply.value.get()).expect("valid raw reply");
+            let value: Value = studio_json::from_str(reply.value.as_str()).expect("valid raw reply");
             json!({"requestId":key,"outcome":"applied","value":value})
         }
         ExchangeOutcome::NotApplied(error) => {
@@ -591,7 +591,7 @@ impl ServerTools {
                 None=>crate::server_outbox::find_for(tx,&server,&canonical).map_err(access_step)?,
             }.map(|entry|(crate::server_outbox::state(entry.status),entry.record.error,entry.record.body));
             if let Some((state,error,body))=pending {
-                let envelope:Value=serde_json::from_str(&body).map_err(StoreError::from)?;
+                let envelope:Value=studio_json::from_str(&body).map_err(StoreError::from)?;
                 if action.starts_with("exec") && envelope.pointer("/payload/actor").and_then(Value::as_str)!=Some(&actor_id) {return refuse("The receipt belongs to another lead");}
                 return Ok(json!({"state":state,"result":null,"error":error}));
             }
@@ -647,7 +647,7 @@ impl ServerTools {
                         let admitted =
                             parent.derive_result("project-location", &["location"], &signature);
                         if let Some(saved) =
-                            crate::event_write::replay_request::<Box<serde_json::value::RawValue>>(
+                            crate::event_write::replay_request::<studio_json::OwnedRawJson>(
                                 tx,
                                 admitted.id(),
                                 admitted.signature(),
@@ -657,9 +657,9 @@ impl ServerTools {
                             )?
                         {
                             let _: crate::project_locations::LocationResult =
-                                serde_json::from_str(saved.reply.get())
+                                studio_json::from_str(saved.reply.as_str())
                                     .map_err(StoreError::from)?;
-                            return Ok(Err(serde_json::from_str(saved.reply.get())
+                            return Ok(Err(studio_json::from_str(saved.reply.as_str())
                                 .map_err(StoreError::from)?));
                         }
                         let Some((_, mut project)) = ProjectsRepository::get(tx, &project_id)?
@@ -688,10 +688,10 @@ impl ServerTools {
                         if let Some((old_server, body)) = old {
                             #[derive(Deserialize)]
                             struct SavedEnvelope {
-                                payload: Box<serde_json::value::RawValue>,
+                                payload: studio_json::OwnedRawJson,
                             }
                             let envelope: SavedEnvelope =
-                                serde_json::from_str(&body).map_err(|_| {
+                                studio_json::from_str(&body).map_err(|_| {
                                     Step::Refused("Stored cross-server envelope is invalid".into())
                                 })?;
                             if old_server != server_for_write
@@ -705,7 +705,7 @@ impl ServerTools {
                             {
                                 return refuse("This request ID has different content");
                             }
-                            return Ok(Ok(serde_json::from_str(envelope.payload.get())
+                            return Ok(Ok(studio_json::from_str(envelope.payload.as_str())
                                 .map_err(StoreError::from)?));
                         }
                         let busy = crate::server_outbox::project_action_pending(
@@ -922,7 +922,7 @@ impl ServerTools {
             _ => return refuse("Invalid command action"),
         };
         let key = key.to_owned();
-        let encoded = serde_json::to_vec(&crate::orchestration_wire::OrchestrationRequest {
+        let encoded = studio_json::to_vec(&crate::orchestration_wire::OrchestrationRequest {
             request_id: key.clone(),
             operation: Vec::new(),
             command: command.clone(),
@@ -1062,9 +1062,9 @@ impl ServerTools {
                 let parent=task_admission(tx,&key_owned,&actor_for_fetch)?;
                 let admitted=parent.derive_result("server-fetch",&[],&signature_for_claim);
                 let now=(crate::event_write::unix_time().map_err(|_|Step::Refused("The system clock is unavailable".into()))?*1000.0) as i64;
-                if let Some(saved)=crate::event_write::replay_request::<Box<serde_json::value::RawValue>>(tx,&key_owned,&signature_for_claim,now)?.or(crate::event_write::replay_request::<Box<serde_json::value::RawValue>>(tx,admitted.id(),&signature_for_claim,now)?) {
-                    let _: FetchReply = serde_json::from_str(saved.reply.get()).map_err(StoreError::from)?;
-                    return Ok(Err(serde_json::from_str(saved.reply.get()).map_err(StoreError::from)?));
+                if let Some(saved)=crate::event_write::replay_request::<studio_json::OwnedRawJson>(tx,&key_owned,&signature_for_claim,now)?.or(crate::event_write::replay_request::<studio_json::OwnedRawJson>(tx,admitted.id(),&signature_for_claim,now)?) {
+                    let _: FetchReply = studio_json::from_str(saved.reply.as_str()).map_err(StoreError::from)?;
+                    return Ok(Err(studio_json::from_str(saved.reply.as_str()).map_err(StoreError::from)?));
                 }
                 if let Some(prior)=RemoteOutbox::find::<FetchEntry>(tx,RemoteEffect::ServerFetch,&key_owned).map_err(StoreError::from)? {
                     if prior.signature!=signature_for_claim {return refuse("This request id has different content");}
@@ -1075,7 +1075,7 @@ impl ServerTools {
                     });
                 }
                 let export=ExportRequest{cwd:worker_cwd.map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value),branch:branch_for_claim,known:studio_runtime_schema::queue_command::Field::Value(known_sorted)};
-                RemoteOutbox::put(tx,RemoteEffect::ServerFetch,&server_owned,&key_owned,&signature_for_claim,OutboxStatus::Pending,None,FetchEntry{state:ServerFetchState::Preparing,export:Some(serde_json::to_string(&export).map_err(StoreError::from)?),admission:admitted},now).map_err(StoreError::from)?;
+                RemoteOutbox::put(tx,RemoteEffect::ServerFetch,&server_owned,&key_owned,&signature_for_claim,OutboxStatus::Pending,None,FetchEntry{state:ServerFetchState::Preparing,export:Some(studio_json::to_string(&export).map_err(StoreError::from)?),admission:admitted},now).map_err(StoreError::from)?;
                 Ok(Ok(FetchPayload::Preparing(export)))
             })
             .await?;
@@ -1099,7 +1099,7 @@ impl ServerTools {
         let ExchangeOutcome::Applied(reply) = outcome else {
             return Ok(receipt(&outcome, key));
         };
-        let metadata: crate::server_git::ExportReply = serde_json::from_str(reply.value.get())
+        let metadata: crate::server_git::ExportReply = studio_json::from_str(reply.value.as_str())
             .map_err(|_| Step::Refused("Invalid remote bundle metadata".into()))?;
         if metadata.branch != branch {
             return refuse("Invalid remote bundle branch");
@@ -1168,7 +1168,7 @@ impl ServerTools {
             let ExchangeOutcome::Applied(reply) = chunk_receipt else {
                 return Ok(receipt(&chunk_receipt, &chunk_key));
             };
-            let chunk: crate::server_git::ChunkReply = serde_json::from_str(reply.value.get())
+            let chunk: crate::server_git::ChunkReply = studio_json::from_str(reply.value.as_str())
                 .map_err(|_| Step::Refused("Invalid remote bundle chunk".into()))?;
             let data = base64::engine::general_purpose::STANDARD
                 .decode(&chunk.data)
@@ -1423,7 +1423,7 @@ impl ServerTools {
                 let Some(raw) = raw else {
                     return refuse("Unknown remote-parent link");
                 };
-                let record: Value = serde_json::from_str(&raw)
+                let record: Value = studio_json::from_str(&raw)
                     .map_err(|_| Step::Refused("The remote-parent link is invalid".into()))?;
                 record
                     .get("parentEpoch")
@@ -1670,7 +1670,7 @@ pub(crate) fn validate_exec(
     if payload.env.as_ref().is_some_and(|env| {
         env.iter()
             .any(|(key, value)| !valid_environment_name(key) || value.contains('\0'))
-            || serde_json::to_vec(env).map_or(true, |bytes| bytes.len() > 128 * 1024)
+            || studio_json::to_vec(env).map_or(true, |bytes| bytes.len() > 128 * 1024)
     }) {
         return Err(
             "Supply env additions with valid names and string values, at most 128 KiB".into(),

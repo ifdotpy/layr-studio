@@ -44,7 +44,7 @@ impl Fixture {
         let folder = tempfile::tempdir().expect("bridge folder");
         let directory = folder.path().join("browser");
         std::fs::create_dir_all(&directory).expect("browser folder");
-        let items: serde_json::Map<String, Value> =
+        let items: studio_json::Map<String, Value> =
             ids.iter().map(|id| ((*id).to_owned(), saved(id))).collect();
         std::fs::write(
             directory.join("requests.json"),

@@ -57,9 +57,9 @@ pub async fn peer_team_write(
     store.transaction_with(move |tx| {
         prepared.recheck(tx)?;
         let server = RuntimeStore::transaction_local_server_id(tx)?.ok_or(ProjectsError::Invalid("The local server ID is unavailable"))?;
-        let admitted = match begin_request::<Box<serde_json::value::RawValue>>(tx,RequestKey::new("peer-team", &[&server,"owner-api"], &request_id).raw(&key).operation(&["write"]), &signature,(now_seconds()*1000.0) as i64).map_err(StoreError::from)? {
+        let admitted = match begin_request::<studio_json::OwnedRawJson>(tx,RequestKey::new("peer-team", &[&server,"owner-api"], &request_id).raw(&key).operation(&["write"]), &signature,(now_seconds()*1000.0) as i64).map_err(StoreError::from)? {
             CallerAdmission::Fresh(admitted) => admitted,
-            CallerAdmission::Replay(reply) => return serde_json::from_str(reply.get()).map_err(StoreError::from).map_err(Into::into),
+            CallerAdmission::Replay(reply) => return studio_json::from_str(reply.as_str()).map_err(StoreError::from).map_err(Into::into),
         };
         let mut project = match load_project(tx, &path)? {
             Some(project) => project,
@@ -127,7 +127,7 @@ pub async fn peer_team_write(
         }
         for id in previous_ids.difference(&live_ids) { SyncDocumentsRepository::put_entity(tx, "peerTeam", id, json!({}), true)?; }
         refresh_project_rooms(tx, &path, &prepared)?;
-        let reply = serde_json::value::to_raw_value(&project).map_err(StoreError::from)?;
+        let reply = studio_json::to_raw_value(&project).map_err(StoreError::from)?;
         crate::event_write::settle_request(tx, &admitted, None, &reply).map_err(StoreError::from)?;
         Ok(project)
     }).await
@@ -260,7 +260,7 @@ pub async fn reorder(
     let total = groups.values().map(Vec::len).sum::<usize>();
     if groups.len() > 500
         || total > 10_000
-        || serde_json::to_string(groups).map_or(true, |value| value.len() > 5_000_000)
+        || studio_json::to_string(groups).map_or(true, |value| value.len() > 5_000_000)
         || groups.iter().any(|(key, items)| {
             key.chars().count() > 4096
                 || items.len() > 10_000
@@ -280,7 +280,7 @@ pub async fn reorder(
         .transaction_with(move |tx| -> Result<Value, ProjectsError> {
             let server = RuntimeStore::transaction_local_server_id(tx)?
                 .ok_or(ProjectsError::Invalid("The local server ID is unavailable"))?;
-            let admitted = match begin_request::<Box<serde_json::value::RawValue>>(
+            let admitted = match begin_request::<studio_json::OwnedRawJson>(
                 tx,
                 RequestKey::new("sidebar-order", &[&server, "owner-api"], &request_id)
                     .raw(&key)
@@ -292,7 +292,7 @@ pub async fn reorder(
             {
                 CallerAdmission::Fresh(admitted) => admitted,
                 CallerAdmission::Replay(reply) => {
-                    return serde_json::from_str(reply.get())
+                    return studio_json::from_str(reply.as_str())
                         .map_err(StoreError::from)
                         .map_err(Into::into);
                 }
@@ -320,7 +320,7 @@ pub async fn reorder(
             }
             let result = json!({"revision":revision.saturating_add(1),"groups":groups});
             ProjectsRepository::put_sidebar_order(tx, &result)?;
-            let reply = serde_json::value::to_raw_value(&result).map_err(StoreError::from)?;
+            let reply = studio_json::to_raw_value(&result).map_err(StoreError::from)?;
             crate::event_write::settle_request(tx, &admitted, None, &reply)
                 .map_err(StoreError::from)?;
             Ok(result)
@@ -365,9 +365,9 @@ mod sidebar_signature_tests {
 
     #[test]
     fn equivalent_requests_have_the_same_signature() {
-        let a: SidebarReorder = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
-        let b: SidebarReorder = serde_json::from_str(r#"{"groups":{"a":["1"],"b":["2"]},"expected_revision":1,"request_id":"r","action":"reorder"}"#).unwrap();
-        let changed: SidebarReorder = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":2,"groups":{"a":["1"],"b":["2"]}}"#).unwrap();
+        let a: SidebarReorder = studio_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
+        let b: SidebarReorder = studio_json::from_str(r#"{"groups":{"a":["1"],"b":["2"]},"expected_revision":1,"request_id":"r","action":"reorder"}"#).unwrap();
+        let changed: SidebarReorder = studio_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":2,"groups":{"a":["1"],"b":["2"]}}"#).unwrap();
         assert_eq!(
             sidebar_signature(&a).unwrap(),
             sidebar_signature(&b).unwrap()
@@ -380,7 +380,7 @@ mod sidebar_signature_tests {
 
     #[test]
     fn peer_team_signature_keeps_legacy_bytes() {
-        let body = serde_json::from_str(r#"{"action":"delete","path":"/雪","expected_revision":1,"request_id":"r","team_id":"a"}"#).unwrap();
+        let body = studio_json::from_str(r#"{"action":"delete","path":"/雪","expected_revision":1,"request_id":"r","team_id":"a"}"#).unwrap();
         assert_eq!(
             peer_team_signature(&body).unwrap(),
             "bc5059bb0ff81794b0b058e3d29d06f81fff2ad19c7a4cca8f33e1c2b7d77c63"
@@ -389,7 +389,7 @@ mod sidebar_signature_tests {
 
     #[test]
     fn sidebar_signature_keeps_legacy_bytes() {
-        let body = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
+        let body = studio_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
         assert_eq!(
             sidebar_signature(&body).unwrap(),
             "b253b17fedf5317dd24bcccca6f1d6eb2166326039b3f14fa442c55de2a17f14"

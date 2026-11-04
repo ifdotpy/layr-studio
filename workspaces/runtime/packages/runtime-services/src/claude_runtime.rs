@@ -8,7 +8,7 @@ use crate::claude_controls::{
         ControlSession,
     },
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_providers::Method;
 
@@ -77,7 +77,7 @@ impl ControlSession for RetainedClaudeSession {
                 return Err(ControlError::Request);
             }
             let params = call.params();
-            if serde_json::to_vec(&params)
+            if studio_json::to_vec(&params)
                 .map_err(|_| ControlError::Request)?
                 .len()
                 > MAX_CONTROL_BYTES
@@ -116,7 +116,7 @@ fn validate_receipt(
     if receipt.identity != *expected || current != &expected.binding {
         return Err(ControlError::Unknown);
     }
-    if serde_json::to_vec(&receipt.result)
+    if studio_json::to_vec(&receipt.result)
         .map_err(|_| ControlError::Unknown)?
         .len()
         > MAX_CONTROL_BYTES

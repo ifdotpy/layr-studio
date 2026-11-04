@@ -171,9 +171,9 @@ impl UpstreamFetch for CountingFetch {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn version_parse_and_comparison_match_the_real_python_functions() {
-    let cases: Vec<[String; 2]> = serde_json::from_str(CASES).expect("version corpus");
+    let cases: Vec<[String; 2]> = studio_json::from_str(CASES).expect("version corpus");
     let expected: Vec<[bool; 3]> =
-        serde_json::from_str(include_str!("../../tests/provider_versions/expected.json"))
+        studio_json::from_str(include_str!("../../tests/provider_versions/expected.json"))
             .expect("frozen version comparisons");
     let actual = cases
         .iter()
@@ -387,7 +387,7 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         first.clone(),
         upstream_warning.clone(),
     ];
-    let expected: Value = serde_json::from_str(include_str!(
+    let expected: Value = studio_json::from_str(include_str!(
         "../../tests/provider_versions/projection.json"
     ))
     .expect("frozen provider projection");
@@ -466,7 +466,7 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         .await
         .expect("connected notices commit");
     let written = read_notice_state().expect("workspace entity created");
-    let written_payload: Value = serde_json::from_str(&written.1).expect("sync entity JSON");
+    let written_payload: Value = studio_json::from_str(&written.1).expect("sync entity JSON");
     assert_eq!(
         written_payload["value"]["nativeNotices"]
             .as_array()
@@ -550,7 +550,7 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         |row| Ok((row.get(0)?,row.get(1)?)),
     ).expect("changed workspace row");
     assert!(changed_row.0 > written.0);
-    let changed_payload: Value = serde_json::from_str(&changed_row.1).expect("changed entity JSON");
+    let changed_payload: Value = studio_json::from_str(&changed_row.1).expect("changed entity JSON");
     assert_eq!(
         changed_payload["value"]["nativeNotices"][0],
         disconnected_warning
@@ -799,7 +799,7 @@ fn release_cache_uses_typed_fields_and_preserves_defaults() {
     assert_eq!(entry.fetched_at, Some(42.0));
     assert_eq!(entry.last_attempt_at, 0.0);
     save_cache(&path, &cache).expect("save cache");
-    let saved: Value = serde_json::from_slice(&std::fs::read(&path).expect("read saved cache"))
+    let saved: Value = studio_json::from_slice(&std::fs::read(&path).expect("read saved cache"))
         .expect("valid JSON");
     assert_eq!(saved["version"], 1);
     assert_eq!(saved["packages"]["@openai/codex"]["lastAttemptAt"], 0.0);
@@ -819,23 +819,23 @@ fn release_cache_uses_typed_fields_and_preserves_defaults() {
 #[test]
 fn registry_document_rejects_malformed_known_fields() {
     let JsonObject(document): JsonObject<RegistryDocument> =
-        serde_json::from_str(r#"{"dist-tags":{"latest":"0.154.0"}}"#)
+        studio_json::from_str(r#"{"dist-tags":{"latest":"0.154.0"}}"#)
             .expect("valid registry document");
     assert_eq!(
         document.dist_tags.and_then(|tags| tags.0.latest).as_deref(),
         Some("0.154.0")
     );
     let JsonObject(document): JsonObject<RegistryDocument> =
-        serde_json::from_str("{}").expect("missing tags are allowed");
+        studio_json::from_str("{}").expect("missing tags are allowed");
     assert!(document.dist_tags.is_none());
     let JsonObject(document): JsonObject<RegistryDocument> =
-        serde_json::from_str(r#"{"dist-tags":null}"#).expect("null tags are allowed");
+        studio_json::from_str(r#"{"dist-tags":null}"#).expect("null tags are allowed");
     assert!(document.dist_tags.is_none());
     let JsonObject(document): JsonObject<RegistryDocument> =
-        serde_json::from_str(r#"{"dist-tags":{"latest":null}}"#).expect("null latest is allowed");
+        studio_json::from_str(r#"{"dist-tags":{"latest":null}}"#).expect("null latest is allowed");
     assert!(document.dist_tags.expect("tags exist").0.latest.is_none());
     assert!(
-        serde_json::from_str::<JsonObject<RegistryDocument>>(r#"{"dist-tags":{"latest":42}}"#)
+        studio_json::from_str::<JsonObject<RegistryDocument>>(r#"{"dist-tags":{"latest":42}}"#)
             .is_err()
     );
 }
@@ -843,10 +843,10 @@ fn registry_document_rejects_malformed_known_fields() {
 #[test]
 fn release_documents_reject_positional_arrays() {
     assert!(
-        serde_json::from_str::<JsonObject<RegistryDocument>>(r#"{"dist-tags":["0.154.0"]}"#)
+        studio_json::from_str::<JsonObject<RegistryDocument>>(r#"{"dist-tags":["0.154.0"]}"#)
             .is_err()
     );
-    assert!(serde_json::from_str::<JsonObject<RegistryDocument>>(r#"[["0.154.0"]]"#).is_err());
+    assert!(studio_json::from_str::<JsonObject<RegistryDocument>>(r#"[["0.154.0"]]"#).is_err());
     let dir = isolated_tempdir();
     let path = dir.path().join("cache.json");
     for text in [

@@ -1,5 +1,5 @@
 //! Liveness detection must never change a chat or its pending input.
-use serde_json::json;
+use studio_json::json;
 use std::sync::Arc;
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository};
 
@@ -227,7 +227,7 @@ async fn partial_schedule_observations_and_session_dedup_keep_legacy_behavior() 
         studio_runtime_services::liveness::record_session_start_failure(tx, "default", "unchanged", 1.0)?;
         studio_runtime_services::liveness::record_session_start_failure(tx, "default", "unchanged", 9.0)?;
         let failure: String = tx.query_row("SELECT start_failure FROM runtime_account_state WHERE account='default'", [], |r| r.get(0))?;
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&failure).unwrap()["at"], 1.0);
+        assert_eq!(studio_json::from_str::<studio_json::Value>(&failure).unwrap()["at"], 1.0);
         Ok::<_, studio_runtime_store::StoreError>(())
     }).await.unwrap();
     let before = stored_state(&store).await;

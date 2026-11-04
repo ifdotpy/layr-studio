@@ -1,5 +1,5 @@
 use futures_util::FutureExt;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -46,7 +46,7 @@ fn agent(store: &RuntimeStore) -> Value {
             |row| row.get(0),
         )
         .expect("agent");
-    serde_json::from_str(&raw).expect("record")
+    studio_json::from_str(&raw).expect("record")
 }
 fn row_count(store: &RuntimeStore, table: &str) -> i64 {
     store
@@ -230,14 +230,14 @@ async fn title_admission_owns_one_root_and_unresolved_outbox() {
         .await
         .expect("admit");
     assert!(start);
-    let wire = serde_json::to_string(&pending).expect("serialize pending receipt");
+    let wire = studio_json::to_string(&pending).expect("serialize pending receipt");
     assert_eq!(
-        serde_json::from_str::<studio_runtime_services::title_generation::TitleReply>(&wire)
+        studio_json::from_str::<studio_runtime_services::title_generation::TitleReply>(&wire)
             .expect("decode pending receipt"),
         pending
     );
     assert_eq!(
-        serde_json::from_str::<Value>(&wire).expect("parse pending receipt"),
+        studio_json::from_str::<Value>(&wire).expect("parse pending receipt"),
         json!({"id":"title-agent","request_id":id,"status":"pending"})
     );
     let job = agent(&store)["titleJob"].clone();
@@ -389,7 +389,7 @@ async fn not_sent_retry_preserves_root_and_exact_reply_after_later_changes() {
         .expect("replay");
     assert!(!start);
     assert_eq!(
-        serde_json::from_str::<Value>(&serde_json::to_string(&replayed).expect("serialize replay"))
+        studio_json::from_str::<Value>(&studio_json::to_string(&replayed).expect("serialize replay"))
             .expect("parse replay"),
         expected
     );
@@ -659,7 +659,7 @@ async fn late_name_epoch_or_deletion_changes_discard_without_renaming() {
                     [],
                     |row| row.get(0),
                 )?;
-                let mut record: Value = serde_json::from_str(&raw)?;
+                let mut record: Value = studio_json::from_str(&raw)?;
                 record
                     .as_object_mut()
                     .expect("record")

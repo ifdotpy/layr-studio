@@ -41,7 +41,7 @@
 use crate::principal::CommandClass;
 use rusqlite::Transaction;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{future::Future, pin::Pin};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::WorkItemsRepository;
@@ -149,7 +149,7 @@ impl Call {
         if !args.is_object() || args.to_string().len() > MAX_CALL_BYTES {
             return Err(Error::Invalid("Invalid or oversized tool arguments"));
         }
-        let tool = serde_json::from_value(json!(tool))
+        let tool = studio_json::from_value(json!(tool))
             .map_err(|_| Error::Invalid("Unknown managed host tool"))?;
         validate_request_id(request_id)?;
         Ok(Self {
@@ -358,7 +358,7 @@ impl WakeSignal {
 
 #[derive(Clone, Debug)]
 pub(crate) struct OperationResult {
-    pub(crate) value: Box<serde_json::value::RawValue>,
+    pub(crate) value: studio_json::OwnedRawJson,
     pub(crate) signals: Vec<WakeSignal>,
     pub(crate) output_expires_at: Option<f64>,
     pub(crate) handle: bool,
@@ -368,10 +368,10 @@ pub(crate) struct OperationResult {
 impl OperationResult {
     pub(crate) fn reply<T: serde::Serialize>(reply: &T) -> Self {
         // Replies are derived Serialize types or JSON values with string-keyed maps.
-        Self::raw(serde_json::value::to_raw_value(reply).expect("derived reply serializes"))
+        Self::raw(studio_json::to_raw_value(reply).expect("derived reply serializes"))
     }
 
-    pub(crate) fn raw(value: Box<serde_json::value::RawValue>) -> Self {
+    pub(crate) fn raw(value: studio_json::OwnedRawJson) -> Self {
         Self {
             value,
             signals: Vec::new(),
@@ -383,7 +383,7 @@ impl OperationResult {
 
     #[cfg(test)]
     pub(crate) fn test_value(&self) -> Value {
-        serde_json::from_str(self.value.get()).expect("valid result JSON")
+        studio_json::from_str(self.value.as_str()).expect("valid result JSON")
     }
 }
 
@@ -419,7 +419,7 @@ impl DispatchedOperation {
 /// returning this object. Its `signals` are released only after commit.
 #[derive(Clone, Debug)]
 pub(crate) struct Staged {
-    pub(crate) value: Box<serde_json::value::RawValue>,
+    pub(crate) value: studio_json::OwnedRawJson,
     pub(crate) signals: Vec<WakeSignal>,
     pub(crate) output_expires_at: Option<f64>,
     pub(crate) handle: bool,
@@ -897,7 +897,7 @@ fn spawn(
 /// Match the public child projection returned by Python `spawn_agents`; never
 /// return a full stored agent record to the model.
 fn project_child(record: &Value, task_id: Option<&str>) -> Value {
-    let mut output = serde_json::Map::new();
+    let mut output = studio_json::Map::new();
     for key in [
         "id",
         "name",
@@ -967,7 +967,7 @@ fn project_child(record: &Value, task_id: Option<&str>) -> Value {
     Value::Object(output)
 }
 
-fn copy_if(record: &Value, output: &mut serde_json::Map<String, Value>, to: &str, from: &str) {
+fn copy_if(record: &Value, output: &mut studio_json::Map<String, Value>, to: &str, from: &str) {
     if let Some(value) = record.get(from) {
         output.insert(to.to_owned(), value.clone());
     }
@@ -1188,7 +1188,7 @@ mod tests {
     #[test]
     fn spawn_batch_bound_matches_the_published_tool_schema() {
         let resources: Value =
-            serde_json::from_str(include_str!("account_worker/preparation-resources.json"))
+            studio_json::from_str(include_str!("account_worker/preparation-resources.json"))
                 .unwrap();
         let mut published = Vec::new();
         let mut stack = vec![&resources];

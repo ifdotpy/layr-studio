@@ -146,7 +146,7 @@ pub fn authorize(
                 .extra
                 .get("remoteWorker")
                 .and_then(|remote| remote.get("server"))
-                .and_then(serde_json::Value::as_str)
+                .and_then(studio_json::Value::as_str)
                 == Some(server.as_str());
             linked.then_some(()).ok_or(CommandError::Forbidden)
         }
@@ -214,7 +214,7 @@ pub fn begin(
         .map_err(RequestResultError::from)?
     };
     let signature = sha256_hex(
-        &serde_json::to_vec(&(&who, &request.command)).map_err(RequestResultError::from)?,
+        &studio_json::to_vec(&(&who, &request.command)).map_err(RequestResultError::from)?,
     );
     // An in-process identity is issued at `now_ms`, so the retention floor of stored
     // results does not apply to it.
@@ -475,7 +475,7 @@ pub fn response(
                 collection,
                 id,
                 seq,
-                payload: serde_json::from_slice(&payload).ok()?,
+                payload: studio_json::from_slice(&payload).ok()?,
             })
         })
         .collect();
@@ -497,7 +497,7 @@ pub struct Executed {
     /// The command ran before; nothing changed now.
     pub replayed: bool,
     /// The reply of the lifecycle decision of a stop (`{"stopped": [...]}`).
-    pub reply: serde_json::Value,
+    pub reply: studio_json::Value,
 }
 
 /// Write the text of a withdrawn message as a server draft of the chat. The draft stream
@@ -510,7 +510,7 @@ pub(crate) fn server_draft(
     now_ms: i64,
 ) -> Result<(), CommandError> {
     let id = format!("server:withdraw:{chat}");
-    let payload = serde_json::json!({
+    let payload = studio_json::json!({
         "id": id, "session": chat, "device": "server",
         "text": text, "updated": now_ms, "seen": {},
     });
@@ -557,7 +557,7 @@ fn run_stop(
     action: &Action,
     now: f64,
     ports: Option<&dyn LifecyclePorts>,
-) -> Result<serde_json::Value, CommandError> {
+) -> Result<studio_json::Value, CommandError> {
     Ok(match ports {
         Some(ports) => {
             crate::agent_lifecycle_runtime::execute_in_transaction(tx, action, now, ports)?
@@ -592,12 +592,12 @@ pub fn execute_sync(
             return Ok(Executed {
                 reference,
                 replayed: true,
-                reply: serde_json::json!({"stopped":[request.command.target()]}),
+                reply: studio_json::json!({"stopped":[request.command.target()]}),
             });
         }
         Start::Fresh(begun) => begun,
     };
-    let mut reply = serde_json::Value::Null;
+    let mut reply = studio_json::Value::Null;
     let reference = match &request.command {
         Command::Withdraw { target, body } => {
             let input = read_withdraw(tx, target.as_str(), body.message.as_str())?;

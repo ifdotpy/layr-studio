@@ -9,9 +9,9 @@
 //! cause `diskFull`. The full state ends at or above `DISK_FULL_EXIT_FREE_BYTES`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -489,7 +489,7 @@ async fn hold_agent_turn_with_gate(
             let context = agent
                 .filter(|agent| agent.epoch == epoch)
                 .map(|agent| {
-                    serde_json::from_value::<TurnStorageContext>(agent.value())
+                    studio_json::from_value::<TurnStorageContext>(agent.value())
                         .map_err(studio_runtime_store::StoreError::from)
                 })
                 .transpose()?;
@@ -513,7 +513,7 @@ async fn hold_agent_turn_with_gate(
                 return Ok(true);
             };
             if agent.epoch != epoch
-                || serde_json::from_value::<TurnStorageContext>(agent.value())? != context
+                || studio_json::from_value::<TurnStorageContext>(agent.value())? != context
             {
                 return Ok(true);
             }
@@ -643,14 +643,14 @@ mod tests {
             WORKER_STORAGE_MIN_FREE_BYTES
         );
         assert_eq!(
-            serde_json::from_value::<StorageReport>(
-                serde_json::to_value(&report).expect("serialize")
+            studio_json::from_value::<StorageReport>(
+                studio_json::to_value(&report).expect("serialize")
             )
             .expect("typed report"),
             report
         );
         assert!(
-            serde_json::from_value::<StorageReport>(json!({"filesystems":[], "unknown":true}))
+            studio_json::from_value::<StorageReport>(json!({"filesystems":[], "unknown":true}))
                 .is_err()
         );
     }
@@ -906,11 +906,11 @@ mod tests {
     fn desktop_status_ignores_healthy_free_byte_changes() {
         let free = Arc::new(AtomicU64::new(DISK_SPACE_WARNING_FREE_BYTES));
         let gate = gate(&free);
-        let first = serde_json::to_vec(&gate.status()).expect("desktop disk status");
+        let first = studio_json::to_vec(&gate.status()).expect("desktop disk status");
         free.store(DISK_SPACE_WARNING_FREE_BYTES + 1, Ordering::SeqCst);
         // Expire only the injected sampler's cache; no wall-clock delay or disk writes.
         gate.lock().sampled_at = None;
-        let second = serde_json::to_vec(&gate.status()).expect("desktop disk status");
+        let second = studio_json::to_vec(&gate.status()).expect("desktop disk status");
         assert_eq!(
             first, second,
             "healthy disk writes must not change served identity"

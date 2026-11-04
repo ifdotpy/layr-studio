@@ -244,9 +244,9 @@ const MAX_TOKEN_RATE_WATERMARKS: usize = MAX_PROJECTED_AGENTS * 2;
 const MAX_PENDING_RESPONSE_DURATION_ENTRIES: usize = 1024;
 
 impl TokenRateSnapshot {
-    pub fn from_value(value: serde_json::Value) -> Result<Self, TokenRateError> {
+    pub fn from_value(value: studio_json::Value) -> Result<Self, TokenRateError> {
         let snapshot: Self =
-            serde_json::from_value(value).map_err(|_| TokenRateError::InvalidSnapshot)?;
+            studio_json::from_value(value).map_err(|_| TokenRateError::InvalidSnapshot)?;
         snapshot.validated()
     }
 
@@ -275,8 +275,8 @@ impl TokenRateSnapshot {
     }
 
     #[must_use]
-    pub fn to_value(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({"records":[]}))
+    pub fn to_value(&self) -> studio_json::Value {
+        studio_json::to_value(self).unwrap_or_else(|_| studio_json::json!({"records":[]}))
     }
 
     #[must_use]
@@ -298,9 +298,9 @@ impl TokenRateSnapshot {
     pub fn wire(&self) -> Arc<TokenRateWire> {
         Arc::clone(self.wire.0.get_or_init(|| {
             let text =
-                |result: serde_json::Result<String>| result.unwrap_or_else(|_| "[]".to_owned());
+                |result: studio_json::Result<String>| result.unwrap_or_else(|_| "[]".to_owned());
             Arc::new(TokenRateWire {
-                records: text(serde_json::to_string(&self.records)),
+                records: text(studio_json::to_string(&self.records)),
             })
         }))
     }
@@ -395,7 +395,7 @@ impl TokenRateHub {
     }
 
     /// Publish one already validated producer snapshot; identical updates are coalesced.
-    pub fn publish(&self, value: serde_json::Value) -> Result<bool, TokenRateError> {
+    pub fn publish(&self, value: studio_json::Value) -> Result<bool, TokenRateError> {
         Ok(self
             .publication
             .publish(TokenRateSnapshot::from_value(value)?))
@@ -717,7 +717,7 @@ fn agent_turn(observation: &NotificationObservation) -> Option<&str> {
         .and_then(|agent| agent["turnId"].as_str())
 }
 
-fn observed_turn<'a>(params: &'a serde_json::Value, fallback: Option<&'a str>) -> Option<String> {
+fn observed_turn<'a>(params: &'a studio_json::Value, fallback: Option<&'a str>) -> Option<String> {
     params["turnId"]
         .as_str()
         .or_else(|| params["turn"]["id"].as_str())
@@ -939,7 +939,7 @@ mod tests {
     use crate::notification_dispatch::{
         NotificationObservation, NotificationPostCommit, ProviderDeliveryIdentity, SharedJson,
     };
-    use serde_json::json;
+    use studio_json::json;
 
     /// Every subscriber of one published snapshot shares one serialization, and it equals the
     /// snapshot's own JSON members.
@@ -955,7 +955,7 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&a, &b));
         let expected = hub.snapshot().to_value();
         assert_eq!(
-            serde_json::from_str::<Vec<super::TokenRateRecord>>(&a.records).expect("records"),
+            studio_json::from_str::<Vec<super::TokenRateRecord>>(&a.records).expect("records"),
             hub.snapshot().records
         );
         assert_eq!(expected["records"].as_array().expect("records").len(), 1);
@@ -976,11 +976,11 @@ mod tests {
         )
         .expect("current");
         assert_eq!(
-            serde_json::to_value(current.delta_since(&old)).expect("delta"),
+            studio_json::to_value(current.delta_since(&old)).expect("delta"),
             json!({"records":[moved, added],"removed":["z"]})
         );
         assert_eq!(
-            serde_json::to_value(current.delta_since(&current)).expect("unchanged"),
+            studio_json::to_value(current.delta_since(&current)).expect("unchanged"),
             json!({"records":[],"removed":[]})
         );
         assert!(
@@ -1013,13 +1013,13 @@ mod tests {
         })
     }
 
-    fn response_usage(turn: &str, response: &str, output: u64) -> serde_json::Value {
+    fn response_usage(turn: &str, response: &str, output: u64) -> studio_json::Value {
         json!({"turnId":turn,"responseId":response,"usageSource":"claudeResponse",
             "requestUsage":{"inputTokens":0,"outputTokens":output},
             "responseOutputTokens":output})
     }
 
-    fn usage_at(projector: &mut RateProjector, cursor: u64, at: f64, params: serde_json::Value) {
+    fn usage_at(projector: &mut RateProjector, cursor: u64, at: f64, params: studio_json::Value) {
         let mut effect = usage_effect("agent", "provider", 1, cursor, "turn");
         if let NotificationPostCommit::TokenRateUsage(observation) = &mut effect {
             observation.agent = Some(SharedJson::new(
@@ -1168,11 +1168,11 @@ mod tests {
         assert_eq!(projector.snapshot().records[0].output_tokens.0, 100.0);
     }
 
-    fn typed_usage(usage: studio_runtime_schema::usage::UsageObservation) -> serde_json::Value {
+    fn typed_usage(usage: studio_runtime_schema::usage::UsageObservation) -> studio_json::Value {
         json!({"studioUsage":usage})
     }
 
-    fn typed_response(turn: &str, response: &str, output: u64) -> serde_json::Value {
+    fn typed_response(turn: &str, response: &str, output: u64) -> studio_json::Value {
         typed_usage(studio_runtime_schema::usage::UsageObservation::Response {
             response_id: response.into(),
             turn_id: Some(turn.into()),
@@ -1476,7 +1476,7 @@ mod tests {
             ..super::ProjectedAgent::default()
         };
 
-        super::project_usage_observation(&mut state, serde_json::from_value(json!({"kind":"response","responseId":"response","turnId":"turn","model":"claude","evidence":"live","tokens":{"uncachedInput":0,"cacheReadInput":0,"cacheWriteInput":0,"output":10}})).expect("typed response"), 8.0);
+        super::project_usage_observation(&mut state, studio_json::from_value(json!({"kind":"response","responseId":"response","turnId":"turn","model":"claude","evidence":"live","tokens":{"uncachedInput":0,"cacheReadInput":0,"cacheWriteInput":0,"output":10}})).expect("typed response"), 8.0);
 
         assert_eq!(state.actual, 10.0);
         assert_eq!(state.pending, 20.0);
@@ -1694,7 +1694,7 @@ mod tests {
         agent: &str,
         base: u64,
     ) -> Vec<(NotificationPostCommit, u8)> {
-        let observation = |cursor: u64, method: &str, params: serde_json::Value| {
+        let observation = |cursor: u64, method: &str, params: studio_json::Value| {
             NotificationObservation {
                 agent: Some(SharedJson::new(
                     json!({"id":agent,"rootId":"root","turnId":"turn","inFlight":true,"provider":provider.key()}),

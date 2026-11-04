@@ -35,7 +35,7 @@ pub fn next_cursor(cursor: &Cursor) -> Result<Option<&str>, InvalidCursor> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn cursor_accepts_only_null_or_nonempty_strings() {
@@ -49,8 +49,8 @@ mod tests {
         ] {
             let cursor: Cursor = serde::Deserialize::deserialize(&value).expect("cursor shape");
             match value {
-                serde_json::Value::Null => assert!(matches!(next_cursor(&cursor), Ok(None))),
-                serde_json::Value::String(ref s) if !s.is_empty() => {
+                studio_json::Value::Null => assert!(matches!(next_cursor(&cursor), Ok(None))),
+                studio_json::Value::String(ref s) if !s.is_empty() => {
                     assert_eq!(next_cursor(&cursor).expect("valid"), Some(s.as_str()));
                 }
                 Value::Bool(_)

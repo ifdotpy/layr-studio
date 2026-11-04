@@ -3,7 +3,7 @@
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::RuntimeStore;
 
 use super::runtime_dispatch::{
@@ -243,7 +243,7 @@ impl MonitorCreatePort for ManagedMonitorCreateAdapter {
         args: &'a Value,
         request_id: &'a str,
         now: f64,
-    ) -> BoxFuture<'a, Result<Box<serde_json::value::RawValue>, Error>> {
+    ) -> BoxFuture<'a, Result<studio_json::OwnedRawJson, Error>> {
         Box::pin(async move {
             let wait_ms = match args.get("wait_timeout_ms") {
                 None => 0,
@@ -402,7 +402,7 @@ impl ManagedMonitorCreateAdapter {
         actor: &Actor,
         record: studio_runtime_store::MonitorRecord,
         deadline: Option<tokio::time::Instant>,
-    ) -> Result<Box<serde_json::value::RawValue>, Error> {
+    ) -> Result<studio_json::OwnedRawJson, Error> {
         if deadline.is_none() {
             return monitor_reply(&record);
         }
@@ -428,8 +428,8 @@ impl ManagedMonitorCreateAdapter {
     }
 }
 
-fn monitor_reply(value: &impl serde::Serialize) -> Result<Box<serde_json::value::RawValue>, Error> {
-    serde_json::value::to_raw_value(value)
+fn monitor_reply(value: &impl serde::Serialize) -> Result<studio_json::OwnedRawJson, Error> {
+    studio_json::to_raw_value(value)
         .map_err(|_| Error::Invalid("Monitor serialization failed"))
 }
 

@@ -25,7 +25,7 @@
 use crate::account_driver::AccountDriver;
 use crate::continuation::ContinuationError;
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -487,7 +487,7 @@ impl StartGate {
 
     /// The gate state for diagnostics: admitted slots, queued starts and the
     /// latest admits, each with its age in milliseconds (unit: ms).
-    pub fn diagnostics(&self) -> serde_json::Value {
+    pub fn diagnostics(&self) -> studio_json::Value {
         let state = self.lock();
         let now = Instant::now();
         let age_ms = |since: Instant| {
@@ -748,7 +748,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_wait_reaches_sync_and_stale_epoch_cannot_replace_it() {
-        use serde_json::json;
+        use studio_json::json;
         use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
         let dir = tempfile::tempdir().expect("state directory");
         let store = RuntimeStore::open(Some(dir.path())).await.expect("store");
@@ -1073,7 +1073,7 @@ mod tests {
     #[test]
     fn provider_identity_throttle_rejects_unknown_even_with_stored_limits() {
         use super::REGISTRY_FIELD;
-        use serde_json::{Value, json};
+        use studio_json::{Value, json};
         let stored = throttle(2, 5, 3);
         for provider in [
             None,
@@ -1097,7 +1097,7 @@ mod tests {
     #[tokio::test]
     async fn provider_identity_gate_refuses_missing_account_without_admission() {
         use super::{AccountDriver, ContinuationError, StartGate, StartSources};
-        use serde_json::json;
+        use studio_json::json;
         use std::sync::Arc;
         use studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION;
         use studio_runtime_store::RuntimeStore;
@@ -1144,7 +1144,7 @@ mod tests {
 
     impl AdmissionFixture {
         async fn new(burst: u64, pause_seconds: u64, max_running: u64) -> Self {
-            use serde_json::json;
+            use studio_json::json;
             use studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION;
             let root = tempfile::tempdir().expect("state directory");
             let store = Arc::new(
@@ -1288,7 +1288,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn diagnostics_reports_slots_waits_and_admit_outcomes_with_ages() {
-        use serde_json::json;
+        use studio_json::json;
         let gate = Arc::new(StartGate::default());
         {
             let mut state = gate.lock();
@@ -1326,7 +1326,7 @@ mod tests {
 
     #[test]
     fn public_throttle_matches_legacy_for_extensions_and_numeric_types() {
-        use serde_json::json;
+        use studio_json::json;
         for row in [
             json!({"provider":"codex","startThrottle":{"burst":2,"pauseSeconds":5,"maxRunningTurns":3,"vendor":true}}),
             json!({"provider":"codex","startThrottle":{"burst":2.0,"pauseSeconds":5,"maxRunningTurns":3}}),
@@ -1344,7 +1344,7 @@ mod tests {
 
     #[test]
     fn stored_throttles_outside_the_bounds_read_as_the_provider_defaults() {
-        use serde_json::json;
+        use studio_json::json;
         use studio_runtime_schema::ProviderKind;
         let codex = StartThrottle::provider_default(ProviderKind::Codex);
         let claude = StartThrottle::provider_default(ProviderKind::Claude);

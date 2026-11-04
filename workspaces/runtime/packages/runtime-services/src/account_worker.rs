@@ -9,7 +9,7 @@ use crate::{
     scheduler::{self, TurnIntent, TurnStart},
 };
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     future::Future,
@@ -3234,7 +3234,7 @@ impl Worker {
                         .optional()?;
                     if saved
                         .as_deref()
-                        .map(serde_json::from_str::<Value>)
+                        .map(studio_json::from_str::<Value>)
                         .transpose()
                         .map_err(|_| WorkerError::StaleVmActor)?
                         .as_ref()

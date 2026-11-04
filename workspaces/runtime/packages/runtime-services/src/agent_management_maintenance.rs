@@ -3,7 +3,7 @@
 use crate::agent_management::{ManagementError, ManagementSnapshot, Records};
 #[cfg(unix)]
 use crate::linux_vm_guest::GuestRpc;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 #[cfg(unix)]
 use std::time::Duration;
 use std::{

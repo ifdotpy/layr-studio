@@ -54,7 +54,7 @@ async fn live_limits_journal_pins_both_providers_and_suppresses_replay() {
                     .1
                     .as_ref()
                     .expect("account notification creates an effect");
-                let value = serde_json::to_value(effect).unwrap();
+                let value = studio_json::to_value(effect).unwrap();
                 assert_eq!(
                     value["LimitsUpdated"]["scope"],
                     json!({"account":"default","connection":"connection","generation":7})

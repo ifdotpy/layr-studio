@@ -8,7 +8,7 @@
 
 use crate::event_write;
 use rusqlite::{OptionalExtension, Transaction};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::queue_command::Field;
@@ -542,7 +542,7 @@ pub(crate) async fn spawn_agents(
         .await?;
     for (index, raw_spec) in specs.iter().enumerate() {
         let spec: studio_runtime_schema::creation_intent::CreationIntent =
-            serde_json::from_value(raw_spec.clone()).map_err(|_| {
+            studio_json::from_value(raw_spec.clone()).map_err(|_| {
                 crate::managed_host_tools::Error::Invalid("Invalid worker creation settings")
             })?;
         let profile =
@@ -1186,7 +1186,7 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
             let Some((run_id, raw_run)) = run else {
                 return Ok(());
             };
-            let Ok(run) = serde_json::from_str::<Value>(&raw_run) else {
+            let Ok(run) = studio_json::from_str::<Value>(&raw_run) else {
                 return Ok(());
             };
             if active_turn.is_none()
@@ -1208,7 +1208,7 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
                     |row| row.get(0),
                 )
                 .optional()?;
-            let previous: Option<Value> = previous.and_then(|raw| serde_json::from_str(&raw).ok());
+            let previous: Option<Value> = previous.and_then(|raw| studio_json::from_str(&raw).ok());
             let effect_run = previous
                 .as_ref()
                 .and_then(|value| value.get("runId"))
@@ -1297,7 +1297,7 @@ fn can_delegate(
 }
 
 fn project_child(record: &Value, task_id: Option<&str>, worktree: bool) -> Value {
-    let mut output = serde_json::Map::new();
+    let mut output = studio_json::Map::new();
     for field in [
         "id",
         "name",
@@ -1741,7 +1741,7 @@ mod vm_review_identity_tests {
         Error, WorkerBase, host_project_cwd, resolve_child_base, validate_vm_parent_workspace,
         vm_review_guest_ids,
     };
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn worker_recheck_refusal_reports_its_cause() {

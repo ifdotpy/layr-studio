@@ -1,6 +1,6 @@
 //! Every decided command outcome has one durable owner wake, across restarts.
 use crate::monitor_fixtures as fixtures;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     monitor_policy::{Operation, ReattachProof},
     monitor_runtime,
@@ -43,7 +43,7 @@ async fn fixture() -> (tempfile::TempDir, RuntimeStore, String, Operation) {
     let mut case = fixtures::corpus(root.path()).remove(0);
     case["actor"]["status"] = json!("waiting_on_monitor");
     let id = case["before"]["id"].as_str().expect("id").to_owned();
-    let operation = serde_json::from_value(case["before"]["operation"].clone()).expect("operation");
+    let operation = studio_json::from_value(case["before"]["operation"].clone()).expect("operation");
     let store = fixtures::store(root.path(), "wake").await;
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     (root, store, id, operation)
@@ -234,7 +234,7 @@ fn agent_status_consumers_match_the_runtime_store_owner() {
     use std::collections::BTreeSet;
     let owned: BTreeSet<_> = AgentStatus::VALUES.iter().copied().collect();
     let api: Value =
-        serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
     fn check_enums(value: &Value, owned: &BTreeSet<&str>, count: &mut usize) {
         match value {
             Value::Object(object) => {
@@ -339,7 +339,7 @@ async fn answered_approval_retires_card_and_replays_without_another_start() {
         store.transaction(move |tx| {
             tx.execute("UPDATE runtime_monitors SET record=json_remove(json_set(record,'$.status','approval'),'$.operation') WHERE id=?1", [&selected])?;
             let request = pending_approval(tx, &selected);
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", "approval", serde_json::to_value(&request)?, false)?;
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", "approval", studio_json::to_value(&request)?, false)?;
             Ok(())
         }).await.expect("pending approval");
         let pending_seq: i64 = store.test_reader().expect("reader").query_row("SELECT seq FROM sync_entities WHERE collection='request' AND id='approval' AND deleted=0", [], |row| row.get(0)).expect("pending card");

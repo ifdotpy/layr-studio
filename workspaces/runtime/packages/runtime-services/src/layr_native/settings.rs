@@ -16,7 +16,7 @@ fn path(state: &Path) -> PathBuf {
 
 fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
     let settings = match fs::read(path(state)) {
-        Ok(bytes) => serde_json::from_slice::<Settings>(&bytes)
+        Ok(bytes) => studio_json::from_slice::<Settings>(&bytes)
             .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}")))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
         Err(e) => return Err(e.into()),
@@ -70,7 +70,7 @@ pub fn configure(state: &Path, root: Option<&Path>) -> Result<Value> {
     fs::create_dir_all(&folder)?;
     crate::atomic_file::replace(
         &path(state),
-        serde_json::to_string(&settings)
+        studio_json::to_string(&settings)
             .map_err(|e| NativeLayrError::Refused(e.to_string()))?
             .as_bytes(),
         Some(0o600),

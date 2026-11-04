@@ -4,7 +4,7 @@ use crate::agent_management::{
 };
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::BTreeMap;
 use studio_runtime_store::{RuntimeStore, Transaction, agent_management as repository};
 
@@ -38,7 +38,7 @@ pub async fn execute(
             })?;
     }
     if let Action::Archive { target, .. } = action {
-        let reply: ArchiveReply = serde_json::from_value(result.clone())
+        let reply: ArchiveReply = studio_json::from_value(result.clone())
             .map_err(studio_runtime_store::StoreError::from)?;
         if matches!(reply.status, ArchiveStatus::Blocked) {
             return Ok(result);
@@ -53,7 +53,7 @@ pub async fn execute(
         .await
         {
             result["cleanupPending"] = Value::Bool(true);
-            result["worktree"] = serde_json::json!(CleanupReply {
+            result["worktree"] = studio_json::json!(CleanupReply {
                 state: CleanupState::Pending,
                 bytes: None,
                 reason: Some(error.to_string()),
@@ -70,7 +70,7 @@ pub async fn execute(
             .await?;
         if let Some(current) = current {
             let record = current.value();
-            let progress: ArchiveReadback = serde_json::from_value(record.clone())
+            let progress: ArchiveReadback = studio_json::from_value(record.clone())
                 .map_err(studio_runtime_store::StoreError::from)?;
             let pending = progress
                 .agent_archive
@@ -78,7 +78,7 @@ pub async fn execute(
                 .is_some_and(|archive| archive.cleanup_pending);
             let (worktree, workspace) = if pending {
                 (
-                    serde_json::json!({"state":"pending","bytes":0}),
+                    studio_json::json!({"state":"pending","bytes":0}),
                     Value::Null,
                 )
             } else {
@@ -86,7 +86,7 @@ pub async fn execute(
             };
             result["worktree"] =
                 if !pending && !progress.worktree_ready && progress.cleaned_worktree.is_none() {
-                    serde_json::json!({"state":"none","bytes":0})
+                    studio_json::json!({"state":"none","bytes":0})
                 } else {
                     worktree
                 };
@@ -241,7 +241,7 @@ pub async fn archive_finished(
         )
         .await?;
         let reply: ArchiveReply =
-            serde_json::from_value(reply).map_err(studio_runtime_store::StoreError::from)?;
+            studio_json::from_value(reply).map_err(studio_runtime_store::StoreError::from)?;
         match reply.status {
             ArchiveStatus::Blocked => result.kept.push(KeptWorker {
                 id,
@@ -335,7 +335,7 @@ fn execute_decision(
             .map_err(studio_runtime_store::StoreError::from)?;
         let link_record: Value = raw
             .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
+            .and_then(|raw| studio_json::from_str(raw).ok())
             .ok_or(ManagementError::Invalid(
                 "The remote-parent link is unavailable",
             ))?;
@@ -406,7 +406,7 @@ fn execute_decision(
                 .map_err(studio_runtime_store::StoreError::from)?;
             for raw in rooms {
                 let room: studio_runtime_schema::room_record::RoomRecord =
-                    serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
+                    studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
                 if directory.is_none() {
                     directory = Some(crate::sync_entity_context::RoomDirectory::load_live(
                         transaction,
@@ -508,7 +508,7 @@ fn execute_decision(
                 ));
             }
             let current =
-                serde_json::to_value(current).map_err(studio_runtime_store::StoreError::from)?;
+                studio_json::to_value(current).map_err(studio_runtime_store::StoreError::from)?;
             for field in [
                 "epoch",
                 "autoWake",
@@ -703,7 +703,7 @@ mod lifecycle_scope_tests {
 #[cfg(test)]
 mod lifecycle_identity_tests {
     use super::same_attempt_except_interrupt;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn lifecycle_guard_allows_only_interrupt_intent_change() {
@@ -723,7 +723,7 @@ mod lifecycle_identity_tests {
 #[cfg(test)]
 mod archive_finished_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use std::sync::Arc;
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, Table, WorkItemRecord};
 
@@ -954,7 +954,7 @@ mod archive_finished_tests {
             for row in [
                 json!({"id":"accepted", "rootId":"lead", "owner":"clean", "status":"accepted", "version":1}),
                 json!({"id":"open", "rootId":"lead", "owner":"assigned", "status":"running", "version":1}),
-            ] { Table::<WorkItemRecord>::new(tx).put(&serde_json::from_value(row)?)?; }
+            ] { Table::<WorkItemRecord>::new(tx).put(&studio_json::from_value(row)?)?; }
             Ok::<_, studio_runtime_store::StoreError>(())
         }).await.expect("agents and tasks");
         let result = archive_finished(

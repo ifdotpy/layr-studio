@@ -18,7 +18,7 @@ use process_wrap::std::CommandWrap;
 use process_wrap::std::ProcessGroup;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsStr;
@@ -322,7 +322,7 @@ fn read_codex_auth(home: &Path) -> CodexAuth {
         if bytes.len() as u64 > AUTH_FILE_LIMIT {
             return Err(());
         }
-        serde_json::from_slice(&bytes).map_err(|_| ())
+        studio_json::from_slice(&bytes).map_err(|_| ())
     })();
     let Ok(auth) = auth else {
         return CodexAuth::Unreadable;
@@ -460,7 +460,7 @@ where
 
 fn vm_document<T: serde::de::DeserializeOwned + Default>(bytes: &[u8]) -> Option<T> {
     // Parse the complete document first for legacy duplicate and number admission.
-    let value: Value = serde_json::from_slice(bytes).ok()?;
+    let value: Value = studio_json::from_slice(bytes).ok()?;
     if value.is_object() {
         T::deserialize(value).ok()
     } else {
@@ -530,7 +530,7 @@ fn codex_metadata(auth: CodexAuthFile) -> Result<AuthMetadata, ()> {
         .and_then(|token| token.split('.').nth(1))
         .and_then(base64url_decode)
     {
-        Some(bytes) => match serde_json::from_slice::<CodexClaims>(&bytes) {
+        Some(bytes) => match studio_json::from_slice::<CodexClaims>(&bytes) {
             Ok(claims) => claims,
             Err(error) if error.is_syntax() || error.is_eof() => CodexClaims::default(),
             Err(_) => return Err(()),
@@ -939,7 +939,7 @@ pub(crate) fn parse_claude_status_with_outcome(
     stdout: &[u8],
     succeeded: bool,
 ) -> (AuthMetadata, bool) {
-    let Ok(value) = serde_json::from_slice::<ClaudeStatusOutput>(stdout) else {
+    let Ok(value) = studio_json::from_slice::<ClaudeStatusOutput>(stdout) else {
         return (AuthMetadata::error(Some("parser")), false);
     };
     let metadata = if !succeeded
@@ -1394,7 +1394,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             .account_key
             .clone()
             .unwrap_or_else(|| format!("login-{}", request.login_id));
-        let mut receipt = serde_json::json!({"requestId":request.login_id,"accountKey":key,"status":"starting","createdAt":now});
+        let mut receipt = studio_json::json!({"requestId":request.login_id,"accountKey":key,"status":"starting","createdAt":now});
         if let Some(account) = &request.account_key {
             let row = registry_account(&value, account)?;
             if studio_runtime_providers::ProviderKind::key_of(row)
@@ -1423,17 +1423,17 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
                     "Sign-in is already active for this account. Check its status first.",
                 ));
             }
-            receipt["reauthAccountKey"] = serde_json::json!(account);
+            receipt["reauthAccountKey"] = studio_json::json!(account);
             receipt["expectedAccountId"] = row["accountId"].clone();
             receipt["email"] = row.get("email").cloned().unwrap_or(Value::Null);
         } else {
-            value["accounts"][&key] = serde_json::json!({"id":key,"provider":studio_runtime_schema::ProviderKind::Codex.key(),"home":home,"label":request.label.as_deref().unwrap_or("New account"),"source":"Codex Agents","accountId":null,"email":null,"plan":null,"status":"pending"});
+            value["accounts"][&key] = studio_json::json!({"id":key,"provider":studio_runtime_schema::ProviderKind::Codex.key(),"home":home,"label":request.label.as_deref().unwrap_or("New account"),"source":"Codex Agents","accountId":null,"email":null,"plan":null,"status":"pending"});
             order.accounts.push(key);
-            receipt["emailHint"] = serde_json::json!(request.email);
-            receipt["requestedLabel"] = serde_json::json!(request.label);
+            receipt["emailHint"] = studio_json::json!(request.email);
+            receipt["requestedLabel"] = studio_json::json!(request.label);
         }
         if value.get("logins").is_none() {
-            value["logins"] = serde_json::json!({});
+            value["logins"] = studio_json::json!({});
         }
         value["logins"][&request.login_id] = receipt.clone();
         order.logins.push(request.login_id.clone());
@@ -1485,7 +1485,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
                             .is_some_and(|value| !value.is_empty() && value.len() <= 8192)
                     })
         }) {
-            receipt["status"] = serde_json::json!("pending");
+            receipt["status"] = studio_json::json!("pending");
             if let Some(object) = receipt.as_object_mut() {
                 object.remove("error");
             }
@@ -1503,11 +1503,11 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
                         .map(|seconds| now + seconds)
                 });
             if let Some(expiry) = expiry.filter(|expiry| expiry.is_finite() && *expiry > now) {
-                receipt["expiresAt"] = serde_json::json!(expiry);
+                receipt["expiresAt"] = studio_json::json!(expiry);
             }
         } else {
-            receipt["status"] = serde_json::json!(if sent { "uncertain" } else { "error" });
-            receipt["error"] = serde_json::json!(match (sent, not_sent_cause) {
+            receipt["status"] = studio_json::json!(if sent { "uncertain" } else { "error" });
+            receipt["error"] = studio_json::json!(match (sent, not_sent_cause) {
                 (true, _) => {
                     "Sign-in response is unconfirmed. Check its status before starting again."
                         .to_owned()
@@ -1518,7 +1518,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         }
         let result = receipt.clone();
         if !sent && result.get("reauthAccountKey").is_none() {
-            value["accounts"][account]["status"] = serde_json::json!("error");
+            value["accounts"][account]["status"] = studio_json::json!("error");
             value["accounts"][account]["error"] = result["error"].clone();
         }
         self.persist(&mut state, value)?;
@@ -1554,8 +1554,8 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
                 receipt,
             )?)));
         }
-        receipt["status"] = serde_json::json!("uncertain");
-        receipt["error"] = serde_json::json!(
+        receipt["status"] = studio_json::json!("uncertain");
+        receipt["error"] = studio_json::json!(
             "Cancellation is pending confirmation. Check status for a late receipt or completed sign-in."
         );
         let result = receipt.clone();
@@ -1587,7 +1587,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         if login_terminal(receipt) || !confirmed {
             return Ok(receipt.clone());
         }
-        receipt["status"] = serde_json::json!("cancelled");
+        receipt["status"] = studio_json::json!("cancelled");
         if let Some(object) = receipt.as_object_mut() {
             for field in ["error", "userCode", "verificationUrl"] {
                 object.remove(field);
@@ -1595,7 +1595,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         }
         let result = receipt.clone();
         if result.get("reauthAccountKey").is_none() {
-            value["accounts"][account]["status"] = serde_json::json!("signedOut");
+            value["accounts"][account]["status"] = studio_json::json!("signedOut");
         }
         self.persist(&mut state, value)?;
         self.change_signal.publish_login(request);
@@ -1628,8 +1628,8 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             return Ok(receipt.clone());
         }
         if receipt["status"] == "uncertain" {
-            receipt["status"] = serde_json::json!("pending");
-            receipt["error"] = serde_json::json!(
+            receipt["status"] = studio_json::json!("pending");
+            receipt["error"] = studio_json::json!(
                 "Cancellation is unconfirmed. Check status or retry cancellation."
             );
         }
@@ -1652,8 +1652,8 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
                 .values_mut()
                 .filter(|receipt| receipt["status"] == "starting")
             {
-                receipt["status"] = serde_json::json!("uncertain");
-                receipt["error"] = serde_json::json!(
+                receipt["status"] = studio_json::json!("uncertain");
+                receipt["error"] = studio_json::json!(
                     "Sign-in response is unconfirmed. Check status or start a separate attempt."
                 );
             }
@@ -1710,10 +1710,10 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         ) {
             return Ok(receipt.clone());
         }
-        receipt["loginId"] = serde_json::json!(native_id);
+        receipt["loginId"] = studio_json::json!(native_id);
         if success {
             if receipt.get("reauthAccountKey").is_some() {
-                receipt["nativeCompleted"] = serde_json::json!(true);
+                receipt["nativeCompleted"] = studio_json::json!(true);
             }
             if let Some(metadata) = metadata {
                 let row = registry_account_mut(&mut value, account)?
@@ -1725,16 +1725,16 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
                 }
             }
         } else {
-            receipt["status"] = serde_json::json!("error");
-            receipt["error"] = serde_json::json!("Sign-in failed or expired. Try again.");
+            receipt["status"] = studio_json::json!("error");
+            receipt["error"] = studio_json::json!("Sign-in failed or expired. Try again.");
             if let Some(object) = receipt.as_object_mut() {
                 object.remove("userCode");
                 object.remove("verificationUrl");
             }
             if receipt.get("reauthAccountKey").is_none() {
-                value["accounts"][account]["status"] = serde_json::json!("error");
+                value["accounts"][account]["status"] = studio_json::json!("error");
                 value["accounts"][account]["error"] =
-                    serde_json::json!("Sign-in failed or expired. Try again.");
+                    studio_json::json!("Sign-in failed or expired. Try again.");
             }
         }
         let result = value["logins"][request].clone();
@@ -1959,7 +1959,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         }
         row["claudeOptions"] = options;
         if let Some(label) = label {
-            row["label"] = serde_json::json!(python_strip(label));
+            row["label"] = studio_json::json!(python_strip(label));
         }
         if value != state.value {
             self.persist(&mut state, value)?;
@@ -2218,7 +2218,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             .lock()
             .map_err(|_| AccountDriverError::Poisoned)?;
         let mut updated = state.value.clone();
-        let content = serde_json::json!({"accountKey": account, "label": label});
+        let content = studio_json::json!({"accountKey": account, "label": label});
         let previous = updated
             .get("nameReceipts")
             .and_then(|receipts| receipts.get(&request_id));
@@ -2383,7 +2383,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             .ok_or(AccountDriverError::InvalidRegistry)?
             .entry("deleteReceipts")
             .or_insert_with(|| Value::Object(Default::default()));
-        updated["deleteReceipts"][&request_id] = serde_json::json!({
+        updated["deleteReceipts"][&request_id] = studio_json::json!({
             "accountKey": account,
             "deletedAt": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2716,7 +2716,7 @@ fn eligible_default(value: &Value, account: &str) -> bool {
         && row.deleted != Some(true)
 }
 
-fn apply_registration_metadata(row: &mut serde_json::Map<String, Value>, metadata: &AuthMetadata) {
+fn apply_registration_metadata(row: &mut studio_json::Map<String, Value>, metadata: &AuthMetadata) {
     apply_metadata(row, metadata);
     row.entry("accountId").or_insert_with(|| {
         metadata
@@ -2772,7 +2772,7 @@ fn register_metadata(
                 .and_then(OsStr::to_str)
         })
         .unwrap_or("Codex profile");
-    let mut row = serde_json::Map::new();
+    let mut row = studio_json::Map::new();
     row.insert("id".into(), Value::String(account.clone()));
     row.insert(
         "provider".into(),
@@ -3212,11 +3212,11 @@ fn default_registry_bytes(codex_home: &Path) -> Result<Vec<u8>, AccountDriverErr
             row.credential_identity = metadata.credential_identity;
         }
     }
-    serde_json::to_vec(&AccountRegistry::with_default_account(row))
+    studio_json::to_vec(&AccountRegistry::with_default_account(row))
         .map_err(|_| AccountDriverError::WriteRegistry)
 }
 
-fn apply_metadata(row: &mut serde_json::Map<String, Value>, metadata: &AuthMetadata) {
+fn apply_metadata(row: &mut studio_json::Map<String, Value>, metadata: &AuthMetadata) {
     let expected_account = row
         .get("accountId")
         .and_then(nonempty_str)
@@ -3408,13 +3408,13 @@ mod tests {
     #[test]
     fn vm_codex_projection_matches_legacy_ingress() {
         fn legacy(bytes: &[u8], expected: Option<&str>) -> Result<Value, &'static str> {
-            let auth: Value = serde_json::from_slice(bytes).map_err(|_| "invalid")?;
+            let auth: Value = studio_json::from_slice(bytes).map_err(|_| "invalid")?;
             if let Some(key) = auth
                 .get("OPENAI_API_KEY")
                 .and_then(Value::as_str)
                 .filter(|key| !key.is_empty())
             {
-                return Ok(serde_json::json!({"kind":"api","key":key}));
+                return Ok(studio_json::json!({"kind":"api","key":key}));
             }
             let tokens = auth.get("tokens").ok_or("invalid")?;
             let access = tokens
@@ -3427,7 +3427,7 @@ mod tests {
                 .decode(part)
                 .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(part))
                 .ok()
-                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .and_then(|bytes| studio_json::from_slice::<Value>(&bytes).ok())
                 .ok_or("invalid")?;
             let id = tokens
                 .get("account_id")
@@ -3441,14 +3441,14 @@ mod tests {
                 return Err("changed");
             }
             let exp = claims.get("exp").and_then(Value::as_f64).ok_or("invalid")?;
-            Ok(serde_json::json!({"kind":"token","account":id,"exp":exp}))
+            Ok(studio_json::json!({"kind":"token","account":id,"exp":exp}))
         }
         let claims = [
-            serde_json::json!({"exp":12.5}),
-            serde_json::json!({"exp":12,"https://api.openai.com/auth":{"chatgpt_account_id":"a"}}),
-            serde_json::json!({"exp":12,"https:":{"":{"api.openai.com":{"auth":{"chatgpt_account_id":"a"}}}}}),
-            serde_json::json!({}),
-            serde_json::json!([]),
+            studio_json::json!({"exp":12.5}),
+            studio_json::json!({"exp":12,"https://api.openai.com/auth":{"chatgpt_account_id":"a"}}),
+            studio_json::json!({"exp":12,"https:":{"":{"api.openai.com":{"auth":{"chatgpt_account_id":"a"}}}}}),
+            studio_json::json!({}),
+            studio_json::json!([]),
         ];
         let mut cases = vec![
             "null".to_owned(),
@@ -3468,11 +3468,11 @@ mod tests {
                 };
                 for id in [None, Some(""), Some("a"), Some("other")] {
                     let mut tokens =
-                        serde_json::json!({"access_token":format!("x.{token}.x"),"id_token":false});
+                        studio_json::json!({"access_token":format!("x.{token}.x"),"id_token":false});
                     if let Some(id) = id {
                         tokens["account_id"] = Value::String(id.into());
                     }
-                    cases.push(serde_json::json!({"tokens":tokens}).to_string());
+                    cases.push(studio_json::json!({"tokens":tokens}).to_string());
                 }
             }
         }
@@ -3484,21 +3484,21 @@ mod tests {
             r#"{"exp":null,"exp":12}"#,
         ] {
             let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw_claims);
-            cases.push(serde_json::json!({"tokens":{"access_token":format!("x.{token}.x"),"account_id":"a"}}).to_string());
+            cases.push(studio_json::json!({"tokens":{"access_token":format!("x.{token}.x"),"account_id":"a"}}).to_string());
         }
         for raw in cases {
             for expected in [None, Some(""), Some("a")] {
                 let old = legacy(raw.as_bytes(), expected);
                 let new = match codex_vm_auth(raw.as_bytes(), None, expected) {
                     Ok(CodexVmCredential::ApiKey(key)) => {
-                        Ok(serde_json::json!({"kind":"api","key":key}))
+                        Ok(studio_json::json!({"kind":"api","key":key}))
                     }
                     Ok(CodexVmCredential::ChatGpt {
                         account_id,
                         expires,
                         ..
                     }) => {
-                        Ok(serde_json::json!({"kind":"token","account":account_id,"exp":expires}))
+                        Ok(studio_json::json!({"kind":"token","account":account_id,"exp":expires}))
                     }
                     Err(CodexVmAuthError::Invalid) => Err("invalid"),
                     Err(CodexVmAuthError::AccountChanged) => Err("changed"),
@@ -3627,7 +3627,7 @@ mod tests {
         drop(store);
         let migrated = fs::read(&path).expect("migrated registry");
         assert_eq!(
-            serde_json::from_slice::<Value>(&migrated).expect("current registry")["version"],
+            studio_json::from_slice::<Value>(&migrated).expect("current registry")["version"],
             studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION
         );
         let (_, order) = decode_registry(&migrated).expect("strict policy");
@@ -3669,14 +3669,14 @@ mod tests {
         fs::create_dir(fixture.path.join("accounts")).expect("accounts");
         let path = fixture.path.join("accounts/registry.json");
         for provider in [
-            serde_json::json!("unknown"),
-            serde_json::json!(1),
-            serde_json::json!({}),
+            studio_json::json!("unknown"),
+            studio_json::json!(1),
+            studio_json::json!({}),
         ] {
             let mut value: Value =
-                serde_json::from_slice(&registry(&fixture.path)).expect("registry");
+                studio_json::from_slice(&registry(&fixture.path)).expect("registry");
             value["accounts"]["default"]["provider"] = provider;
-            let bytes = serde_json::to_vec(&value).expect("bytes");
+            let bytes = studio_json::to_vec(&value).expect("bytes");
             fs::write(&path, &bytes).expect("invalid registry");
             assert!(
                 studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
@@ -3687,7 +3687,7 @@ mod tests {
         }
         for field in [None, Some(Value::Null)] {
             let mut value: Value =
-                serde_json::from_slice(&registry(&fixture.path)).expect("current registry");
+                studio_json::from_slice(&registry(&fixture.path)).expect("current registry");
             match field {
                 None => {
                     value["accounts"]["default"]
@@ -3697,7 +3697,7 @@ mod tests {
                 }
                 Some(field) => value["accounts"]["default"]["provider"] = field,
             }
-            let bytes = serde_json::to_vec(&value).expect("bytes");
+            let bytes = studio_json::to_vec(&value).expect("bytes");
             fs::write(&path, &bytes).expect("corrupt current registry");
             assert!(
                 studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
@@ -3707,9 +3707,9 @@ mod tests {
             assert_eq!(fs::read(&path).expect("unchanged current bytes"), bytes);
         }
         let mut explicit_legacy: Value =
-            serde_json::from_slice(&registry(&fixture.path)).expect("registry");
+            studio_json::from_slice(&registry(&fixture.path)).expect("registry");
         explicit_legacy["version"] = Value::from(1);
-        fs::write(&path, serde_json::to_vec(&explicit_legacy).expect("bytes")).expect("old source");
+        fs::write(&path, studio_json::to_vec(&explicit_legacy).expect("bytes")).expect("old source");
         drop(
             studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
                 .await
@@ -3717,7 +3717,7 @@ mod tests {
         );
         let upgraded = fs::read(&path).expect("registry");
         assert_eq!(
-            serde_json::from_slice::<Value>(&upgraded).expect("current")["version"],
+            studio_json::from_slice::<Value>(&upgraded).expect("current")["version"],
             studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION
         );
     }
@@ -3739,7 +3739,7 @@ mod tests {
             OsStr::new(CLAUDE_BIN_OVERRIDE).to_owned(),
             override_binary.as_os_str().to_owned(),
         )]);
-        let profile = serde_json::json!({
+        let profile = studio_json::json!({
             "claudeOptions": {"binaryPath": profile_binary.to_string_lossy()}
         });
 
@@ -3993,7 +3993,7 @@ exit 0
     }
 
     fn registry(home: &Path) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({
+        studio_json::to_vec(&studio_json::json!({
             "version": studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
             "defaultAccountKey": "default",
             "accounts": {"default": {
@@ -4078,7 +4078,7 @@ exit 0
         let fixture = TestDir::new();
         let home = fixture.path.join("claude-home");
         fs::create_dir_all(&home).expect("create disposable Claude home");
-        let mut value: Value = serde_json::from_slice(&registry(&home)).expect("fixture registry");
+        let mut value: Value = studio_json::from_slice(&registry(&home)).expect("fixture registry");
         value["accounts"]["default"]["provider"] = Value::String("claude".into());
         value["accounts"]["default"]["source"] = Value::String("Claude Code".into());
         value["accounts"]["default"]["status"] = Value::String("error".into());
@@ -4093,7 +4093,7 @@ exit 0
             .expect("create registry directory");
         fs::write(
             &path,
-            serde_json::to_vec(&value).expect("serialize fixture"),
+            studio_json::to_vec(&value).expect("serialize fixture"),
         )
         .expect("write registry");
         let reader = FakeReader(AuthMetadata {
@@ -4128,7 +4128,7 @@ exit 0
     fn claude_registry(fixture: &TestDir, status: &str, error_kind: Option<&str>) -> PathBuf {
         let home = fixture.path.join("claude-home");
         fs::create_dir_all(&home).expect("create disposable Claude home");
-        let mut value: Value = serde_json::from_slice(&registry(&home)).expect("fixture registry");
+        let mut value: Value = studio_json::from_slice(&registry(&home)).expect("fixture registry");
         let row = &mut value["accounts"]["default"];
         row["provider"] = Value::String("claude".into());
         row["source"] = Value::String("Claude Code".into());
@@ -4145,7 +4145,7 @@ exit 0
             .expect("create registry directory");
         fs::write(
             &path,
-            serde_json::to_vec(&value).expect("serialize fixture"),
+            studio_json::to_vec(&value).expect("serialize fixture"),
         )
         .expect("write registry");
         path
@@ -4227,10 +4227,10 @@ exit 0
                 "id" | "duplicateOf" => Value::String("another-account".into()),
                 "provider" => Value::String("codex".into()),
                 "home" => Value::String("/fixture/another-home".into()),
-                "claudeOptions" => serde_json::json!({"configDir":"/fixture/another-config"}),
+                "claudeOptions" => studio_json::json!({"configDir":"/fixture/another-config"}),
                 "accountId" => Value::String("claude:other@example.invalid".into()),
                 "deleted" | "disconnected" => Value::Bool(true),
-                "updatedAt" => serde_json::json!(2.0),
+                "updatedAt" => studio_json::json!(2.0),
                 _ => panic!("add a changed fixture value for {field}"),
             };
             assert!(
@@ -4266,18 +4266,18 @@ exit 0
         let other_account =
             claude_identity::identity("fixture@example.invalid", Some("org-a"), Some("account-b"));
         for (old, new) in [
-            (serde_json::json!(full), serde_json::json!(legacy)),
-            (serde_json::json!(full), serde_json::json!(partial)),
-            (serde_json::json!(partial), serde_json::json!(legacy)),
-            (serde_json::json!(full), serde_json::json!(other_email)),
-            (serde_json::json!(legacy), serde_json::json!(other_email)),
-            (serde_json::json!(full), serde_json::json!(other_org)),
-            (serde_json::json!(full), serde_json::json!(other_account)),
-            (Value::Null, serde_json::json!(full)),
-            (serde_json::json!(full), Value::Null),
-            (serde_json::json!("unknown"), serde_json::json!(full)),
-            (serde_json::json!(full), serde_json::json!("unknown")),
-            (serde_json::json!(42), serde_json::json!(full)),
+            (studio_json::json!(full), studio_json::json!(legacy)),
+            (studio_json::json!(full), studio_json::json!(partial)),
+            (studio_json::json!(partial), studio_json::json!(legacy)),
+            (studio_json::json!(full), studio_json::json!(other_email)),
+            (studio_json::json!(legacy), studio_json::json!(other_email)),
+            (studio_json::json!(full), studio_json::json!(other_org)),
+            (studio_json::json!(full), studio_json::json!(other_account)),
+            (Value::Null, studio_json::json!(full)),
+            (studio_json::json!(full), Value::Null),
+            (studio_json::json!("unknown"), studio_json::json!(full)),
+            (studio_json::json!(full), studio_json::json!("unknown")),
+            (studio_json::json!(42), studio_json::json!(full)),
         ] {
             let mut selected = driver.auth_pin("default").expect("selected pin");
             selected["_credentialIdentity"] = old;
@@ -4290,11 +4290,11 @@ exit 0
             );
         }
         driver.state.lock().expect("registry lock").value["accounts"]["default"]["provider"] =
-            serde_json::json!("codex");
+            studio_json::json!("codex");
         driver.state.lock().expect("registry lock").value["accounts"]["default"]["_credentialIdentity"] =
-            serde_json::json!(full);
+            studio_json::json!(full);
         let mut codex_selected = driver.auth_pin("default").expect("Codex pin");
-        codex_selected["_credentialIdentity"] = serde_json::json!(legacy);
+        codex_selected["_credentialIdentity"] = studio_json::json!(legacy);
         assert!(
             !driver
                 .auth_pin_matches("default", &codex_selected)
@@ -4313,7 +4313,7 @@ exit 0
             .expect("open fixture");
         assert_eq!(driver.get("default").expect("status"), AccountStatus::Ready);
         let saved: Value =
-            serde_json::from_slice(&fs::read(&path).expect("read registry")).expect("registry");
+            studio_json::from_slice(&fs::read(&path).expect("read registry")).expect("registry");
         let row = &saved["accounts"]["default"];
         assert_eq!(row["status"], "ready");
         assert!(row.get("error").is_none_or(Value::is_null));
@@ -4353,7 +4353,7 @@ exit 0
         fs::create_dir_all(&home).expect("create fixture home");
         fs::write(
             home.join("auth.json"),
-            serde_json::to_vec(&serde_json::json!({"tokens": {
+            studio_json::to_vec(&studio_json::json!({"tokens": {
                 "account_id": "python-account", "access_token": "placeholder-access-token",
             }}))
             .expect("auth JSON"),
@@ -4454,7 +4454,7 @@ exit 0
         fs::create_dir_all(path.parent().expect("registry parent"))
             .expect("create registry directory");
         let mut value: Value =
-            serde_json::from_slice(&registry(&fixture.path)).expect("registry fixture");
+            studio_json::from_slice(&registry(&fixture.path)).expect("registry fixture");
         let row = value["accounts"]["default"]
             .as_object_mut()
             .expect("account row");
@@ -4463,7 +4463,7 @@ exit 0
             "_credentialIdentity".into(),
             Value::String("chatgpt:old-account".into()),
         );
-        fs::write(&path, serde_json::to_vec(&value).expect("encoded registry"))
+        fs::write(&path, studio_json::to_vec(&value).expect("encoded registry"))
             .expect("write registry");
         let reader = FakeReader(metadata(
             AuthStatus::Ready,
@@ -4496,7 +4496,7 @@ exit 0
         let baseline = driver.state.lock().expect("driver state").value.clone();
         for flag in ["disconnected", "deleted"] {
             let mut candidate = baseline.clone();
-            candidate["accounts"]["default"]["status"] = serde_json::json!("ready");
+            candidate["accounts"]["default"]["status"] = studio_json::json!("ready");
             candidate["accounts"]["default"][flag] = Value::Bool(true);
             driver.state.lock().expect("driver state").value = candidate;
             assert_eq!(
@@ -4527,12 +4527,12 @@ exit 0
         fs::create_dir_all(path.parent().expect("registry parent"))
             .expect("create registry directory");
         let mut value: Value =
-            serde_json::from_slice(&registry(&fixture.path)).expect("registry fixture");
-        value["accounts"]["other"] = serde_json::json!({
+            studio_json::from_slice(&registry(&fixture.path)).expect("registry fixture");
+        value["accounts"]["other"] = studio_json::json!({
             "id": "other", "provider":studio_runtime_schema::ProviderKind::Codex.key(), "home": fixture.path.join("other"), "label": "Other",
             "source": "Codex CLI", "status": "signedOut"
         });
-        fs::write(&path, serde_json::to_vec(&value).expect("encoded")).expect("write registry");
+        fs::write(&path, studio_json::to_vec(&value).expect("encoded")).expect("write registry");
         let driver = AccountDriver::open_with_reader(&path, WatchRecorder(Mutex::default()))
             .expect("open registry");
         assert_eq!(*driver.reader.0.lock().expect("log"), [2]);
@@ -4745,9 +4745,9 @@ exit 0
         let profile = AuthProfile {
             provider: studio_runtime_providers::ProviderKind::Claude,
             home: fixture.path.clone(),
-            claude_options: Some(serde_json::json!({"configDir":fixture.path})),
+            claude_options: Some(studio_json::json!({"configDir":fixture.path})),
         };
-        fs::write(fixture.path.join(".claude.json"), serde_json::json!({"oauthAccount":{
+        fs::write(fixture.path.join(".claude.json"), studio_json::json!({"oauthAccount":{
             "emailAddress":"claude@example.invalid", "organizationUuid":"org-a", "accountUuid":"account-a"
         }}).to_string()).expect("isolated native account metadata");
         let metadata = ClaudeCliAuthReader::read_with_environment(&profile, &environment);
@@ -4788,7 +4788,7 @@ exit 0
 
     #[test]
     fn auth_repair_regression_native_signed_out_status_is_conclusive_after_exit_one() {
-        use serde_json::json;
+        use studio_json::json;
         // The maintained CLI's authStatus emits this negative result and exits 1.
         let (metadata, conclusive) = claude::auth_status_probe_from_output(
             br#"{"loggedIn":false,"authMethod":"none"}"#,
@@ -4828,7 +4828,7 @@ exit 0
             invalid[key] = value;
             assert!(
                 !claude::auth_status_probe_from_output(
-                    &serde_json::to_vec(&invalid).expect("invalid authentication fixture"),
+                    &studio_json::to_vec(&invalid).expect("invalid authentication fixture"),
                     Some(1)
                 )
                 .1,
@@ -5009,7 +5009,7 @@ exit 0
             Some("stable-account"),
             Some("chatgpt:stable-account"),
         );
-        let mut value = serde_json::json!({
+        let mut value = studio_json::json!({
             "version": studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
             "defaultAccountKey": "existing",
             "accounts": {"existing": {
@@ -5091,7 +5091,7 @@ exit 0
     }
 
     #[test]
-    fn default_registry_uses_serde_json_encoding() {
+    fn default_registry_uses_studio_json_encoding() {
         let bytes = default_registry_bytes(Path::new("雪")).expect("default registry");
         let text = std::str::from_utf8(&bytes).expect("UTF-8 registry");
         assert!(text.contains("雪"));
@@ -5106,7 +5106,7 @@ exit 0
         assert_eq!(create_default_registry(&path, &home), Ok(true));
         let written = fs::read(&path).expect("read created registry");
         let registry: studio_runtime_schema::account_registry::AccountRegistry =
-            serde_json::from_slice(&written).expect("typed registry");
+            studio_json::from_slice(&written).expect("typed registry");
         assert_eq!(registry.default_account_key, "default");
         assert_eq!(
             registry.accounts["default"].0.home,
@@ -5117,7 +5117,7 @@ exit 0
             studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION
         );
         assert!(
-            serde_json::from_str::<studio_runtime_schema::account_registry::AccountRegistry>(&old)
+            studio_json::from_str::<studio_runtime_schema::account_registry::AccountRegistry>(&old)
                 .is_ok()
         );
         #[cfg(unix)]
@@ -5151,7 +5151,7 @@ exit 0
         fs::create_dir_all(&home).expect("create auth home");
         fs::write(home.join("auth.json"), b"not json").expect("write malformed auth");
         let bytes = default_registry_bytes(&home).expect("default registry encodes");
-        let value: Value = serde_json::from_slice(&bytes).expect("registry is JSON");
+        let value: Value = studio_json::from_slice(&bytes).expect("registry is JSON");
         let row = &value["accounts"]["default"];
         assert_eq!(row["status"], "error");
         assert_eq!(row["error"], CODEX_AUTH_ERROR);
@@ -5168,12 +5168,12 @@ exit 0
             .expect("write disposable auth file");
         let path = fixture.path.join("accounts/registry.json");
         fs::create_dir_all(path.parent().expect("registry parent")).expect("create registry dir");
-        let mut value: Value = serde_json::from_slice(&registry(&home)).expect("registry fixture");
+        let mut value: Value = studio_json::from_slice(&registry(&home)).expect("registry fixture");
         value["accounts"]["default"]["status"] = Value::String("ready".into());
         value["accounts"]["default"]["accountId"] = Value::String("stable".into());
         value["accounts"]["default"]["_credentialIdentity"] =
             Value::String("chatgpt:stable".into());
-        fs::write(&path, serde_json::to_vec(&value).expect("encode fixture"))
+        fs::write(&path, studio_json::to_vec(&value).expect("encode fixture"))
             .expect("write registry");
         let driver = AccountDriver::open_with_reader(
             &path,
@@ -5205,7 +5205,7 @@ exit 0
                 .has_changed()
                 .expect("profile change signal remains open")
         );
-        let persisted: Value = serde_json::from_slice(&fs::read(&path).expect("read registry"))
+        let persisted: Value = studio_json::from_slice(&fs::read(&path).expect("read registry"))
             .expect("decode registry");
         assert_ne!(
             persisted.get("pendingAccountsChange"),
@@ -5248,11 +5248,11 @@ exit 0
         let canonical = CanonicalPath::existing(&home).expect("resolve profile");
         let path = fixture.path.join("accounts/registry.json");
         fs::create_dir_all(path.parent().expect("registry parent")).expect("create registry dir");
-        let mut value: Value = serde_json::from_slice(&registry(&canonical)).expect("fixture");
+        let mut value: Value = studio_json::from_slice(&registry(&canonical)).expect("fixture");
         value["accounts"]["default"]["accountId"] = Value::String("stable".into());
         for marker in [Value::Bool(false), Value::Null] {
             value["accounts"]["default"]["deleted"] = marker.clone();
-            fs::write(&path, serde_json::to_vec(&value).expect("encode registry"))
+            fs::write(&path, studio_json::to_vec(&value).expect("encode registry"))
                 .expect("write registry");
             let before = fs::read(&path).expect("registry bytes before registration");
             let driver = AccountDriver::open(&path).expect("open registry");
@@ -5263,7 +5263,7 @@ exit 0
                 fs::read(&path).expect("registry bytes after registration"),
                 before
             );
-            let saved: Value = serde_json::from_slice(&before).expect("saved registry");
+            let saved: Value = studio_json::from_slice(&before).expect("saved registry");
             assert_eq!(saved["accounts"]["default"]["deleted"], marker);
             assert_eq!(driver.revision().expect("public revision"), 0);
         }
@@ -5301,7 +5301,7 @@ exit 0
         let fixture = TestDir::new();
         let path = fixture.path.join("registry.json");
         let mut value: Value =
-            serde_json::from_slice(&registry(&fixture.path)).expect("fixture JSON");
+            studio_json::from_slice(&registry(&fixture.path)).expect("fixture JSON");
         let row = value["accounts"]["default"]
             .as_object_mut()
             .expect("account row");
@@ -5313,9 +5313,9 @@ exit 0
         row.insert("provider".into(), Value::String("claude".into()));
         row.insert(
             "claudeOptions".into(),
-            serde_json::json!({"futureField":"preserve"}),
+            studio_json::json!({"futureField":"preserve"}),
         );
-        fs::write(&path, serde_json::to_vec(&value).expect("encode")).expect("write registry");
+        fs::write(&path, studio_json::to_vec(&value).expect("encode")).expect("write registry");
         let driver = AccountDriver::open_with_reader(
             &path,
             FakeReader(metadata(AuthStatus::SignedOut, None, None)),
@@ -5325,7 +5325,7 @@ exit 0
             driver.get("default").expect("refresh"),
             AccountStatus::SignedOut
         );
-        let saved: Value = serde_json::from_slice(&fs::read(path).expect("read refreshed"))
+        let saved: Value = studio_json::from_slice(&fs::read(path).expect("read refreshed"))
             .expect("parse refreshed");
         assert_eq!(saved["accounts"]["default"]["accountId"], "remember-me");
         assert_eq!(
@@ -5343,17 +5343,17 @@ exit 0
         let fixture = TestDir::new();
         let home = fixture.path.join("codex-home");
         fs::create_dir_all(&home).expect("create fixture home");
-        let mut base: Value = serde_json::from_slice(&registry(&home)).expect("registry");
+        let mut base: Value = studio_json::from_slice(&registry(&home)).expect("registry");
         base["accounts"]["default"]["provider"] = Value::String("claude".into());
         base["accounts"]["default"]["accountId"] = Value::String("stable".into());
         base["accounts"]["default"]["_credentialIdentity"] = Value::String("chatgpt:stable".into());
         for (index, auth) in [
-            serde_json::json!({"status":"ready", "accountId":"stable", "_credentialIdentity":"chatgpt:stable", "email":"fixture@example.invalid", "plan":"plus"}),
-            serde_json::json!({"status":"signedOut", "accountId":null, "_credentialIdentity":null, "email":null, "plan":null}),
-            serde_json::json!({"status":"error", "error":"Cannot read this profile's authentication"}),
+            studio_json::json!({"status":"ready", "accountId":"stable", "_credentialIdentity":"chatgpt:stable", "email":"fixture@example.invalid", "plan":"plus"}),
+            studio_json::json!({"status":"signedOut", "accountId":null, "_credentialIdentity":null, "email":null, "plan":null}),
+            studio_json::json!({"status":"error", "error":"Cannot read this profile's authentication"}),
         ].into_iter().enumerate() {
             let rust_path = fixture.path.join(format!("rust-{index}.json"));
-            fs::write(&rust_path, serde_json::to_vec(&base).expect("Rust fixture")).expect("write Rust fixture");
+            fs::write(&rust_path, studio_json::to_vec(&base).expect("Rust fixture")).expect("write Rust fixture");
             let md = AuthMetadata {
                 status: match auth["status"].as_str().unwrap_or_default() { "ready" => AuthStatus::Ready, "error" => AuthStatus::Error, _ => AuthStatus::SignedOut },
                 account_id: auth.get("accountId").and_then(Value::as_str).map(str::to_owned),
@@ -5365,7 +5365,7 @@ exit 0
                 error_kind: None,
             };
             AccountDriver::open_with_reader(&rust_path, FakeReader(md)).expect("open Rust fixture").get("default").expect("Rust refresh");
-            let rust: Value = serde_json::from_slice(&fs::read(rust_path).expect("read Rust result")).expect("parse Rust result");
+            let rust: Value = studio_json::from_slice(&fs::read(rust_path).expect("read Rust result")).expect("parse Rust result");
             for field in ["status", "accountId", "_credentialIdentity", "email", "plan"] {
                 if let Some(expected) = auth.get(field).filter(|value| !value.is_null() || field == "email" || field == "plan") {
                     assert_eq!(&rust["accounts"]["default"][field], expected, "case {index}, field {field}");

@@ -13,7 +13,7 @@
 //! provider, so a test can check them without a provider process or a Git repository.
 
 use rusqlite::{Connection, params};
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::HashSet;
 use std::future::Future;
 
@@ -22,7 +22,7 @@ pub enum EditTurnError {
     #[error("the item store failed: {0}")]
     Store(#[from] rusqlite::Error),
     #[error("an item record is not JSON")]
-    Record(#[from] serde_json::Error),
+    Record(#[from] studio_json::Error),
 }
 
 /// Hide every item of `agent` that is not in `visible`, and show every hidden item that
@@ -44,7 +44,7 @@ pub fn set_item_visibility(
     drop(statement);
     let mut changed = 0;
     for (id, raw) in rows {
-        let mut item: Value = serde_json::from_str(&raw)?;
+        let mut item: Value = studio_json::from_str(&raw)?;
         let shown = visible.contains(&id);
         let was_shown = item
             .get("afterRestore")
@@ -87,7 +87,7 @@ where
 mod tests {
     use super::{set_item_visibility, snapshot_then_restore};
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::cell::RefCell;
     use std::collections::HashSet;
 
@@ -116,7 +116,7 @@ mod tests {
         statement
             .query_map([], |row| row.get::<_, String>(0))
             .expect("query")
-            .map(|raw| serde_json::from_str(&raw.expect("row")).expect("json"))
+            .map(|raw| studio_json::from_str(&raw.expect("row")).expect("json"))
             .collect()
     }
 

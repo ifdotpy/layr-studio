@@ -1,7 +1,7 @@
 //! A local tool receipt takes precedence over native history. Unknown local
 //! mutations cannot be retired by a native delivery error.
 use crate::recovery_policy::{InvalidRecoveryRecord, RecoverySnapshot};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::task_record::{TaskKind, TaskStatus, TaskType};
 use studio_runtime_store::TaskRecord;

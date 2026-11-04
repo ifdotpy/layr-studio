@@ -1,5 +1,5 @@
 use crate::analytics_fixtures as common;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, atomic::AtomicBool};
@@ -56,7 +56,7 @@ fn file(root: &Path, lines: &[Value], suffix: &[u8]) -> PathBuf {
     let path = root.join("rollout-fixture-thread.jsonl");
     let mut bytes = Vec::new();
     for line in lines {
-        bytes.extend(serde_json::to_vec(line).expect("JSON"));
+        bytes.extend(studio_json::to_vec(line).expect("JSON"));
         bytes.push(b'\n');
     }
     bytes.extend_from_slice(suffix);
@@ -569,7 +569,7 @@ async fn collector_tick_imports_rollout_usage_and_replay_is_exactly_once() {
     }}));
     let mut bytes = Vec::new();
     for line in &lines {
-        bytes.extend(serde_json::to_vec(line).expect("rollout line"));
+        bytes.extend(studio_json::to_vec(line).expect("rollout line"));
         bytes.push(b'\n');
     }
     fs::write(&path, bytes).expect("fixture rollout");

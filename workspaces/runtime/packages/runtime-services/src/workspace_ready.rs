@@ -1,6 +1,6 @@
 //! Pure host workspace readiness. Observations are gathered by `workspace_ready_git`.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use std::path::{Path, PathBuf};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::workspace_ready::{ProvisionIdentity, overlaps, workspace_generation};

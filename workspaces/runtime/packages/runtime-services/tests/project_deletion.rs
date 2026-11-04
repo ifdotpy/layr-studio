@@ -1,5 +1,5 @@
 //! Controlled creation/deletion interleavings through the real admission caller.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use studio_runtime_services::{
     account_policy::AccountPolicyState,
@@ -94,7 +94,7 @@ impl studio_runtime_services::provider_callbacks::ManagedCreationEnvironment for
 }
 
 fn accounts() -> AccountPolicyState {
-    AccountPolicyState::from_startup(Some(&serde_json::to_vec(&json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","provider":studio_runtime_schema::ProviderKind::Codex,"home":"/fixture-provider-home","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{},"deleteReceipts":{}})).expect("current registry JSON")),[]).expect("accounts")
+    AccountPolicyState::from_startup(Some(&studio_json::to_vec(&json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","provider":studio_runtime_schema::ProviderKind::Codex,"home":"/fixture-provider-home","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{},"deleteReceipts":{}})).expect("current registry JSON")),[]).expect("accounts")
 }
 fn driver(root: &std::path::Path) -> Arc<studio_runtime_services::account_driver::AccountDriver> {
     let registry = root.join("accounts.json");
@@ -167,7 +167,7 @@ async fn delete_with_ports(
     )
     .await
     .expect("delete");
-    serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")
+    studio_json::from_slice(&studio_json::to_vec(&reply).expect("serialize reply")).expect("reply")
 }
 fn creation(path: &str, bound: bool) -> agents_create::Creation {
     agents_create::Creation {
@@ -327,7 +327,7 @@ async fn project_deletion_receipt_survives_store_restart() {
     .await
     .expect("replay after restart");
     let result: Value =
-        serde_json::from_slice(&serde_json::to_vec(&result).expect("serialize reply"))
+        studio_json::from_slice(&studio_json::to_vec(&result).expect("serialize reply"))
             .expect("reply");
     assert_eq!(result, first);
 }
@@ -580,7 +580,7 @@ async fn agent_creation_assigns_task_and_replays_without_reassignment() {
         .unwrap();
     assert_eq!(saved.owner(), Some("spawned"));
     assert_eq!(
-        saved.version().and_then(serde_json::Number::as_i64),
+        saved.version().and_then(studio_json::Number::as_i64),
         Some(2)
     );
 }
@@ -762,13 +762,13 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
         operation: Vec::new(),
         command: location_command(&payload),
     };
-    let encoded = serde_json::to_string(&envelope).expect("typed envelope");
+    let encoded = studio_json::to_string(&envelope).expect("typed envelope");
     let legacy = json!({"requestId":"legacy","action":"add_location","payload":payload});
     let canonical = studio_runtime_schema::json_compat::python_json_compact_serialized(&legacy)
         .expect("legacy canonical fingerprint");
     let fingerprint = studio_runtime_store::sha256_hex(canonical.as_bytes());
     let saved_fingerprint = fingerprint.clone();
-    store.transaction(move|tx|{studio_runtime_store::remote_outbox::RemoteOutbox::put(tx,studio_runtime_store::remote_outbox::RemoteEffect::ServerRequest,"peer","legacy",&fingerprint,studio_runtime_schema::persistence::OutboxStatus::Pending,Some(0),serde_json::json!({"body":encoded,"admission":{"id":"legacy","signature":fingerprint,"created":1},"attempts":0,"error":null}),1)?;Ok(())}).await.expect("legacy reservation");
+    store.transaction(move|tx|{studio_runtime_store::remote_outbox::RemoteOutbox::put(tx,studio_runtime_store::remote_outbox::RemoteEffect::ServerRequest,"peer","legacy",&fingerprint,studio_runtime_schema::persistence::OutboxStatus::Pending,Some(0),studio_json::json!({"body":encoded,"admission":{"id":"legacy","signature":fingerprint,"created":1},"attempts":0,"error":null}),1)?;Ok(())}).await.expect("legacy reservation");
     let replay = payload.clone();
     store
         .transaction_with(move |tx| {
@@ -797,12 +797,12 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
     );
     let token_json = format!(
         "{{\"id\":{},\"signature\":\"{}\",\"created\":{}}}",
-        serde_json::to_string(&scoped).expect("scoped id"),
+        studio_json::to_string(&scoped).expect("scoped id"),
         saved_fingerprint,
         chrono::Utc::now().timestamp_millis(),
     );
     let token: studio_runtime_store::request_results::AdmittedRequest =
-        serde_json::from_str(&token_json).expect("legacy admission");
+        studio_json::from_str(&token_json).expect("legacy admission");
     let saved = studio_runtime_store::multi_server_delivery::SavedRemoteReply {
         principal: None,
         server: Some("peer".into()),
@@ -812,7 +812,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
             request_id: "legacy".into(),
             outcome: studio_runtime_schema::persistence::RemoteOutcome::Applied,
             value: Some(
-                serde_json::value::RawValue::from_string("{\"retained\":true}".into())
+                studio_json::OwnedRawJson::from_string("{\"retained\":true}".into())
                     .expect("reply"),
             ),
             error: None,
@@ -836,7 +836,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
         .await
         .expect("legacy completed receipt replays without admission");
     assert!(
-        matches!(replayed,studio_runtime_services::multi_server_transport::ExchangeOutcome::Applied(ref value) if serde_json::from_str::<Value>(value.value.get()).expect("retained reply")["retained"]==true)
+        matches!(replayed,studio_runtime_services::multi_server_transport::ExchangeOutcome::Applied(ref value) if studio_json::from_str::<Value>(value.value.as_str()).expect("retained reply")["retained"]==true)
     );
     let mut changed = payload;
     changed["path"] = json!("/changed");

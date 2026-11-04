@@ -2,7 +2,7 @@ use crate::login_fixtures as claude_fixture;
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 
 use claude_fixture::{Fixture as ClaudeFixture, Script};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     path::Path,
     sync::{
@@ -218,7 +218,7 @@ impl RetainedAccountSession for CodexSession {
 }
 
 fn python_corpus() -> Value {
-    serde_json::from_str(include_str!("wave9_login_expected.json")).expect("frozen login corpus")
+    studio_json::from_str(include_str!("wave9_login_expected.json")).expect("frozen login corpus")
 }
 
 /// The resolved spelling of a fixture root. Rust and Python store some paths
@@ -355,7 +355,7 @@ async fn compare_codex(expected: &Value) {
         "one start and one cancel"
     );
     let mut actual_registry: Value =
-        serde_json::from_slice(&std::fs::read(&registry).expect("written Rust registry"))
+        studio_json::from_slice(&std::fs::read(&registry).expect("written Rust registry"))
             .expect("Rust registry JSON");
     let mut expected_registry = expected["stored"].clone();
     // Rust persists this notification marker for its account-list consumer;

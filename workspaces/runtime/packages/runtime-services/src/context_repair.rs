@@ -12,7 +12,7 @@ use crate::account_session_runtime::{
     RequestCertainty,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use studio_runtime_schema::persistence::{ContextRepairPhase, RequestIdentity};
@@ -284,7 +284,7 @@ impl RecoverySnapshot {
         pending: Option<Vec<Value>>,
     ) -> Result<Self, RepairError> {
         validate_agent(&agent)?;
-        if serde_json::to_vec(&(&agent, &events, &pending))
+        if studio_json::to_vec(&(&agent, &events, &pending))
             .map_err(|_| RepairError::Invalid("capture"))?
             .len()
             > MAX_CAPTURE_BYTES
@@ -313,7 +313,7 @@ impl RecoverySnapshot {
         let mut ids = BTreeSet::new();
         let mut rows = Vec::new();
         for value in &events {
-            let row: InputRow = serde_json::from_value(value.clone())
+            let row: InputRow = studio_json::from_value(value.clone())
                 .map_err(|_| RepairError::Invalid("events"))?;
             if row.id.is_empty()
                 || !ids.insert(row.id.clone())
@@ -530,7 +530,7 @@ impl NativeHistory {
     ) -> Result<Self, RepairError> {
         if thread_id.is_empty()
             || turns.len() > MAX_TURNS
-            || serde_json::to_vec(&turns)
+            || studio_json::to_vec(&turns)
                 .map_err(|_| RepairError::Invalid("history"))?
                 .len()
                 > MAX_CAPTURE_BYTES
@@ -1202,7 +1202,7 @@ async fn repair_idle_with_broker_inner(
         }
         let operation_id = RequestIdentity::issue_root();
         archive_previous_repair(&mut agent)?;
-        let start_snapshot=if let Some(attempt)=agent.get("startAttempt").filter(|value|value.is_object()) {Some(serde_json::value::to_raw_value(attempt).map_err(|_| RepairError::Invalid("agent.startAttempt"))?)} else {
+        let start_snapshot=if let Some(attempt)=agent.get("startAttempt").filter(|value|value.is_object()) {Some(studio_json::to_raw_value(attempt).map_err(|_| RepairError::Invalid("agent.startAttempt"))?)} else {
             let pointer = AgentRecord::deserialize(&agent).map_err(|_| RepairError::Invalid("agent"))?.active_execution().map_err(|_| RepairError::Invalid("agent.activeExecution"))?;
             if let Some(id)=pointer.and_then(|pointer| pointer.attempt_id) {studio_runtime_store::ExecutionHistoryRepository::attempt(tx,&id)?.and_then(|attempt|attempt.snapshot)} else {None}
         };
@@ -1665,7 +1665,7 @@ impl RepairEventSummary for RepairSummary {
         let summary = json!({"eventId":event["id"],"kind":event["kind"],"truncated":true,
             "textBytes":text.len(),"read":{"tool":"orchestration_read","output_ref":format!("event:{}",event["id"])},
             "excerpt":excerpt,"tail":tail});
-        serde_json::to_string(&summary).map_err(|_| RepairError::Invalid("event.summary"))
+        studio_json::to_string(&summary).map_err(|_| RepairError::Invalid("event.summary"))
     }
 }
 
@@ -2023,11 +2023,11 @@ mod item_read_identity_tests {
 #[cfg(test)]
 mod repair_history_tests {
     use super::{ContextRepairPhase, archive_previous_repair};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn undispatched_repair_does_not_create_an_unused_diagnostic() {
-        let mut agent = serde_json::from_str(r#"{"contextRepair":{"phase":"preparing"}}"#).unwrap();
+        let mut agent = studio_json::from_str(r#"{"contextRepair":{"phase":"preparing"}}"#).unwrap();
         archive_previous_repair(&mut agent).unwrap();
         assert!(agent.get("lastContextRepairCheck").is_none());
         assert!(agent.get("contextRepairHistory").is_none());
@@ -2214,7 +2214,7 @@ fn verified_repair_events(tx: &Transaction<'_>, agent: &Value) -> Result<Vec<Val
             continue;
         };
         let metadata: Value =
-            serde_json::from_str(&meta).map_err(|_| RepairError::Invalid("event.metadata"))?;
+            studio_json::from_str(&meta).map_err(|_| RepairError::Invalid("event.metadata"))?;
         let quoted:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status='delivered' AND kind IN ('user','followup') AND turn_id=?2 AND instr(text,?3)>0)",rusqlite::params![agent["id"].as_str(),turn,format!("[Orchestration event: {kind}]\n{text}")],|r|r.get(0))?;
         if quoted {
             continue;
@@ -2264,7 +2264,7 @@ impl HistoryRewrite {
         terminal: String,
     ) -> Result<Self, RepairError> {
         if records.len() > MAX_TURNS
-            || serde_json::to_vec(&(&records, &events))
+            || studio_json::to_vec(&(&records, &events))
                 .map_err(|_| RepairError::Invalid("rewrite"))?
                 .len()
                 > MAX_CAPTURE_BYTES

@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use studio_runtime_store::path_identity::CanonicalPath;
 
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -64,7 +64,7 @@ pub enum NativeRuntimeError {
     #[error("native runtime state lock was poisoned")]
     Poisoned,
     #[error("native runtime JSON failed: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     StateRead(#[from] state::StateReadError),
 }
@@ -694,7 +694,7 @@ impl NativeRuntime {
 
     fn load_or_default(&self) -> Result<Value, NativeRuntimeError> {
         if let Some(path) = checked_status_path(&self.inner.root, false)? {
-            let value: Value = serde_json::from_slice(&fs::read(path)?)?;
+            let value: Value = studio_json::from_slice(&fs::read(path)?)?;
             if !value.is_object() {
                 return Err(NativeRuntimeError::InvalidState);
             }
@@ -729,7 +729,7 @@ impl NativeRuntime {
             let mut temporary = tempfile::Builder::new()
                 .prefix(".status-")
                 .tempfile_in(&parent)?;
-            temporary.write_all(&serde_json::to_vec(state)?)?;
+            temporary.write_all(&studio_json::to_vec(state)?)?;
             temporary.as_file().sync_all()?;
             self.inner
                 .fail_points

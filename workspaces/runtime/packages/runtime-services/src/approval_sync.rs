@@ -24,7 +24,7 @@ pub(crate) fn publish(tx: &Transaction<'_>, row: &Approval) -> Result<(), StoreE
             row.request,
             Request::Question { .. } | Request::AgentQuestion { .. }
         );
-    let mut value = serde::Serialize::serialize(row, serde_json::value::Serializer)?;
+    let mut value = serde::Serialize::serialize(row, studio_json::value::Serializer)?;
     // The transcript item that an asynchronous question belongs to is part of its id.
     if matches!(row.request, Request::AgentQuestion { .. })
         && let Some(item) =
@@ -33,7 +33,7 @@ pub(crate) fn publish(tx: &Transaction<'_>, row: &Approval) -> Result<(), StoreE
     {
         params
             .entry("itemId")
-            .or_insert_with(|| serde_json::Value::String(item.to_owned()));
+            .or_insert_with(|| studio_json::Value::String(item.to_owned()));
     }
     SyncDocumentsRepository::put_entity(tx, "request", row.id.as_str(), value.clone(), !open)?;
     SyncDocumentsRepository::put_entity(tx, "questionHistory", row.id.as_str(), value, !asked)?;

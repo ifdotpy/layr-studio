@@ -117,10 +117,10 @@ fn permission_case(
 ) {
     let mut parent = studio_runtime_store::AgentRecord::test_defaults();
     parent.provider = studio_runtime_schema::queue_command::Field::Value(
-        serde_json::from_str(&format!("{provider:?}")).unwrap(),
+        studio_json::from_str(&format!("{provider:?}")).unwrap(),
     );
     parent.permission_mode = Some(
-        serde_json::from_str(&format!(
+        studio_json::from_str(&format!(
             "{:?}",
             mode.unwrap_or(if yolo { "bypassPermissions" } else { "default" })
         ))

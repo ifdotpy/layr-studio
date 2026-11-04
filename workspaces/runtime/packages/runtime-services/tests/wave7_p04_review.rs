@@ -4,7 +4,7 @@ use crate::callback_fixtures as fixture;
 use crate::wave7_p04_callback_runtime::{callback_body, callback_owner};
 use fixture::*;
 use futures_util::{FutureExt, poll};
-use serde_json::json;
+use studio_json::json;
 use std::sync::{Arc, mpsc};
 use studio_runtime_providers::{Frame, RequestId};
 use studio_runtime_schema::persistence::{OutboxStatus, ToolRequestStatus};
@@ -230,7 +230,7 @@ async fn queued_reply_is_checked_under_the_same_gate_as_resolution_and_stop() {
                         "delete" => value["deletedAt"] = json!(21.0),
                         _ => {
                             value["status"] = json!("completed");
-                            value["turnId"] = serde_json::Value::Null;
+                            value["turnId"] = studio_json::Value::Null;
                             value["inFlight"] = json!(false);
                         }
                     }
@@ -323,7 +323,7 @@ async fn late_written_settles_card_without_reviving_completed_failed_or_replaced
         value["turnId"] = if status == "replaced" {
             json!("other-turn")
         } else {
-            serde_json::Value::Null
+            studio_json::Value::Null
         };
         if status == "deleted" {
             value["deletedAt"] = json!(21.0);
@@ -769,7 +769,7 @@ async fn non_radio_async_answer_is_steered_and_acknowledged() {
             &self,
             _: &Transaction<'_>,
             _: &AgentRecord,
-        ) -> Result<Vec<serde_json::Value>, CoordinationError> {
+        ) -> Result<Vec<studio_json::Value>, CoordinationError> {
             Ok(vec![])
         }
     }

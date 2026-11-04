@@ -9,7 +9,7 @@ use studio_runtime_store::path_identity::{CanonicalPath, LexicalPath};
 use crate::linux_vm_guest::GuestRpc;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError, Transaction};
 use thiserror::Error;
 
@@ -257,7 +257,7 @@ async fn complete_without_effect(
             }
             if let Some(intent) = current.get(INTENT_FIELD).filter(|intent| !intent.is_null())
                 && (intent.get("action")
-                    != Some(&serde_json::to_value(action).map_err(StoreError::from)?)
+                    != Some(&studio_json::to_value(action).map_err(StoreError::from)?)
                     || !matches!(
                         intent.get("phase").and_then(Value::as_str),
                         Some("queued" | "written" | "not_sent")
@@ -320,7 +320,7 @@ async fn finalize_cleanup(
                 .cloned()
                 .ok_or(WorkspaceCleanupError::InvalidRecord)?;
             if intent.get("action")
-                != Some(&serde_json::to_value(action).map_err(StoreError::from)?)
+                != Some(&studio_json::to_value(action).map_err(StoreError::from)?)
                 || !matches!(intent.get("phase").and_then(Value::as_str), Some("written"))
             {
                 return Err(WorkspaceCleanupError::Held);
@@ -462,7 +462,7 @@ impl CompletedEffect {
 impl CleanupIntent {
     fn decode(value: Value) -> Result<Self, WorkspaceCleanupError> {
         let raw: RawCleanupIntent =
-            serde_json::from_value(value).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
+            studio_json::from_value(value).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
         let progress = match raw.phase.as_str() {
             "queued" => CleanupProgress::Queued,
             "written" => CleanupProgress::Written {
@@ -493,7 +493,7 @@ async fn reconcile_cleanup_intent(
     raw: &str,
 ) -> Result<WorkspaceCleanupResult, WorkspaceCleanupError> {
     let record: CleanupRecord =
-        serde_json::from_str(raw).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
+        studio_json::from_str(raw).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
     let intent = CleanupIntent::decode(record.workspace_cleanup_intent)?;
     match intent.progress {
         CleanupProgress::Queued | CleanupProgress::Written { .. } | CleanupProgress::NotSent => {
@@ -524,7 +524,7 @@ fn plan(
         .get(INTENT_FIELD)
         .is_some_and(|intent| !intent.is_null())
     {
-        let intent_action: CleanupAction = serde_json::from_value(
+        let intent_action: CleanupAction = studio_json::from_value(
             agent[INTENT_FIELD]
                 .get("action")
                 .cloned()
@@ -592,7 +592,7 @@ pub(crate) fn check_archive_worktree(
         worktree_ready: bool,
     }
     let workspace: Workspace =
-        serde_json::from_value(agent.clone()).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
+        studio_json::from_value(agent.clone()).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
     if workspace.worktree_ready
         && let Some(identity) = worktree_identity(agent, state_dir)?
     {
@@ -694,7 +694,7 @@ fn worktree_identity(
         common_dir: Option<PathBuf>,
     }
     let owner: WorktreeOwner =
-        serde_json::from_value(agent.clone()).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
+        studio_json::from_value(agent.clone()).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
     let lexical = cleanup_cwd(&owner.cwd).ok_or(WorkspaceCleanupError::InvalidRecord)?;
     let lexical_owned = owned_worktree_root(&lexical, &owner.id)?;
     let lexical_root = lexical_owned.root();
@@ -838,7 +838,7 @@ fn load_agent(tx: &Transaction<'_>, agent_id: &str) -> Result<Value, WorkspaceCl
         .optional()
         .map_err(StoreError::from)?;
     let raw = raw.ok_or(WorkspaceCleanupError::InvalidRecord)?;
-    let mut agent = serde_json::from_str(&raw).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
+    let mut agent = studio_json::from_str(&raw).map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
     studio_runtime_store::agent_volatile::merge(tx, agent_id, &mut agent)?;
     Ok(agent)
 }
@@ -862,8 +862,8 @@ async fn begin_effect(
         let mut attempt = 0_u64;
         if let Some(intent) = agent.get(INTENT_FIELD).filter(|v| !v.is_null()) {
             let decoded = CleanupIntent::decode(intent.clone())?;
-            if intent.get("action") == Some(&serde_json::to_value(action).map_err(StoreError::from)?)
-                && intent.get("effect") == Some(&serde_json::to_value(&effect).map_err(StoreError::from)?)
+            if intent.get("action") == Some(&studio_json::to_value(action).map_err(StoreError::from)?)
+                && intent.get("effect") == Some(&studio_json::to_value(&effect).map_err(StoreError::from)?)
                 && intent.get("phase").and_then(Value::as_str) == Some("not_sent")
             {
                 attempt = intent.get("attempt").and_then(Value::as_u64).unwrap_or(0) + 1;
@@ -872,8 +872,8 @@ async fn begin_effect(
             if intent.get("identity").is_some_and(|previous| *previous != identity) {
                 return Err(WorkspaceCleanupError::Held);
             }
-            let same_effect = intent.get("action") == Some(&serde_json::to_value(action).map_err(StoreError::from)?)
-                && intent.get("effect") == Some(&serde_json::to_value(&effect).map_err(StoreError::from)?);
+            let same_effect = intent.get("action") == Some(&studio_json::to_value(action).map_err(StoreError::from)?)
+                && intent.get("effect") == Some(&studio_json::to_value(&effect).map_err(StoreError::from)?);
             if phase == Some("written") && same_effect {
                 if let CleanupProgress::Written { request_id, effect: completed, raw } = decoded.progress {
                     return Ok((request_id, Some((completed, raw))));
@@ -881,7 +881,7 @@ async fn begin_effect(
                 return Err(WorkspaceCleanupError::InvalidRecord);
             }
             if phase == Some("queued") {
-                if intent.get("action") != Some(&serde_json::to_value(action).map_err(StoreError::from)?) {
+                if intent.get("action") != Some(&studio_json::to_value(action).map_err(StoreError::from)?) {
                     return Err(WorkspaceCleanupError::Held);
                 }
             } else if phase == Some("not_sent") {
@@ -1470,7 +1470,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
 
     use super::{
@@ -1552,7 +1552,7 @@ mod tests {
                 |row| row.get::<_, String>(0),
             )
             .expect("agent reads");
-        serde_json::from_str(&record).expect("stored agent parses")
+        studio_json::from_str(&record).expect("stored agent parses")
     }
 
     #[test]
@@ -1665,7 +1665,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("unrelated row");
-        let saved: Value = serde_json::from_str(&raw).expect("record");
+        let saved: Value = studio_json::from_str(&raw).expect("record");
         assert!(
             saved.get("workspaceCleanupIntent").is_none(),
             "unrelated intent drains"

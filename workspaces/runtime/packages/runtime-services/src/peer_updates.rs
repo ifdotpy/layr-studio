@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::bounded_child::{self, ChildError};
@@ -445,7 +445,7 @@ fn hold_ready(
 
 /// Python `_ready_export`.
 fn ready_export(paths: &ExportPaths, build: &Value) -> Option<Value> {
-    let metadata: Value = serde_json::from_slice(&std::fs::read(&paths.metadata).ok()?).ok()?;
+    let metadata: Value = studio_json::from_slice(&std::fs::read(&paths.metadata).ok()?).ok()?;
     if &metadata["build"] != build {
         return None;
     }
@@ -629,7 +629,7 @@ pub(crate) fn valid_build(value: &Value) -> Option<Value> {
 
 /// Python `read_build`.
 pub(crate) fn read_build(app: &Path) -> Option<Value> {
-    valid_build(&serde_json::from_slice(&std::fs::read(app.join(BUILD_STAMP)).ok()?).ok()?)
+    valid_build(&studio_json::from_slice(&std::fs::read(app.join(BUILD_STAMP)).ok()?).ok()?)
 }
 
 /// Python `installed_app`: the installed app that this process runs from, or
@@ -654,7 +654,7 @@ pub(crate) mod fixture {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     use super::Offer;
 
@@ -717,7 +717,7 @@ mod tests {
     use std::time::Duration;
 
     use base64::Engine;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     use super::{CHUNK_BYTES, EXPORT_WAIT, Offer, UpdateError, fixture};
 

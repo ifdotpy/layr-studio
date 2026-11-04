@@ -5,7 +5,7 @@
 //! the delivery of that reply and never by inference.
 use super::{model::*, storage};
 use rusqlite::{Connection, Transaction};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_providers::{ProviderKind, RequestId, ResponseBody};
 use studio_runtime_schema::approvals::{
     AgentId, Answer, Approval, ApprovalId, ApprovalState, CloseReason, CommandId, Decision,
@@ -70,11 +70,11 @@ fn request_id(rpc: &RpcId) -> Result<RequestId, CallbackError> {
         RpcId::Number { value } => json!(value),
         RpcId::Text { value } => json!(value),
     };
-    Ok(serde_json::from_value(value)?)
+    Ok(studio_json::from_value(value)?)
 }
 
 fn rpc_id(id: &RequestId) -> Result<RpcId, CallbackError> {
-    match serde::Serialize::serialize(id, serde_json::value::Serializer)? {
+    match serde::Serialize::serialize(id, studio_json::value::Serializer)? {
         Value::Number(number) => Ok(RpcId::Number {
             value: number
                 .as_i64()
@@ -324,7 +324,7 @@ fn item_preview(
     Ok(item
         .as_ref()
         .and_then(|item| item["text"].as_str())
-        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|text| studio_json::from_str::<Value>(text).ok())
         .and_then(|preview| preview.as_object().cloned()))
 }
 

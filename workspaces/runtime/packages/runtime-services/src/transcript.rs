@@ -3,7 +3,7 @@
 use crate::event_write::truthy;
 use crate::submit_gates::Deletion;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_store::{
     AgentId, ComplaintRecord, PlanRecord, RuntimeStore, StoreError, Table, TaskId, TranscriptItem,
@@ -277,7 +277,7 @@ impl PageIndex {
             .flatten()
             .filter(|(key, _)| key.as_str() != "items")
             .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<serde_json::Map<_, _>>();
+            .collect::<studio_json::Map<_, _>>();
         index.meta = studio_runtime_store::sha256_hex(Value::Object(meta).to_string().as_bytes());
         Ok((index, items.iter().collect()))
     }
@@ -328,7 +328,7 @@ fn read_time_documents(
             history.remove(0);
         }
     }
-    let encode = |value: &Value| serde_json::to_string(value).map_err(|_| TranscriptError::Store);
+    let encode = |value: &Value| studio_json::to_string(value).map_err(|_| TranscriptError::Store);
     let Some(prior) = prior else {
         let document =
             json!({"id": scope, "payload": encode(payload)?, "seq": through, "_deleted": false});
@@ -469,7 +469,7 @@ fn pull_scope_cached_in(
         return Ok(None);
     };
     let payload: Value =
-        serde_json::from_str(&raw).map_err(|_| invalid_stored("sync_entities", scope))?;
+        studio_json::from_str(&raw).map_err(|_| invalid_stored("sync_entities", scope))?;
     if !deleted {
         validate_cached_payload(scope, &payload)?;
     }
@@ -520,7 +520,7 @@ fn pull_scope_in(
     )?;
     // Keep the bounded result on the existing revision entity. A lost
     // response can replay any original cursor without observing time again.
-    let encoded = serde_json::to_string(&payload).map_err(|_| TranscriptError::Store)?;
+    let encoded = studio_json::to_string(&payload).map_err(|_| TranscriptError::Store)?;
     transaction.execute(
         "UPDATE sync_entities SET payload=?1 WHERE collection=?2 AND id='@revision'",
         params![encoded, scope],
@@ -730,7 +730,7 @@ fn search_item_in(
         if room_view(connection, directory, &room_record)?.is_none() {
             return Err(TranscriptError::ChatUnavailable);
         }
-        serde_json::from_str::<Value>(&deliveries)
+        studio_json::from_str::<Value>(&deliveries)
             .map_err(|_| invalid_stored("runtime_chat_messages", &id))?;
         return Ok(json!({"id":id,"room":room,"sender":sender,"text":text,
             "seq":sequence,"created":created,"deliveries":deliveries,
@@ -790,8 +790,8 @@ fn search_item_in(
             |r| r.get(0),
         )?;
         let ordered: crate::turn_prepare::OrderedJson =
-            serde_json::from_str(&raw).map_err(|_| invalid_stored(table, identity))?;
-        serde_json::to_string_pretty(&ordered).map_err(|_| invalid_stored(table, identity))?
+            studio_json::from_str(&raw).map_err(|_| invalid_stored(table, identity))?;
+        studio_json::to_string_pretty(&ordered).map_err(|_| invalid_stored(table, identity))?
     };
     let object = record
         .as_object_mut()
@@ -933,7 +933,7 @@ pub(crate) fn search_work_in_transaction(
             if !allowed.contains(root) || caller_root.is_some_and(|caller| caller != root) {
                 continue;
             }
-            let serialized = serde_json::to_string(&record).map_err(|_| TranscriptError::Store)?;
+            let serialized = studio_json::to_string(&record).map_err(|_| TranscriptError::Store)?;
             if find_lowercase(&serialized, query).is_none() {
                 continue;
             }
@@ -1210,7 +1210,7 @@ fn find_lowercase(text: &str, query: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::{hydrate_input, parent_projection};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_store::{
         AgentRecord, AgentRepository, RuntimeStore, TranscriptItem, TranscriptItemRecord,
@@ -1263,7 +1263,7 @@ mod tests {
             if let Some(text) = text {
                 stored["text"] = text;
             }
-            let record: TranscriptItemRecord = serde_json::from_str(&stored.to_string())
+            let record: TranscriptItemRecord = studio_json::from_str(&stored.to_string())
                 .expect("persisted transcript permits absent or null parent text");
             let row = TranscriptItem {
                 id: record.id().as_ref().to_owned(),
@@ -1289,7 +1289,7 @@ mod tests {
             json!({"id":"input-1"}),
             json!({"id":"input-1","kind":null,"text":null,"truncated":null}),
         ] {
-            let record: TranscriptItemRecord = serde_json::from_str(
+            let record: TranscriptItemRecord = studio_json::from_str(
                 &json!({
                     "id":"item-1", "role":"assistant", "text":null,
                     "inputs":[input]
@@ -1372,7 +1372,7 @@ mod tests {
             .iter()
             .find(|document| document["id"] == "transcript:agent")
             .expect("transcript delta");
-        let payload: Value = serde_json::from_str(document["payload"].as_str().expect("payload"))
+        let payload: Value = studio_json::from_str(document["payload"].as_str().expect("payload"))
             .expect("delta JSON");
         assert_eq!(payload["delta"], true);
         assert_eq!(payload["items"][0]["id"], "agent:item");
@@ -1458,7 +1458,7 @@ mod tests {
 
     fn payload(pulled: &Value) -> Value {
         let document = &pulled["documents"][0];
-        serde_json::from_str(document["payload"].as_str().expect("payload")).expect("JSON")
+        studio_json::from_str(document["payload"].as_str().expect("payload")).expect("JSON")
     }
 
     fn transcript_rows(store: &RuntimeStore) -> i64 {

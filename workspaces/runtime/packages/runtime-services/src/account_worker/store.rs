@@ -58,7 +58,7 @@ pub(super) fn save_publication<T: serde::Serialize>(
     if let Some(old) = old {
         let mut stored = old.payload;
         let mut incoming: Publication<Effect> =
-            serde_json::from_str(&serde_json::to_string(&payload).map_err(StoreError::from)?)
+            studio_json::from_str(&studio_json::to_string(&payload).map_err(StoreError::from)?)
                 .map_err(StoreError::from)?;
         for value in [&mut stored, &mut incoming] {
             value.analytics_overflow = Some(value.analytics_overflow.unwrap_or_default());
@@ -183,7 +183,7 @@ pub(super) fn save_account_submission(
     let account = &context.intent.account_key;
     let request = super::retained::storage::TransportRequest::from(request);
     let signature = studio_runtime_store::sha256_hex(
-        &serde_json::to_vec(&json!({"context":context,"request":request}))
+        &studio_json::to_vec(&json!({"context":context,"request":request}))
             .map_err(StoreError::from)?,
     );
     Outbox::put(
@@ -1086,7 +1086,7 @@ pub(super) fn hold_invalid_agent_record_in(
         Err(StoreError::InvalidSyncObjectField { .. }) => return Ok(()),
         Err(error) => return Err(error.into()),
     }
-    let parsed: Value = serde_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
+    let parsed: Value = studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
         scope: "runtime_agents".into(),
         id: agent_id.to_owned(),
     })?;
@@ -1596,12 +1596,12 @@ fn settle_outcome(
         if let Some(abandoned) = abandoned {
             let _: studio_runtime_store::request_results::ResultEnvelope<
                 studio_runtime_store::request_results::AbandonedResult,
-            > = serde_json::from_str(&abandoned).map_err(StoreError::from)?;
+            > = studio_json::from_str(&abandoned).map_err(StoreError::from)?;
             let reply = match body {
                 ResponseBody::Result(value) => LateProviderReply::Result(value),
                 ResponseBody::Error(value) => LateProviderReply::Error(value),
             };
-            let signature = serde_json::to_string(&reply).map_err(StoreError::from)?;
+            let signature = studio_json::to_string(&reply).map_err(StoreError::from)?;
             let token =
                 source.derive_result("account-call-late", &[&context.operation], &signature);
             studio_runtime_store::request_results::RequestResults::settle(
@@ -2217,7 +2217,7 @@ fn resolve_unbound_completion(
         AgentRepository::put(tx, &agent)?;
         return Ok(UnboundCompletion::Bound);
     }
-    let events = serde_json::to_string(
+    let events = studio_json::to_string(
         attempt
             .events
             .as_ref()
@@ -2547,7 +2547,7 @@ fn record_manual_release_closure(
     let [raw] = rows.as_slice() else {
         return Ok(false);
     };
-    let mut agent: AgentRecord = serde_json::from_str(raw).map_err(|_| invalid(thread))?;
+    let mut agent: AgentRecord = studio_json::from_str(raw).map_err(|_| invalid(thread))?;
     let record = agent.value();
     let release = &record["nativeRelease"];
     if !release["id"]
@@ -3137,7 +3137,7 @@ pub(super) fn effect_key(account: &str, effect: &Effect) -> Option<String> {
     if matches!(effect, Effect::Callback(..)) {
         return None;
     }
-    let raw = serde_json::to_vec(effect).ok()?;
+    let raw = studio_json::to_vec(effect).ok()?;
     Some(format!(
         "effect:{account}:{}",
         studio_runtime_store::sha256_hex(&raw)
@@ -3163,7 +3163,7 @@ pub(super) fn persist_effect(
             tx,
             &OutboxRow {
                 signature: studio_runtime_store::sha256_hex(
-                    &serde_json::to_vec(effect).map_err(StoreError::from)?,
+                    &studio_json::to_vec(effect).map_err(StoreError::from)?,
                 ),
                 id: key,
                 kind: OutboxKind::FollowupEffect,
@@ -3214,7 +3214,7 @@ mod effect_obligation_tests {
         persist_effect(&tx, "account", &first).expect("same obligation");
         let recovered = recover_effects(&tx, "account").expect("recover");
         assert_eq!(
-            serde_json::to_value(recovered).expect("effects"),
+            studio_json::to_value(recovered).expect("effects"),
             json!([first, second])
         );
         delete_effect(&tx, &effect_key("account", &first).expect("effect key"))
@@ -3599,7 +3599,7 @@ fn compact(
     let mut generations = std::collections::BTreeMap::new();
     for (id, raw, origin) in rows {
         let row: JournalSettlement =
-            serde_json::from_str(&raw).map_err(|_| invalid(journal_scope))?;
+            studio_json::from_str(&raw).map_err(|_| invalid(journal_scope))?;
         let origin = u64::try_from(origin).map_err(|_| invalid(journal_scope))?;
         if origin > stream_generation || !row.ready || !row.committed {
             break;
@@ -3903,7 +3903,7 @@ fn coalesce_token_rate_receipt(
         .transpose()?;
     if let Some((id, result)) = row {
         let mut publication: Publication =
-            serde_json::from_str(&result).map_err(|_| invalid(&id))?;
+            studio_json::from_str(&result).map_err(|_| invalid(&id))?;
         let count = publication.coalesced_effects.len() + usize::from(publication.effect.is_some());
         if count.saturating_sub(1) >= MAX_COALESCED_TOKEN_RATE_EFFECTS {
             return Ok(false);
@@ -3912,12 +3912,12 @@ fn coalesce_token_rate_receipt(
         // under a later cursor can double-project them after a partial drain.
         publication
             .coalesced_effects
-            .push(serde_json::value::to_raw_value(effect).map_err(StoreError::from)?);
+            .push(studio_json::to_raw_value(effect).map_err(StoreError::from)?);
         if publication.effect.is_none() {
             publication.effect = Some(publication.coalesced_effects.remove(0));
         }
         publication.token_rate_coalesced = true;
-        let serialized = serde_json::to_string(&publication).map_err(StoreError::from)?;
+        let serialized = studio_json::to_string(&publication).map_err(StoreError::from)?;
         if serialized.len() > MAX_COALESCED_TOKEN_RATE_BYTES {
             return Ok(false);
         }
@@ -4065,7 +4065,7 @@ async fn publish_pending(
     result: &str,
     after_publish: &mut (impl FnMut() -> Result<(), WorkerError> + Send),
 ) -> Result<(), WorkerError> {
-    let publication: Publication = serde_json::from_str(result).map_err(|_| invalid(id))?;
+    let publication: Publication = studio_json::from_str(result).map_err(|_| invalid(id))?;
     let analytics_overflow = publication.analytics_overflow.unwrap_or_default();
     let publication_overflow = publication.publication_overflow.unwrap_or_default();
     if analytics_overflow > 0 || publication_overflow > 0 {
@@ -4087,7 +4087,7 @@ async fn publish_pending(
             .chain(&publication.coalesced_effects)
         {
             let effect: crate::notification_dispatch::NotificationPostCommit =
-                serde_json::from_str(raw.get()).map_err(|_| StoreError::InvalidStoredObject {
+                studio_json::from_str(raw.as_str()).map_err(|_| StoreError::InvalidStoredObject {
                     table: "runtime_outbox",
                     id: id.to_owned(),
                 })?;
@@ -4205,13 +4205,13 @@ pub(crate) fn persist_streams(
         let scope = super::vm_journal_scope(account, &actor);
         let saved = persist_stream_lane(tx, account, &scope, Some(&actor), &revision, &lane)?;
         stored_agent(tx, &actor)?;
-        tx.execute_cached("UPDATE runtime_agents SET record=json_set(record,'$.providerStream.streams',json(?2)) WHERE id=?1", params![actor, serde_json::to_string(&saved).map_err(StoreError::from)?])?;
+        tx.execute_cached("UPDATE runtime_agents SET record=json_set(record,'$.providerStream.streams',json(?2)) WHERE id=?1", params![actor, studio_json::to_string(&saved).map_err(StoreError::from)?])?;
     }
     let saved = persist_stream_lane(tx, account, account, None, &revision, &host)?;
     studio_runtime_store::account_state::put_streams(
         tx,
         account,
-        &serde_json::to_string(&saved).map_err(StoreError::from)?,
+        &studio_json::to_string(&saved).map_err(StoreError::from)?,
     )?;
     streams.store_revision = Some((account.to_owned(), revision));
     Ok(())
@@ -4259,7 +4259,7 @@ pub(super) fn load_streams(
         restore_stream_lane(
             tx,
             account,
-            serde_json::from_str(&raw).map_err(|_| invalid(account))?,
+            studio_json::from_str(&raw).map_err(|_| invalid(account))?,
         )?
     } else {
         AccountStreams {
@@ -4279,7 +4279,7 @@ pub(super) fn load_streams(
         let saved = restore_stream_lane(
             tx,
             &scope,
-            serde_json::from_str(&raw).map_err(|_| invalid(&actor))?,
+            studio_json::from_str(&raw).map_err(|_| invalid(&actor))?,
         )?;
         host.metadata.merge_owner(saved.metadata)?;
     }
@@ -4374,7 +4374,7 @@ mod stream_owner_query_tests {
             .unwrap();
         for n in 0..20 {
             let id = format!("host-{n}");
-            let raw = serde_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":"default","executionMode":"host"});
+            let raw = studio_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":"default","executionMode":"host"});
             db.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                 rusqlite::params![id, raw.to_string()],
@@ -4430,7 +4430,7 @@ mod pending_preparation_scan_tests {
             .unwrap();
         for n in 0..20 {
             let id = format!("disabled-{n}");
-            let raw = serde_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":"default","autoWake":false});
+            let raw = studio_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":"default","autoWake":false});
             db.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                 rusqlite::params![id, raw.to_string()],
@@ -4477,34 +4477,34 @@ mod pending_preparation_scan_tests {
                 "a",
                 "default",
                 true,
-                serde_json::json!({"startAttempt":{"prepareError":"waiting"}}),
+                studio_json::json!({"startAttempt":{"prepareError":"waiting"}}),
             ),
             (
                 "b",
                 "default",
                 true,
-                serde_json::json!({"lastWorkspaceWait":{"attemptId":"old"}}),
+                studio_json::json!({"lastWorkspaceWait":{"attemptId":"old"}}),
             ),
             (
                 "c",
                 "default",
                 true,
-                serde_json::json!({"startAttempt":null,"lastWorkspaceWait":{"attemptId":"old"}}),
+                studio_json::json!({"startAttempt":null,"lastWorkspaceWait":{"attemptId":"old"}}),
             ),
             (
                 "d",
                 "other",
                 true,
-                serde_json::json!({"startAttempt":{"prepareError":"waiting"}}),
+                studio_json::json!({"startAttempt":{"prepareError":"waiting"}}),
             ),
             (
                 "e",
                 "default",
                 false,
-                serde_json::json!({"startAttempt":{"prepareError":"waiting"}}),
+                studio_json::json!({"startAttempt":{"prepareError":"waiting"}}),
             ),
         ] {
-            let mut row = serde_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":2,"status":"idle","accountKey":account,"autoWake":auto_wake});
+            let mut row = studio_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":2,"status":"idle","accountKey":account,"autoWake":auto_wake});
             row.as_object_mut()
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
@@ -4775,12 +4775,12 @@ fn hold_before_claim(
 #[cfg(test)]
 mod journal_frame_payload_tests {
     use super::*;
-    use serde_json::{Map, json};
+    use studio_json::{Map, json};
     use studio_runtime_providers::{NotificationFrame, RequestFrame, UnknownMethodFrame};
 
     fn assert_legacy_payload_bytes(frame: &Frame) {
         let encoded = studio_runtime_providers::encode_line(frame).expect("frame encoding");
-        let frame_value: Value = serde_json::from_slice(&encoded).expect("encoded frame JSON");
+        let frame_value: Value = studio_json::from_slice(&encoded).expect("encoded frame JSON");
         let legacy_payload = json!({"frame": frame_value}).to_string();
         assert_eq!(
             journal_frame_payload(frame, "test journal").expect("journal payload"),

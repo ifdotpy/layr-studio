@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     account_worker::commit_prepared_turn,
     claude_input_recovery::{
@@ -118,7 +118,7 @@ async fn seeded(path: &std::path::Path, state: &Value) -> studio_runtime_store::
     let store = studio_runtime_store::RuntimeStore::open(Some(path))
         .await
         .expect("fresh current store");
-    let seed: Seed = serde_json::from_value(state.clone()).expect("typed captured rows");
+    let seed: Seed = studio_json::from_value(state.clone()).expect("typed captured rows");
     store.transaction(move |tx| {
         for row in seed.runtime_agents {
             let agent = studio_runtime_store::AgentRecord::from_value(row.record)?;
@@ -132,7 +132,7 @@ async fn seeded(path: &std::path::Path, state: &Value) -> studio_runtime_store::
             let root = RequestIdentity::issue_root();
             let identity = RequestIdentity::new("execution-attempt", &["agent"], &root, &[&row.id]).expect("identity");
             let Admission::Fresh(admission) = RequestResults::admit(tx, &identity, "fixture", identity.issued_ms()).map_err(studio_runtime_store::StoreError::from)? else { panic!("new identity"); };
-            tx.execute("INSERT INTO runtime_execution_attempts(id,run,record) VALUES(?1,?2,json_set(?3,'$.admission',json(?4),'$.rootRequestId',?5))",rusqlite::params![row.id,row.run,row.record.to_string(),serde_json::to_string(&admission)?,root])?;
+            tx.execute("INSERT INTO runtime_execution_attempts(id,run,record) VALUES(?1,?2,json_set(?3,'$.admission',json(?4),'$.rootRequestId',?5))",rusqlite::params![row.id,row.run,row.record.to_string(),studio_json::to_string(&admission)?,root])?;
         }
         for row in seed.runtime_execution_inputs { tx.execute("INSERT INTO runtime_execution_inputs(run,event) VALUES(?1,?2)",rusqlite::params![row.run,row.event])?; }
         for row in seed.runtime_events { tx.execute("INSERT INTO runtime_events(id,agent,epoch,kind,text,created,status,turn_id,error) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",rusqlite::params![row.id,row.agent,row.epoch,row.kind,row.text,row.created,row.status,row.turn_id,row.error])?; }
@@ -144,7 +144,7 @@ async fn seeded(path: &std::path::Path, state: &Value) -> studio_runtime_store::
 }
 
 fn state(db: &rusqlite::Connection) -> Value {
-    let mut result = serde_json::Map::new();
+    let mut result = studio_json::Map::new();
     for table in [
         "runtime_agents",
         "runtime_execution_runs",
@@ -176,7 +176,7 @@ fn state(db: &rusqlite::Connection) -> Value {
             .collect::<Vec<_>>();
         let rows = stmt
             .query_map([], |row| {
-                let mut value = serde_json::Map::new();
+                let mut value = studio_json::Map::new();
                 for (i, name) in names.iter().enumerate() {
                     use rusqlite::types::ValueRef;
                     let v = match row.get_ref(i)? {
@@ -186,7 +186,7 @@ fn state(db: &rusqlite::Connection) -> Value {
                         ValueRef::Text(v) => {
                             let s = std::str::from_utf8(v).expect("UTF8");
                             if name == "record" {
-                                serde_json::from_str(s).expect("JSON")
+                                studio_json::from_str(s).expect("JSON")
                             } else {
                                 json!(s)
                             }
@@ -226,7 +226,7 @@ fn agent(state: &Value) -> &Value {
     &state["runtime_agents"][0]["record"]
 }
 fn transport() -> TransportSnapshot {
-    serde_json::from_str(r#"{"accountKey":"account","connectionId":"connection","supervisorIdentity":null,"closed":false}"#).expect("transport")
+    studio_json::from_str(r#"{"accountKey":"account","connectionId":"connection","supervisorIdentity":null,"closed":false}"#).expect("transport")
 }
 fn binding(generation: u64) -> SubmittedBinding {
     SubmittedBinding {
@@ -379,11 +379,11 @@ fn assert_current_receipts(db: &rusqlite::Connection) {
     let attempt = studio_runtime_store::ExecutionHistoryRepository::attempt(db, "attempt")
         .expect("attempt read")
         .expect("attempt exists");
-    let owner: Owner = serde_json::from_str(
+    let owner: Owner = studio_json::from_str(
         attempt
             .provider_submission
             .expect("publication owner")
-            .get(),
+            .as_str(),
     )
     .expect("typed publication owner");
     assert_eq!(owner.attempt_id.as_deref(), Some("attempt"));
@@ -396,7 +396,7 @@ fn assert_current_receipts(db: &rusqlite::Connection) {
     );
     for event in ["one", "two"] {
         let raw: String = db.query_row("SELECT json_extract(record,'$.providerSubmission') FROM runtime_event_meta WHERE id=?1",[event],|r| r.get(0)).expect("event owner");
-        let event_owner: Owner = serde_json::from_str(&raw).expect("typed event owner");
+        let event_owner: Owner = studio_json::from_str(&raw).expect("typed event owner");
         assert_eq!(event_owner, owner);
     }
 }

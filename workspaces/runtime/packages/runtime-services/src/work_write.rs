@@ -20,7 +20,7 @@ use studio_runtime_schema::shared_values::{
 use studio_runtime_store::path_identity::CanonicalPath;
 
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, Connection, LegacyWorkReply, ReviewerArchiveRepository,
     RuntimeStore, Transaction, WorkItemRecord, WorkItemsRepository, WorkStatus,
@@ -191,7 +191,7 @@ async fn run_accepted_archive(
     timing: ArchiveTiming,
 ) -> Result<ArchiveRun, WorkWriteError> {
     // Archive intents of older builds lack the typed identity; they are left as they are.
-    let Ok(intent) = serde_json::from_str::<ArchiveIntent>(&encoded_intent) else {
+    let Ok(intent) = studio_json::from_str::<ArchiveIntent>(&encoded_intent) else {
         return Ok(ArchiveRun::Skipped);
     };
     let task_id_for_read = task_id.clone();
@@ -234,7 +234,7 @@ async fn run_accepted_archive(
                     [&task_id_for_claim], |row| row.get(0),
                 ).map_err(studio_runtime_store::StoreError::from)?;
                 let mut intent: ArchiveIntent =
-                    serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
+                    studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
                 let prior_status = intent.status;
                 if !matches!(
                     prior_status,
@@ -468,7 +468,7 @@ async fn run_accepted_archive(
                     )
                     .map_err(studio_runtime_store::StoreError::from)?;
                 let notice: ArchiveNotice =
-                    serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
+                    studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
                 let reason = notice
                     .decisions
                     .last()
@@ -565,7 +565,7 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
         .transaction_with_error(move |tx| -> Result<(), WorkWriteError> {
             let candidates = ReviewerArchiveRepository::candidates(tx)?;
             for (child_id, encoded) in candidates {
-                let mut record: Value = serde_json::from_str(&encoded)
+                let mut record: Value = studio_json::from_str(&encoded)
                     .map_err(studio_runtime_store::StoreError::from)?;
                 if event_write::truthy(record.get("agentArchive"))
                     || event_write::truthy(record.get("reviewArchiveError"))
@@ -605,7 +605,7 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
 
     for (child_id, encoded) in due {
         let record: Value =
-            serde_json::from_str(&encoded).map_err(studio_runtime_store::StoreError::from)?;
+            studio_json::from_str(&encoded).map_err(studio_runtime_store::StoreError::from)?;
         let Some(event_id) = record.get("reviewArchiveScheduled").and_then(Value::as_str) else {
             continue;
         };
@@ -637,7 +637,7 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                     .map_err(studio_runtime_store::StoreError::from)?;
                 Ok::<_, WorkWriteError>(event.is_some_and(|(event_parent, text)| {
                     event_parent == parent_id_for_read
-                        && serde_json::from_str::<Value>(&text)
+                        && studio_json::from_str::<Value>(&text)
                             .ok()
                             .and_then(|payload| {
                                 payload
@@ -792,7 +792,7 @@ async fn retry_refused_reviewer_archives(store: &Arc<RuntimeStore>) -> Result<()
             drop(statement);
             for (id, raw) in rows {
                 let mut record: Value =
-                    serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
+                    studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
                 if event_write::truthy(record.get("agentArchive")) {
                     continue;
                 }
@@ -1162,7 +1162,7 @@ fn read_vm_view(connection: &Connection, task_id: &str) -> Result<VmView, WorkWr
         .optional()
         .map_err(studio_runtime_store::StoreError::from)?
         .ok_or(Error::InvalidRequest("Unknown work item"))?;
-    Ok(serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?)
+    Ok(studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?)
 }
 fn write_vm_view(tx: &Transaction<'_>, task_id: &str, view: &VmView) -> Result<(), WorkWriteError> {
     let mut work = WorkItemsRepository::work_record(tx, task_id)?
@@ -1253,10 +1253,10 @@ pub async fn prepare_vm_submission(
         let mut view = read_vm_view(tx, &input.task_id)?;
         match &view.vm_submit {
             Some(VmWorkIntent::Pending(..) | VmWorkIntent::Unknown(..) | VmWorkIntent::UnknownUnattributed(..)) => return Err(Error::Conflict("A prior layr evidence request has an unknown outcome; inspect it before retrying").into()),
-            Some(VmWorkIntent::Completed { owner, result }) if owner.request_id==rpc_id && owner.owner==owner_id && Some(owner.id.version)==work.version().and_then(serde_json::Number::as_i64) && owner.revision==revision => return Ok(VmSubmissionPreparation::Evidence{evidence:result.evidence.clone(),request_id:rpc_id}),
+            Some(VmWorkIntent::Completed { owner, result }) if owner.request_id==rpc_id && owner.owner==owner_id && Some(owner.id.version)==work.version().and_then(studio_json::Number::as_i64) && owner.revision==revision => return Ok(VmSubmissionPreparation::Evidence{evidence:result.evidence.clone(),request_id:rpc_id}),
             Some(VmWorkIntent::Completed { .. } | VmWorkIntent::NotSent(..)) | None => {}
         }
-        view.vm_submit = Some(VmWorkIntent::Pending(VmOwner {request_id:rpc_id.clone(),owner:owner_id.into(),revision:revision.clone(),id:Submission { version:work.version().and_then(serde_json::Number::as_i64).ok_or_else(|| invalid("runtime_work", &input.task_id))? },public:None}));
+        view.vm_submit = Some(VmWorkIntent::Pending(VmOwner {request_id:rpc_id.clone(),owner:owner_id.into(),revision:revision.clone(),id:Submission { version:work.version().and_then(studio_json::Number::as_i64).ok_or_else(|| invalid("runtime_work", &input.task_id))? },public:None}));
         if let Some(root) = request_id.as_deref()
             && admit_vm_work_request(tx, &agent, root, &input.task_id, &signature, event_write::unix_time()?)?.is_none() {
             return Ok(VmSubmissionPreparation::Replay);
@@ -1928,9 +1928,9 @@ pub fn settle_accepted_archive(
         [task], |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(studio_runtime_store::StoreError::from)?;
     let token: AdmittedRequest =
-        serde_json::from_str(&token).map_err(studio_runtime_store::StoreError::from)?;
+        studio_json::from_str(&token).map_err(studio_runtime_store::StoreError::from)?;
     let mut original: LegacyWorkReply =
-        serde_json::from_str(&original).map_err(studio_runtime_store::StoreError::from)?;
+        studio_json::from_str(&original).map_err(studio_runtime_store::StoreError::from)?;
     original
         .set("archive", reply.value()["archive"].clone())
         .map_err(studio_runtime_store::StoreError::from)?;
@@ -2649,7 +2649,7 @@ fn advance_checked(record: &mut WorkItemRecord, now: f64) -> Result<(), Error> {
     let id = record.id().as_ref();
     let version = record
         .version()
-        .and_then(serde_json::Number::as_i64)
+        .and_then(studio_json::Number::as_i64)
         .ok_or_else(|| invalid("runtime_work", id))?;
     let next = version
         .checked_add(1)
@@ -2828,7 +2828,7 @@ fn mutate(
     }
     let version = work
         .version()
-        .and_then(serde_json::Number::as_i64)
+        .and_then(studio_json::Number::as_i64)
         .ok_or_else(|| invalid("runtime_work", &task_id))?;
     if expected.is_some_and(|expected| expected != version) {
         return Err(Error::Conflict(
@@ -3119,7 +3119,7 @@ fn submit(
         let revision = python_bounded_text(&input.revision, 200)?;
         if owner.request_id != request_id
             || owner.owner != submitter_id
-            || Some(owner.id.version) != work.version().and_then(serde_json::Number::as_i64)
+            || Some(owner.id.version) != work.version().and_then(studio_json::Number::as_i64)
             || owner.revision != revision
             || Some(&result.evidence) != input.vm_evidence.as_ref()
         {
@@ -3487,7 +3487,7 @@ fn accept(
                 "work-decision:{}:{}",
                 input.task_id,
                 work.version()
-                    .and_then(serde_json::Number::as_i64)
+                    .and_then(studio_json::Number::as_i64)
                     .unwrap_or_default()
             ),
             "work_decision",
@@ -3550,7 +3550,7 @@ fn load_work(
     }
     let version = work
         .version()
-        .and_then(serde_json::Number::as_i64)
+        .and_then(studio_json::Number::as_i64)
         .ok_or_else(|| invalid("runtime_work", task_id))?;
     if expected_version.is_some_and(|expected| expected != version) {
         return Err(Error::Conflict(
@@ -3980,7 +3980,7 @@ mod actor_tests {
         write_action_as_agent, write_as_agent,
     };
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::{
@@ -4191,7 +4191,7 @@ mod actor_tests {
     fn vm_submission_completed_requires_evidence() {
         let missing = r#"{"status":"completed","requestId":"evidence","taskId":"task","owner":"worker","revision":"state","version":2,"created":1.0}"#;
         assert!(
-            serde_json::from_str::<
+            studio_json::from_str::<
                 super::VmWorkIntent<super::Submission, super::VmSubmissionResult>,
             >(missing)
             .is_err()
@@ -4203,10 +4203,10 @@ mod actor_tests {
         let stored =
             r#"{"status":"unknown","requestId":"rpc","owner":"a","revision":"rev","version":1}"#;
         let intent: super::VmWorkIntent<super::Submission, super::VmSubmissionResult> =
-            serde_json::from_str(stored).expect("migrated intent");
+            studio_json::from_str(stored).expect("migrated intent");
         assert_eq!(
             studio_runtime_store::projection_value(&intent),
-            serde_json::from_str::<Value>(stored).expect("fixture")
+            studio_json::from_str::<Value>(stored).expect("fixture")
         );
     }
 
@@ -4510,7 +4510,7 @@ mod actor_tests {
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].0, "archive-due");
         assert_eq!(
-            serde_json::from_str::<Value>(&due[0].1).expect("receipt JSON")["intentId"],
+            studio_json::from_str::<Value>(&due[0].1).expect("receipt JSON")["intentId"],
             "archive-due:result-1"
         );
     }
@@ -4667,7 +4667,7 @@ mod actor_tests {
                 |row| row.get(0),
             )
             .expect("archive outcome receipt");
-        let receipt: Value = serde_json::from_str(&encoded_receipt).expect("receipt JSON");
+        let receipt: Value = studio_json::from_str(&encoded_receipt).expect("receipt JSON");
         assert_eq!(receipt["status"], "terminal");
         assert_eq!(receipt["outcome"]["status"], "kept");
         assert_eq!(
@@ -4681,7 +4681,7 @@ mod actor_tests {
                 |row| row.get(0),
             )
             .expect("accepted work record");
-        let work: Value = serde_json::from_str(&encoded_work).expect("work JSON");
+        let work: Value = studio_json::from_str(&encoded_work).expect("work JSON");
         assert_eq!(work["archive"]["status"], "kept");
         assert_eq!(work["archiveIntent"]["status"], "terminal");
     }
@@ -4746,7 +4746,7 @@ mod actor_tests {
                 |row| row.get(0),
             )
             .expect("archive outcome receipt");
-        let receipt: Value = serde_json::from_str(&encoded_receipt).expect("receipt JSON");
+        let receipt: Value = studio_json::from_str(&encoded_receipt).expect("receipt JSON");
         assert_eq!(receipt["actorEpoch"], 0);
         assert_eq!(receipt["status"], "terminal");
         assert_eq!(receipt["outcome"]["status"], "kept");
@@ -4758,7 +4758,7 @@ mod actor_tests {
                 |row| row.get(0),
             )
             .expect("accepted work record");
-        let work: Value = serde_json::from_str(&encoded_work).expect("work JSON");
+        let work: Value = studio_json::from_str(&encoded_work).expect("work JSON");
         assert_eq!(work["archive"]["status"], "kept");
         assert_eq!(work["archiveIntent"]["status"], "terminal");
     }
@@ -5158,7 +5158,7 @@ mod actor_tests {
             WorkItemsRepository::put_work(tx, "race", &item)?;
             Ok(())
         }).await.expect("seed");
-        let intent: super::ArchiveIntent = serde_json::from_str(r#"{"status":"unknown","taskId":"race","intentId":"race:result-1","actor":"lead","actorEpoch":1,"target":"worker","attempts":0,"created":1}"#).expect("intent");
+        let intent: super::ArchiveIntent = studio_json::from_str(r#"{"status":"unknown","taskId":"race","intentId":"race:result-1","actor":"lead","actorEpoch":1,"target":"worker","attempts":0,"created":1}"#).expect("intent");
         assert!(super::accepted_revision_is_on_local_main(
             repo.path().to_str().expect("path"),
             &revision
@@ -5940,7 +5940,7 @@ mod actor_tests {
 mod release_tests {
     use super::{continuation_work_pending, release_failed_work};
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::AgentRecord;
 
     #[test]
@@ -6021,7 +6021,7 @@ mod release_tests {
         released_ids.sort();
         assert_eq!(released_ids, ["blocked-task", "task"]);
         assert!(released.event_inserted);
-        let stored: Value = serde_json::from_str(
+        let stored: Value = studio_json::from_str(
             &tx.query_row(
                 "SELECT record FROM runtime_work WHERE id='task'",
                 [],
@@ -6033,7 +6033,7 @@ mod release_tests {
         assert_eq!(stored["owner"], Value::Null);
         assert_eq!(stored["status"], "ready");
         assert_eq!(stored["releases"][0]["reason"], "worker exited");
-        let blocked: Value = serde_json::from_str(
+        let blocked: Value = studio_json::from_str(
             &tx.query_row(
                 "SELECT record FROM runtime_work WHERE id='blocked-task'",
                 [],

@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::cost_aggregate::{
     CostGroup, CostMember, CostTokens, DEFAULT_ACCOUNT, JournalReceiptCache,
     journal_partition_and_adjustments_cached,
@@ -579,7 +579,7 @@ fn usage_reconciliation_on_reader(
         analytics::SessionCostError::InvalidRequest("Unknown chat"),
     ))?;
     let member: CostMember =
-        serde_json::from_str(&raw).map_err(|_| CostsError::InvalidSessionState)?;
+        studio_json::from_str(&raw).map_err(|_| CostsError::InvalidSessionState)?;
     let mut budget = EvidenceBudget::default();
     let snapshot = read_usage_snapshot(&tx, agent_id, MAX_RECONCILIATION_SOURCE_ROWS)?;
     let recorded = snapshot.recorded;
@@ -616,7 +616,7 @@ fn usage_reconciliation_on_reader(
         )
         .optional()?;
     let budget_record = budget_record
-        .map(|raw| serde_json::from_str::<Value>(&raw))
+        .map(|raw| studio_json::from_str::<Value>(&raw))
         .transpose()
         .map_err(StoreError::from)?;
     let mut replay_conflicts = match budget_record {
@@ -973,7 +973,7 @@ fn parse_codex_evidence(
         .filter(|line| !line.is_empty())
         .enumerate()
     {
-        let Ok(record) = serde_json::from_slice::<Value>(line) else {
+        let Ok(record) = studio_json::from_slice::<Value>(line) else {
             incomplete = true;
             continue;
         };
@@ -1754,7 +1754,7 @@ fn read_session_native_ids(path: &Path) -> Option<Result<Vec<String>, ()>> {
 }
 
 fn parse_session_native_ids(reader: impl Read) -> Result<Vec<String>, ()> {
-    let Ok(saved) = serde_json::from_reader::<_, SessionFile>(reader) else {
+    let Ok(saved) = studio_json::from_reader::<_, SessionFile>(reader) else {
         return Err(());
     };
     let state = match saved.format {
@@ -1878,7 +1878,7 @@ fn parse_claude_log_reader_limited(
             incomplete = true;
             CLAUDE_LOG_LINES_SKIPPED.fetch_add(1, Ordering::Relaxed);
         };
-        let row = match serde_json::from_slice::<LogLine>(&line) {
+        let row = match studio_json::from_slice::<LogLine>(&line) {
             Ok(LogLine::Assistant(row)) => row,
             Ok(LogLine::Other) => continue,
             Err(_) => {
@@ -1997,7 +1997,7 @@ fn pricing_provider(provider: ProviderKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{CostsError, read_local_claude_usage, session_cost};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::collections::BTreeMap;
     use std::fs;
     use studio_runtime_store::analytics_capture::{AnalyticsCaptureRepository, CaptureTable};
@@ -2011,7 +2011,7 @@ mod tests {
         accounts: &BTreeMap<String, crate::account_policy::PublicAccount>,
     ) -> Result<Value, CostsError> {
         super::session_cost_with_account_profiles(store, agent, accounts).map(|cost| {
-            serde_json::from_slice(&serde_json::to_vec(&cost).expect("serialize cost"))
+            studio_json::from_slice(&studio_json::to_vec(&cost).expect("serialize cost"))
                 .expect("cost JSON")
         })
     }
@@ -2127,7 +2127,7 @@ mod tests {
     }
 
     fn member(record: Value) -> CostMember {
-        serde_json::from_value(record).expect("agent cost members")
+        studio_json::from_value(record).expect("agent cost members")
     }
 
     /// The skipped line count is one process-wide counter, and tests run in parallel
@@ -2235,7 +2235,7 @@ mod tests {
     async fn typed_usage_ledger_journal_incremental_group_prices() {
         let temp = tempdir().expect("state");
         let store = RuntimeStore::open(Some(temp.path())).await.expect("store");
-        let runs: Value = serde_json::from_str(include_str!(
+        let runs: Value = studio_json::from_str(include_str!(
             "../../runtime-schema/src/fixtures/claude-cache-write-1h.json"
         ))
         .expect("native counts");
@@ -2356,7 +2356,7 @@ mod tests {
         assert!(!incomplete);
         let tokens = super::log_tokens(rows[0].tokens).expect("journal tokens");
         assert_eq!(
-            serde_json::to_value(&tokens).expect("tokens")["cacheWriteInput1h"],
+            studio_json::to_value(&tokens).expect("tokens")["cacheWriteInput1h"],
             10
         );
         let catalog = crate::pricing::PricingCatalog::from_value(&json!({"providers":{
@@ -2591,7 +2591,7 @@ mod tests {
         let (members, accounts) = reconciliation_journal_fixture(root.path());
         let journal = root.path().join("profile/projects/project/thread.jsonl");
         let original: Value =
-            serde_json::from_slice(&fs::read(&journal).expect("journal")).expect("row");
+            studio_json::from_slice(&fs::read(&journal).expect("journal")).expect("row");
         let lines = ["one", "two", "three"].map(|id| {
             let mut row = original.clone();
             row["message"]["id"] = json!(id);
@@ -3464,8 +3464,8 @@ mod tests {
         let repeated =
             session_cost_with_account_profiles(&store, "agent", &accounts).expect("repeated cost");
         assert_eq!(
-            serde_json::to_vec(&repeated).expect("cached JSON"),
-            serde_json::to_vec(&result).expect("initial JSON")
+            studio_json::to_vec(&repeated).expect("cached JSON"),
+            studio_json::to_vec(&result).expect("initial JSON")
         );
         let full_reads = store
             .with_cost_reader(
@@ -3495,8 +3495,8 @@ mod tests {
         let uncached =
             session_cost_with_account_profiles(&store, "agent", &accounts).expect("uncached cost");
         assert_eq!(
-            serde_json::to_vec(&uncached).expect("uncached JSON"),
-            serde_json::to_vec(&repeated).expect("cached JSON")
+            studio_json::to_vec(&uncached).expect("uncached JSON"),
+            studio_json::to_vec(&repeated).expect("cached JSON")
         );
 
         // Cached log parses and the cached catalog follow the files: a second answer
@@ -3546,7 +3546,7 @@ mod tests {
         for evidence in ["live", "recovered"] {
             store.analytics_transaction::<_,StoreError>(move |tx,_| {
                 let raw: String = tx.query_row("SELECT record FROM analytics_usage WHERE id='usage-receipt'", [], |row|row.get(0))?;
-                let mut row: Value = serde_json::from_str(&raw)?;
+                let mut row: Value = studio_json::from_str(&raw)?;
                 row["inputTokensAreUncached"] = json!(true);
                 row["last"]["outputTokens"] = json!(50);
                 row["studioUsage"] = json!({"kind":"response","responseId":"response-1","model":"claude-sonnet-4-5",

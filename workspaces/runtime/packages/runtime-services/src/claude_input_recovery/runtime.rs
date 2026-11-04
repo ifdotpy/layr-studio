@@ -2,7 +2,7 @@
 //! Submitted transaction calls `submission::commit_start`
 //! with the exact prepared wire params and request generation. No provider call or journal ACK belongs here.
 use super::{TransportSnapshot, capture_input};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::{
     AgentRecord, AgentRepository, ClaudeRetryRecords, ClaudeRetryRepository, StoreError,

@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, io::Read, path::Path, sync::Arc, time::Duration};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRepository, RuntimeStore, WorkspaceFilesRepository, sha256_hex,
 };
@@ -252,7 +252,7 @@ pub(crate) async fn prepare(
         return Err(refused());
     }
     let home = context["home"].as_str().ok_or_else(refused)?;
-    let namespace = sha256_hex(&serde_json::to_vec(&expected).map_err(|_| refused())?);
+    let namespace = sha256_hex(&studio_json::to_vec(&expected).map_err(|_| refused())?);
     let mut paths = BTreeMap::new();
     for asset in &snapshot.assets {
         let root = store.root().to_path_buf();
@@ -296,7 +296,7 @@ pub(crate) async fn prepare(
             ]);
             let id = format!(
                 "vm-attachment:{}",
-                sha256_hex(&serde_json::to_vec(&argv).map_err(|_| refused())?)
+                sha256_hex(&studio_json::to_vec(&argv).map_err(|_| refused())?)
             );
             let result = call(
                 Arc::clone(&guest),
@@ -320,7 +320,7 @@ pub(crate) async fn prepare(
         argv.extend(hashes);
         let id = format!(
             "vm-attachment:{}",
-            sha256_hex(&serde_json::to_vec(&argv).map_err(|_| refused())?)
+            sha256_hex(&studio_json::to_vec(&argv).map_err(|_| refused())?)
         );
         let result = call(
             Arc::clone(&guest),
@@ -371,11 +371,11 @@ pub(crate) async fn prepare(
 pub(crate) mod tests {
     use super::{COPY, prepare};
     use crate::turn_prepare::*;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::sha256_hex;
 
     fn snapshot() -> PreparationSnapshot {
-        serde_json::from_value(json!({
+        studio_json::from_value(json!({
             "provider":"claude","actor":{"id":"lead","root_id":"lead","epoch":["thread",0],
                 "is_lead":true,"forked_from":null,"prepared_context":null,"delivered_mode":null},
             "root":{"concurrency":32,"mode_revision":0},"delivered_manifests":[],"plan":null,
@@ -387,7 +387,7 @@ pub(crate) mod tests {
     }
 
     fn event() -> Event {
-        serde_json::from_value(
+        studio_json::from_value(
             json!({"id":"original-event","kind":"user","text":"original input",
             "created":1.0,"metadata":{"assets":["image","file"],"accepted_at":null,"extra":{}},
             "preserve_progress":false,"preserve_complaint":false}),
@@ -431,8 +431,8 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
             .expect("guest owner source");
         let output = child.wait_with_output().expect("contract parser result");
         assert!(output.status.success());
-        let contract: serde_json::Value =
-            serde_json::from_slice(&output.stdout).expect("guest contracts");
+        let contract: studio_json::Value =
+            studio_json::from_slice(&output.stdout).expect("guest contracts");
         assert_eq!(contract["stdin"], super::CHUNK_BYTES);
         assert!(
             contract["command"].as_u64().expect("command budget")
@@ -458,9 +458,9 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
                 path: directory.path().join(id).to_string_lossy().into_owned(),
                 name: if image { "image.png" } else { "notes.txt" }.into(),
                 size: 4,
-                view: serde_json::Map::new(),
+                view: studio_json::Map::new(),
             };
-            let source_fingerprint = sha256_hex(&serde_json::to_vec(&asset).expect("asset"));
+            let source_fingerprint = sha256_hex(&studio_json::to_vec(&asset).expect("asset"));
             s.asset_paths.insert(
                 id.into(),
                 AssetPath {
@@ -474,7 +474,7 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
         original.asset_paths.clear();
         let before = compile(&original, &[event()]).expect("host projection");
         let after = compile(&s, &[event()]).expect("guest projection");
-        let wire = serde_json::to_value(&after.provider_inputs)
+        let wire = studio_json::to_value(&after.provider_inputs)
             .expect("wire")
             .to_string();
         assert!(
@@ -484,8 +484,8 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
         assert!(wire.contains("/home/actor/.studio-attachments/image"));
         assert!(wire.contains("/home/actor/.studio-attachments/file"));
         assert_eq!(
-            serde_json::to_value(&before.transcript).expect("transcript"),
-            serde_json::to_value(&after.transcript).expect("transcript")
+            studio_json::to_value(&before.transcript).expect("transcript"),
+            studio_json::to_value(&after.transcript).expect("transcript")
         );
         assert_eq!(after.event_ids, ["original-event"]);
         assert_eq!(after.operation_id, "original-operation");
@@ -503,7 +503,7 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
             path: "/host/attachment".into(),
             name: "notes".into(),
             size: 4,
-            view: serde_json::Map::new(),
+            view: studio_json::Map::new(),
         };
         s.asset_paths.insert(
             "file".into(),
@@ -520,7 +520,7 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
         let full = result.studio_input.expect("full overflow body");
         assert!(full.contains("/home/actor/.studio-attachments/notes"));
         assert!(!full.contains("/host/attachment"));
-        let wire = serde_json::to_value(result.provider_inputs)
+        let wire = studio_json::to_value(result.provider_inputs)
             .expect("wire")
             .to_string();
         assert!(wire.contains(&format!("studio-input:{}", sha256_hex(full.as_bytes()))));
@@ -532,16 +532,16 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
     }
 
     pub(crate) struct Guest {
-        context: serde_json::Value,
+        context: studio_json::Value,
         receipts: std::sync::Mutex<
-            std::collections::BTreeMap<String, (serde_json::Value, serde_json::Value)>,
+            std::collections::BTreeMap<String, (studio_json::Value, studio_json::Value)>,
         >,
         writes: std::sync::atomic::AtomicUsize,
         lose_reply: std::sync::atomic::AtomicBool,
         after_write: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
     }
     impl Guest {
-        pub(crate) fn new(context: serde_json::Value) -> std::sync::Arc<Self> {
+        pub(crate) fn new(context: studio_json::Value) -> std::sync::Arc<Self> {
             std::sync::Arc::new(Self {
                 context,
                 receipts: std::sync::Mutex::new(std::collections::BTreeMap::new()),
@@ -575,10 +575,10 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
         fn call(
             &self,
             method: &str,
-            params: &serde_json::Value,
+            params: &studio_json::Value,
             id: Option<&str>,
             _: std::time::Duration,
-        ) -> Result<serde_json::Value, crate::linux_vm_guest::GuestError> {
+        ) -> Result<studio_json::Value, crate::linux_vm_guest::GuestError> {
             use base64::Engine as _;
             use std::io::Write;
             use std::sync::atomic::Ordering::SeqCst;
@@ -646,11 +646,11 @@ print(json.dumps({'stdin':value(limit.comparators[0]),'command':command,'wait':w
         fn stream(
             &self,
             _: &str,
-            _: &serde_json::Value,
+            _: &studio_json::Value,
             _: Option<&str>,
             _: std::time::Duration,
-            _: &mut dyn FnMut(serde_json::Value) -> Result<(), crate::linux_vm_guest::GuestError>,
-        ) -> Result<serde_json::Value, crate::linux_vm_guest::GuestError> {
+            _: &mut dyn FnMut(studio_json::Value) -> Result<(), crate::linux_vm_guest::GuestError>,
+        ) -> Result<studio_json::Value, crate::linux_vm_guest::GuestError> {
             unreachable!("call only")
         }
     }

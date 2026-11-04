@@ -7,7 +7,7 @@ use crate::projects::operations::{
 };
 use crate::projects::{ProjectsError, project_key};
 use rusqlite::{Connection, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use studio_runtime_schema::peer_team_ingress::Convert;
@@ -54,7 +54,7 @@ pub async fn convert(
         ))?;
     let key = format!("peer-convert:{request}");
     let signature = studio_runtime_store::sha256_hex(
-        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
+        &studio_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
     );
     let replay_root = request_id.clone();
     let replay_key = key.clone();
@@ -165,7 +165,7 @@ pub async fn convert(
         }
         for mut room in affected {
             if room.root_id.as_ref().map(String::as_str)==Some(source.as_str()) {
-                room.root_id=studio_runtime_schema::queue_command::Field::Value(target.clone()); room.updated=serde_json::Number::from_f64(now).map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value);
+                room.root_id=studio_runtime_schema::queue_command::Field::Value(target.clone()); room.updated=studio_json::Number::from_f64(now).map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value);
                 if room.kind==studio_runtime_schema::room_record::RoomKind::Broadcast {room.kind=studio_runtime_schema::room_record::RoomKind::Private;room.members=Some(moving.iter().filter(|a|!truthy(a.get("deletedAt"))).filter_map(|a|a["id"].as_str().map(str::to_owned)).collect());room.custom_name=studio_runtime_schema::queue_command::Field::Value(format!("{} (previous broadcast)",src["name"].as_str().filter(|v|!v.is_empty()).unwrap_or(source.as_str())));}
                 studio_runtime_store::Table::new(db).put(&room)?;
             }
@@ -365,23 +365,23 @@ mod receipt_tests {
     fn equivalent_typed_requests_have_identical_signatures() {
         use studio_runtime_schema::peer_team_ingress::{Convert, RadioManage, TeamMutation};
         fn signature<T: serde::Serialize>(body: &T) -> String {
-            studio_runtime_store::sha256_hex(&serde_json::to_vec(body).expect("request encoding"))
+            studio_runtime_store::sha256_hex(&studio_json::to_vec(body).expect("request encoding"))
         }
-        let conversion: Convert = serde_json::from_str(r#"{"action":"convert","path":"p","request_id":"r","member":"a","target":"b","expected_revision":1}"#).unwrap();
-        let conversion_reordered: Convert = serde_json::from_str(r#"{"expected_revision":1,"target":"b","member":"a","request_id":"r","path":"p","action":"convert"}"#).unwrap();
+        let conversion: Convert = studio_json::from_str(r#"{"action":"convert","path":"p","request_id":"r","member":"a","target":"b","expected_revision":1}"#).unwrap();
+        let conversion_reordered: Convert = studio_json::from_str(r#"{"expected_revision":1,"target":"b","member":"a","request_id":"r","path":"p","action":"convert"}"#).unwrap();
         assert_eq!(
             signature(&conversion),
             "f2a4d3ee3f7fb705439305bc89250ac9e340c380fb8eb4499f5626377a7ab103"
         );
         assert_eq!(signature(&conversion), signature(&conversion_reordered));
-        let team: TeamMutation = serde_json::from_str(r#"{"action":"delete","path":"p","request_id":"r","team_id":"t","expected_revision":1}"#).unwrap();
-        let team_reordered: TeamMutation = serde_json::from_str(r#"{"expected_revision":1,"team_id":"t","request_id":"r","path":"p","action":"delete"}"#).unwrap();
+        let team: TeamMutation = studio_json::from_str(r#"{"action":"delete","path":"p","request_id":"r","team_id":"t","expected_revision":1}"#).unwrap();
+        let team_reordered: TeamMutation = studio_json::from_str(r#"{"expected_revision":1,"team_id":"t","request_id":"r","path":"p","action":"delete"}"#).unwrap();
         assert_eq!(signature(&team), signature(&team_reordered));
-        let radio: RadioManage = serde_json::from_str(
+        let radio: RadioManage = studio_json::from_str(
             r#"{"action":"radio","radio_action":"open","path":"p","team_id":"t","request_id":"r"}"#,
         )
         .unwrap();
-        let radio_reordered: RadioManage = serde_json::from_str(
+        let radio_reordered: RadioManage = studio_json::from_str(
             r#"{"request_id":"r","team_id":"t","path":"p","radio_action":"open","action":"radio"}"#,
         )
         .unwrap();
@@ -395,12 +395,12 @@ mod receipt_tests {
             .await
             .unwrap();
         store.transaction(|db| {
-            let agent = studio_runtime_store::AgentRecord::from_value(serde_json::json!({
+            let agent = studio_runtime_store::AgentRecord::from_value(studio_json::json!({
                 "id":"member", "rootId":"member", "epoch":1, "status":"idle", "compactions":0, "accountKey":"source", "provider":"codex", "model":"gpt-6-astra", "cwd":std::env::temp_dir()
             })).unwrap();
             studio_runtime_store::AgentRepository::put(db, &agent)?;
             db.execute("INSERT INTO runtime_account_transfers(id,record) VALUES(?1,?2)", rusqlite::params!["transfer", r#"{"id":"transfer","leadId":"other","targetAccountKey":"target","status":"pending","created":1,"members":{"member":{"phase":"unknown","sourceAccountKey":"source"}}}"#])?;
-            let value = serde_json::json!({"id":"member", "status":"idle"});
+            let value = studio_json::json!({"id":"member", "status":"idle"});
             assert!(matches!(super::idle(db, &[value], true), Err(super::ProjectsError::Invalid("Finish pending operations first"))));
             Ok(())
         }).await.unwrap();
@@ -409,7 +409,7 @@ mod receipt_tests {
     #[test]
     fn conversion_receipt_keeps_persisted_fields() {
         let raw = r#"{"id":"source","parentId":"target","rootId":"target","movedAgents":["source"],"peerTeamsRevision":2}"#;
-        let reply: ConversionReply = serde_json::from_str(raw).expect("receipt");
-        assert_eq!(serde_json::to_string(&reply).expect("serialize"), raw);
+        let reply: ConversionReply = studio_json::from_str(raw).expect("receipt");
+        assert_eq!(studio_json::to_string(&reply).expect("serialize"), raw);
     }
 }

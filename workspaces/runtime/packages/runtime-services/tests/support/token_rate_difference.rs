@@ -1,4 +1,4 @@
-use serde_json::Value;
+use studio_json::Value;
 
 /// Compare complete documents, allowing numeric equivalence only for the
 /// `rate` and `outputTokens` members of TokenRateRecord entries in the named

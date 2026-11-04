@@ -9,15 +9,15 @@ const BUILD: &str = "build-a";
 #[test]
 fn persisted_operation_rejects_invalid_and_unknown_fields() {
     let body = r#"{"operationId":"op","agentId":"agent","projectId":"project","linePath":"line","slotId":"0","state":"leased","createdAt":1.0,"slotPath":"slot","derivedData":"derived","packageCache":"cache","artifactsPath":"artifacts","diskBudget":5,"macOnly":[],"features":[]}"#;
-    assert!(serde_json::from_str::<Op>(body).is_ok());
+    assert!(studio_json::from_str::<Op>(body).is_ok());
     assert!(
-        serde_json::from_str::<Op>(
+        studio_json::from_str::<Op>(
             &body.replace(r#""features":[]"#, r#""features":[],"extension":{"z":1}"#)
         )
         .is_err()
     );
     assert!(
-        serde_json::from_str::<Op>(&body.replace(r#""agentId":"agent""#, r#""agentId":42"#))
+        studio_json::from_str::<Op>(&body.replace(r#""agentId":"agent""#, r#""agentId":42"#))
             .is_err()
     );
 }
@@ -525,7 +525,7 @@ async fn receipt_refuses_changed_raw_params_without_reexecution() {
         .request_frame(changed.as_bytes())
         .await
         .unwrap();
-    let refused: Value = serde_json::from_str(&refused).unwrap();
+    let refused: Value = studio_json::from_str(&refused).unwrap();
     assert_eq!(refused["error"]["code"], "id_conflict");
 }
 
@@ -1155,7 +1155,7 @@ async fn a_guest_restart_frees_idle_slots_and_orphans_running_commands() {
             .join("lease.json")
             .exists()
     );
-    let slot_json: Value = serde_json::from_str(
+    let slot_json: Value = studio_json::from_str(
         &fs::read_to_string(
             Path::new(idle["slotPath"].as_str().unwrap())
                 .parent()
@@ -1280,7 +1280,7 @@ async fn an_interrupted_slot_removal_blocks_reuse_until_recovery() {
         ".retiring-{}.json",
         slot.file_name().unwrap().to_str().unwrap()
     ));
-    let saved: Value = serde_json::from_str(&fs::read_to_string(&marker).unwrap()).unwrap();
+    let saved: Value = studio_json::from_str(&fs::read_to_string(&marker).unwrap()).unwrap();
     assert_eq!(saved["metadata"]["generation"], op["generation"]);
     assert!(locked.join("evidence").exists());
     assert!(!fixture.service.opdir("retire-failed").exists());
@@ -1337,7 +1337,7 @@ async fn the_socket_serves_one_request_per_connection() {
     .unwrap()
     .unwrap();
     assert_eq!(response.lines().count(), 1, "one answer followed by EOF");
-    let health: Value = serde_json::from_str(&response).unwrap();
+    let health: Value = studio_json::from_str(&response).unwrap();
     assert_eq!(
         (&health["result"]["protocol"], &health["result"]["buildId"]),
         (&json!(PROTOCOL), &json!(BUILD))

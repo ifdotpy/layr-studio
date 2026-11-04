@@ -101,7 +101,7 @@ impl OperationReceipt {
         receipt
     }
     fn bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self).map_err(|e| NativeLayrError::Refused(e.to_string()))
+        studio_json::to_vec(self).map_err(|e| NativeLayrError::Refused(e.to_string()))
     }
 }
 
@@ -279,7 +279,7 @@ fn operation_with_recovery(
     if path.exists() {
         // Parse the complete JSON value first: duplicates retain the last key,
         // and ignored data still observes JSON number and nesting limits.
-        let value: Value = serde_json::from_slice(&fs::read(&path)?)
+        let value: Value = studio_json::from_slice(&fs::read(&path)?)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         let receipt: OperationReceipt = if value.is_object() {
             <OperationReceipt as serde::Deserialize>::deserialize(value)
@@ -431,7 +431,7 @@ fn settle_pending_save(
     let mut oldest = u64::MAX;
     let mut saved = false;
     for line in log.lines().filter(|line| !line.trim().is_empty()) {
-        let record: Value = serde_json::from_str(line)
+        let record: Value = studio_json::from_str(line)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         let time = record["time"].as_u64().ok_or_else(unknown)?;
         records += 1;
@@ -496,7 +496,7 @@ fn admit_git_policy_in_store(
 ) -> Result<()> {
     let ready_path = settings::metadata(state_dir, root).join(format!("{project}.json"));
     if without_git && ready_path.exists() {
-        let receipt: Value = serde_json::from_slice(&fs::read(&ready_path)?)
+        let receipt: Value = studio_json::from_slice(&fs::read(&ready_path)?)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         if receipt["withoutGit"] != true {
             return Err(NativeLayrError::Refused("This project was already imported with Git metadata. The --without-git option cannot change an existing import.".into()));
@@ -693,7 +693,7 @@ pub(super) fn prepare_files_with_git_policy(
             },
         )?;
     }
-    let imported: Value = serde_json::from_slice(&fs::read(&ready_path)?)
+    let imported: Value = studio_json::from_slice(&fs::read(&ready_path)?)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     let (start, cache_warning) = if imported["mapped"] == true {
         super::mapping::cached_main_start(state_dir, &main)?
@@ -886,7 +886,7 @@ fn working_state(state_dir: &Path, cwd: &Path) -> Result<String> {
 /// Repairs each folder overlay at a quiet point: a folder that a build tool made again is a cache.
 fn repair_caches(state_dir: &Path, cwd: &Path) -> Result<()> {
     let overlays: Vec<Value> =
-        serde_json::from_str(&run(state_dir, cwd, &["overlay", "list", "--json"])?)
+        studio_json::from_str(&run(state_dir, cwd, &["overlay", "list", "--json"])?)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     for overlay in overlays.iter().filter(|overlay| needs_repair(overlay)) {
         run(
@@ -908,7 +908,7 @@ fn needs_repair(overlay: &Value) -> bool {
 #[cfg(test)]
 mod repair_tests {
     use super::needs_repair;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn only_a_plain_folder_overlay_is_repaired() {
@@ -1053,7 +1053,7 @@ pub fn merge(
         Some(&|| {
             let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
             let status: Value =
-                serde_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
+                studio_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
                     .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
             if !["staged", "unstaged", "untracked", "conflicts"]
                 .iter()
@@ -1375,7 +1375,7 @@ esac
             r#"{"$serde_json::private::Number":"1"}"#,
             r#"{"nested":[1,null,{"x":true}]}"#,
         ] {
-            let value: Value = serde_json::from_str(raw).unwrap();
+            let value: Value = studio_json::from_str(raw).unwrap();
             // A fixed start time keeps the byte-exact encoding comparable.
             let started = |mut receipt: OperationReceipt| {
                 receipt.started_at = Some(7);
@@ -1483,13 +1483,13 @@ esac
             replay("duplicate", &intent).unwrap(),
             json!({"opaque":[1,null]})
         );
-        let special: Value = serde_json::from_str(
+        let special: Value = studio_json::from_str(
             r#"{"kind":"inspect","data":{"$serde_json::private::Number":"1"}}"#,
         )
         .unwrap();
         write("number_key", br#"{"intent":{"kind":"inspect","data":{"$serde_json::private::Number":"1"}},"status":"completed","result":{"$serde_json::private::Number":"1"}}"#);
         let expected: Value =
-            serde_json::from_str(r#"{"$serde_json::private::Number":"1"}"#).unwrap();
+            studio_json::from_str(r#"{"$serde_json::private::Number":"1"}"#).unwrap();
         assert_eq!(replay("number_key", &special).unwrap(), expected);
         for (id, raw) in [
             (
@@ -1794,7 +1794,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 "{}.json",
                 studio_runtime_store::sha256_hex(b"line:worker")
             ));
-        let receipt: Value = serde_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        let receipt: Value = studio_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
         assert_eq!(receipt["intent"]["start"], "requested");
         let commands = std::fs::read_to_string(root.join("commands")).unwrap();
         assert!(commands.contains("line new worker requested"));

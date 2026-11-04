@@ -357,7 +357,7 @@ impl Plan {
 
     pub fn saved_main(state: &Path, main: &Path, destination: &Path) -> Result<Self> {
         let lines: super::mapping::response::Lines =
-            serde_json::from_str(&super::run(state, main, &["line", "list", "--json"])?)
+            studio_json::from_str(&super::run(state, main, &["line", "list", "--json"])?)
                 .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
         let head = lines
             .main_head()
@@ -393,7 +393,7 @@ impl Plan {
                 let mut bytes = vec![0; count];
                 rustix::fs::lgetxattr(&delta, "com.layr.subvolume", bytes.as_mut_slice())
                     .map_err(std::io::Error::from)?;
-                let marker: serde_json::Value = serde_json::from_slice(&bytes)
+                let marker: studio_json::Value = studio_json::from_slice(&bytes)
                     .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
                 head = marker["base"]
                     .as_str()
@@ -1029,7 +1029,7 @@ fn add_regenerable(state: &Path, cwd: &Path, paths: &[String]) -> Result<()> {
         .lines()
         .find_map(|line| line.strip_prefix("regenerable="))
     {
-        Some(value) => serde_json::from_str(value)
+        Some(value) => studio_json::from_str(value)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?,
         None => Vec::new(),
     };
@@ -1039,7 +1039,7 @@ fn add_regenerable(state: &Path, cwd: &Path, paths: &[String]) -> Result<()> {
         }
     }
     let value =
-        serde_json::to_string(&all).map_err(|error| NativeLayrError::Refused(error.to_string()))?;
+        studio_json::to_string(&all).map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     super::run(state, cwd, &["config", "regenerable", &value])?;
     Ok(())
 }
@@ -1072,8 +1072,8 @@ fn volume_id(path: &Path) -> std::io::Result<VolumeId> {
     volume_id_fd(&fd)
 }
 
-pub(super) fn allocation_model() -> serde_json::Value {
-    serde_json::json!({
+pub(super) fn allocation_model() -> studio_json::Value {
+    studio_json::json!({
         "cacheEntryMetadataBytes":ENTRY_METADATA_BYTES,
         "versionedEntryMetadataBytes":ENTRY_METADATA_BYTES,
         "lineNewEntryMetadataBytes":LINE_NEW_ENTRY_METADATA_BYTES,

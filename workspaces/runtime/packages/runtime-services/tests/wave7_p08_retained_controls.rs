@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use studio_runtime_services::{
     claude_controls::{ControlError, service::*},

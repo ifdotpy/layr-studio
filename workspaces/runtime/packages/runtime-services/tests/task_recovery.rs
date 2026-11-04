@@ -1,11 +1,11 @@
 use futures_util::future::BoxFuture;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_services::task_recovery::{TaskRecoveryDecision, TaskRecoverySnapshot};
 
 #[test]
 fn cancelled_receipt_requires_exact_attempt_and_negative_finished_result() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/task_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/task_oracle.json"))
         .expect("frozen recovery cases");
     let case = cases
         .iter()
@@ -76,7 +76,7 @@ fn cancelled_receipt_requires_exact_attempt_and_negative_finished_result() {
 
 #[test]
 fn historical_negative_receipt_resolves_without_native_evidence() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/task_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/task_oracle.json"))
         .expect("frozen recovery cases");
     let case = cases
         .iter()
@@ -103,14 +103,14 @@ fn historical_negative_receipt_resolves_without_native_evidence() {
 
 #[test]
 fn exact_task_receipts_match_python_and_unknown_local_outcomes_override_native() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/task_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/task_oracle.json"))
         .expect("frozen recovery cases");
     assert_eq!(cases.len(), 34);
     for case in cases {
         let snapshot = TaskRecoverySnapshot::from_records(
             case["agent"].clone(),
             super::task_record(&case["task"]),
-            serde_json::from_value(case["aliases"].clone()).expect("valid recovery fixture"),
+            studio_json::from_value(case["aliases"].clone()).expect("valid recovery fixture"),
             vec![("receipt".into(), case["receipt"].clone())],
         )
         .expect("valid recovery fixture");
@@ -251,7 +251,7 @@ async fn task_consumer_resolves_local_receipt_without_native_read() {
             })
         }
     }
-    let mut cases: Vec<Value> = serde_json::from_str(include_str!("recovery/task_oracle.json"))
+    let mut cases: Vec<Value> = studio_json::from_str(include_str!("recovery/task_oracle.json"))
         .expect("frozen receipt cases");
     let mut cancelled = cases
         .iter()
@@ -394,7 +394,7 @@ async fn native_task_consumer_preserves_duplicate_ambiguity() {
             })
         }
     }
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/task_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/task_oracle.json"))
         .expect("frozen receipt cases");
     let case = &cases[0];
     let snapshot = TaskRecoverySnapshot::from_records(
@@ -433,7 +433,7 @@ async fn native_task_consumer_preserves_duplicate_ambiguity() {
 
 #[test]
 fn native_task_proofs_match_real_python_reader() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("recovery/native_task_oracle.json"))
+    let cases: Vec<Value> = studio_json::from_str(include_str!("recovery/native_task_oracle.json"))
         .expect("frozen recovery cases");
     assert_eq!(cases.len(), 32);
     for case in cases {

@@ -1,7 +1,7 @@
 use base64::Engine;
 use std::collections::BTreeMap;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::payload_blobs::{
     decide_externalize_json, decide_externalize_result_json, resolve_record, trim_task,
 };
@@ -23,7 +23,7 @@ fn python_oracle() -> (Value, tempfile::TempDir) {
         )
     };
     let files: BTreeMap<String, String> =
-        serde_json::from_str(files).expect("frozen payload blobs");
+        studio_json::from_str(files).expect("frozen payload blobs");
     for (name, bytes) in files {
         let path = state.path().join(name);
         std::fs::create_dir_all(path.parent().expect("blob parent")).expect("blob directory");
@@ -36,7 +36,7 @@ fn python_oracle() -> (Value, tempfile::TempDir) {
         .expect("historical blob");
     }
     (
-        serde_json::from_str(expected).expect("frozen payload corpus"),
+        studio_json::from_str(expected).expect("frozen payload corpus"),
         state,
     )
 }
@@ -204,7 +204,7 @@ fn public_receipt(receipt: &Value) -> Value {
         "requestId",
         "rpcMethod",
     ];
-    let mut view = serde_json::Map::new();
+    let mut view = studio_json::Map::new();
     for key in keys {
         view.insert(key.into(), receipt.get(key).cloned().unwrap_or(Value::Null));
     }

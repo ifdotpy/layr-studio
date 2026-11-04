@@ -1,7 +1,7 @@
 use crate::projection_fixtures as projections;
 use projections::full_rebuild;
 use rusqlite::{Connection, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{fs, path::Path};
 use studio_runtime_services::{
     account_session_runtime::AccountSessionPort,
@@ -16,9 +16,9 @@ use studio_runtime_store::{RuntimeStore, Transaction, agent_management};
 use tokio::sync::Notify;
 
 /// A request fixture in the legacy shape, as the typed approval row the store keeps.
-fn approval_row(row: &serde_json::Value) -> serde_json::Value {
+fn approval_row(row: &studio_json::Value) -> studio_json::Value {
     let id = row["id"].as_str().expect("request id");
-    serde_json::to_value(
+    studio_json::to_value(
         studio_runtime_store::approvals::from_legacy_record(id, row).expect("typed approval"),
     )
     .expect("approval json")
@@ -37,7 +37,7 @@ fn monitor_fixture(fields: &Value) -> Value {
 }
 
 fn template(root: &Path) {
-    let schema: Value = serde_json::from_str(include_str!(
+    let schema: Value = studio_json::from_str(include_str!(
         "../../runtime-store/tests/fixtures/live-state-schema.json"
     ))
     .expect("schema fixture");
@@ -87,7 +87,7 @@ fn template(root: &Path) {
 const NOW: f64 = 1_234_567.5;
 
 fn seed_records() -> Value {
-    let mut lead: studio_runtime_store::AgentRecord = serde_json::from_str(r#"{"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","parentId":null,"epoch":3,"status":"idle","name":"Lead","cwd":"/fixture","isLead":true,"autoWake":true,"inFlight":false,"created":1.0}"#).expect("agent fixture");
+    let mut lead: studio_runtime_store::AgentRecord = studio_json::from_str(r#"{"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","parentId":null,"epoch":3,"status":"idle","name":"Lead","cwd":"/fixture","isLead":true,"autoWake":true,"inFlight":false,"created":1.0}"#).expect("agent fixture");
     let mut worker = lead.clone();
     worker.id = "worker".into();
     worker.parent_id = Some("lead".into());
@@ -196,10 +196,10 @@ async fn stop_clears_the_matching_unsubmitted_capacity_retry_attempt() {
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     let result = agent_lifecycle_runtime::execute(
         std::sync::Arc::clone(&store),
         &action,
@@ -229,10 +229,10 @@ async fn lifecycle_failure_case(case_name: &str, tables: &[&str]) {
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     let before = state(&store);
     for table in tables {
         let event = if matches!(*table, "sync_entities" | "approvals") {
@@ -309,10 +309,10 @@ async fn committed_archive_response_loss_replays_after_restart_without_duplicate
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("records"),
+        studio_json::from_value(case["records"].clone()).expect("records"),
     )
     .await;
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     let first = execute(std::sync::Arc::clone(&store), &action, 1234567.5, None)
         .await
         .expect("archive");
@@ -346,7 +346,7 @@ async fn deleted_team_broadcast_projection_survives_repeated_delete() {
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("records"),
+        studio_json::from_value(case["records"].clone()).expect("records"),
     )
     .await;
     store
@@ -370,7 +370,7 @@ async fn deleted_team_broadcast_projection_survives_repeated_delete() {
         .expect("delete");
     let room = |store: &RuntimeStore| -> Value {
         let raw:String=store.test_reader().expect("reader").query_row("SELECT payload FROM sync_entities WHERE collection='room' AND id='broadcast' AND deleted=0",[],|r| r.get(0)).expect("retained broadcast");
-        serde_json::from_str::<Value>(&raw).expect("payload")["value"].clone()
+        studio_json::from_str::<Value>(&raw).expect("payload")["value"].clone()
     };
     let before = room(&store);
     assert_eq!(before["members"], json!(["lead"]));
@@ -519,7 +519,7 @@ async fn lifecycle_effect_refusals_preserve_rows_and_projections() {
     );
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("records"),
+        studio_json::from_value(case["records"].clone()).expect("records"),
     )
     .await;
     store
@@ -625,7 +625,7 @@ async fn ended_voice_allows_stop_and_delete_clears_saved_voice_in_transaction() 
     let root = tempfile::tempdir().expect("root");
     template(root.path());
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
-    let mut records: Records = serde_json::from_value(case["records"].clone()).expect("records");
+    let mut records: Records = studio_json::from_value(case["records"].clone()).expect("records");
     records.tables.remove("voice_sessions");
     seed(&store, records).await;
     store.transaction(|tx| {

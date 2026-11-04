@@ -4,7 +4,7 @@ use crate::event_write::truthy;
 pub use crate::relocation::RelocationError as MoveError;
 use crate::relocation::{checked, identity, invalid, timestamp};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_store::{
     AgentId, AgentMoveRepository as Repository, AgentRecord, AgentRepository, RuntimeStore,
@@ -61,7 +61,7 @@ pub struct MoveDecision {
 impl MoveSnapshot {
     pub fn from_record(raw: &Value) -> Result<Self, MoveError> {
         checked::<Value>("relocation/MoveRecord", "runtime_agent_moves", raw)?;
-        let fields: Fields = serde_json::from_value(raw.clone())
+        let fields: Fields = studio_json::from_value(raw.clone())
             .map_err(|_| invalid("runtime_agent_moves", "record"))?;
         let agent = if fields.side == Side::Source {
             raw.get("agent")

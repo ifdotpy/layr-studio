@@ -253,7 +253,7 @@ pub(crate) fn project_action_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn database() -> Connection {
         let db = Connection::open_in_memory().expect("database");

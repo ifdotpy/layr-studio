@@ -30,7 +30,7 @@ pub use recovery::{
     read_context_tool_receipt_rows, recover_connection, recover_tool_requests_on_startup,
     revalidate_unresolved_context_tool_receipts,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 pub use storage::{
     CallbackBody, CallbackOwner, CallbackResponse, DeliveryOutcome, FrameAdmission, Reopen,
     admit_callback_request, begin_frame, callback_admission, callback_origin_key, delivery,

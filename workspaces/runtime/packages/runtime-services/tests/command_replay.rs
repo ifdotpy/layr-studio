@@ -3,7 +3,7 @@
 //! its expected outcome is `command_replay/<case>.expected.json`.
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_services::agent_management::{
     Action, ManagementSnapshot, Records, decide_with_effects,
@@ -80,8 +80,8 @@ fn recorded_management_commands_replay_through_decide() {
             .expect("case stem")
             .to_string_lossy()
             .into_owned();
-        let case: Case = serde_json::from_str(&read_text(&path)).expect("replay case");
-        let expected: Value = serde_json::from_str(&read_text(
+        let case: Case = studio_json::from_str(&read_text(&path)).expect("replay case");
+        let expected: Value = studio_json::from_str(&read_text(
             &path.with_file_name(format!("{stem}.expected.json")),
         ))
         .expect("replay expected outcome");

@@ -12,7 +12,7 @@ use crate::claude_bridge::{BridgeSnapshot, ClaudeLaunchProfile, ResolvedBridge};
 use crate::continuation_runtime::classify_usage_failure;
 use crate::thread_prepare::{Snapshot, TurnInput};
 use crate::usage_resume::Cause as UsageCause;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use std::{
     collections::BTreeMap,
     env,
@@ -570,7 +570,7 @@ impl ProviderAdapter for ClaudeAdapter {
     }
 
     fn is_busy_error(&self, error: &Value) -> bool {
-        *error == serde_json::json!({"code": CLAUDE_BUSY_CODE, "message": CLAUDE_BUSY_MESSAGE})
+        *error == studio_json::json!({"code": CLAUDE_BUSY_CODE, "message": CLAUDE_BUSY_MESSAGE})
     }
 
     fn owns_model(&self, model: &str) -> bool {
@@ -737,7 +737,7 @@ pub fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     fn test_claude_launch(
-        profile: &serde_json::Value,
+        profile: &studio_json::Value,
         bridge_dir: &std::path::Path,
         root: std::path::PathBuf,
         environment: std::collections::BTreeMap<String, String>,
@@ -758,7 +758,7 @@ mod tests {
     }
 
     use super::{ProviderKind, UsageCause, adapter};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn each_adapter_reports_its_typed_control_list() {
@@ -868,7 +868,7 @@ mod tests {
         let profile = |provider| AuthProfile {
             provider,
             home: home.path().to_path_buf(),
-            claude_options: Some(serde_json::json!({"configDir": home.path()})),
+            claude_options: Some(studio_json::json!({"configDir": home.path()})),
         };
         let codex = adapter(ProviderKind::Codex).credential_location(&profile(ProviderKind::Codex));
         assert_eq!(codex.directories, vec![home.path().to_path_buf()]);
@@ -907,9 +907,9 @@ mod tests {
         std::fs::create_dir_all(&sdk).expect("sdk");
         std::fs::write(sdk.join("package.json"), "{}").expect("sdk package");
         let registry = dir.path().join("registry.json");
-        let row = serde_json::json!({"id":"claude","provider":"claude","status":"ready","home":dir.path(),"label":"Fixture","source":"CLI","email":"a@example.test","accountId":"claude:a@example.test","_credentialIdentity":"claude:a@example.test","claudeOptions":{"binaryPath":binary,"launchArgs":"--verbose","vendor":{"n":1.0}}});
-        let write = |row: &serde_json::Value| {
-            std::fs::write(&registry, serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"claude","accounts":{"claude":row},"logins":{}}).to_string()).expect("registry");
+        let row = studio_json::json!({"id":"claude","provider":"claude","status":"ready","home":dir.path(),"label":"Fixture","source":"CLI","email":"a@example.test","accountId":"claude:a@example.test","_credentialIdentity":"claude:a@example.test","claudeOptions":{"binaryPath":binary,"launchArgs":"--verbose","vendor":{"n":1.0}}});
+        let write = |row: &studio_json::Value| {
+            std::fs::write(&registry, studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"claude","accounts":{"claude":row},"logins":{}}).to_string()).expect("registry");
             crate::account_driver::AccountDriver::open(&registry).expect("driver")
         };
         let driver = write(&row);
@@ -943,12 +943,12 @@ mod tests {
             spec.environment["STUDIO_CLAUDE_CREDENTIAL_IDENTITY"],
             "claude:a@example.test"
         );
-        let options: serde_json::Value =
-            serde_json::from_str(&spec.environment["STUDIO_CLAUDE_OPTIONS"]).expect("options");
-        assert_eq!(options["vendor"]["n"], serde_json::json!(1.0));
-        assert_eq!(options["extraArgs"]["verbose"], serde_json::Value::Null);
+        let options: studio_json::Value =
+            studio_json::from_str(&spec.environment["STUDIO_CLAUDE_OPTIONS"]).expect("options");
+        assert_eq!(options["vendor"]["n"], studio_json::json!(1.0));
+        assert_eq!(options["extraArgs"]["verbose"], studio_json::Value::Null);
         let mut invalid = row.clone();
-        invalid["_credentialIdentity"] = serde_json::json!("claude:other@example.test");
+        invalid["_credentialIdentity"] = studio_json::json!("claude:other@example.test");
         let invalid = write(&invalid)
             .claude_launch_profile("claude")
             .expect("private profile");
@@ -965,7 +965,7 @@ mod tests {
         );
         assert!(!dir.path().join("identity-refused").exists());
         let mut null_options = row;
-        null_options["claudeOptions"] = serde_json::Value::Null;
+        null_options["claudeOptions"] = studio_json::Value::Null;
         let null_options = write(&null_options)
             .claude_launch_profile("claude")
             .expect("private profile");
@@ -1121,7 +1121,7 @@ mod tests {
         };
         let claude = claude_with("claude:a@example.test");
         let history: BTreeMap<String, Vec<Recorded>> =
-            serde_json::from_str(include_str!("provider-launch-history.json"))
+            studio_json::from_str(include_str!("provider-launch-history.json"))
                 .expect("launch history");
         let mut failures = Vec::new();
         for (name, spec) in [
@@ -1130,7 +1130,7 @@ mod tests {
             ("claude", claude),
         ] {
             let current = record("current", &spec);
-            let current_json = serde_json::to_string_pretty(&current).expect("current launch");
+            let current_json = studio_json::to_string_pretty(&current).expect("current launch");
             let Some((last, earlier)) = history.get(name).and_then(|entries| entries.split_last())
             else {
                 failures.push(format!(

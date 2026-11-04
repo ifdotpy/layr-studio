@@ -122,7 +122,7 @@ pub(super) fn validate_transport(
         id: RequestId::String(operation(&intent.account_key, &intent.attempt_id)),
         method: Method::TurnSteer,
         params: Some(params(intent, turn, compiled)),
-        fields: serde_json::Map::new(),
+        fields: studio_json::Map::new(),
     });
     studio_runtime_providers::encode_line(&frame).map(|_| ()).map_err(|error| {
         WorkerError::PreparationRefused(format!("Busy-turn input cannot fit the provider transport: {error}. Full input remains queued."))
@@ -197,17 +197,17 @@ pub(super) fn submitted(
         tx,
         &intent.agent_id,
         &intent.attempt_id,
-        &serde_json::value::to_raw_value(context).map_err(StoreError::from)?,
+        &studio_json::to_raw_value(context).map_err(StoreError::from)?,
     )?;
     if let Some(saved) = saved {
-        verify_frozen_context(saved.get(), context)?;
+        verify_frozen_context(saved.as_str(), context)?;
     }
     store::save_account_submission(tx, context, request)?;
     Ok(true)
 }
 
 fn verify_frozen_context(raw: &str, context: &Pending) -> Result<(), WorkerError> {
-    let previous: Pending = serde_json::from_str(raw)
+    let previous: Pending = studio_json::from_str(raw)
         .map_err(|_| StoreError::RecordContract("steer submission context"))?;
     if previous != *context {
         return Err(StoreError::RecordContract("steer submission context").into());
@@ -299,7 +299,7 @@ pub(super) fn acknowledge(
     };
     let operation = operation(account, &ack.steer_id);
     let submission = if let Some(saved) = &ack.prepared_submission {
-        let context: Pending = serde_json::from_str(saved.get())
+        let context: Pending = studio_json::from_str(saved.as_str())
             .map_err(|_| StoreError::RecordContract("steer submission context"))?;
         if let Some(compiled) = &context.compiled {
             let ids = ack
@@ -474,7 +474,7 @@ mod frozen_context_tests {
             "thread": null, "compiled": null
         })
         .to_string();
-        let mut context: Pending = serde_json::from_str(&legacy).expect("legacy context");
+        let mut context: Pending = studio_json::from_str(&legacy).expect("legacy context");
         assert!(verify_frozen_context(&legacy, &context).is_ok());
         context.operation.push_str(":changed");
         assert!(verify_frozen_context(&legacy, &context).is_err());

@@ -3,7 +3,7 @@
 //! models the account session broker: no scope and a NotSent receipt until
 //! `ensure_session` starts the account's worker.
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
@@ -244,7 +244,7 @@ async fn re_sign_in_recreates_a_missing_sign_in_home() {
     let home = fixture.root.path().join("accounts").join(key);
     let registry = fixture.root.path().join("accounts/registry.json");
     let mut value: Value =
-        serde_json::from_slice(&std::fs::read(&registry).expect("registry")).expect("JSON");
+        studio_json::from_slice(&std::fs::read(&registry).expect("registry")).expect("JSON");
     value["accounts"][key] = json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":key,"home":home,"source":"Codex Agents","label":"Saved","accountId":"fixture-saved","email":"fixture@example.invalid","plan":"pro","status":"signedOut"});
     std::fs::write(&registry, value.to_string()).expect("registry");
     let driver = Arc::new(AccountDriver::open(&registry).expect("reopen"));

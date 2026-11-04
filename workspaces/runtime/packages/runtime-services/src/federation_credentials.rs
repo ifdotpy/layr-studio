@@ -12,7 +12,7 @@ use ring::{
     rand::SystemRandom,
     signature::{Ed25519KeyPair, KeyPair},
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use spki::{
     AlgorithmIdentifierRef, ObjectIdentifier, SubjectPublicKeyInfoRef,
     der::{Encode, asn1::BitStringRef},
@@ -633,7 +633,7 @@ fn write_identity(
     identity.signing_identity()?;
     let mut file =
         tempfile::NamedTempFile::new_in(&directory).map_err(|_| CredentialError::Storage)?;
-    serde_json::to_writer(file.as_file_mut(), identity).map_err(|_| CredentialError::Storage)?;
+    studio_json::to_writer(file.as_file_mut(), identity).map_err(|_| CredentialError::Storage)?;
     file.flush().map_err(|_| CredentialError::Storage)?;
     file.as_file()
         .sync_all()

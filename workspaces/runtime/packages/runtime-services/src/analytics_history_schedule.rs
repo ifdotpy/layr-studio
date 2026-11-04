@@ -1,7 +1,7 @@
 //! Event-driven scheduling over a retained, checked history roster.
 use crate::analytics_capture::CaptureError;
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use studio_runtime_store::analytics_capture::CaptureTable;
@@ -548,7 +548,7 @@ mod tests {
     }
 
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn agent(status: &str) -> Value {
         json!({
@@ -909,7 +909,7 @@ mod tests {
     mod legacy {
         use super::super::{ACTIVE_QUOTA, MAX_ACTORS};
         use crate::analytics_capture::CaptureError;
-        use serde_json::Value;
+        use studio_json::Value;
         use std::collections::{BTreeMap, BTreeSet};
         use studio_runtime_store::analytics_capture::CaptureTable;
         #[derive(Clone)]

@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(any(test, feature = "test-support"))]
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 use sha2::{Digest, Sha256};
 use studio_runtime_schema::{
     resource_notification::ResourceNotifyRequest, resource_ref::ResourceRef,
@@ -224,7 +224,7 @@ impl ResourceNotifications {
         &self,
         request: &ResourceNotifyRequest,
     ) -> Result<bool, ResourceNotifyError> {
-        if serde_json::to_vec(request)
+        if studio_json::to_vec(request)
             .map_err(|_| ResourceNotifyError::Invalid)?
             .len()
             > MAX_PUBLICATION_BYTES
@@ -236,14 +236,14 @@ impl ResourceNotifications {
         let keys = resources
             .iter()
             .map(|resource| {
-                serde_json::to_string(resource)
+                studio_json::to_string(resource)
                     .map(|key| (matches!(resource, ResourceRef::StateResource(_)), key))
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| ResourceNotifyError::Invalid)?;
         let resource_keys = keys.iter().map(|(_, key)| key).collect::<BTreeSet<_>>();
         let signature: [u8; 32] = Sha256::digest(
-            serde_json::to_vec(&resource_keys).map_err(|_| ResourceNotifyError::Invalid)?,
+            studio_json::to_vec(&resource_keys).map_err(|_| ResourceNotifyError::Invalid)?,
         )
         .into();
         let mut state = self
@@ -453,7 +453,7 @@ impl ResourceNotifications {
         &self,
         resource: &T,
     ) -> Result<i64, ResourceNotifyError> {
-        let key = serde_json::to_string(resource).map_err(|_| ResourceNotifyError::Invalid)?;
+        let key = studio_json::to_string(resource).map_err(|_| ResourceNotifyError::Invalid)?;
         self.publications
             .lock()
             .map(|state| state.resource_revision(&key))
@@ -615,7 +615,7 @@ mod tests {
         let calls = AtomicUsize::new(0);
         let read = |resource: Value| {
             calls.fetch_add(1, Ordering::Relaxed);
-            std::future::ready(Some(serde_json::to_vec(&resource).expect("content")))
+            std::future::ready(Some(studio_json::to_vec(&resource).expect("content")))
         };
         let initial = notifications
             .changes_since_with_content(&resources, None, read)
@@ -647,7 +647,7 @@ mod tests {
         );
         notifications
             .publish_once(
-                &serde_json::from_str(
+                &studio_json::from_str(
                     r#"{"requestId":"changed-account","resources":[{"kind":"accounts"}]}"#,
                 )
                 .expect("notification fixture"),
@@ -658,7 +658,7 @@ mod tests {
                 std::future::ready(Some(if resource == resources[0] {
                     b"changed".to_vec()
                 } else {
-                    serde_json::to_vec(&resource).expect("content")
+                    studio_json::to_vec(&resource).expect("content")
                 }))
             })
             .await
@@ -797,7 +797,7 @@ mod tests {
             }));
         notifications
             .publish_once(
-                &serde_json::from_str(
+                &studio_json::from_str(
                     r#"{"requestId":"boundary","resources":[{"kind":"accounts"}]}"#,
                 )
                 .expect("notification fixture"),
@@ -876,7 +876,7 @@ mod tests {
             std::thread::spawn(move || {
                 entered.send(()).expect("admitted");
                 notifications.publish_once(
-                    &serde_json::from_str(
+                    &studio_json::from_str(
                         r#"{"requestId":"race","resources":[{"kind":"accounts"}]}"#,
                     )
                     .expect("notification fixture"),

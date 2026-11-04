@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use studio_runtime_store::path_identity::CanonicalPath;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_store::{
     AgentId, AgentRepository, QueueEventId, QueueEventRepository, RuntimeStore,
@@ -101,12 +101,12 @@ impl ArchiveDescriptor {
     }
 
     pub fn to_value(&self) -> Result<Value, PortableHistoryError> {
-        Ok(serde_json::to_value(self)?)
+        Ok(studio_json::to_value(self)?)
     }
 
     pub fn from_value(value: Value) -> Result<Self, PortableHistoryError> {
         let descriptor: Self =
-            serde_json::from_value(value).map_err(|_| PortableHistoryError::InvalidDescriptor)?;
+            studio_json::from_value(value).map_err(|_| PortableHistoryError::InvalidDescriptor)?;
         if descriptor.version != ARCHIVE_VERSION
             || descriptor.sha256.len() != 64
             || !descriptor
@@ -193,7 +193,7 @@ pub enum PortableHistoryError {
     #[error("portable history file operation failed")]
     Io(#[from] std::io::Error),
     #[error("portable history JSON is invalid")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("portable history store operation failed")]
     Store(#[from] studio_runtime_store::StoreError),
     #[error("portable history SQLite operation failed")]
@@ -632,7 +632,7 @@ The excerpt below is bounded. The complete JSONL archive contains native pages, 
 full available text, asset metadata, and direct references to earlier immutable archives. \
 Assets remain at their recorded locations. Read the archive when older context is needed.\n\
 Full archive path (JSON string): {}\nArchive SHA256: {}\n<historical_conversation>\n",
-        serde_json::to_string(&descriptor.path)?,
+        studio_json::to_string(&descriptor.path)?,
         descriptor.sha256,
     );
     let suffix = "\n</historical_conversation>";
@@ -767,7 +767,7 @@ where
                 maximum: MAX_ARCHIVE_BYTES,
             })?;
         enforce_archive_size(bytes_count, record_index)?;
-        let record: ArchiveRecord = serde_json::from_slice(&line)
+        let record: ArchiveRecord = studio_json::from_slice(&line)
             .map_err(|_| PortableHistoryError::InvalidArchive("record"))?;
         if let ArchiveRecord::Footer {
             counts,
@@ -953,7 +953,7 @@ fn stored_items(
     })?;
     for row in rows {
         let (id, created, encoded) = row?;
-        let item: Value = serde_json::from_str(&encoded)
+        let item: Value = studio_json::from_str(&encoded)
             .map_err(|_| PortableHistoryError::InvalidArchive("Studio item"))?;
         if !item.is_object() || item.get("id").and_then(Value::as_str) != Some(&id) {
             return Err(PortableHistoryError::InvalidArchive("Studio item identity"));
@@ -1062,7 +1062,7 @@ fn checked_native_records(
         }
         let record_index = writer.record_count + 1;
         let encoded_value = encode_record(&value, record_index)?;
-        let record: ArchiveRecord = serde_json::from_slice(&encoded_value)
+        let record: ArchiveRecord = studio_json::from_slice(&encoded_value)
             .map_err(|_| PortableHistoryError::InvalidArchive("native record"))?;
         match &record {
             ArchiveRecord::NativeThread { thread } => {
@@ -1394,7 +1394,7 @@ fn archive_path(
     source: &HistorySource,
     transfer_id: &str,
 ) -> Result<PathBuf, PortableHistoryError> {
-    let mut encoded = serde_json::to_vec(&json!([&source.agent_id, transfer_id]))?;
+    let mut encoded = studio_json::to_vec(&json!([&source.agent_id, transfer_id]))?;
     encoded.push(b'\n');
     Ok(directory.join(format!(
         "{}.jsonl",
@@ -1479,7 +1479,7 @@ fn encode_record<T: Serialize>(
         bytes: Vec::new(),
         serialized_bytes: 0,
     };
-    serde_json::to_writer(&mut output, record)?;
+    studio_json::to_writer(&mut output, record)?;
     let actual = output.serialized_bytes.saturating_add(1);
     enforce_record_size(actual, record_index)?;
     output.bytes.push(b'\n');
@@ -1503,7 +1503,7 @@ fn record_kind(record: &ArchiveRecord) -> &'static str {
 pub fn source_settings_snapshot(agent: &Value) -> Result<Value, PortableHistoryError> {
     let provider = studio_runtime_schema::ProviderKind::of_record(agent)
         .map_err(|_| PortableHistoryError::InvalidIdentity("provider"))?;
-    let mut settings = serde_json::Map::new();
+    let mut settings = studio_json::Map::new();
     for key in [
         "model",
         "effort",
@@ -1568,7 +1568,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{BufReader, Cursor, Read};
 
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     use super::{
         ArchiveDescriptor, ArchiveWriter, HistorySource, MAX_ARCHIVE_BYTES, MAX_RECORD_BYTES,

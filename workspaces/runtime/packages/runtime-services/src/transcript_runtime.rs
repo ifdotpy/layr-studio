@@ -1,7 +1,7 @@
 //! Committed managed transcript projection shared by HTTP history and sync pull.
 use crate::{event_write::truthy, transcript::TranscriptError};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 use studio_runtime_schema::DeliveryMoment;
@@ -326,7 +326,7 @@ pub(crate) fn project(
             actor.get(key).cloned().unwrap_or(Value::Null),
         )
     })
-    .collect::<serde_json::Map<_, _>>();
+    .collect::<studio_json::Map<_, _>>();
     let text = |key: &str| actor.get(key).and_then(Value::as_str).unwrap_or("None");
     Ok(
         json!({"items":items,"truncated":next.is_some(),"nextCursor":next,"nextAfterCursor":next_after,"historyVersion":format!("{}:{}",text("threadId"),text("restoredCheckpoint")),"unavailable":null,"agent":view}),
@@ -474,7 +474,7 @@ fn tool_result(
     }
     let Some(payload) = item["text"]
         .as_str()
-        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .and_then(|s| studio_json::from_str::<Value>(s).ok())
         .filter(Value::is_object)
     else {
         return Ok(());
@@ -487,7 +487,7 @@ fn tool_result(
         .into_iter()
         .flatten()
         .filter(|c| c["type"] == "inputText")
-        .filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok())
+        .filter_map(|c| studio_json::from_str::<Value>(c["text"].as_str()?).ok())
         .any(|v| v["truncated"] == true && v["outputRef"].is_string());
     if !projected
         && (!payload["status"].is_null() && payload["status"] != "inProgress"
@@ -550,7 +550,7 @@ fn apply_tool_result(
 ) -> Result<(), TranscriptError> {
     let Some(mut payload) = item["text"]
         .as_str()
-        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|text| studio_json::from_str::<Value>(text).ok())
         .filter(Value::is_object)
     else {
         return Ok(());
@@ -662,7 +662,7 @@ fn reasoning(
     for row in records {
         let (id, raw) = row?;
         let record: ReasoningRecord =
-            serde_json::from_str(&raw).map_err(|_| invalid("analytics_items", &id))?;
+            studio_json::from_str(&raw).map_err(|_| invalid("analytics_items", &id))?;
         if record.id != id
             || record.agent_id != actor["id"]
             || record.kind != "reasoning"

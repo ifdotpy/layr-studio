@@ -2,7 +2,7 @@
 //! Native credentials stay with the CLI; all account evidence is injected.
 use crate::account_driver::{AuthMetadata, AuthStatus};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
 use studio_runtime_process::ProviderLaunchSpec;
 /// Launch variable that binds a bridge to its credential identity.
@@ -234,7 +234,7 @@ impl BridgeSnapshot {
         }
         env.insert(
             "STUDIO_CLAUDE_OPTIONS".into(),
-            serde_json::to_string(&bridge_options_checked(
+            studio_json::to_string(&bridge_options_checked(
                 self.raw_options.as_ref(),
                 &self.options,
             )?)
@@ -302,7 +302,7 @@ pub fn bridge_options_public(
     use crate::account_policy::PublicString;
     let mut output = match options {
         Some(options) => options.wire_object().ok_or(BridgeHold::Options)?,
-        None => serde_json::Map::new(),
+        None => studio_json::Map::new(),
     };
     output.remove("launchArgs");
     let args = match options.map(|options| &options.launch_args) {
@@ -319,7 +319,7 @@ fn bridge_options_checked(
 ) -> Result<Value, BridgeHold> {
     let mut options = match value {
         Some(value) => value.as_object().cloned().ok_or(BridgeHold::Options)?,
-        None => serde_json::Map::new(),
+        None => studio_json::Map::new(),
     };
     let present = options.remove("launchArgs");
     let args = match (present, typed.launch_args.as_deref()) {
@@ -331,7 +331,7 @@ fn bridge_options_checked(
 }
 
 fn finish_bridge_options(
-    mut options: serde_json::Map<String, Value>,
+    mut options: studio_json::Map<String, Value>,
     args: &str,
 ) -> Result<Value, BridgeHold> {
     let extra = bridge_launch_args(args)?;
@@ -340,13 +340,13 @@ fn finish_bridge_options(
     Ok(Value::Object(options))
 }
 
-pub(crate) fn bridge_launch_args(args: &str) -> Result<serde_json::Map<String, Value>, BridgeHold> {
+pub(crate) fn bridge_launch_args(args: &str) -> Result<studio_json::Map<String, Value>, BridgeHold> {
     if args.len() > 4096 {
         return Err(BridgeHold::Options);
     }
     let tokens = shlex::split(args).ok_or(BridgeHold::Options)?;
     let mut tokens = tokens.iter();
-    let mut extra = serde_json::Map::new();
+    let mut extra = studio_json::Map::new();
     while let Some(token) = tokens.next() {
         let name = token.strip_prefix("--").ok_or(BridgeHold::Options)?;
         let value = match name {
@@ -369,7 +369,7 @@ pub(crate) fn bridge_launch_args(args: &str) -> Result<serde_json::Map<String, V
 #[cfg(test)]
 mod options_tests {
     use super::{BridgeHold, BridgeSnapshot, ClaudeLaunchProfile};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn snapshot_checks_options_shape_and_bridge_preserves_extensions() {
@@ -400,11 +400,11 @@ mod options_tests {
             ),
             (r#"{"claudeOptions":{"launchArgs":null}}"#, None),
         ] {
-            let profile: crate::account_policy::PublicAccount = serde_json::from_str(raw).unwrap();
+            let profile: crate::account_policy::PublicAccount = studio_json::from_str(raw).unwrap();
             let actual = super::bridge_options_public(profile.claude_options.as_ref());
             match expected {
                 Some(expected) => {
-                    assert_eq!(serde_json::to_string(&actual.unwrap()).unwrap(), expected)
+                    assert_eq!(studio_json::to_string(&actual.unwrap()).unwrap(), expected)
                 }
                 None => assert!(actual.is_err()),
             }

@@ -7,7 +7,7 @@ use crate::{
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Deserializer};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -427,7 +427,7 @@ async fn sweep(
         let agents = statement.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
         // Parse through a map so duplicate keys retain the historical last value.
         let agents = agents.into_iter().map(|raw| {
-            let value: Value = serde_json::from_str(&raw)?;
+            let value: Value = studio_json::from_str(&raw)?;
             ShellPolicyAgent::deserialize(value).map_err(StoreError::from)
         }).collect::<Result<Vec<_>, _>>()?;
         Ok::<_, StoreError>((settings, agents))

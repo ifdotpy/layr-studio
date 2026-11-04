@@ -9,7 +9,7 @@
 //! client run the same cases.
 
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::ProviderKind;
 use studio_runtime_schema::project_record::ProjectAccountPreference;
 use studio_runtime_schema::shared_values::{
@@ -100,7 +100,7 @@ impl AccountOrder {
         let Some(file) = std::fs::read(path)
             .ok()
             .and_then(|bytes| {
-                let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+                let mut deserializer = studio_json::Deserializer::from_slice(&bytes);
                 let file = read_order_file(&mut deserializer).ok()?;
                 deserializer.end().ok()?;
                 Some(file)
@@ -136,7 +136,7 @@ impl AccountOrder {
     /// The file content.
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({
+        studio_json::to_vec(&studio_json::json!({
             "version": ACCOUNT_ORDER_VERSION,
             "groups": self.groups,
             DEFAULT_GROUPS_FIELD: self.default_groups,
@@ -311,11 +311,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("temporary order directory");
         let path = dir.path().join(ACCOUNT_ORDER_FILE);
         let read = |value: Value| {
-            std::fs::write(&path, serde_json::to_vec(&value).expect("encode fixture"))
+            std::fs::write(&path, studio_json::to_vec(&value).expect("encode fixture"))
                 .expect("write fixture");
             AccountOrder::read(&path)
         };
-        let order = read(serde_json::json!({
+        let order = read(studio_json::json!({
             "version": 1,
             "groups": {"a":"team", "b":false, "c":"Bad", "d":"work"},
             "defaultAccountGroups": ["work", 2, null, "team"],
@@ -329,18 +329,18 @@ mod tests {
         std::fs::write(&path, order.encode()).expect("write order");
         assert_eq!(AccountOrder::read(&path), order);
         for value in [
-            serde_json::json!([]),
-            serde_json::json!([1, {}, []]),
-            serde_json::json!({"version": null}),
-            serde_json::json!({"version": 1.0}),
-            serde_json::json!({"version": 2, "groups":{"a":"team"}}),
+            studio_json::json!([]),
+            studio_json::json!([1, {}, []]),
+            studio_json::json!({"version": null}),
+            studio_json::json!({"version": 1.0}),
+            studio_json::json!({"version": 2, "groups":{"a":"team"}}),
         ] {
             assert_eq!(read(value), AccountOrder::default());
         }
-        let order = read(serde_json::json!({"version":1,"groups":[],"defaultAccountGroups":{}}));
+        let order = read(studio_json::json!({"version":1,"groups":[],"defaultAccountGroups":{}}));
         assert_eq!(order, AccountOrder::default());
         let order = read(
-            serde_json::json!({"version":1,"groups":{"a":"team"},"defaultAccountGroups":["same","same"]}),
+            studio_json::json!({"version":1,"groups":{"a":"team"},"defaultAccountGroups":["same","same"]}),
         );
         assert_eq!(order.groups.get("a").map(String::as_str), Some("team"));
         assert!(order.default_groups.is_empty());
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn provider_identity_unknown_accounts_cannot_be_selected() {
-        use serde_json::json;
+        use studio_json::json;
         for provider in [
             None,
             Some(Value::Null),
@@ -408,7 +408,7 @@ mod tests {
             model: Option<String>,
             effort: Option<String>,
         }
-        let contract: Contract = serde_json::from_str(include_str!(
+        let contract: Contract = studio_json::from_str(include_str!(
             "../../../../client/contracts/account-preference.json"
         ))
         .expect("the contract parses");

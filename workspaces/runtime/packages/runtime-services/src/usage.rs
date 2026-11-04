@@ -1,6 +1,6 @@
 //! Local usage snapshot readers that do not require provider or turn drivers.
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -335,7 +335,7 @@ where
                 .unwrap_or(checked_at)
         };
         let state = json!({"at":at,"checkedAt":checked_at,"error":null,"data":data,"sourceFingerprint":fingerprint});
-        let bytes = serde_json::to_vec(&json!({"scope":scope,"state":state}))
+        let bytes = studio_json::to_vec(&json!({"scope":scope,"state":state}))
             .map_err(|_| UsageError::Scan)?;
         crate::atomic_file::replace(
             &cache_root.join("local-costs.json"),
@@ -361,7 +361,7 @@ where
             fields.insert("error".to_owned(), Value::String(error.to_string()));
             fields.insert("checkedAt".to_owned(), Value::from(checked_at));
         }
-        if let Ok(bytes) = serde_json::to_vec(&json!({"scope":scope,"state":state})) {
+        if let Ok(bytes) = studio_json::to_vec(&json!({"scope":scope,"state":state})) {
             match crate::atomic_file::replace(&path, &bytes, Some(0o600), false) {
                 Ok(()) => cache_saved = true,
                 Err(error) => {
@@ -398,7 +398,7 @@ fn cost_fingerprint(data: &Value) -> String {
             data.get(field).cloned().unwrap_or(Value::Null),
         )
     })
-    .collect::<serde_json::Map<_, _>>();
+    .collect::<studio_json::Map<_, _>>();
     Value::Object(content).to_string()
 }
 
@@ -440,7 +440,7 @@ fn refresh_claude_costs(
             .unwrap_or(Value::Null)
     };
     let content = json!({"config":home,"data":data,"at":at,"checked":checked,"error":error});
-    let bytes = serde_json::to_vec(&content).map_err(|_| UsageError::Scan)?;
+    let bytes = studio_json::to_vec(&content).map_err(|_| UsageError::Scan)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(UsageError::ScannerCancelled);
     }
@@ -545,7 +545,7 @@ where
                 }
                 check_scan_timeout(started)?;
                 let line = line.map_err(|_| UsageError::Scan)?;
-                let Ok(row) = serde_json::from_str::<Value>(&line) else {
+                let Ok(row) = studio_json::from_str::<Value>(&line) else {
                     continue;
                 };
                 if row.get("type").and_then(Value::as_str) != Some("assistant") {
@@ -766,7 +766,7 @@ where
         let mut fork_at = None::<chrono::DateTime<chrono::FixedOffset>>;
         for line in BufReader::new(file).lines() {
             check_codex_scan(started, cancelled)?;
-            let Ok(row) = serde_json::from_str::<Value>(&line.map_err(|_| UsageError::Scan)?)
+            let Ok(row) = studio_json::from_str::<Value>(&line.map_err(|_| UsageError::Scan)?)
             else {
                 continue;
             };
@@ -1085,7 +1085,7 @@ pub fn fetch_models_dev_catalog() -> Option<Value> {
         if response.status().as_u16() != 200 {
             return None;
         }
-        let body: Value = serde_json::from_reader(response.into_body().into_reader()).ok()?;
+        let body: Value = studio_json::from_reader(response.into_body().into_reader()).ok()?;
         body.get("providers").cloned().or(Some(body))
     })
 }
@@ -1120,7 +1120,7 @@ fn write_pricing_attempt(path: &Path, now: f64) -> Result<(), UsageError> {
 fn write_private_json_atomic(path: &Path, value: &Value) -> Result<(), UsageError> {
     let parent = path.parent().ok_or(UsageError::Scan)?;
     create_private_dir(parent)?;
-    let bytes = serde_json::to_vec(value).map_err(|_| UsageError::Scan)?;
+    let bytes = studio_json::to_vec(value).map_err(|_| UsageError::Scan)?;
     crate::atomic_file::replace(path, &bytes, Some(0o600), false).map_err(|_| UsageError::Scan)
 }
 
@@ -1189,7 +1189,7 @@ fn claude_cost_snapshot(
 
 fn read_json(path: &Path) -> Option<Value> {
     let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    studio_json::from_slice(&bytes).ok()
 }
 
 fn create_private_dir(path: &Path) -> Result<(), UsageError> {
@@ -1218,7 +1218,7 @@ fn local_day(timestamp: f64) -> String {
 }
 
 /// Daily totals are usable only for the local day identified by the scan.
-fn clear_unproven_daily_costs(data: &mut serde_json::Map<String, Value>, now: f64) -> bool {
+fn clear_unproven_daily_costs(data: &mut studio_json::Map<String, Value>, now: f64) -> bool {
     if data.get("sourceDay").and_then(Value::as_str) == Some(&local_day(now)) {
         return false;
     }
@@ -1230,12 +1230,12 @@ fn clear_unproven_daily_costs(data: &mut serde_json::Map<String, Value>, now: f6
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
-    fn account_fixture(value: serde_json::Value) -> crate::account_policy::PublicAccount {
-        serde_json::from_value(value).expect("account fixture")
+    fn account_fixture(value: studio_json::Value) -> crate::account_policy::PublicAccount {
+        studio_json::from_value(value).expect("account fixture")
     }
 
     use super::{account_cost_snapshot, refresh_account_costs_with, scan_claude_sessions};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
@@ -1616,7 +1616,7 @@ mod tests {
             count(58, 400_000, 100_000, 40_000),
             record(58, "r1", 400_000, 100_000, 40_000),
             json!({"timestamp":at(57),"type":"compacted","payload":{
-                "latest_token_usage_record":serde_json::from_str::<Value>(&record(57,"r1",400_000,100_000,40_000)).expect("valid response fixture")["payload"]}}).to_string(),
+                "latest_token_usage_record":studio_json::from_str::<Value>(&record(57,"r1",400_000,100_000,40_000)).expect("valid response fixture")["payload"]}}).to_string(),
             record(56, "r2", 600_000, 100_000, 60_000),
             // Compaction's cumulative total omits part of the recovered responses.
             count(55, 900_000, 150_000, 90_000),
@@ -1995,7 +1995,7 @@ mod tests {
             .join("account-costs/claude")
             .join(super::digest(&identity))
             .join("claude-costs.json");
-        let saved: Value = serde_json::from_slice(&std::fs::read(&cache).expect("cache exists"))
+        let saved: Value = studio_json::from_slice(&std::fs::read(&cache).expect("cache exists"))
             .expect("valid cache");
         assert_eq!(saved["checked"], midnight);
         assert_eq!(saved["data"]["sourceDay"], super::local_day(scan_started));
@@ -2060,7 +2060,7 @@ mod tests {
         let attempt = std::fs::read_to_string(root.path().join("model-pricing/refresh-state.json"))
             .expect("attempt time is persisted separately from successful catalog");
         assert_eq!(
-            serde_json::from_str::<Value>(&attempt).expect("attempt state remains valid JSON")["lastAttemptAt"],
+            studio_json::from_str::<Value>(&attempt).expect("attempt state remains valid JSON")["lastAttemptAt"],
             now
         );
 

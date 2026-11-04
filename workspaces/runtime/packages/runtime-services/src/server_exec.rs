@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_store::{RuntimeStore, StoreError};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -378,7 +378,7 @@ impl ServerExec {
         self.snapshot_reads
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let raw = std::fs::read(job_path(&self.folder, key, ".output.json")).ok()?;
-        serde_json::from_slice(&raw).ok()
+        studio_json::from_slice(&raw).ok()
     }
 
     /// Python `_record`: the record of a command that this principal and actor own.
@@ -402,7 +402,7 @@ impl ServerExec {
             .await?;
         match row {
             Some((owner, saved_actor, record)) if owner == principal && saved_actor == actor => {
-                serde_json::from_str(&record)
+                studio_json::from_str(&record)
                     .map_err(|_| ExecError::Failed("The stored command record is invalid".into()))
             }
             _ => refused("The command handle belongs to another actor or server"),
@@ -435,7 +435,7 @@ impl ServerExec {
                     )
                     .optional()?;
                 if let Some(previous) = previous {
-                    let previous: Value = serde_json::from_str(&previous).unwrap_or(Value::Null);
+                    let previous: Value = studio_json::from_str(&previous).unwrap_or(Value::Null);
                     let was_final = !matches!(previous["status"].as_str(), Some("starting" | "running"));
                     if was_final && !final_record {
                         return Ok(false);
@@ -499,7 +499,7 @@ impl ServerExec {
                 None => {
                     let config = std::fs::read(job_path(&self.folder, &key, ".config.json"))
                         .ok()
-                        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
+                        .and_then(|raw| studio_json::from_slice::<Value>(&raw).ok());
                     let marker = config
                         .as_ref()
                         .and_then(|config| config["markerSecret"].as_str())
@@ -514,7 +514,7 @@ impl ServerExec {
                         None => 0,
                     };
                     let mut record: Value =
-                        serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+                        studio_json::from_str(&raw).unwrap_or_else(|_| json!({}));
                     if record["finishedAt"].is_null() {
                         record["finishedAt"] = json!(now());
                     }

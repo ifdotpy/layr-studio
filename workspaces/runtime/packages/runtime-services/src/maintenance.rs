@@ -12,7 +12,7 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Serialize;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::room_record::RoomRecord;
 use studio_runtime_store::{
     AgentRecord, AgentRepository, RuntimeStore, StoreResult, SyncDocumentsRepository, Table,
@@ -61,7 +61,7 @@ fn remove_review_assignments_in_transaction(
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
         for (id, raw) in rows {
-            let record: RoomRecord = match serde_json::from_str::<RoomRecord>(&raw) {
+            let record: RoomRecord = match studio_json::from_str::<RoomRecord>(&raw) {
                 Ok(record) if record.id == id => record,
                 _ => {
                     eprintln!("Skipping invalid room {id} in retired review cleanup");
@@ -110,7 +110,7 @@ fn remove_projection_field(
     let Some((Some(payload), 0)) = row else {
         return Ok(());
     };
-    let mut envelope: Value = serde_json::from_str(&payload)?;
+    let mut envelope: Value = studio_json::from_str(&payload)?;
     let Some(value) = envelope.get_mut("value").and_then(Value::as_object_mut) else {
         return Ok(());
     };
@@ -140,7 +140,7 @@ fn records_with_field(
         })?
         .map(|row| {
             let (id, raw) = row?;
-            let value: Value = serde_json::from_str(&raw).map_err(|_| {
+            let value: Value = studio_json::from_str(&raw).map_err(|_| {
                 studio_runtime_store::StoreError::InvalidStoredRecord {
                     object: table,
                     id: id.clone(),
@@ -163,27 +163,27 @@ fn table_exists(transaction: &Transaction<'_>, table: &str) -> StoreResult<bool>
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::JsonRecord;
 
     #[test]
     fn room_record_rejects_unknown_and_malformed_fields() {
         assert!(
-            serde_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","unexpected":1}"#)
+            studio_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","unexpected":1}"#)
                 .is_err()
         );
         assert!(
-            serde_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":false}"#)
+            studio_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":false}"#)
                 .is_err()
         );
-        assert!(serde_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":["agent"],"updated":1,"userHidden":false}"#).is_ok());
+        assert!(studio_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":["agent"],"updated":1,"userHidden":false}"#).is_ok());
     }
 
     #[test]
     fn open_room_encoder_still_validates_schema() {
         let connection = Connection::open_in_memory().unwrap();
-        assert!(serde_json::from_str::<RoomRecord>(r#"{"id":"r","kind":false}"#).is_err());
-        let valid: RoomRecord = serde_json::from_str(r#"{"id":"r","kind":"private"}"#).unwrap();
+        assert!(studio_json::from_str::<RoomRecord>(r#"{"id":"r","kind":false}"#).is_err());
+        let valid: RoomRecord = studio_json::from_str(r#"{"id":"r","kind":"private"}"#).unwrap();
         assert!(valid.encode_stored(&connection, "r").is_ok());
     }
 
@@ -234,7 +234,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let value: Value = serde_json::from_str(&payload).unwrap();
+        let value: Value = studio_json::from_str(&payload).unwrap();
         assert!(value["value"].get("reviewTargets").is_none());
     }
 
@@ -309,7 +309,7 @@ mod tests {
             .expect("agents query runs")
             .map(|row| {
                 let (id, record) = row.expect("agent row reads");
-                json!({"id":id,"record":serde_json::from_str::<Value>(&record).expect("agent JSON reads")})
+                json!({"id":id,"record":studio_json::from_str::<Value>(&record).expect("agent JSON reads")})
             })
             .collect::<Vec<_>>();
         let rooms = connection
@@ -321,7 +321,7 @@ mod tests {
             .expect("rooms query runs")
             .map(|row| {
                 let (id, record) = row.expect("room row reads");
-                json!({"id":id,"record":serde_json::from_str::<Value>(&record).expect("room JSON reads")})
+                json!({"id":id,"record":studio_json::from_str::<Value>(&record).expect("room JSON reads")})
             })
             .collect::<Vec<_>>();
         let events = connection

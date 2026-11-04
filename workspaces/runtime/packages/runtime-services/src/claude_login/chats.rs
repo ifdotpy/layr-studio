@@ -1,6 +1,6 @@
 //! Idempotent post-login repair; historical input and transcript rows stay intact.
 use super::{LoginError, ports::LoginChats};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_store::{AgentRecord, RuntimeStore, SchedulerRepository, Table};
 

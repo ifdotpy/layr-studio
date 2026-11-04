@@ -125,14 +125,14 @@ pub(super) fn execute(
     snapshot: &CallbackSnapshot,
     args: &Value,
     now: f64,
-) -> Result<(Box<serde_json::value::RawValue>, Vec<WakeSignal>), CallbackError> {
+) -> Result<(studio_json::OwnedRawJson, Vec<WakeSignal>), CallbackError> {
     let actor = snapshot.actor();
     let args = &resolved_args(tx, actor, args)?;
     let (action, _) = checked_action(args)?;
     match action {
         "park" | "list_parked" | "cancel_park" | "emit_event" => park_action(tx, actor, args, now),
         "list" | "list_archived" => Ok((
-            serde_json::value::to_raw_value(&list(tx, snapshot, args, action)?)?,
+            studio_json::to_raw_value(&list(tx, snapshot, args, action)?)?,
             Vec::new(),
         )),
         "inspect" => {
@@ -147,7 +147,7 @@ pub(super) fn execute(
                 now,
             )
             .map_err(management_error)?;
-            Ok((serde_json::value::to_raw_value(&value)?, Vec::new()))
+            Ok((studio_json::to_raw_value(&value)?, Vec::new()))
         }
         // Python reads native history and the account transfer store for
         // recovery, and releases native tool sessions for a tool reset.
@@ -302,7 +302,7 @@ fn park_action(
     actor: &Value,
     args: &Value,
     now: f64,
-) -> Result<(Box<serde_json::value::RawValue>, Vec<WakeSignal>), CallbackError> {
+) -> Result<(studio_json::OwnedRawJson, Vec<WakeSignal>), CallbackError> {
     let action = text(args, "action")?;
     let root = text(actor, "rootId")?;
     let actor_id = text(actor, "id")?;
@@ -324,7 +324,7 @@ fn park_action(
         }
         rows.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
         let value = model_page(rows, args, json!([root, actor_id, "parked_workers"]), None)?;
-        return Ok((serde_json::value::to_raw_value(&value)?, signals));
+        return Ok((studio_json::to_raw_value(&value)?, signals));
     }
     if action == "emit_event" {
         if actor["isLead"] != true {
@@ -345,7 +345,7 @@ fn park_action(
             chrono::Utc::now().timestamp_millis(),
         )? {
             event_write::CallerAdmission::Replay(reply) => {
-                return Ok((serde_json::value::to_raw_value(&reply)?, signals));
+                return Ok((studio_json::to_raw_value(&reply)?, signals));
             }
             event_write::CallerAdmission::Fresh(admitted) => admitted,
         };
@@ -357,7 +357,7 @@ fn park_action(
                 replayed: Some(true),
             };
             event_write::settle_request(tx, &admitted, Some(actor_id), &result)?;
-            return Ok((serde_json::value::to_raw_value(&result)?, signals));
+            return Ok((studio_json::to_raw_value(&result)?, signals));
         }
         let mut woken = Vec::new();
         for mut agent in team(tx, root, false)? {
@@ -389,7 +389,7 @@ fn park_action(
             replayed: None,
         };
         event_write::settle_request(tx, &admitted, Some(actor_id), &result)?;
-        return Ok((serde_json::value::to_raw_value(&result)?, signals));
+        return Ok((studio_json::to_raw_value(&result)?, signals));
     }
     let mut target = target(tx, args)?;
     park_target(tx, actor, &target)?;
@@ -406,7 +406,7 @@ fn park_action(
                 ));
             }
             let value = json!({"status":target["status"],"agent":crate::agent_management::brief(&target),"replayed":true});
-            return Ok((serde_json::value::to_raw_value(&value)?, signals));
+            return Ok((studio_json::to_raw_value(&value)?, signals));
         }
         let pending: bool = tx.query_row(
             &format!(
@@ -433,12 +433,12 @@ fn park_action(
         super::super::super::storage::save_actor(tx, &target)?;
         let value =
             json!({"status":target["status"],"agent":crate::agent_management::brief(&target)});
-        return Ok((serde_json::value::to_raw_value(&value)?, signals));
+        return Ok((studio_json::to_raw_value(&value)?, signals));
     }
     // cancel_park
     if !studio_runtime_store::truthy(target.get("parkedEvent")) {
         let value = json!({"status":target["status"],"agent":crate::agent_management::brief(&target),"replayed":true});
-        return Ok((serde_json::value::to_raw_value(&value)?, signals));
+        return Ok((studio_json::to_raw_value(&value)?, signals));
     }
     let old = text(&target, "parkedEvent")?.to_owned();
     resume(&mut target)?;
@@ -455,7 +455,7 @@ fn park_action(
     let current = records::get(tx, "runtime_agents", &target_id)?.ok_or(CallbackError::Stale)?;
     let value =
         json!({"status":current["status"],"agent":crate::agent_management::brief(&current)});
-    Ok((serde_json::value::to_raw_value(&value)?, signals))
+    Ok((studio_json::to_raw_value(&value)?, signals))
 }
 
 /// End an event wait: Python clears the wait fields and turns a parked worker
@@ -482,11 +482,11 @@ mod receipt_tests {
             r#"{"event":"ready","count":1,"woken":["worker"]}"#,
             r#"{"event":"ready","count":0,"woken":[],"replayed":true}"#,
         ] {
-            let reply: super::ParkReply = serde_json::from_str(raw).unwrap();
-            let encoded = serde_json::to_string(&reply).unwrap();
+            let reply: super::ParkReply = studio_json::from_str(raw).unwrap();
+            let encoded = studio_json::to_string(&reply).unwrap();
             assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
-                serde_json::from_str::<serde_json::Value>(raw).unwrap()
+                studio_json::from_str::<studio_json::Value>(&encoded).unwrap(),
+                studio_json::from_str::<studio_json::Value>(raw).unwrap()
             );
         }
     }

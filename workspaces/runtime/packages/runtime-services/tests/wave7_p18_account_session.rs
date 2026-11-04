@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Mutex;
 use studio_runtime_services::account_session_runtime::{
     AccountSessionError, AccountSessionFuture, AccountSessionPort, LimitsSnapshot, LoginRequest,
@@ -98,24 +98,24 @@ fn profile_options_preserve_aliases_and_reject_invalid_shapes() {
             home.path(),
         )
     };
-    let result = normalize(serde_json::json!({"customModels":["model", {"id":"other","label":null}], "autoCompactWindow":"100000"})).expect("aliases normalize");
+    let result = normalize(studio_json::json!({"customModels":["model", {"id":"other","label":null}], "autoCompactWindow":"100000"})).expect("aliases normalize");
     assert_eq!(
         result["customModels"],
-        serde_json::json!([{"id":"model","label":"model"},{"id":"other","label":"other"}])
+        studio_json::json!([{"id":"model","label":"model"},{"id":"other","label":"other"}])
     );
-    assert_eq!(result["autoCompactWindow"], serde_json::json!(100000));
+    assert_eq!(result["autoCompactWindow"], studio_json::json!(100000));
     for value in [
-        serde_json::json!({"binaryPath":null}),
-        serde_json::json!({"configDir":null}),
-        serde_json::json!({"customModels":null}),
-        serde_json::json!({"launchArgs":null}),
-        serde_json::json!({"customModels":[["model","Model"]]}),
-        serde_json::json!({"customModels":[{"id":"model","label":"Model","extra":true}]}),
-        serde_json::json!({"autoCompactWindow":100000.0}),
-        serde_json::json!({"autoCompactWindow":"99999"}),
-        serde_json::json!({"unknown":true}),
+        studio_json::json!({"binaryPath":null}),
+        studio_json::json!({"configDir":null}),
+        studio_json::json!({"customModels":null}),
+        studio_json::json!({"launchArgs":null}),
+        studio_json::json!({"customModels":[["model","Model"]]}),
+        studio_json::json!({"customModels":[{"id":"model","label":"Model","extra":true}]}),
+        studio_json::json!({"autoCompactWindow":100000.0}),
+        studio_json::json!({"autoCompactWindow":"99999"}),
+        studio_json::json!({"unknown":true}),
     ] {
         assert!(normalize(value.clone()).is_err(), "{value}");
     }
-    assert!(normalize(serde_json::json!({"autoCompactWindow":null})).is_ok());
+    assert!(normalize(studio_json::json!({"autoCompactWindow":null})).is_ok());
 }

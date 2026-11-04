@@ -13,7 +13,7 @@ use hyper::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HeaderName, Header
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -1375,7 +1375,7 @@ fn page(text: &str) -> Vec<u8> {
 /// Filesystem facts discovered alongside the Python-written config records.
 fn plugin_version(plugin: &std::path::Path) -> Option<String> {
     let path = plugin.join(".codex-plugin/plugin.json");
-    let value: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let value: Value = studio_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     value
         .get("version")
         .and_then(Value::as_str)
@@ -1446,7 +1446,7 @@ impl BrowserConfigSnapshot {
             shared_node.and_then(|node| node.pointer("/env/NODE_REPL_TRUSTED_SERVICES"));
         let parsed = match service_value {
             None => Some(json!({})),
-            Some(Value::String(source)) => serde_json::from_str::<Value>(source).ok(),
+            Some(Value::String(source)) => studio_json::from_str::<Value>(source).ok(),
             Some(_) => None,
         };
         let trusted_services_valid = parsed.is_some();
@@ -1634,7 +1634,7 @@ pub fn prepare_browser_config(snapshot: BrowserConfigSnapshot) -> BrowserConfigD
             && let Some(service) = shared_node
                 .and_then(|node| node.pointer("/env/NODE_REPL_TRUSTED_SERVICES"))
                 .and_then(Value::as_str)
-                .and_then(|value| serde_json::from_str::<Value>(value).ok())
+                .and_then(|value| studio_json::from_str::<Value>(value).ok())
                 .and_then(|value| value.get("browser").cloned())
         {
             let trusted = format!("{{\"browser\": {}}}", service);
@@ -1683,7 +1683,7 @@ fn read_codex_config(home: &std::path::Path) -> Option<Value> {
         return Some(json!({}));
     }
     let table: toml::Table = std::fs::read_to_string(path).ok()?.parse().ok()?;
-    serde_json::to_value(table).ok()
+    studio_json::to_value(table).ok()
 }
 
 /// Python `codex_browser.skill_root`: the installed plugin's skills, else the
@@ -1740,7 +1740,7 @@ pub fn account_browser(home: &std::path::Path, shared_home: &std::path::Path) ->
     let services = shared_node
         .and_then(|node| node.pointer("/env/NODE_REPL_TRUSTED_SERVICES"))
         .and_then(Value::as_str)
-        .and_then(|value| serde_json::from_str::<Value>(value).ok());
+        .and_then(|value| studio_json::from_str::<Value>(value).ok());
     let assets = BrowserConfigAssets {
         control_chrome_skill: root.as_ref().map(|root| {
             root.join("control-chrome/SKILL.md")
@@ -2903,7 +2903,7 @@ mod tests {
                 .as_str()
                 .expect("services");
         assert_eq!(
-            serde_json::from_str::<Value>(services).expect("json")["browser"],
+            studio_json::from_str::<Value>(services).expect("json")["browser"],
             json!(homes.root.path().join("browser.mjs"))
         );
 

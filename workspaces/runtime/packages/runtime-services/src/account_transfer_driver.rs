@@ -6,7 +6,7 @@ use crate::account_transfer::{
     Action, Command, Decision, EXECUTOR_REQUIRED, Snapshot, Ticket, TransferError,
 };
 use serde::Serialize;
-use serde_json::Value;
+use studio_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use studio_runtime_store::{
@@ -235,7 +235,7 @@ fn replay_in(
             Some(Field::Value(saved)) => saved,
         };
         return saved
-            .serialize(serde_json::value::Serializer)
+            .serialize(studio_json::value::Serializer)
             .map(Some)
             .map_err(|_| TransferError::Refused("The original transfer response is invalid"));
     }
@@ -421,11 +421,11 @@ pub async fn request(
                     .map_err(|_| TransferError::Refused("Invalid transfer identity"))?,
                 target_key,
                 provider,
-                serde_json::Number::from_f64(now)
+                studio_json::Number::from_f64(now)
                     .ok_or(TransferError::Refused("Invalid transfer time"))?,
                 studio_runtime_store::transfer_record::OrderedMembers(members),
             );
-            let raw = serde_json::to_string(&operation)
+            let raw = studio_json::to_string(&operation)
                 .map_err(|_| TransferError::Refused("Invalid transfer"))?;
             let snapshot = Snapshot::read_typed(
                 operation.clone(),
@@ -433,7 +433,7 @@ pub async fn request(
                 agents.iter().map(|(id, value)| {
                     Ok((
                         id.clone(),
-                        serde_json::to_string(value)
+                        studio_json::to_string(value)
                             .map_err(|_| TransferError::Refused("Invalid transfer agent"))?,
                     ))
                 }),
@@ -486,7 +486,7 @@ pub async fn receive(
         .transaction_with_error(move |tx| {
             let snapshot = load(tx, &ticket.operation)?;
             let result = result
-                .map(|value| serde_json::value::to_raw_value(&value))
+                .map(|value| studio_json::to_raw_value(&value))
                 .transpose()
                 .map_err(|_| TransferError::Refused("Invalid provider payload"))?;
             persist(tx, snapshot.typed_receive(&ticket, result)?, now)?;
@@ -508,7 +508,7 @@ fn persist_request(
     if !decision.changed {
         return serde::Serialize::serialize(
             &(decision.typed_public_view()),
-            serde_json::value::Serializer,
+            studio_json::value::Serializer,
         )
         .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
@@ -605,7 +605,7 @@ fn persist_request(
     }
     serde::Serialize::serialize(
         &(decision.typed_public_view()),
-        serde_json::value::Serializer,
+        studio_json::value::Serializer,
     )
     .map_err(|_| TransferError::Refused("Invalid transfer response"))
 }
@@ -732,7 +732,7 @@ fn typed_intent(
             serde::de::value::StrDeserializer::<serde::de::value::Error>::new(method),
         )
         .map_err(|_| TransferError::Refused("Invalid provider method"))?,
-        &serde_json::value::to_raw_value(params)
+        &studio_json::to_raw_value(params)
             .map_err(|_| TransferError::Refused("Invalid provider payload"))?,
     )
 }
@@ -849,7 +849,7 @@ pub(crate) async fn provider_read_intent(
                     serde::de::value::Error,
                 >::new(&method))
                 .map_err(|_| TransferError::Refused("Invalid provider method"))?,
-                params: serde_json::value::to_raw_value(&intent.params)
+                params: studio_json::to_raw_value(&intent.params)
                     .map_err(|_| TransferError::Refused("Invalid provider parameters"))?,
             };
             if let Some(reply) = snapshot.written_read_replay_typed(&agent, &next)? {
@@ -921,10 +921,10 @@ fn inline_reply(
     };
     let lost = |_| TransferError::Refused("The saved provider reply is unavailable");
     let reference =
-        serde::Serialize::serialize(&(reference), serde_json::value::Serializer).map_err(lost)?;
+        serde::Serialize::serialize(&(reference), studio_json::value::Serializer).map_err(lost)?;
     let bytes = crate::payload_blobs::load_blob(root, &reference)
         .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
-    let value = serde_json::from_slice(&bytes).map_err(lost)?;
+    let value = studio_json::from_slice(&bytes).map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
     *result = studio_runtime_store::transfer_record::ProviderResult::Inline {
         kind,
         value: Some(value),
@@ -1252,7 +1252,7 @@ pub async fn execute_member(
 mod request_tests {
     use super::request as request_async;
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use std::future::Future;
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository};
 
@@ -1408,7 +1408,7 @@ mod request_tests {
     fn inline_reply_restores_a_spilled_body() {
         let root = tempfile::tempdir().expect("directory");
         let body = json!({"data":["page"]});
-        let bytes = serde_json::to_vec(&body).expect("bytes");
+        let bytes = studio_json::to_vec(&body).expect("bytes");
         let sha256 = studio_runtime_store::sha256_hex(&bytes);
         crate::payload_blobs::write_blobs(
             root.path(),
@@ -1424,7 +1424,7 @@ mod request_tests {
         let saved = serde::Deserialize::deserialize(saved).expect("receipt");
         let restored = inline_reply(root.path(), saved).expect("restored");
         assert_eq!(
-            serde::Serialize::serialize(&(restored), serde_json::value::Serializer).unwrap()["result"],
+            serde::Serialize::serialize(&(restored), studio_json::value::Serializer).unwrap()["result"],
             json!({"kind":"reply","value":body})
         );
         let lost = json!({"certainty":"written", "receipt":receipt, "result":{"kind":"reply","valueBlob":{"sha256":"0".repeat(64),"size":1}}});
@@ -1681,7 +1681,7 @@ mod request_tests {
                 operation:key.clone(),thread:None,lightweight:true,deadline:60000,unknown:false,remote_id:None,
             };
             tx.execute("UPDATE runtime_outbox SET status=?2,payload=json_set(payload,'$.payload.request',json(?3),'$.payload.written',json('true')) WHERE id=?1",
-                (key,OutboxStatus::Unknown,serde_json::to_string(&prepared).expect("transport request")))?;
+                (key,OutboxStatus::Unknown,studio_json::to_string(&prepared).expect("transport request")))?;
             Ok::<_,crate::account_worker::WorkerError>(())
         })).expect("persist the original written command");
         let transfer = "5a300f72-4ea6-4d30-8a0e-9b2c13c4a001";
@@ -1918,7 +1918,7 @@ mod request_tests {
             )
             .expect("resume row is readable");
         assert_eq!(
-            serde_json::from_str::<Value>(&saved).expect("saved resume is valid JSON")["status"],
+            studio_json::from_str::<Value>(&saved).expect("saved resume is valid JSON")["status"],
             "cancelled"
         );
     }
@@ -2076,7 +2076,7 @@ mod request_tests {
 #[cfg(test)]
 mod provider_admission_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn snapshot(intent: bool, admission: Option<Value>) -> Snapshot {
         let mut operation = json!({"id":"transfer","leadId":"agent","targetAccountKey":"target",
@@ -2109,7 +2109,7 @@ mod provider_admission_tests {
                 .provider_admission
                 .value()
                 .unwrap()),
-            serde_json::value::Serializer,
+            studio_json::value::Serializer,
         )
         .unwrap();
         let admission: ProviderAdmission =
@@ -2135,7 +2135,7 @@ mod provider_admission_tests {
                     .provider_admission
                     .value()
                     .unwrap()),
-                serde_json::value::Serializer
+                studio_json::value::Serializer
             )
             .unwrap(),
             saved

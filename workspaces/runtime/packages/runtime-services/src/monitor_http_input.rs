@@ -2,7 +2,7 @@
 
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, MonitorsRepository, StoreError};
 
 use crate::event_write::settle_request;
@@ -157,7 +157,7 @@ pub(crate) fn read(
         Status::Rejected => (MonitorInputStatus::Rejected, true),
         Status::Expired => {
             return Err(
-                StoreError::Json(<serde_json::Error as serde::de::Error>::custom(
+                StoreError::Json(<studio_json::Error as serde::de::Error>::custom(
                     "invalid monitor input status: expired",
                 ))
                 .into(),
@@ -206,7 +206,7 @@ fn request_context(
     let signature = format!(
         "http-input-v1:{}",
         studio_runtime_store::sha256_hex(
-            &serde_json::to_vec(&(id, &operation, input)).map_err(StoreError::from)?
+            &studio_json::to_vec(&(id, &operation, input)).map_err(StoreError::from)?
         )
     );
     let existing = if let Some((saved_signature, receipt)) = saved(tx, request_id)? {

@@ -16,7 +16,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use ring::{aead, agreement, hkdf, rand, signature};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{SIGN_IN_ALERT_GRACE_SECONDS, SIGN_IN_REMINDER_SECONDS};
 
 /// The folder in the server state directory.
@@ -310,7 +310,7 @@ impl Subscriptions {
 
     pub fn list(&self) -> Result<Vec<Subscription>, WebPushError> {
         match std::fs::read(&self.path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
+            Ok(bytes) => studio_json::from_slice(&bytes)
                 .map_err(|_| WebPushError::Invalid("The subscription file is invalid".into())),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
             Err(error) => Err(error.into()),
@@ -318,7 +318,7 @@ impl Subscriptions {
     }
 
     fn save(&self, rows: &[Subscription]) -> Result<(), WebPushError> {
-        let text = serde_json::to_vec(rows).map_err(|_| WebPushError::Crypto)?;
+        let text = studio_json::to_vec(rows).map_err(|_| WebPushError::Crypto)?;
         write_private(&self.path, &text)?;
         Ok(())
     }
@@ -505,7 +505,7 @@ impl Sender {
     fn sent(&self) -> BTreeMap<String, BTreeSet<String>> {
         std::fs::read(self.sent_path())
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| studio_json::from_slice(&bytes).ok())
             .unwrap_or_default()
     }
 
@@ -556,7 +556,7 @@ impl Sender {
         if changed {
             write_private(
                 &self.sent_path(),
-                &serde_json::to_vec(&sent).map_err(|_| WebPushError::Crypto)?,
+                &studio_json::to_vec(&sent).map_err(|_| WebPushError::Crypto)?,
             )?;
         }
         Ok(())
@@ -663,7 +663,7 @@ pub fn subject(state: &Path) -> Option<String> {
     let bytes =
         std::fs::read(state.join(studio_runtime_schema::multi_server_protocol::REMOTE_ACCESS_FILE))
             .ok()?;
-    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    let value: Value = studio_json::from_slice(&bytes).ok()?;
     let origin = value["origin"].as_str()?;
     origin.starts_with("https://").then(|| origin.to_owned())
 }

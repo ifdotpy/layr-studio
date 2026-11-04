@@ -2,7 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Answer, Approval, ApprovalId, ApprovalState, CommandId, Deferral, Hidden, Principal,
     QuestionAnswer, Request, Timestamp,
@@ -47,7 +47,7 @@ pub enum QuestionsWriteError {
     #[error(transparent)]
     Approval(#[from] studio_runtime_store::approvals::ApprovalError),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("system clock is before the Unix epoch")]
     Clock,
     #[error(transparent)]
@@ -724,7 +724,7 @@ fn stored_agent(
 
 fn parse_complaint(raw: &str, id: &str) -> Result<ComplaintRecord, QuestionsWriteError> {
     let complaint: studio_runtime_store::ComplaintRecord =
-        serde_json::from_str(raw).map_err(|_| invalid_stored("runtime_complaints", id))?;
+        studio_json::from_str(raw).map_err(|_| invalid_stored("runtime_complaints", id))?;
     if complaint.id() != id {
         return Err(invalid_stored("runtime_complaints", id));
     }
@@ -748,7 +748,7 @@ fn unix_time() -> Result<f64, QuestionsWriteError> {
 #[cfg(test)]
 mod receipt_tests {
     use super::{ComplaintReceiptReply, complaint_message};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn new_complaint_message_keeps_unicode() {
@@ -773,12 +773,12 @@ mod receipt_tests {
     #[test]
     fn sparse_historical_complaint_reply_remains_replayable() {
         let reply: ComplaintReceiptReply =
-            serde_json::from_str(r#"{"id":"c","status":"future","text":null,"opaque":{"a":1}}"#)
+            studio_json::from_str(r#"{"id":"c","status":"future","text":null,"opaque":{"a":1}}"#)
                 .unwrap();
         assert_eq!(
             reply.0,
             json!({"id":"c","status":"future","text":null,"opaque":{"a":1}})
         );
-        assert!(serde_json::from_str::<ComplaintReceiptReply>(r#"{"text":false}"#).is_err());
+        assert!(studio_json::from_str::<ComplaintReceiptReply>(r#"{"text":false}"#).is_err());
     }
 }

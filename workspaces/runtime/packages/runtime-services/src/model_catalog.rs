@@ -2,7 +2,7 @@
 
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -200,7 +200,7 @@ async fn read_account_session_catalog(
                 }
             },
         };
-        let bytes = serde_json::to_vec(&response)
+        let bytes = studio_json::to_vec(&response)
             .map_err(|_| "page-encode")?
             .len();
         if bytes > MAX_CATALOG_PAGE_BYTES {
@@ -980,7 +980,7 @@ impl From<&ProviderModel> for crate::submit_gates::ModelCapabilities {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    fn typed(value: serde_json::Value) -> studio_runtime_schema::model_catalog::ModelCatalog {
+    fn typed(value: studio_json::Value) -> studio_runtime_schema::model_catalog::ModelCatalog {
         studio_runtime_schema::model_catalog::ModelCatalog::parse(value)
             .expect("valid test catalog")
     }
@@ -1061,7 +1061,7 @@ pub(crate) mod tests {
         )
         .await
         .map_err(|_| ())
-        .map(|catalog| serde_json::to_value(catalog).expect("catalog serializes"))
+        .map(|catalog| studio_json::to_value(catalog).expect("catalog serializes"))
     }
     impl crate::account_session_runtime::AccountSessionPort for AccountSessionPages {
         fn current_scope(
@@ -1133,7 +1133,7 @@ pub(crate) mod tests {
         .await
         .expect("catalog pages");
         assert_eq!(
-            serde_json::to_value(result).expect("catalog serializes"),
+            studio_json::to_value(result).expect("catalog serializes"),
             json!({
                 "data":[{"model":"one"},{"model":"two"}],
                 "nextCursor":null,

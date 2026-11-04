@@ -2,19 +2,19 @@ use super::{model::*, storage, tool_result};
 use crate::tool_requests::{self, admission, lifecycle};
 use rusqlite::{Transaction, params};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use studio_runtime_providers::{RequestId, ResponseBody};
 use studio_runtime_store::{RuntimeStore, system_reads as records};
 
 fn raw_tool_result(
-    raw: &serde_json::value::RawValue,
+    raw: &studio_json::OwnedRawJson,
     success: bool,
 ) -> Result<studio_runtime_store::ToolResultRecord, CallbackError> {
-    let text = if raw.get().starts_with('"') {
-        serde_json::from_str::<String>(raw.get())?
+    let text = if raw.as_str().starts_with('"') {
+        studio_json::from_str::<String>(raw.as_str())?
     } else {
-        raw.get().to_owned()
+        raw.as_str().to_owned()
     };
     Ok(studio_runtime_store::ToolResultRecord::text(success, text))
 }
@@ -163,7 +163,7 @@ impl ToolCall {
             .ok_or(CallbackError::Invalid("Supply tool name"))?
             .to_owned();
         let args = match input.params.get("arguments") {
-            Some(Value::String(raw)) => serde_json::from_str(raw)?,
+            Some(Value::String(raw)) => studio_json::from_str(raw)?,
             None => json!({}),
             Some(v) => v.clone(),
         };
@@ -234,7 +234,7 @@ impl ToolCall {
                 .as_bytes(),
         );
         let kind = ToolKind::deserialize(
-            serde::de::value::StrDeserializer::<serde_json::Error>::new(&name),
+            serde::de::value::StrDeserializer::<studio_json::Error>::new(&name),
         )?;
         Ok(Self {
             name,
@@ -992,7 +992,7 @@ fn finalize_dispatched(
 mod local_failure_tests {
     use super::{CallbackError, LocalFailure, ToolCall, ToolKind};
     use crate::managed_host_tools::DispatchedOperation;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn tool_parser_keeps_watch_actions_and_request_identity() {
@@ -1066,8 +1066,8 @@ mod local_failure_tests {
         let result = super::raw_tool_result(&object.value, true)
             .unwrap()
             .into_value();
-        let decoded: serde_json::Value =
-            serde_json::from_str(result["contentItems"][0]["text"].as_str().unwrap()).unwrap();
+        let decoded: studio_json::Value =
+            studio_json::from_str(result["contentItems"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(decoded, json!({"status":"queued","count":2}));
     }
 

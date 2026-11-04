@@ -4,7 +4,7 @@ use crate::notification_dispatch::{
     DispatchOutcome, NotificationDispatchError, NotificationEffects, NotificationObservation,
     NotificationPostCommit, ObservationTime, ProviderDeliveryIdentity, SharedJson,
 };
-use serde_json::Value;
+use studio_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use studio_runtime_store::Transaction;
@@ -327,14 +327,14 @@ mod tests {
 
     #[test]
     fn observations_project_agents_and_share_immutable_params() {
-        let agent = serde_json::json!({
+        let agent = studio_json::json!({
             "id":"agent", "name":"Agent", "rootId":"root", "accountKey":"default",
             "accountHistory":[], "provider":"codex", "threadId":"thread", "epoch":4,
             "turnId":"turn", "inFlight":false, "model":"model", "effort":"high",
             "fastMode":false, "daybreakEnabled":false, "cyberAccessProgram":false,
             "cwd":"/workspace", "deletedAt":null, "unrelatedTranscript": "x".repeat(64 * 1024)
         });
-        let frame = serde_json::json!({
+        let frame = studio_json::json!({
             "method":"turn/completed",
             "params":{"threadId":"thread","turnId":"turn"}
         });
@@ -380,7 +380,7 @@ mod tests {
                 .contains_key("unrelatedTranscript")
         );
         assert!(
-            serde_json::to_value(&effects[0])
+            studio_json::to_value(&effects[0])
                 .expect("journal serialization")
                 .pointer("/Analytics/observation/params/threadId")
                 .is_some()

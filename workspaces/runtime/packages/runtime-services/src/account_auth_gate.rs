@@ -11,7 +11,7 @@
 use crate::account_driver::{AccountDriver, AccountStatus, CHANGED_ERROR};
 use crate::continuation::{ContinuationError, Result};
 use crate::provider_adapter::adapter;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use studio_runtime_providers::ProviderKind;
@@ -344,7 +344,7 @@ pub(crate) async fn release_loop(
 mod tests {
     use super::{hold_reason, same_selected_account};
     use crate::account_driver::{AccountStatus, CHANGED_ERROR};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_providers::ProviderKind;
 
     #[test]

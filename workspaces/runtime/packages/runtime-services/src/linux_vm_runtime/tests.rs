@@ -107,7 +107,7 @@ fn serve(socket: PathBuf, answer: impl Fn(&str, &Value) -> Value + Send + 'stati
             if reader.read_line(&mut line).is_err() {
                 continue;
             }
-            let request: Value = serde_json::from_str(&line).unwrap();
+            let request: Value = studio_json::from_str(&line).unwrap();
             let mut response = answer(request["method"].as_str().unwrap(), &request["params"]);
             response["id"] = request["id"].clone();
             let mut stream = stream;
@@ -268,7 +268,7 @@ impl Fixture {
     }
 
     fn json(&self, name: &str) -> Value {
-        serde_json::from_str(&fs::read_to_string(self.state.join(name)).unwrap()).unwrap()
+        studio_json::from_str(&fs::read_to_string(self.state.join(name)).unwrap()).unwrap()
     }
 
     fn launches(&self) -> usize {
@@ -644,7 +644,7 @@ async fn each_start_mounts_the_registered_project_views_again() {
         vec![json!({"projectId": "p1", "name": "app"})]
     );
     let saved: Value =
-        serde_json::from_str(&fs::read_to_string(project.join("mount.json")).unwrap()).unwrap();
+        studio_json::from_str(&fs::read_to_string(project.join("mount.json")).unwrap()).unwrap();
     assert_eq!(
         saved,
         json!({"projectId": "p1", "name": "app", "path": view, "port": BRIDGE_PORT})
@@ -656,7 +656,7 @@ async fn each_start_mounts_the_registered_project_views_again() {
     *fixture.shares.failure.lock().unwrap() = Some("server rejected the connection".into());
     fixture.runtime.start().await.unwrap();
     let report: Value =
-        serde_json::from_str(&fs::read_to_string(project.join("mount-error.json")).unwrap())
+        studio_json::from_str(&fs::read_to_string(project.join("mount-error.json")).unwrap())
             .unwrap();
     assert_eq!(report["projectId"], "p1");
     assert!(

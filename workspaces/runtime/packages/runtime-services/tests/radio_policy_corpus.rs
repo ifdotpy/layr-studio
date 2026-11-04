@@ -1,5 +1,5 @@
 //! Differential radio-turn policy cases from Python-created room state.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use studio_runtime_services::radio::{
     RadioAuthorizationRecords, RadioAuthorizationSnapshot, RadioDenial, RadioTurnDecision,
@@ -12,7 +12,7 @@ struct Oracle {
 impl Oracle {
     fn new() -> Self {
         Self {
-            cases: serde_json::from_str(include_str!("radio_policy/expected.json"))
+            cases: studio_json::from_str(include_str!("radio_policy/expected.json"))
                 .expect("frozen radio policy corpus"),
         }
     }
@@ -24,10 +24,10 @@ impl Oracle {
 
 fn cases() -> Vec<Value> {
     let mut cases: Vec<Value> =
-        serde_json::from_str(include_str!("radio_policy/cases.json")).expect("fast radio corpus");
+        studio_json::from_str(include_str!("radio_policy/cases.json")).expect("fast radio corpus");
     if std::env::var("STUDIO_RUNTIME_CORPUS_FULL").as_deref() == Ok("1") {
         cases.extend(
-            serde_json::from_str::<Vec<Value>>(include_str!("radio_policy/cases-full.json"))
+            studio_json::from_str::<Vec<Value>>(include_str!("radio_policy/cases-full.json"))
                 .expect("full radio corpus"),
         );
     }
@@ -36,7 +36,7 @@ fn cases() -> Vec<Value> {
 
 fn decode_records(value: &Value) -> RadioAuthorizationRecords {
     let mut records: RadioAuthorizationRecords =
-        serde_json::from_value(value.clone()).expect("Python-written radio records");
+        studio_json::from_value(value.clone()).expect("Python-written radio records");
     let mut db = rusqlite::Connection::open_in_memory().expect("migrate radio fixture");
     db.execute_batch("CREATE TABLE runtime_rooms(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_projects(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
         .expect("migrate radio fixture");
@@ -78,7 +78,7 @@ fn decode_records(value: &Value) -> RadioAuthorizationRecords {
             .expect("project fixture");
     }
     for raw in records.agents.values_mut() {
-        let mut agent: Value = serde_json::from_str(raw).expect("agent record");
+        let mut agent: Value = studio_json::from_str(raw).expect("agent record");
         agent
             .as_object_mut()
             .expect("agent object")
@@ -151,7 +151,7 @@ fn radio_turn_decisions_match_python_written_room_records() {
                 panic!("{}: expected allow, got {actual:?}", case["name"]);
             };
             assert_eq!(
-                serde_json::to_value(binding).expect("binding JSON"),
+                studio_json::to_value(binding).expect("binding JSON"),
                 expected["binding"],
                 "{}: first-thread binding differs",
                 case["name"]
@@ -190,22 +190,22 @@ fn radio_snapshot_refuses_malformed_consumed_records_with_locations() {
     let mut input = decode_records(&expected["records"]);
 
     let mut room: Value =
-        serde_json::from_str(input.rooms.values().next().expect("room")).expect("room record");
+        studio_json::from_str(input.rooms.values().next().expect("room")).expect("room record");
     room["radio"]["active"]["epoch"] = json!("one");
     let room_id = room["id"].as_str().expect("room id").to_owned();
     input
         .rooms
-        .insert(room_id, serde_json::to_string(&room).expect("room JSON"));
+        .insert(room_id, studio_json::to_string(&room).expect("room JSON"));
     let error = RadioAuthorizationSnapshot::from_records(&input).expect_err("bad active epoch");
     assert!(error.location.ends_with("/radio/active/epoch"), "{error}");
 
     let mut input = decode_records(&expected["records"]);
     let (agent_id, raw) = input.agents.iter().next().expect("agent");
-    let mut agent: Value = serde_json::from_str(raw).expect("agent record");
+    let mut agent: Value = studio_json::from_str(raw).expect("agent record");
     agent["autoWake"] = Value::Null;
     input.agents.insert(
         agent_id.clone(),
-        serde_json::to_string(&agent).expect("agent JSON"),
+        studio_json::to_string(&agent).expect("agent JSON"),
     );
     RadioAuthorizationSnapshot::from_records(&input).expect("null autoWake means absent");
 }
@@ -216,7 +216,7 @@ fn radio_snapshot_accepts_numeric_deletion_timestamp() {
     let expected = oracle.call(&json!({"name":"ready-peer-team"}));
     let mut input = decode_records(&expected["records"]);
     let (agent_id, raw) = input.agents.iter().next().expect("agent");
-    let mut agent: Value = serde_json::from_str(raw).expect("agent record");
+    let mut agent: Value = studio_json::from_str(raw).expect("agent record");
     agent["deletedAt"] = json!(1.0);
     input.agents.insert(agent_id.clone(), agent.to_string());
     RadioAuthorizationSnapshot::from_records(&input).expect("numeric deletion timestamp");

@@ -6,7 +6,7 @@ use crate::notification_dispatch::{
 use crate::notification_runtime_effects::{
     NotificationPostCommitSink, RuntimeNotificationPostCommitSink,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
 use studio_runtime_store::RuntimeStore;
@@ -194,8 +194,8 @@ async fn test_store() -> (PathBuf, Arc<RuntimeStore>) {
 async fn typed_publication_keeps_exact_receipt_bytes_and_replay() {
     let (_root, store) = test_store().await;
     let effect = publication_effect(7);
-    let raw = serde_json::value::to_raw_value(&effect).unwrap();
-    let expected = serde_json::to_string(&studio_runtime_store::outbox::Publication {
+    let raw = studio_json::to_raw_value(&effect).unwrap();
+    let expected = studio_json::to_string(&studio_runtime_store::outbox::Publication {
         account: "default".into(),
         sequence: 1,
         index: 0,
@@ -232,10 +232,10 @@ async fn typed_publication_keeps_exact_receipt_bytes_and_replay() {
 async fn migrated_publication_replay_compares_semantically() {
     let (_root, store) = test_store().await;
     let effect = publication_effect(7);
-    let raw = serde_json::value::to_raw_value(&effect).expect("effect JSON");
-    let legacy: Value = serde_json::from_str(&format!(
+    let raw = studio_json::to_raw_value(&effect).expect("effect JSON");
+    let legacy: Value = studio_json::from_str(&format!(
         r#"{{"index":0,"effect":{},"sequence":1,"account":"default","class":"token-rate"}}"#,
-        raw.get()
+        raw.as_str()
     ))
     .expect("legacy publication");
     stage(&store, 1, 0, legacy).await;
@@ -631,7 +631,7 @@ async fn publication_overflow_receipt_records_only_newly_attached_counts() {
         )
         .expect("read coverage error count");
     assert_eq!(
-        serde_json::from_str::<Value>(&errors).expect("decode coverage errors")["count"],
+        studio_json::from_str::<Value>(&errors).expect("decode coverage errors")["count"],
         3
     );
     drop(store);
@@ -784,7 +784,7 @@ async fn publication_bound_keeps_state_invalidation_and_token_rate_usage() {
             |row| row.get(0),
         )
         .expect("saturated receipt retains token-rate effects");
-    let coalesced: Value = serde_json::from_str(&coalesced_effects).expect("coalesced JSON");
+    let coalesced: Value = studio_json::from_str(&coalesced_effects).expect("coalesced JSON");
     let effects = std::iter::once(&coalesced["effect"])
         .chain(coalesced["coalescedEffects"].as_array().unwrap().iter())
         .collect::<Vec<_>>();

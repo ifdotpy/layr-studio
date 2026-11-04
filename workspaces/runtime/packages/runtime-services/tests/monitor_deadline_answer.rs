@@ -1,6 +1,6 @@
 //! A loss decided at the command deadline, and the command's late real answer.
 use crate::monitor_fixtures as fixtures;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::monitor_policy::{self, Effect, Operation};
 
 /// A command lost with `proof` after its reattach; `rule` makes it a rule check.
@@ -17,7 +17,7 @@ fn lost(proof: &str, rule: bool) -> (studio_runtime_store::MonitorRecord, Value,
     if rule {
         record["ruleId"] = json!("rule");
     }
-    let operation = serde_json::from_value(record["operation"].clone()).expect("operation");
+    let operation = studio_json::from_value(record["operation"].clone()).expect("operation");
     let actor = case["actor"].clone();
     let snapshot = fixtures::checked(record, actor.clone()).expect("snapshot");
     (snapshot.record().clone(), actor, operation)
@@ -89,7 +89,7 @@ async fn a_reattach_proof_observed_before_deadline_loss_is_superseded() {
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     let id = case["before"]["id"].as_str().expect("id");
     let operation: Operation =
-        serde_json::from_value(case["before"]["operation"].clone()).expect("operation");
+        studio_json::from_value(case["before"]["operation"].clone()).expect("operation");
     monitor_runtime::reconcile_unknown(&store, id, 2900.0)
         .await
         .expect("recovery");
@@ -146,7 +146,7 @@ async fn an_unanswered_command_commits_only_its_loss_and_replays_without_changes
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     let id = case["before"]["id"].as_str().expect("id");
     let operation: Operation =
-        serde_json::from_value(case["before"]["operation"].clone()).expect("operation");
+        studio_json::from_value(case["before"]["operation"].clone()).expect("operation");
     let commits = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&commits);
     store.add_table_change_observer(ObservedTable::Monitors, move || {
@@ -218,14 +218,14 @@ async fn an_unanswered_check_of_a_rule_that_moved_on_still_settles() {
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     let id = case["before"]["id"].as_str().expect("id");
     let operation: Operation =
-        serde_json::from_str(&case["before"]["operation"].to_string()).expect("operation");
+        studio_json::from_str(&case["before"]["operation"].to_string()).expect("operation");
     let mut seed: Value =
-        serde_json::from_str(include_str!("rules_engine/seed.json")).expect("rule seed");
+        studio_json::from_str(include_str!("rules_engine/seed.json")).expect("rule seed");
     seed["rule"]["agent"] = case["actor"]["id"].clone();
     seed["rule"]["epoch"] = case["actor"]["epoch"].clone();
     seed["rule"]["checks"] = json!(9);
     seed["rule"]["inFlight"] = json!(true);
-    let rule: RuleRecord = serde_json::from_str(&seed["rule"].to_string()).expect("rule");
+    let rule: RuleRecord = studio_json::from_str(&seed["rule"].to_string()).expect("rule");
     let selected = id.to_owned();
     store
         .transaction(move |tx| {

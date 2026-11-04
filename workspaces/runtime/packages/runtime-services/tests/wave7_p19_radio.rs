@@ -1,5 +1,5 @@
 use rusqlite::types::Value as SqlValue;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{fs, path::Path};
 use studio_runtime_services::{
     host_project_runtime::PreparedHost,
@@ -97,13 +97,13 @@ async fn corpus() -> RadioCorpus {
         include_str!("wave7_p19/expected.json")
     };
     let projects = tempfile::tempdir().expect("radio project root");
-    let mut cases: Vec<Value> = serde_json::from_str(expected).expect("frozen radio corpus");
+    let mut cases: Vec<Value> = studio_json::from_str(expected).expect("frozen radio corpus");
     for case in &mut cases {
         for side in ["before", "after"] {
             if let Some(rows) = case[side]["complaints"].as_array_mut() {
                 for row in rows {
                     let mut record: Value =
-                        serde_json::from_str(row["record"].as_str().expect("complaint record"))
+                        studio_json::from_str(row["record"].as_str().expect("complaint record"))
                             .expect("complaint JSON");
                     for (field, value) in [
                         ("recipient", json!("lead")),
@@ -126,7 +126,7 @@ async fn corpus() -> RadioCorpus {
                 for row in rows {
                     if row["collection"] == "agent" && row["deleted"] == 0 {
                         let mut payload: Value =
-                            serde_json::from_str(row["payload"].as_str().expect("agent payload"))
+                            studio_json::from_str(row["payload"].as_str().expect("agent payload"))
                                 .expect("agent payload JSON");
                         payload["value"]["compactions"] = json!(0);
                         if payload["value"]["role"] == "lead" {
@@ -153,7 +153,7 @@ async fn corpus() -> RadioCorpus {
             if let Some(rows) = case[side]["agents"].as_array_mut() {
                 for row in rows {
                     let mut record: Value =
-                        serde_json::from_str(row["record"].as_str().expect("agent record"))
+                        studio_json::from_str(row["record"].as_str().expect("agent record"))
                             .expect("agent JSON");
                     if record["role"] == "lead" {
                         record["role"] = json!("orchestrator");
@@ -174,9 +174,9 @@ async fn corpus() -> RadioCorpus {
             if let Some(rows) = case[side]["rules"].as_array_mut() {
                 for row in rows {
                     let saved: LegacyRule =
-                        serde_json::from_str(row["record"].as_str().expect("valid fixture"))
+                        studio_json::from_str(row["record"].as_str().expect("valid fixture"))
                             .expect("valid fixture");
-                    let mut typed: studio_runtime_store::RuleRecord = serde_json::from_str(r#"{"id":"fixture","agent":"fixture","inFlight":false,"epoch":1,"name":"watch","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"fileGeneration":0,"stallTimeoutSeconds":0,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#).expect("rule defaults");
+                    let mut typed: studio_runtime_store::RuleRecord = studio_json::from_str(r#"{"id":"fixture","agent":"fixture","inFlight":false,"epoch":1,"name":"watch","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"fileGeneration":0,"stallTimeoutSeconds":0,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#).expect("rule defaults");
                     typed.id = saved.id;
                     typed.root_id = Some(saved.root_id);
                     typed.agent = saved.agent;
@@ -188,7 +188,7 @@ async fn corpus() -> RadioCorpus {
                         typed.epoch = epoch.try_into().expect("epoch");
                     }
                     typed.error = saved.error;
-                    row["record"] = json!(serde_json::to_string(&typed).expect("valid fixture"));
+                    row["record"] = json!(studio_json::to_string(&typed).expect("valid fixture"));
                 }
             }
         }
@@ -351,7 +351,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                     // The oracle names the retired table. The typed rows live in `approvals`.
                     db.execute("DELETE FROM approvals", [])?;
                     for row in rows.as_array().expect("rows") {
-                        let mut record: Value = serde_json::from_str(row["record"].as_str().expect("record"))
+                        let mut record: Value = studio_json::from_str(row["record"].as_str().expect("record"))
                             .expect("request record");
                         // The frozen Python record names its creation time `created`.
                         if let Some(created) = record.as_object_mut().and_then(|map| map.remove("created")) {
@@ -363,15 +363,15 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                 }
                 if table == "operation_receipts" {
                     db.execute("DELETE FROM request_results", [])?;
-                    let receipts: Vec<LegacyReceipt> = serde_json::from_value(rows.clone()).expect("receipts");
+                    let receipts: Vec<LegacyReceipt> = studio_json::from_value(rows.clone()).expect("receipts");
                     for row in receipts {
-                        let reply: Box<serde_json::value::RawValue> = serde_json::from_str(&row.result).expect("saved reply");
+                        let reply: studio_json::OwnedRawJson = studio_json::from_str(&row.result).expect("saved reply");
                         let envelope = studio_runtime_store::request_results::ResultEnvelope {
                             actor: None, reply, references: Vec::new(),
                         };
                         db.execute(
                             "INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
-                            rusqlite::params![row.id, row.signature, serde_json::to_string(&envelope).expect("envelope"), chrono::Utc::now().timestamp_millis()],
+                            rusqlite::params![row.id, row.signature, studio_json::to_string(&envelope).expect("envelope"), chrono::Utc::now().timestamp_millis()],
                         )?;
                     }
                     continue;
@@ -442,7 +442,7 @@ fn pending_question(raw: &Value) -> studio_runtime_schema::approvals::Approval {
 fn state(store: &RuntimeStore, tables: &Value) -> Value {
     let db = store.test_reader().expect("read");
     super::agent_view_fixtures::assert_agent_view_projections(&db);
-    let mut result = serde_json::Map::new();
+    let mut result = studio_json::Map::new();
     for table in tables.as_object().expect("tables").keys() {
         if table == "operation_receipts" {
             // Replay and conflict checks below exercise the current request_results owner.
@@ -501,7 +501,7 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
             .collect::<Vec<_>>();
         let rows = query
             .query_map([], |row| {
-                let mut value = serde_json::Map::new();
+                let mut value = studio_json::Map::new();
                 for (index, column) in columns.iter().enumerate() {
                     if table == "agents"
                         && ["hold_status", "hold_incident"].contains(&column.as_str())
@@ -586,7 +586,7 @@ fn normalize(value: &mut Value) {
                 }
                 if ["record", "result", "payload"].contains(&key.as_str())
                     && let Some(raw) = value.as_str()
-                    && let Ok(parsed) = serde_json::from_str(raw)
+                    && let Ok(parsed) = studio_json::from_str(raw)
                 {
                     *value = parsed;
                 }
@@ -602,9 +602,9 @@ fn normalize(value: &mut Value) {
                     let (context, messages) = tail
                         .split_once("\nShared messages since your last successful reply (JSON):\n")
                         .expect("messages");
-                    let context: Value = serde_json::from_str(context).expect("context JSON");
+                    let context: Value = studio_json::from_str(context).expect("context JSON");
                     let mut messages: Value =
-                        serde_json::from_str(messages).expect("messages JSON");
+                        studio_json::from_str(messages).expect("messages JSON");
                     normalize(&mut messages);
                     *value = json!({"prefix":prefix,"context":context,"messages":messages});
                 }
@@ -653,7 +653,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
     // Binding callers resolve the client path to a project key before SQL.
     let project_key = host_key(case["body"]["path"].as_str().expect("project path"));
     match mode.as_str() {
-        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid conversion"))?).await.map(|reply| serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
+        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid conversion"))?).await.map(|reply| studio_json::from_slice(&studio_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
         "project" => {
             let mut body = case["body"].clone();
             if body["action"] == "reorder" {
@@ -688,7 +688,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
                     value["compactions"] = json!(0);
                     AgentRecord::from_value(value).expect("checked Python agent draft")
                 });
-                radio_runtime::create_with(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio create"))?, Box::new(Creation(drafts))).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
+                radio_runtime::create_with(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio create"))?, Box::new(Creation(drafts))).await.map(|reply| studio_json::from_str(&studio_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
             }
         },
         "project-binding" => store.transaction_with(move |db| {
@@ -724,7 +724,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
             )?;
             Ok(Value::Null)
         }).await,
-        _ => radio_runtime::manage(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio command"))?).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes")),
+        _ => radio_runtime::manage(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio command"))?).await.map(|reply| studio_json::from_str(&studio_json::to_string(&reply).expect("reply encodes")).expect("reply decodes")),
     }
 }
 #[tokio::test]
@@ -835,7 +835,7 @@ async fn python_written_radio_corpus_and_restart_replay() {
                         .split_once("\nShared messages since your last successful reply (JSON):\n")
                         .expect("messages")
                         .0;
-                    let parsed: Value = serde_json::from_str(context).expect("context");
+                    let parsed: Value = studio_json::from_str(context).expect("context");
                     assert_eq!(context, parsed.to_string());
                     checked_room_context = true;
                 }
@@ -850,7 +850,7 @@ async fn python_written_radio_corpus_and_restart_replay() {
                 .flatten()
                 .map(|row| {
                     let record: Value =
-                        serde_json::from_str(row["record"].as_str().expect("record"))
+                        studio_json::from_str(row["record"].as_str().expect("record"))
                             .expect("request record");
                     json!({"id":record["id"],"status":record["status"]})
                 })

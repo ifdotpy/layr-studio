@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::TOKEN_RATE_MAX_ENTRIES;
 use studio_runtime_services::change_notifications::ChangeNotificationHub;
@@ -66,7 +66,7 @@ fn normalized_resource_replay_and_conflict_preserve_the_publication() {
         r#"{"requestId":"unknown", "resources":[{"kind":"unknown"}]}"#,
     ] {
         assert!(
-            serde_json::from_str::<
+            studio_json::from_str::<
                 studio_runtime_schema::resource_notification::ResourceNotifyRequest,
             >(body)
             .is_err()

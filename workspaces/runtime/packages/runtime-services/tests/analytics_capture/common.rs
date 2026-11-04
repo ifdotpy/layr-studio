@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use rusqlite::{Connection, types::Value as SqlValue};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::path::Path;
 
 /// Analytics tables compared before and after a capture.

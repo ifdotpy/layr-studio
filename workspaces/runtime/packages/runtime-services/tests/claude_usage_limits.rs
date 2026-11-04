@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     continuation::Snapshot,
     provider_adapter::{ProviderKind, adapter},
@@ -356,7 +356,7 @@ fn missing_observation_reschedules_without_followup() {
 
 #[test]
 fn ui_eligibility_matches_resume_decisions_on_shared_fixtures() {
-    let fixtures: Value = serde_json::from_str(include_str!("claude_usage_ui_cases.json"))
+    let fixtures: Value = studio_json::from_str(include_str!("claude_usage_ui_cases.json"))
         .expect("usage fixtures parse");
     for case in fixtures.as_array().expect("usage fixtures are an array") {
         let records = snapshot_records(case["model"].as_str().expect("fixture model is text"));
@@ -368,7 +368,7 @@ fn ui_eligibility_matches_resume_decisions_on_shared_fixtures() {
         let typed_agent = studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
         let view = serde::Serialize::serialize(
             &(usage_resume::eligibility(&limits, &typed_agent, 1000.0)),
-            serde_json::value::Serializer,
+            studio_json::value::Serializer,
         )
         .unwrap();
         let decision =
@@ -417,7 +417,7 @@ fn ui_decision_expires_at_the_first_applicable_window_reset() {
     let limits = LimitsObservation::from_record(raw.clone(), None).unwrap();
     let view = serde::Serialize::serialize(
         &(usage_resume::eligibility(&limits, &typed_agent, 1000.0)),
-        serde_json::value::Serializer,
+        studio_json::value::Serializer,
     )
     .unwrap();
     assert_eq!(view["state"], "allowed");

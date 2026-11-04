@@ -6,7 +6,7 @@
 
 use std::{sync::Arc, time::Instant};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::RequestTicket;
 use studio_runtime_store::RuntimeStore;
 

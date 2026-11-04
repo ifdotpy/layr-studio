@@ -2,7 +2,7 @@
 //! The account worker must serialize this port with stop and validate its connection
 //! ticket immediately before I/O. Unknown submissions are retained, never repeated.
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::hash::{Hash, Hasher};
 use studio_runtime_store::RuntimeStore;
 use tokio::sync::{Mutex, MutexGuard};
@@ -298,7 +298,7 @@ pub async fn cancel_checked(
             if let Some(expected) = &expected {
                 let (snapshot, owner) = monitor_runtime::snapshot(tx, &id_for_reservation)?;
                 let owner =
-                    serde_json::to_value(owner).map_err(studio_runtime_store::StoreError::from)?;
+                    studio_json::to_value(owner).map_err(studio_runtime_store::StoreError::from)?;
                 let source = expected.source_generation.map(|generation| {
                     crate::account_session_runtime::ConnectionScope {
                         account: expected.source_account.clone().unwrap_or_default(),

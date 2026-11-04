@@ -6,7 +6,7 @@ use std::sync::Arc;
 use studio_runtime_schema::delivery::DeliveryMoment;
 
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{ServerDeliveryState, ServerOperationKind};
 use studio_runtime_store::multi_server_delivery::{
     RemoteReply, SavedRemoteReply, remote_operation_key,
@@ -222,10 +222,10 @@ fn settle_delivery(
             let entry = crate::server_outbox::find(tx, key)?
                 .filter(|entry| entry.signature == signature)
                 .ok_or_else(|| refused(409, "receipt_missing", "The delivery claim is missing"))?;
-            let actor = serde_json::from_str::<Value>(&entry.record.body)
+            let actor = studio_json::from_str::<Value>(&entry.record.body)
                 .ok()
                 .and_then(|body| body.pointer("/payload/actor").and_then(Value::as_str).map(str::to_owned));
-            let admission = serde_json::to_string(&entry.record.admission).map_err(|_| {
+            let admission = studio_json::to_string(&entry.record.admission).map_err(|_| {
                 refused(503, "invalid_record", "Stored delivery admission is invalid")
             })?;
             let row = (admission, None, Some(entry.target.clone()), actor, Some(entry.record.body.clone()));
@@ -233,7 +233,7 @@ fn settle_delivery(
             row
         }
     };
-    let admission: AdmittedRequest = serde_json::from_str(&admission).map_err(|_| {
+    let admission: AdmittedRequest = studio_json::from_str(&admission).map_err(|_| {
         refused(
             503,
             "invalid_record",
@@ -260,7 +260,7 @@ fn settle_delivery(
     if direction == Direction::Outgoing
         && let Some(body) = saved.body.as_deref()
     {
-        let envelope: Value = serde_json::from_str(body).map_err(|_| {
+        let envelope: Value = studio_json::from_str(body).map_err(|_| {
             refused(
                 503,
                 "invalid_record",
@@ -326,44 +326,44 @@ pub enum ExchangeOutcome {
 }
 #[derive(Clone, Debug)]
 pub struct AppliedReply {
-    pub value: Box<serde_json::value::RawValue>,
+    pub value: studio_json::OwnedRawJson,
     pub output_expires_at: Option<f64>,
     pub handle: bool,
     pub output_ref: bool,
 }
 impl AppliedReply {
-    pub fn new(value: Box<serde_json::value::RawValue>) -> Self {
+    pub fn new(value: studio_json::OwnedRawJson) -> Self {
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Metadata<'a> {
             #[serde(borrow)]
-            output_expires_at: Option<&'a serde_json::value::RawValue>,
+            output_expires_at: Option<studio_json::RawJson<'a>>,
             #[serde(default, deserialize_with = "present")]
             handle: bool,
             #[serde(default, deserialize_with = "present")]
             output_ref: bool,
             #[serde(borrow)]
-            value: Option<&'a serde_json::value::RawValue>,
+            value: Option<studio_json::RawJson<'a>>,
             #[serde(borrow)]
-            result: Option<&'a serde_json::value::RawValue>,
+            result: Option<studio_json::RawJson<'a>>,
         }
         fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
             <serde::de::IgnoredAny as serde::Deserialize>::deserialize(d).map(|_| true)
         }
-        fn metadata(raw: &serde_json::value::RawValue) -> Option<(f64, bool, bool)> {
-            let item: Metadata<'_> = serde_json::from_str(raw.get()).ok()?;
+        fn metadata(raw: &str) -> Option<(f64, bool, bool)> {
+            let item: Metadata<'_> = studio_json::from_str(raw).ok()?;
             if let Some(expires) = item
                 .output_expires_at
-                .and_then(|v| serde_json::from_str(v.get()).ok())
+                .and_then(|v| studio_json::from_str(v.as_str()).ok())
                 && (item.handle || item.output_ref)
             {
                 return Some((expires, item.handle, item.output_ref));
             }
             item.value
-                .and_then(metadata)
-                .or_else(|| item.result.and_then(metadata))
+                .and_then(|v| metadata(v.as_str()))
+                .or_else(|| item.result.and_then(|v| metadata(v.as_str())))
         }
-        let (output_expires_at, handle, output_ref) = metadata(&value)
+        let (output_expires_at, handle, output_ref) = metadata(value.as_str())
             .map_or((None, false, false), |(expiry, handle, output_ref)| {
                 (Some(expiry), handle, output_ref)
             });
@@ -378,7 +378,7 @@ impl AppliedReply {
 impl PartialEq for ExchangeOutcome {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Applied(a), Self::Applied(b)) => a.value.get() == b.value.get(),
+            (Self::Applied(a), Self::Applied(b)) => a.value.as_str() == b.value.as_str(),
             (Self::NotApplied(a), Self::NotApplied(b)) => a == b,
             (Self::Unknown, Self::Unknown) | (Self::PreEffectWaiting, Self::PreEffectWaiting) => {
                 true
@@ -427,7 +427,7 @@ impl ExchangeOutcome {
                     output_expires_at: Option<f64>,
                 }
                 let value = reply.value.ok_or_else(invalid_receipt)?;
-                if serde_json::from_str::<ReplyExpiry>(value.get())
+                if studio_json::from_str::<ReplyExpiry>(value.as_str())
                     .ok()
                     .and_then(|reply| reply.output_expires_at)
                     .is_some_and(|expires| expires <= now as f64)
@@ -453,7 +453,7 @@ fn invalid_receipt() -> AccessError {
     )
 }
 fn applied(value: &impl serde::Serialize) -> Result<ExchangeOutcome, AccessError> {
-    serde_json::value::to_raw_value(value)
+    studio_json::to_raw_value(value)
         .map(AppliedReply::new)
         .map(ExchangeOutcome::Applied)
         .map_err(|_| invalid_receipt())
@@ -1133,7 +1133,7 @@ impl RuntimeOrchestrationEffects {
                         |row| row.get(0),
                     )
                     .optional()?;
-                let link: Value = serde_json::from_str(link_raw.as_deref().ok_or_else(|| {
+                let link: Value = studio_json::from_str(link_raw.as_deref().ok_or_else(|| {
                     refused(
                         404,
                         "link_unavailable",
@@ -1315,7 +1315,7 @@ async fn receive_remote_anchor_input(
                     .optional()?;
                 let link: Value = raw
                     .as_deref()
-                    .and_then(|raw| serde_json::from_str(raw).ok())
+                    .and_then(|raw| studio_json::from_str(raw).ok())
                     .ok_or_else(|| {
                         refused(
                             404,
@@ -1377,7 +1377,7 @@ async fn receive_remote_anchor_input(
                 .optional()?;
             let current_link: Value = current_link
                 .as_deref()
-                .and_then(|raw| serde_json::from_str(raw).ok())
+                .and_then(|raw| studio_json::from_str(raw).ok())
                 .ok_or_else(|| {
                     refused(
                         404,
@@ -1426,7 +1426,7 @@ fn durable_anchor_input_receipt(
     transaction: &Transaction<'_>,
     principal: &str,
     envelope: &Envelope,
-) -> Result<Option<Box<serde_json::value::RawValue>>, AccessError> {
+) -> Result<Option<studio_json::OwnedRawJson>, AccessError> {
     let crate::orchestration_wire::OrchestrationCommand::Input(payload) = &envelope.command else {
         return Ok(None);
     };
@@ -1459,7 +1459,7 @@ fn durable_anchor_input_receipt(
         .optional()?;
     let Some(link) = raw
         .as_deref()
-        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|raw| studio_json::from_str::<Value>(raw).ok())
     else {
         return Ok(None);
     };
@@ -1486,7 +1486,7 @@ fn durable_anchor_input_receipt(
             "Stored remote message receipt is invalid",
         )
     })?
-    .map(|receipt| serde_json::value::to_raw_value(&receipt).map_err(|_| invalid_receipt()))
+    .map(|receipt| studio_json::to_raw_value(&receipt).map_err(|_| invalid_receipt()))
     .transpose()
 }
 
@@ -1558,7 +1558,7 @@ async fn receive_remote_input(
                     .optional()?;
                 let link: Value = raw
                     .as_deref()
-                    .and_then(|raw| serde_json::from_str(raw).ok())
+                    .and_then(|raw| studio_json::from_str(raw).ok())
                     .ok_or_else(|| {
                         refused(
                             404,
@@ -1699,7 +1699,7 @@ async fn receive_remote_input(
                     now,
                 )
                 .map_err(|_| refused(400, "input_rejected", "The remote input was not admitted"))?;
-                return serde_json::value::to_raw_value(&json!({"eventId":key}))
+                return studio_json::to_raw_value(&json!({"eventId":key}))
                     .map_err(|_| invalid_receipt());
             }
             if matches!(kind.as_str(), "user" | "followup") {
@@ -1718,7 +1718,7 @@ async fn receive_remote_input(
                     admission,
                 )
                 .map_err(|_| refused(400, "input_rejected", "The remote input was not admitted"))?;
-                return serde_json::value::to_raw_value(&posted.receipt)
+                return studio_json::to_raw_value(&posted.receipt)
                     .map_err(|_| invalid_receipt());
             }
             crate::event_write::enqueue_recovery_event(
@@ -1730,7 +1730,7 @@ async fn receive_remote_input(
                 now,
             )
             .map_err(|_| refused(400, "input_rejected", "The remote input was not admitted"))?;
-            serde_json::value::to_raw_value(&json!({"eventId":key})).map_err(|_| invalid_receipt())
+            studio_json::to_raw_value(&json!({"eventId":key})).map_err(|_| invalid_receipt())
         })
         .await?;
     Ok(ExchangeOutcome::Applied(AppliedReply::new(result)))
@@ -2213,7 +2213,7 @@ impl RuntimeOrchestrationEffects {
                 wake.peer_changed(principal);
             }
             return Ok(ExchangeOutcome::Applied(AppliedReply::new(
-                serde_json::value::RawValue::from_string("{}".to_owned()).expect("empty reply"),
+                studio_json::OwnedRawJson::from_string("{}".to_owned()).expect("empty reply"),
             )));
         }
         if crate::peer_updates::ACTIONS.contains(&action) {
@@ -2289,7 +2289,7 @@ impl RuntimeOrchestrationEffects {
                         "The remote-parent link is unavailable",
                     )
                 })?;
-                let link: Value = serde_json::from_str(&raw).map_err(|_| {
+                let link: Value = studio_json::from_str(&raw).map_err(|_| {
                     refused(503, "invalid_record", "The remote-parent link is invalid")
                 })?;
                 if link.get("side").and_then(Value::as_str) != Some("home")
@@ -2328,7 +2328,7 @@ impl RuntimeOrchestrationEffects {
                 }
                 if kind_for_write == "child_result" {
                     let details: Value =
-                        serde_json::from_str(&event_text_for_write).map_err(|_| {
+                        studio_json::from_str(&event_text_for_write).map_err(|_| {
                             refused(400, "invalid_request", "Invalid child result event")
                         })?;
                     let child_id =
@@ -2530,7 +2530,7 @@ fn exec_owner(
             (server.to_owned(), body)
         }
     };
-    let envelope: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(&body)
+    let envelope: crate::orchestration_wire::OrchestrationRequest = studio_json::from_str(&body)
         .map_err(|_| {
             refused(
                 503,
@@ -2560,7 +2560,7 @@ pub(crate) fn exec_handle_owned(
 #[serde(rename_all = "camelCase")]
 struct CompletionEventText<'a> {
     detail: &'static str,
-    duration: Option<&'a serde_json::Number>,
+    duration: Option<&'a studio_json::Number>,
     error: Option<&'a String>,
     exit_code: Option<&'a i64>,
     id: &'a str,
@@ -2693,7 +2693,7 @@ fn exec_receipt_answer(
         )
         .optional()?;
     if let Some(raw) = record {
-        let record: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
+        let record: Value = studio_json::from_str(&raw).map_err(|_| invalid())?;
         let settled = match record.get("status") {
             None => false,
             Some(Value::String(status)) => !matches!(status.as_str(), "starting" | "unknown"),
@@ -2768,7 +2768,7 @@ pub struct Envelope {
 }
 
 /// Preserve the pre-typing sorted UTF-8 compact JSON used on the wire and in durable identities.
-fn legacy_compact(value: &impl serde::Serialize) -> Result<String, serde_json::Error> {
+fn legacy_compact(value: &impl serde::Serialize) -> Result<String, studio_json::Error> {
     studio_runtime_schema::json_compat::python_json_compact_serialized(value)
 }
 
@@ -2957,7 +2957,7 @@ pub fn decide_delivery(
     now: i64,
 ) -> Result<DeliveryDecision, AccessError> {
     let action: ServerOperationKind = <ServerOperationKind as serde::Deserialize>::deserialize(
-        serde::de::value::StrDeserializer::<serde_json::Error>::new(action),
+        serde::de::value::StrDeserializer::<studio_json::Error>::new(action),
     )
     .map_err(|_| refused(400, "invalid_request", "Unknown cross-server operation"))?;
     let Some(snapshot) = snapshot else {
@@ -3392,7 +3392,7 @@ impl OrchestrationDriver {
         let Some((saved_server, body, fingerprint, key)) = row else {
             return Ok(None);
         };
-        let saved: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(&body)
+        let saved: crate::orchestration_wire::OrchestrationRequest = studio_json::from_str(&body)
             .map_err(|_| {
                 refused(
                     503,
@@ -3447,7 +3447,7 @@ impl OrchestrationDriver {
         };
         let result = match reply {
             Ok(ExchangeOutcome::Applied(receipt)) => {
-                serde_json::from_str::<RemoteReply>(receipt.value.get())
+                studio_json::from_str::<RemoteReply>(receipt.value.as_str())
                     .map_err(|_| invalid_receipt())
                     .and_then(|reply| ExchangeOutcome::from_reply(reply, &envelope.root, now))
                     .unwrap_or(ExchangeOutcome::Unknown)
@@ -3623,7 +3623,7 @@ impl OrchestrationDriver {
                 && let Some(receipt) = durable_anchor_input_receipt(tx, &principal_for_claim, &envelope_for_claim)?
             {
                 let result = ExchangeOutcome::Applied(AppliedReply::new(receipt));
-                let stored_result = serde_json::to_string(&result.to_reply(&envelope_for_claim.root)).map_err(|_| invalid_receipt())?;
+                let stored_result = studio_json::to_string(&result.to_reply(&envelope_for_claim.root)).map_err(|_| invalid_receipt())?;
                 if stored_result.len() > MAX_RESPONSE_BYTES {
                     return Ok((
                         DeliveryDecision::Return(ExchangeOutcome::Unknown),
@@ -3642,7 +3642,7 @@ impl OrchestrationDriver {
                     )?;
                 } else {
                     let admitted = admit_delivery(tx,Direction::Incoming,&principal_for_claim,&envelope_for_claim,now)?;
-                    let admission = serde_json::to_string(&admitted).map_err(|_| refused(503,"invalid_record","Delivery admission could not be saved"))?;
+                    let admission = studio_json::to_string(&admitted).map_err(|_| refused(503,"invalid_record","Delivery admission could not be saved"))?;
                     tx.execute(
                         "INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,actor,admission) VALUES(?1,?2,?7,NULL,?3,?4,?5,?6)",
                         params![key, signature_for_claim, now, principal_for_claim, envelope_for_claim.command.actor(),admission,ServerDeliveryState::Running],
@@ -3681,7 +3681,7 @@ impl OrchestrationDriver {
             // negative receipt after response loss.
             result = ExchangeOutcome::Unknown;
         }
-        if serde_json::to_string(&result.to_reply(&envelope.root))
+        if studio_json::to_string(&result.to_reply(&envelope.root))
             .map_err(|_| invalid_receipt())?
             .len()
             > MAX_RESPONSE_BYTES
@@ -3762,7 +3762,7 @@ impl OrchestrationDriver {
             .await?;
         let mut count = 0;
         for (key, server, body, state) in pending {
-            let value = match serde_json::from_str::<
+            let value = match studio_json::from_str::<
                 studio_runtime_schema::http_ingress::Object<
                     crate::orchestration_wire::OrchestrationRequest,
                 >,
@@ -3776,7 +3776,7 @@ impl OrchestrationDriver {
                         request_id: String,
                         action: String,
                     }
-                    let header = serde_json::from_str::<StoredHeader>(&body);
+                    let header = studio_json::from_str::<StoredHeader>(&body);
                     if let Ok(header) = header
                         && header.action.parse::<ServerOperationKind>().is_err()
                     {
@@ -4014,7 +4014,7 @@ fn outbox_next_due_at(
 mod tests {
     #[test]
     fn outgoing_fingerprint_keeps_legacy_canonical_bytes() {
-        let request: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
+        let request: crate::orchestration_wire::OrchestrationRequest = studio_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
         let envelope = super::Envelope::from_request(&request).unwrap();
         assert_eq!(
             envelope.body,
@@ -4028,7 +4028,7 @@ mod tests {
 
     #[test]
     fn incoming_signature_keeps_legacy_canonical_bytes() {
-        let request: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
+        let request: crate::orchestration_wire::OrchestrationRequest = studio_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
         let envelope = super::Envelope::from_request(&request).unwrap();
         assert_eq!(
             envelope.incoming_signature("peer-a").unwrap(),
@@ -4064,7 +4064,7 @@ mod tests {
                 r#"{{"requestId":"r","operation":[],"action":"{action}","payload":{payload}}}"#
             );
             let request: crate::orchestration_wire::OrchestrationRequest =
-                serde_json::from_str(&body).unwrap();
+                studio_json::from_str(&body).unwrap();
             let envelope = super::Envelope::from_request(&request).unwrap();
             assert_eq!(
                 envelope.incoming_signature("peer").unwrap(),
@@ -4075,7 +4075,7 @@ mod tests {
     }
 
     fn fixture_envelope(
-        value: &serde_json::Value,
+        value: &studio_json::Value,
     ) -> crate::orchestration_wire::OrchestrationRequest {
         <crate::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value)
             .expect("valid fixture envelope")
@@ -4103,7 +4103,7 @@ mod tests {
                     return Ok(super::ExchangeOutcome::Unknown);
                 }
                 super::applied(
-                    &serde_json::json!({"owner":principal,"root":envelope.request_id,"operation":envelope.operation}),
+                    &studio_json::json!({"owner":principal,"root":envelope.request_id,"operation":envelope.operation}),
                 )
             })
         }
@@ -4133,10 +4133,10 @@ mod tests {
         let next_for_write = next.clone();
         store.transaction(move |tx| {
             let signature = "legacy-signature";
-            let body = serde_json::json!({"requestId":old_for_write,"operation":[],"action":"task","payload":{"actor":"lead"}}).to_string();
+            let body = studio_json::json!({"requestId":old_for_write,"operation":[],"action":"task","payload":{"actor":"lead"}}).to_string();
             crate::server_outbox::insert(tx, "peer", &old_for_write, signature, state, 0.0,
                 &crate::server_outbox::ServerRequestRecord { body, admission: studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(old_for_write.clone(), signature.into(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
-            let request = crate::orchestration_wire::OrchestrationRequest { request_id: next_for_write, operation:Vec::new(), command:crate::orchestration_wire::OrchestrationCommand::Projects(serde_json::json!({})) };
+            let request = crate::orchestration_wire::OrchestrationRequest { request_id: next_for_write, operation:Vec::new(), command:crate::orchestration_wire::OrchestrationCommand::Projects(studio_json::json!({})) };
             let envelope = super::Envelope::from_request(&request).unwrap().scoped(super::Direction::Outgoing, "peer");
             crate::server_outbox::insert(tx, "peer", &envelope.key, &envelope.fingerprint, super::ServerDeliveryState::Queued, 0.0,
                 &crate::server_outbox::ServerRequestRecord { body:envelope.body.clone(), admission:studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(envelope.key.clone(), envelope.fingerprint.clone(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
@@ -4185,7 +4185,7 @@ mod tests {
         let root =
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"completed-location").to_string();
         let payload: crate::project_locations::LocationPayload =
-            serde_json::from_str(r#"{"project":"project","path":"/peer"}"#).expect("location");
+            studio_json::from_str(r#"{"project":"project","path":"/peer"}"#).expect("location");
         let command = crate::orchestration_wire::OrchestrationCommand::AddLocation(payload);
         let request = crate::orchestration_wire::OrchestrationRequest {
             request_id: root.clone(),
@@ -4197,12 +4197,12 @@ mod tests {
             super::remote_operation_key("server-outbox", &["peer"], &root, &["add_location"]);
         let imported_root = root.clone();
         store.transaction(move|tx| {
-            let peer=serde_json::json!({"id":"peer","clientId":"peer","kind":"server","label":"peer","created":1,"publicKey":"key","origin":"https://peer.invalid","status":"paired"});
+            let peer=studio_json::json!({"id":"peer","clientId":"peer","kind":"server","label":"peer","created":1,"publicKey":"key","origin":"https://peer.invalid","status":"paired"});
             tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES('peer',?1)",[peer.to_string()])?;
             let created=chrono::Utc::now().timestamp_millis();
             let public=crate::project_locations::LocationResult{request_id:imported_root.clone(),outcome:studio_runtime_schema::persistence::RemoteOutcome::Applied,project_id:Some("project".into()),value:None,error:None};
             import_result(tx,&imported_root,"public-location-signature",&ResultEnvelope{actor:Some("lead".into()),reply:public,references:Vec::new()},created).expect("public result");
-            let remote=super::SavedRemoteReply{principal:None,server:Some("peer".into()),actor:Some("lead".into()),body:Some(envelope.body),response:super::RemoteReply{request_id:imported_root,outcome:studio_runtime_schema::persistence::RemoteOutcome::Applied,value:Some(serde_json::value::to_raw_value(&serde_json::json!({"transport":"exact"})).expect("opaque payload")),error:None,waiting_for:None}};
+            let remote=super::SavedRemoteReply{principal:None,server:Some("peer".into()),actor:Some("lead".into()),body:Some(envelope.body),response:super::RemoteReply{request_id:imported_root,outcome:studio_runtime_schema::persistence::RemoteOutcome::Applied,value:Some(studio_json::to_raw_value(&studio_json::json!({"transport":"exact"})).expect("opaque payload")),error:None,waiting_for:None}};
             import_result(tx,&canonical,&envelope.fingerprint,&ResultEnvelope{actor:Some("lead".into()),reply:remote,references:Vec::new()},created).expect("transport result");
             Ok(())
         }).await.expect("classified imports");
@@ -4223,7 +4223,7 @@ mod tests {
                     )
                     .await
                     .expect("only canonical transport replay"),
-                super::applied(&serde_json::json!({"transport":"exact"})).expect("reply")
+                super::applied(&studio_json::json!({"transport":"exact"})).expect("reply")
             );
         }
         assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 0);
@@ -4251,7 +4251,7 @@ mod tests {
         );
         store.transaction(|tx| {
             for peer in ["peer-a", "peer-b"] {
-                let record = serde_json::json!({"id":peer,"clientId":peer,"kind":"server","label":peer,"created":1,"publicKey":"key","origin":"https://peer.invalid","status":"paired"});
+                let record = studio_json::json!({"id":peer,"clientId":peer,"kind":"server","label":peer,"created":1,"publicKey":"key","origin":"https://peer.invalid","status":"paired"});
                 tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)", rusqlite::params![peer,record.to_string()])?;
             }
             Ok(())
@@ -4264,7 +4264,7 @@ mod tests {
         );
         let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let request =
-            serde_json::json!({"requestId":root,"operation":[],"action":"projects","payload":{}});
+            studio_json::json!({"requestId":root,"operation":[],"action":"projects","payload":{}});
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
@@ -4275,7 +4275,7 @@ mod tests {
                     .receive(peer, &fixture_envelope(&request), now)
                     .await
                     .expect("scoped reply"),
-                super::applied(&serde_json::json!({"owner":peer,"root":root,"operation":[]}))
+                super::applied(&studio_json::json!({"owner":peer,"root":root,"operation":[]}))
                     .expect("reply")
             );
         }
@@ -4298,20 +4298,20 @@ mod tests {
                     .receive(peer, &fixture_envelope(&request), now)
                     .await
                     .expect("original reply after restart"),
-                super::applied(&serde_json::json!({"owner":peer,"root":root,"operation":[]}))
+                super::applied(&studio_json::json!({"owner":peer,"root":root,"operation":[]}))
                     .expect("reply")
             );
         }
         assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 2);
         for offset in ["0", "0", "4096", "4096"] {
-            let chunk = serde_json::json!({"requestId":root,"operation":[offset],"action":"chunk","payload":{"export":"bundle","offset":offset.parse::<u64>().unwrap()}});
+            let chunk = studio_json::json!({"requestId":root,"operation":[offset],"action":"chunk","payload":{"export":"bundle","offset":offset.parse::<u64>().unwrap()}});
             assert_eq!(
                 driver
                     .receive("peer-a", &fixture_envelope(&chunk), now)
                     .await
                     .expect("chunk reply"),
                 super::applied(
-                    &serde_json::json!({"owner":"peer-a","root":root,"operation":[offset]})
+                    &studio_json::json!({"owner":"peer-a","root":root,"operation":[offset]})
                 )
                 .expect("reply")
             );
@@ -4321,7 +4321,7 @@ mod tests {
             4,
             "same-offset chunk retries replay; a new offset executes once"
         );
-        let conflict = serde_json::json!({"requestId":root,"operation":["0"],"action":"chunk","payload":{"export":"other-bundle","offset":0}});
+        let conflict = studio_json::json!({"requestId":root,"operation":["0"],"action":"chunk","payload":{"export":"other-bundle","offset":0}});
         assert_eq!(
             driver
                 .receive("peer-a", &fixture_envelope(&conflict), now)
@@ -4331,7 +4331,7 @@ mod tests {
             409
         );
         let unknown_root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let unknown = serde_json::json!({"requestId":unknown_root,"operation":[],"action":"move_validate","payload":{"unknown":true}});
+        let unknown = studio_json::json!({"requestId":unknown_root,"operation":[],"action":"move_validate","payload":{"unknown":true}});
         for _ in 0..2 {
             assert_eq!(
                 driver
@@ -4353,7 +4353,7 @@ mod tests {
         let legacy =
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"retained-peer-request").to_string();
         let retained =
-            serde_json::json!({"requestId":legacy,"operation":[],"action":"projects","payload":{}});
+            studio_json::json!({"requestId":legacy,"operation":[],"action":"projects","payload":{}});
         let signature = super::Envelope::from_request(&fixture_envelope(&retained))
             .expect("retained envelope")
             .incoming_signature("peer-a")
@@ -4370,7 +4370,7 @@ mod tests {
                         request_id: legacy_for_import.clone(),
                         outcome: studio_runtime_schema::persistence::RemoteOutcome::Applied,
                         value: Some(
-                            serde_json::value::to_raw_value(&serde_json::json!({"retained":true}))
+                            studio_json::to_raw_value(&studio_json::json!({"retained":true}))
                                 .expect("original reply"),
                         ),
                         error: None,
@@ -4398,10 +4398,10 @@ mod tests {
                 .receive("peer-a", &fixture_envelope(&retained), now)
                 .await
                 .expect("retained v5 replay"),
-            super::applied(&serde_json::json!({"retained":true})).expect("reply")
+            super::applied(&studio_json::json!({"retained":true})).expect("reply")
         );
         let mut changed = retained.clone();
-        changed["payload"] = serde_json::json!({"changedAfterCutover":true});
+        changed["payload"] = studio_json::json!({"changedAfterCutover":true});
         assert_eq!(
             driver
                 .receive("peer-a", &fixture_envelope(&changed), now)
@@ -4410,7 +4410,7 @@ mod tests {
                 .status(),
             409
         );
-        let missing = serde_json::json!({"requestId":uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID,b"missing-peer-request").to_string(),"operation":[],"action":"projects","payload":{}});
+        let missing = studio_json::json!({"requestId":uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID,b"missing-peer-request").to_string(),"operation":[],"action":"projects","payload":{}});
         assert_eq!(
             driver
                 .receive("peer-a", &fixture_envelope(&missing), now)
@@ -4423,7 +4423,7 @@ mod tests {
         store.transaction(move|tx|{
             let envelope=super::Envelope::from_request(&fixture_envelope(&missing_for_import)).expect("pending source envelope");
             let signature=envelope.incoming_signature("peer-a").expect("source signature");
-            let token=serde_json::json!({"id":envelope.root,"signature":signature,"created":chrono::Utc::now().timestamp_millis()});
+            let token=studio_json::json!({"id":envelope.root,"signature":signature,"created":chrono::Utc::now().timestamp_millis()});
             tx.execute("INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,actor,admission) VALUES(?1,?2,?3,NULL,?4,'peer-a',NULL,?5)",rusqlite::params![envelope.root,signature,studio_runtime_schema::persistence::ServerDeliveryState::Waiting,now,token.to_string()])?;
             Ok(())
         }).await.expect("classified pending source");
@@ -4465,7 +4465,7 @@ mod tests {
 
     #[test]
     fn expired_applied_reply_is_unknown() {
-        let reply: super::RemoteReply = serde_json::from_str(
+        let reply: super::RemoteReply = studio_json::from_str(
             r#"{"requestId":"r","outcome":"applied","value":{"outputExpiresAt":10}}"#,
         )
         .expect("reply");
@@ -4477,7 +4477,7 @@ mod tests {
 
     #[test]
     fn applied_metadata_follows_nested_results_and_counts_null_presence() {
-        let raw = serde_json::value::RawValue::from_string(
+        let raw = studio_json::OwnedRawJson::from_string(
             r#"{"outputExpiresAt":"ignored","value":{"result":{"handle":null,"outputExpiresAt":25}}}"#.into(),
         ).expect("payload");
         let reply = super::AppliedReply::new(raw);
@@ -4488,7 +4488,7 @@ mod tests {
 
     fn saved(state: &str, next_at: f64) -> DeliverySnapshot {
         DeliverySnapshot {
-            state: <studio_runtime_schema::persistence::ServerDeliveryState as serde::Deserialize>::deserialize(serde::de::value::StrDeserializer::<serde_json::Error>::new(state)).expect("state"),
+            state: <studio_runtime_schema::persistence::ServerDeliveryState as serde::Deserialize>::deserialize(serde::de::value::StrDeserializer::<studio_json::Error>::new(state)).expect("state"),
             signature: "same-content".to_owned(),
             server: Some("peer".to_owned()),
             next_at,
@@ -4582,7 +4582,7 @@ mod tests {
         db.execute(
             "INSERT INTO runtime_access_clients VALUES('peer',?1)",
             [
-                serde_json::json!({"kind":"server","status":"paired","publicKey":"PEM-A"})
+                studio_json::json!({"kind":"server","status":"paired","publicKey":"PEM-A"})
                     .to_string(),
             ],
         )
@@ -4640,7 +4640,7 @@ mod tests {
             state,
             due,
             &crate::server_outbox::ServerRequestRecord {
-                body: serde_json::json!({"action":action}).to_string(),
+                body: studio_json::json!({"action":action}).to_string(),
                 admission: AdmittedRequest::from_persisted_fields(key.into(), key.into(), 1),
                 attempts: 0,
                 error: None,
@@ -4692,7 +4692,7 @@ mod tests {
                 .await
                 .expect("open store"),
         );
-        let record = serde_json::json!({
+        let record = studio_json::json!({
             "id": "peer-a",
             "clientId": "client-a",
             "kind": "server",
@@ -4732,7 +4732,7 @@ mod tests {
     async fn paired_server_pulls_the_installed_app_and_replays_exact_chunk_receipts() {
         use super::{OrchestrationDriver, RuntimeOrchestrationEffects};
         use base64::Engine;
-        use serde_json::json;
+        use studio_json::json;
 
         let directory = tempfile::tempdir().expect("temporary state directory");
         let store = Arc::new(
@@ -4762,7 +4762,7 @@ mod tests {
             Arc::new(HttpsPairedTransport::new(Arc::clone(&store))),
             Arc::new(RuntimeOrchestrationEffects::new(Arc::clone(&store)).with_update_offer(offer)),
         );
-        let request = |_: &str, action: &str, payload: serde_json::Value| json!({"requestId": studio_runtime_schema::persistence::RequestIdentity::issue_root(), "operation":[], "action": action, "payload": payload});
+        let request = |_: &str, action: &str, payload: studio_json::Value| json!({"requestId": studio_runtime_schema::persistence::RequestIdentity::issue_root(), "operation":[], "action": action, "payload": payload});
 
         let offered = driver
             .receive(
@@ -4808,8 +4808,8 @@ mod tests {
         else {
             panic!("the export is applied");
         };
-        let meta: serde_json::Value =
-            serde_json::from_str(meta.value.get()).expect("export metadata");
+        let meta: studio_json::Value =
+            studio_json::from_str(meta.value.as_str()).expect("export metadata");
         assert_eq!(meta["size"], json!(b"app archive".len()));
         let chunk = request(
             "chunk-1",
@@ -4824,8 +4824,8 @@ mod tests {
             else {
                 panic!("the chunk is applied");
             };
-            let value: serde_json::Value =
-                serde_json::from_str(value.value.get()).expect("chunk payload");
+            let value: studio_json::Value =
+                studio_json::from_str(value.value.as_str()).expect("chunk payload");
             let data = base64::engine::general_purpose::STANDARD
                 .decode(value["data"].as_str().expect("chunk data"))
                 .expect("base64 chunk");
@@ -4848,7 +4848,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("stored chunk receipt");
-        let saved: serde_json::Value = serde_json::from_str(&saved).expect("receipt JSON");
+        let saved: studio_json::Value = studio_json::from_str(&saved).expect("receipt JSON");
         assert_eq!(saved["reply"]["response"]["outcome"], "applied");
         assert!(saved["reply"]["response"]["value"]["data"].is_string());
         assert_eq!(

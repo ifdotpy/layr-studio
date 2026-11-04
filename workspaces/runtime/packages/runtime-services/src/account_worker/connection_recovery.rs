@@ -13,7 +13,7 @@ use crate::{
     recovery_store::LifecycleCompletionWriter,
     task_recovery_store::TaskCompletionWriter,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
@@ -60,7 +60,7 @@ pub(super) async fn run_inner(command: Command) -> Result<Completed, RecoveryErr
             move |db| {
                 let raw =
                     AgentRepository::get_raw(db, &agent_id)?.ok_or(RecoveryError::CommitFailed)?;
-                serde_json::from_str::<Value>(&raw).map_err(|_| RecoveryError::CommitFailed)
+                studio_json::from_str::<Value>(&raw).map_err(|_| RecoveryError::CommitFailed)
             },
         )
         .await?;
@@ -388,7 +388,7 @@ pub(super) async fn begin_request(
             return Err(RecoveryError::CommitFailed);
         };
         let mut current: Value =
-            serde_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
+            studio_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
         let current_id = RecoverySnapshot::from_record(current.clone())
             .map_err(|_| RecoveryError::CommitFailed)?
             .connection_recovery_id();
@@ -431,7 +431,7 @@ pub(super) async fn finish_request(
             return Err(RecoveryError::CommitFailed);
         };
         let mut agent: Value =
-            serde_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
+            studio_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
         if agent["connectionRecovery"]["requestId"] == recovery_id.as_str() {
             agent["connectionRecovery"]["requestState"] = json!("result");
             agent["connectionRecovery"]["requestReceipt"] = receipt.clone();
@@ -447,7 +447,7 @@ fn put_agent(
     value: Value,
 ) -> Result<(), RecoveryError> {
     RecoverySnapshot::from_record(value.clone()).map_err(|_| RecoveryError::CommitFailed)?;
-    let record = serde_json::from_value(value).map_err(|_| RecoveryError::CommitFailed)?;
+    let record = studio_json::from_value(value).map_err(|_| RecoveryError::CommitFailed)?;
     AgentRepository::put(tx, &record)?;
     Ok(())
 }
@@ -508,7 +508,7 @@ fn unix_seconds() -> f64 {
 mod tests {
     use super::{RecoveryObservation, observe_live_session, saved_receipt_matches_current};
     use crate::{account_worker::retained::RetainedSessionPort, recovery_history::ConnectionScope};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn replacing_worker_invalidates_the_effect_transaction_observation() {
@@ -551,7 +551,7 @@ mod tests {
         });
         agent["connectionRecovery"]["requestBasis"] =
             crate::recovery_policy::connection_recovery_basis(&agent);
-        agent["turnId"] = serde_json::Value::Null;
+        agent["turnId"] = studio_json::Value::Null;
         assert!(saved_receipt_matches_current(&agent));
 
         agent["disconnectRecovery"]["connectionId"] = json!("connection-2");

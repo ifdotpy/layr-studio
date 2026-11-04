@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use super::protocol::{self, Failure, HostExecError, INVALID, Manifest, Outcome, require};
 use super::{HostService, Op, State, SyncBatchItem, SyncModeItem, SyncOperation, clone_ffi, slots};
@@ -134,7 +134,7 @@ impl HostService {
             .join("layr-projects")
             .join(project_id)
             .join("project.json");
-        let studio_runtime_schema::json_object::JsonObject(project): studio_runtime_schema::json_object::JsonObject<ProjectSource> = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+        let studio_runtime_schema::json_object::JsonObject(project): studio_runtime_schema::json_object::JsonObject<ProjectSource> = studio_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
         let source = project.source;
         if !source.starts_with('/') {
             return None;
@@ -712,7 +712,7 @@ impl HostService {
                     INVALID,
                 )?;
                 let entry: protocol::ManifestEntry =
-                    serde_json::from_str(&fs::read_to_string(&entry_file)?)?;
+                    studio_json::from_str(&fs::read_to_string(&entry_file)?)?;
                 let protocol::ManifestEntry::File {
                     bytes: declared, ..
                 } = entry
@@ -736,7 +736,7 @@ impl HostService {
                     INVALID,
                 )?;
                 let entry: protocol::ManifestEntry =
-                    serde_json::from_str(&fs::read_to_string(&entry_file)?)?;
+                    studio_json::from_str(&fs::read_to_string(&entry_file)?)?;
                 let protocol::ManifestEntry::File {
                     bytes,
                     mode,

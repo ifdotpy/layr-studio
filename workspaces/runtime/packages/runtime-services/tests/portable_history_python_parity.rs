@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::portable_history::{
     ArchiveDescriptor, ExportInput, NativeHistory, PortableHistoryError, export_history,
     history_context, validate_history,
@@ -19,7 +19,7 @@ fn frozen_archive_writer_and_context_are_read_without_loss() {
         let name = case.name.as_str();
         let state_root = case.root.as_path();
         let descriptor = ArchiveDescriptor::from_value(
-            serde_json::to_value(&case.descriptor).expect("descriptor JSON"),
+            studio_json::to_value(&case.descriptor).expect("descriptor JSON"),
         )
         .unwrap_or_else(|error| panic!("Rust rejected Python descriptor {name}: {error}"));
         let validated = validate_history(state_root, &descriptor)
@@ -43,7 +43,7 @@ fn frozen_archive_writer_and_context_are_read_without_loss() {
         .find(|case| case.name == "native-pages")
         .expect("tamper witness archive");
     let descriptor = ArchiveDescriptor::from_value(
-        serde_json::to_value(&archive_case.descriptor).expect("descriptor JSON"),
+        studio_json::to_value(&archive_case.descriptor).expect("descriptor JSON"),
     )
     .expect("Python descriptor");
     let path = descriptor.path();
@@ -143,7 +143,7 @@ fn frozen_archive_writer_and_context_are_read_without_loss() {
             .contains("thread/turns/list is unavailable before first user message")
     );
     let unmaterialized_descriptor = ArchiveDescriptor::from_value(
-        serde_json::to_value(&unmaterialized.descriptor).expect("descriptor JSON"),
+        studio_json::to_value(&unmaterialized.descriptor).expect("descriptor JSON"),
     )
     .expect("unmaterialized descriptor");
     assert_invalid_mutated_archive(&unmaterialized_descriptor, |records| {
@@ -183,7 +183,7 @@ async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
     let root = isolated_test_root();
     // fe1e1f249 migrated the frozen agent's yoloMode to permissionMode.
     let state: FrozenState =
-        serde_json::from_str(include_str!("portable_history/fixtures/state.json"))
+        studio_json::from_str(include_str!("portable_history/fixtures/state.json"))
             .expect("frozen state identity");
     for (name, sql) in [
         (
@@ -406,7 +406,7 @@ fn assert_invalid_mutated_archive(
     let mut lines: Vec<Value> = String::from_utf8(original.clone())
         .expect("JSONL UTF-8")
         .lines()
-        .map(|line| serde_json::from_str(line).expect("archive JSON line"))
+        .map(|line| studio_json::from_str(line).expect("archive JSON line"))
         .collect();
     let mut footer = lines.pop().expect("footer line");
     mutate(&mut lines);
@@ -415,18 +415,18 @@ fn assert_invalid_mutated_archive(
         let kind = record["kind"].as_str().expect("record kind");
         *counts.entry(kind.to_owned()).or_default() += 1;
     }
-    footer["counts"] = serde_json::to_value(&counts).expect("footer record counts");
+    footer["counts"] = studio_json::to_value(&counts).expect("footer record counts");
     let mut content = Vec::new();
     for record in lines {
-        serde_json::to_writer(&mut content, &record).expect("encode content line");
+        studio_json::to_writer(&mut content, &record).expect("encode content line");
         content.push(b'\n');
     }
     footer["contentSha256"] = json!(studio_runtime_store::sha256_hex(&content));
-    serde_json::to_writer(&mut content, &footer).expect("encode footer");
+    studio_json::to_writer(&mut content, &footer).expect("encode footer");
     content.push(b'\n');
     std::fs::write(descriptor.path(), &content).expect("write mutated archive");
     let mut descriptor_value = descriptor.to_value().expect("descriptor JSON");
-    descriptor_value["counts"] = serde_json::to_value(counts).expect("descriptor counts");
+    descriptor_value["counts"] = studio_json::to_value(counts).expect("descriptor counts");
     descriptor_value["bytes"] = json!(content.len() as u64);
     descriptor_value["sha256"] = json!(studio_runtime_store::sha256_hex(&content));
     let updated = ArchiveDescriptor::from_value(descriptor_value).expect("updated descriptor");
@@ -445,13 +445,13 @@ fn assert_invalid_footer_counts(descriptor: &ArchiveDescriptor) {
     let mut lines: Vec<Value> = String::from_utf8(original.clone())
         .expect("JSONL UTF-8")
         .lines()
-        .map(|line| serde_json::from_str(line).expect("archive JSON line"))
+        .map(|line| studio_json::from_str(line).expect("archive JSON line"))
         .collect();
     let mut footer = lines.pop().expect("footer");
     footer["counts"]["header"] = json!(2);
     let mut bytes = Vec::new();
     for line in lines.into_iter().chain(std::iter::once(footer)) {
-        serde_json::to_writer(&mut bytes, &line).expect("encode footer count mutation");
+        studio_json::to_writer(&mut bytes, &line).expect("encode footer count mutation");
         bytes.push(b'\n');
     }
     std::fs::write(descriptor.path(), &bytes).expect("write footer count mutation");
@@ -471,7 +471,7 @@ fn assert_invalid_content_hash(descriptor: &ArchiveDescriptor) {
     let mut lines: Vec<Value> = String::from_utf8(original.clone())
         .expect("JSONL UTF-8")
         .lines()
-        .map(|line| serde_json::from_str(line).expect("archive JSON line"))
+        .map(|line| studio_json::from_str(line).expect("archive JSON line"))
         .collect();
     let footer = lines.pop().expect("footer");
     let turn_page = lines
@@ -481,7 +481,7 @@ fn assert_invalid_content_hash(descriptor: &ArchiveDescriptor) {
     turn_page["page"]["data"][0]["items"][0]["text"] = json!("changed with a refreshed descriptor");
     let mut bytes = Vec::new();
     for record in lines.into_iter().chain(std::iter::once(footer)) {
-        serde_json::to_writer(&mut bytes, &record).expect("encode content hash mutation");
+        studio_json::to_writer(&mut bytes, &record).expect("encode content hash mutation");
         bytes.push(b'\n');
     }
     std::fs::write(descriptor.path(), &bytes).expect("write content hash mutation");
@@ -504,14 +504,14 @@ fn assert_invalid_footer_order(descriptor: &ArchiveDescriptor) {
     let mut lines: Vec<Value> = String::from_utf8(original.clone())
         .expect("JSONL UTF-8")
         .lines()
-        .map(|line| serde_json::from_str(line).expect("archive JSON line"))
+        .map(|line| studio_json::from_str(line).expect("archive JSON line"))
         .collect();
     let footer = lines.pop().expect("footer");
     let mut bytes = Vec::new();
-    serde_json::to_writer(&mut bytes, &footer).expect("encode first footer");
+    studio_json::to_writer(&mut bytes, &footer).expect("encode first footer");
     bytes.push(b'\n');
     for line in lines {
-        serde_json::to_writer(&mut bytes, &line).expect("encode record after footer");
+        studio_json::to_writer(&mut bytes, &line).expect("encode record after footer");
         bytes.push(b'\n');
     }
     std::fs::write(descriptor.path(), &bytes).expect("write footer order mutation");
@@ -587,7 +587,7 @@ enum RelocatedRecord<'a> {
 
 fn frozen_archives(root: &Path) -> Vec<FrozenCase> {
     let mut cases: Vec<FrozenCase> =
-        serde_json::from_str(include_str!("portable_history/fixtures/archives.json"))
+        studio_json::from_str(include_str!("portable_history/fixtures/archives.json"))
             .expect("frozen Python archive corpus");
     for case in &mut cases {
         case.root = root.join(&case.name);
@@ -623,7 +623,7 @@ fn frozen_archives(root: &Path) -> Vec<FrozenCase> {
                 match record {
                     FrozenRecord::Line { line } => bytes.extend_from_slice(line.as_bytes()),
                     FrozenRecord::Ancestor { ancestor } => {
-                        serde_json::to_writer(
+                        studio_json::to_writer(
                             &mut bytes,
                             &RelocatedRecord::Ancestor {
                                 archive: descriptors
@@ -637,7 +637,7 @@ fn frozen_archives(root: &Path) -> Vec<FrozenCase> {
                 bytes.push(b'\n');
             }
             let content_sha256 = studio_runtime_store::sha256_hex(&bytes);
-            serde_json::to_writer(
+            studio_json::to_writer(
                 &mut bytes,
                 &RelocatedRecord::Footer {
                     counts: &archive.counts,
@@ -654,8 +654,8 @@ fn frozen_archives(root: &Path) -> Vec<FrozenCase> {
             std::io::Write::write_all(&mut file, &bytes).expect("write relocated archive");
             file.persist(&archive.descriptor.path)
                 .expect("publish archive fixture");
-            let descriptor: ArchiveDescriptor = serde_json::from_value(
-                serde_json::to_value(&archive.descriptor).expect("relocated descriptor JSON"),
+            let descriptor: ArchiveDescriptor = studio_json::from_value(
+                studio_json::to_value(&archive.descriptor).expect("relocated descriptor JSON"),
             )
             .expect("relocated descriptor");
             descriptors.insert(filename, descriptor);
@@ -670,8 +670,8 @@ fn frozen_archives(root: &Path) -> Vec<FrozenCase> {
                     .expect("UTF-8 case filename"),
             )
             .expect("case archive fixture");
-        let descriptor: RelocatedDescriptor = serde_json::from_value(
-            serde_json::to_value(&case.descriptor).expect("descriptor JSON"),
+        let descriptor: RelocatedDescriptor = studio_json::from_value(
+            studio_json::to_value(&case.descriptor).expect("descriptor JSON"),
         )
         .expect("typed relocated descriptor");
         case.context = case

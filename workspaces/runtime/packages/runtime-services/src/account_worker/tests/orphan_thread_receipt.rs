@@ -12,7 +12,7 @@ async fn unresolved_thread_obligations(state: &State) -> Vec<String> {
         let rows=query.query_map(rusqlite::params!["default",OutboxKind::ProviderCall,OutboxStatus::Pending,OutboxStatus::Submitted,OutboxStatus::Unknown],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
         let mut operations=Vec::new();
         for (id,raw) in rows {
-            let payload:store::ProviderCall=serde_json::from_str(&raw).map_err(StoreError::from)?;
+            let payload:store::ProviderCall=studio_json::from_str(&raw).map_err(StoreError::from)?;
             if matches!(payload,store::ProviderCall::Account(call) if matches!(call.context.method,Method::ThreadStart|Method::ThreadResume)) {operations.push(id);}
         }
         Ok(operations)
@@ -230,7 +230,7 @@ async fn unwritten_thread_receipt_after_restart(shape: Orphan) {
             .unwrap();
         let saved: studio_runtime_store::request_results::ResultEnvelope<
             studio_runtime_store::request_results::AbandonedResult,
-        > = serde_json::from_str(&raw).unwrap();
+        > = studio_json::from_str(&raw).unwrap();
         assert_eq!(
             saved.reply,
             studio_runtime_store::request_results::AbandonedResult::Abandoned {

@@ -9,7 +9,7 @@ use crate::workspace_operations::{
     accept_provider_result,
 };
 use rusqlite::Transaction;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::workspace_operations::WorkspaceOperationsRepository as Repository;

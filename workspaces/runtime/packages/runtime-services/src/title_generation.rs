@@ -11,7 +11,7 @@ use std::{
 
 use crate::event_write::{CallerAdmission, RequestKey, begin_request, replay_request};
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_schema::ProviderKind;
 use studio_runtime_schema::model_catalog::ModelCatalog;
@@ -185,7 +185,7 @@ fn read_agent(tx: &Connection, agent_id: &str) -> Result<Value, TitleError> {
         )
         .optional()?
         .ok_or(TitleError::AgentNotFound)?;
-    let agent: Value = serde_json::from_str(&raw).map_err(StoreError::from)?;
+    let agent: Value = studio_json::from_str(&raw).map_err(StoreError::from)?;
     if agent.get("id").and_then(Value::as_str) != Some(agent_id) {
         return Err(invalid("runtime_agents", agent_id));
     }
@@ -880,7 +880,7 @@ fn make_snapshot(
         )
         .optional()?
         .ok_or_else(|| invalid("runtime_agents", agent_id))?;
-    let agent: Value = serde_json::from_str(&raw_agent).map_err(StoreError::from)?;
+    let agent: Value = studio_json::from_str(&raw_agent).map_err(StoreError::from)?;
     if agent.get("id").and_then(Value::as_str) != Some(agent_id) {
         return Err(invalid("runtime_agents", agent_id));
     }
@@ -942,7 +942,7 @@ fn build_prompt(
             return Err(invalid("runtime_items", &id));
         }
         let mut item: Value =
-            serde_json::from_str(&raw).map_err(|_| invalid("runtime_items", &id))?;
+            studio_json::from_str(&raw).map_err(|_| invalid("runtime_items", &id))?;
         validate_item(&item, agent_id)?;
         item["created"] = json!(created);
         recent_items.push(item);
@@ -965,7 +965,7 @@ fn build_prompt(
             return Err(invalid("runtime_items", &id));
         }
         let mut item: Value =
-            serde_json::from_str(&raw).map_err(|_| invalid("runtime_items", &id))?;
+            studio_json::from_str(&raw).map_err(|_| invalid("runtime_items", &id))?;
         validate_item(&item, agent_id)?;
         item["created"] = json!(created);
         oldest_items.push(item);
@@ -1024,7 +1024,7 @@ fn signature(snapshot: &Snapshot) -> String {
         "prompt": snapshot.prompt,
         "accountKey": snapshot.account_key,
     });
-    let digest = Sha256::digest(serde_json::to_vec(&content).unwrap_or_default());
+    let digest = Sha256::digest(studio_json::to_vec(&content).unwrap_or_default());
     data_encoding::HEXLOWER.encode(&digest)
 }
 
@@ -1033,7 +1033,7 @@ fn python_rename_signature(agent_id: &str) -> String {
     // whose default separators include spaces after colons and commas.
     let body = format!(
         "{{\"chat\": {}, \"name\": null, \"operation\": \"rename\"}}",
-        serde_json::to_string(agent_id).unwrap_or_default()
+        studio_json::to_string(agent_id).unwrap_or_default()
     );
     let digest = Sha256::digest(body.as_bytes());
     data_encoding::HEXLOWER.encode(&digest)

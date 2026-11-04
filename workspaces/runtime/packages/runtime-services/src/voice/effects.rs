@@ -1,7 +1,7 @@
 //! One durable stop effect per voice session.
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::persistence::{
     CapturedScope, OutboxKind, OutboxStatus, OwnerKind, RequestIdentity, VoiceStopOutcome,

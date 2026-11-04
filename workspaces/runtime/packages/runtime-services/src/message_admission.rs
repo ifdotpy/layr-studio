@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use studio_runtime_store::path_identity::PathEvidence;
 
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentIndexedReads, AgentRecord, AgentRepository, Connection, StoreError, Transaction,
 };
@@ -285,7 +285,7 @@ fn other_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
 

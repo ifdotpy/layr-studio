@@ -3,7 +3,7 @@
 //! recovery after a guest answer that has no proven result.
 #![allow(clippy::unwrap_used)]
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -118,7 +118,7 @@ impl GuestRpc for Guest {
                     return Ok(reply);
                 }
                 // Like the guest: every requested base has a list of main's changes.
-                let mut outbound = serde_json::Map::new();
+                let mut outbound = studio_json::Map::new();
                 for base in params["since"].as_array().unwrap() {
                     outbound.insert(base.as_str().unwrap().into(), json!([]));
                 }
@@ -223,7 +223,7 @@ impl Fixture {
         std::fs::write(self.directory().join(name), value.to_string()).unwrap();
     }
     fn saved(&self, name: &str) -> Value {
-        serde_json::from_slice(&std::fs::read(self.directory().join(name)).unwrap()).unwrap()
+        studio_json::from_slice(&std::fs::read(self.directory().join(name)).unwrap()).unwrap()
     }
     fn exists(&self, name: &str) -> bool {
         self.directory().join(name).exists()
@@ -423,7 +423,7 @@ fn a_lost_reply_repeats_the_same_operation() {
 #[test]
 fn many_mac_deletions_pause_the_round() {
     let fixture = Fixture::new();
-    let mut manifest = serde_json::Map::new();
+    let mut manifest = studio_json::Map::new();
     for index in 0..10 {
         let rel = format!("f{index}.txt");
         fixture.write(&rel, index.to_string().as_bytes());
@@ -547,7 +547,7 @@ fn a_base_the_guest_did_not_compare_stays_with_its_path() {
 #[test]
 fn confirmed_mac_deletions_go_to_the_vm() {
     let fixture = Fixture::new();
-    let mut manifest = serde_json::Map::new();
+    let mut manifest = studio_json::Map::new();
     for index in 0..10 {
         let rel = format!("f{index}.txt");
         fixture.write(&rel, index.to_string().as_bytes());
@@ -706,7 +706,7 @@ fn a_mac_deletion_against_a_main_edit_is_a_conflict_that_stays() {
 #[test]
 fn many_main_deletions_wait_for_a_confirmation() {
     let fixture = Fixture::new();
-    let mut manifest = serde_json::Map::new();
+    let mut manifest = studio_json::Map::new();
     for index in 0..10 {
         let rel = format!("f{index}.txt");
         manifest.insert(
@@ -1673,7 +1673,7 @@ fn the_plan_includes_executable_bit_changes_in_both_directions() {
 #[test]
 fn an_unreadable_folder_fails_the_round_and_deletes_nothing() {
     let fixture = Fixture::new();
-    let mut manifest = serde_json::Map::new();
+    let mut manifest = studio_json::Map::new();
     for index in 0..8 {
         let rel = format!("sub/f{index}.txt");
         manifest.insert(rel.clone(), fixture.agreed(&rel, b"x", "s1", 0o644));

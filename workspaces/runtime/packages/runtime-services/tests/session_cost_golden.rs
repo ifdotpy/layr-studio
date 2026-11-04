@@ -6,7 +6,7 @@
 //! has provisional and answered rows, model-less rows, a deleted agent, an agent without a record,
 //! an account move, Claude log responses that replace analytics rows, several
 //! models, a context tier, an unknown model and a row that changes turn and root.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,7 +62,7 @@ fn usage(
     {
         let ledger = UsageLedgerRow::capture(agent, record["threadId"].as_str(), observation);
         record.as_object_mut().expect("usage row").extend(
-            serde_json::to_value(ledger)
+            studio_json::to_value(ledger)
                 .expect("typed fixture usage")
                 .as_object()
                 .expect("ledger fields")
@@ -485,11 +485,11 @@ async fn session_cost_matches_the_row_scanning_golden_answers() {
     for agent in ["lead", "codex-worker", "claude-worker", "other-root"] {
         let answer =
             session_cost_with_account_profiles(&store, agent, &accounts).expect("session cost");
-        let bytes = serde_json::to_vec(&answer).expect("serialized session cost");
-        let canonical: Value = serde_json::from_slice(&bytes).expect("session cost JSON");
+        let bytes = studio_json::to_vec(&answer).expect("serialized session cost");
+        let canonical: Value = studio_json::from_slice(&bytes).expect("session cost JSON");
         assert_eq!(
             bytes,
-            serde_json::to_vec(&canonical).expect("canonical JSON")
+            studio_json::to_vec(&canonical).expect("canonical JSON")
         );
         answers.insert(agent, answer);
     }
@@ -497,11 +497,11 @@ async fn session_cost_matches_the_row_scanning_golden_answers() {
     if std::env::var_os("STUDIO_WRITE_COST_GOLDEN").is_some() {
         fs::write(
             golden_path(),
-            serde_json::to_string_pretty(&answers).expect("golden JSON") + "\n",
+            studio_json::to_string_pretty(&answers).expect("golden JSON") + "\n",
         )
         .expect("write golden answers");
     }
     let golden: Value =
-        serde_json::from_slice(&fs::read(golden_path()).expect("golden answers")).expect("JSON");
+        studio_json::from_slice(&fs::read(golden_path()).expect("golden answers")).expect("JSON");
     assert_eq!(answers, golden);
 }

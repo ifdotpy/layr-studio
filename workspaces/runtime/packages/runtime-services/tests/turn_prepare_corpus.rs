@@ -1,5 +1,5 @@
 //! Compiler boundary and receipt-order regressions over minimal immutable snapshots.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::turn_prepare::{
     Event, NativeReceipt, PreparationSnapshot, accept, compile,
 };
@@ -74,14 +74,14 @@ fn malformed_snapshot_fields_are_refused_at_the_typed_boundary() {
     let fixtures = CapturedExpectations::new();
     let fixture = fixtures.case(&json!({}));
     let cases: Vec<Value> =
-        serde_json::from_str(include_str!("turn_prepare/invalid_snapshots.json"))
+        studio_json::from_str(include_str!("turn_prepare/invalid_snapshots.json"))
             .expect("invalid fixture data");
     for case in cases {
         let mut snapshot = fixture["snapshot"].clone();
         let path = case["path"].as_str().expect("fixture pointer");
         *snapshot.pointer_mut(path).expect("existing field") = case["value"].clone();
         assert!(
-            serde_json::from_value::<PreparationSnapshot>(snapshot).is_err(),
+            studio_json::from_value::<PreparationSnapshot>(snapshot).is_err(),
             "accepted invalid field {path}"
         );
     }
@@ -89,7 +89,7 @@ fn malformed_snapshot_fields_are_refused_at_the_typed_boundary() {
         let mut row = fixture["events"][0].clone();
         row["metadata"]["accepted_at"] = value;
         assert!(
-            serde_json::from_value::<Event>(row).is_err(),
+            studio_json::from_value::<Event>(row).is_err(),
             "accepted invalid receipt clock type"
         );
     }
@@ -104,8 +104,8 @@ fn competing_preparations_cannot_roll_back_either_receipt_order() {
             "snapshot":{"guidance":{"role":role},"operation_id":format!("op-{index}")},
             "events":[{"id":format!("event-{index}")}]
         }));
-        let snapshot = serde_json::from_value(fixture["snapshot"].clone()).expect("snapshot");
-        let events: Vec<Event> = serde_json::from_value(fixture["events"].clone()).expect("events");
+        let snapshot = studio_json::from_value(fixture["snapshot"].clone()).expect("snapshot");
+        let events: Vec<Event> = studio_json::from_value(fixture["events"].clone()).expect("events");
         preparations.push(compile(&snapshot, &events).expect("prepared"));
     }
     assert!(preparations[0].manifest.versions != preparations[1].manifest.versions);
@@ -117,8 +117,8 @@ fn competing_preparations_cannot_roll_back_either_receipt_order() {
             "prior":{"guidance":{"role":prior_role}},"events":[{"id":"event-2"}]
         }));
         let snapshot =
-            serde_json::from_value(fixture["snapshot"].clone()).expect("successive snapshot");
-        let events: Vec<Event> = serde_json::from_value(fixture["events"].clone()).expect("events");
+            studio_json::from_value(fixture["snapshot"].clone()).expect("successive snapshot");
+        let events: Vec<Event> = studio_json::from_value(fixture["events"].clone()).expect("events");
         preparations.push(compile(&snapshot, &events).expect("successive preparation"));
         let sequences: Vec<ReceiptSequence> =
             crate::turn_fixtures::load(include_bytes!("turn_prepare/receipt_sequences.json"));
@@ -131,7 +131,7 @@ fn competing_preparations_cannot_roll_back_either_receipt_order() {
         let mut turns = [None, None, None];
         for (step, index) in order.iter().copied().enumerate() {
             let prepared = &preparations[index];
-            let receipt: NativeReceipt = serde_json::from_value(json!({
+            let receipt: NativeReceipt = studio_json::from_value(json!({
                 "operation_id":prepared.operation_id,"actor_id":prepared.actor_id,
                 "epoch":prepared.epoch,"event_ids":prepared.event_ids,
                 "outcome":{"kind":"accepted","turn_id":format!("turn-{index}")}
@@ -158,8 +158,8 @@ fn competing_preparations_cannot_roll_back_either_receipt_order() {
 fn reference_floor_is_soft_but_transcript_ceiling_is_hard() {
     let fixtures = CapturedExpectations::new();
     let fixture = fixtures.case(&json!({"id":"summary-result-file-soft-limit"}));
-    let snapshot = serde_json::from_value(fixture["snapshot"].clone()).expect("snapshot");
-    let rows: Vec<Event> = serde_json::from_value(fixture["events"].clone()).expect("events");
+    let snapshot = studio_json::from_value(fixture["snapshot"].clone()).expect("snapshot");
+    let rows: Vec<Event> = studio_json::from_value(fixture["events"].clone()).expect("events");
     let prepared = compile(&snapshot, &rows).expect("prepared");
     let studio_runtime_services::turn_prepare::ProviderInput::Text { text, .. } =
         &prepared.provider_inputs[0]
@@ -178,7 +178,7 @@ fn reference_floor_is_soft_but_transcript_ceiling_is_hard() {
         "reference must survive the soft budget"
     );
     assert_eq!(
-        serde_json::from_str::<Value>(payload).expect("summary")["resultFile"]
+        studio_json::from_str::<Value>(payload).expect("summary")["resultFile"]
             .as_str()
             .expect("reference")
             .len(),

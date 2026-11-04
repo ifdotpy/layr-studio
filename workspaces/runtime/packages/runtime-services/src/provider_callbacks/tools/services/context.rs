@@ -26,7 +26,7 @@ pub(super) fn topic(
                 .collect(),
         )),
         "profiles" => {
-            let profiles = serde_json::to_value(studio_runtime_store::ProfileRepository::list(tx)?)
+            let profiles = studio_json::to_value(studio_runtime_store::ProfileRepository::list(tx)?)
                 .map_err(|_| Error::Invalid("Stored profiles are unreadable"))?;
             Ok(json!({ "profiles": profiles }))
         }

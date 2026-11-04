@@ -2,7 +2,7 @@
 
 use crate::event_write::python_strip;
 use crate::host_project_runtime::PreparedHost;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -730,7 +730,7 @@ fn check_id(value: &Value, table: &'static str, id: &str) -> Result<(), Projects
 #[cfg(test)]
 mod schema_validation_tests {
     use super::check_id;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn project_read_rejects_matching_id_with_invalid_schema() {

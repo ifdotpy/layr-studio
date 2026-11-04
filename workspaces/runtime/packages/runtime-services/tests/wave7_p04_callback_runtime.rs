@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 use crate::callback_fixtures as fixture;
 use fixture::*;
-use serde_json::json;
+use studio_json::json;
 use std::sync::Arc;
 use studio_runtime_schema::persistence::{OutboxStatus, ToolRequestStatus};
 use studio_runtime_services::{callback_runtime::*, provider_callbacks::*};
@@ -38,7 +38,7 @@ pub(crate) fn callback_body(
     )
     .unwrap()
     .map(|row| {
-        serde_json::from_str::<ResultEnvelope<CallbackResponse>>(&row.result)
+        studio_json::from_str::<ResultEnvelope<CallbackResponse>>(&row.result)
             .unwrap()
             .reply
     })
@@ -122,7 +122,7 @@ async fn written_retires_transport_body_and_preserves_exact_http_replay() {
     assert_eq!(owner.status, ToolRequestStatus::Completed);
     assert!(owner.payload.frame_fingerprint.is_some());
     assert!(
-        !serde_json::to_string(&owner)
+        !studio_json::to_string(&owner)
             .unwrap()
             .contains("secret-payload")
     );
@@ -247,8 +247,8 @@ async fn python_resolution_rows_match_after_completed_or_cleared_turn() {
     }
 }
 
-fn frame_value(frame: &studio_runtime_providers::Frame) -> serde_json::Value {
-    serde_json::from_slice(&studio_runtime_providers::encode_line(frame).unwrap()).unwrap()
+fn frame_value(frame: &studio_runtime_providers::Frame) -> studio_json::Value {
+    studio_json::from_slice(&studio_runtime_providers::encode_line(frame).unwrap()).unwrap()
 }
 
 #[tokio::test]
@@ -480,7 +480,7 @@ async fn resolved_pending_or_prepared_callbacks_ack_without_resurrecting_approva
         );
         assert_eq!(owner.status, ToolRequestStatus::Completed);
         assert!(
-            !serde_json::to_string(&owner)
+            !studio_json::to_string(&owner)
                 .unwrap()
                 .contains("resolved-secret")
         );

@@ -26,7 +26,7 @@ use crate::{
         self, Acceptance, Action, Admission, Delivery, NativeError, NativeRequest, Outcome, Request,
     },
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     sync::Arc,
     time::{Duration, Instant},

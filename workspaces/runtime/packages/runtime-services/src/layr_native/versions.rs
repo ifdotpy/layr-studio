@@ -38,7 +38,7 @@ fn inspect(binary: &Path, root: &Path) -> Result<Inspection> {
         environment: &[("LAYR_DIRECT", "1")], input: None,
         stdout_limit: 16 * 1024, stderr_limit: 4096, timeout: Duration::from_secs(10),
     }).map_err(|e| NativeLayrError::Refused(format!("Cannot inspect Layr at {} for store {root}: {e:?}. Upgrade this binary to the Studio Layr release; see docs/native-layr.md.", binary.display())))?;
-    serde_json::from_slice(&result.stdout.bytes).map_err(|e| NativeLayrError::Refused(format!("Layr at {} has no valid store-version response for {root}: {e}. Upgrade this binary; see docs/native-layr.md.", binary.display())))
+    studio_json::from_slice(&result.stdout.bytes).map_err(|e| NativeLayrError::Refused(format!("Layr at {} has no valid store-version response for {root}: {e}. Upgrade this binary; see docs/native-layr.md.", binary.display())))
 }
 
 /// Read the identity reported by the same bounded store inspection used for verification.
@@ -166,7 +166,7 @@ fn daemon_identity(socket: &Path) -> std::result::Result<Identity, String> {
     }
     let mut bytes = vec![0; size];
     stream.read_exact(&mut bytes).map_err(|e| error(&e))?;
-    serde_json::from_slice(&bytes).map_err(|e| error(&e))
+    studio_json::from_slice(&bytes).map_err(|e| error(&e))
 }
 
 #[cfg(target_os = "linux")]

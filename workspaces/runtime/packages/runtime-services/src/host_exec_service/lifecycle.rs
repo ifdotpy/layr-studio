@@ -12,7 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use super::protocol;
 use super::{
@@ -112,7 +112,7 @@ pub fn service_call(
         return Err(unknown("the response is missing or too large"));
     }
     let response: Value =
-        serde_json::from_slice(&line).map_err(|error| unknown(error.to_string()))?;
+        studio_json::from_slice(&line).map_err(|error| unknown(error.to_string()))?;
     if response.get("id").and_then(Value::as_str) != Some(identity.as_str()) {
         return Err(unknown("the response identity differs"));
     }

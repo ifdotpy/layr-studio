@@ -1,10 +1,10 @@
 //! Projection assertions shared by service and HTTP frozen corpora.
 
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::BTreeMap;
 
 /// Remove server projections that postdate the frozen Python agent oracle.
-pub(crate) fn normalize_frozen_projection(fields: &mut serde_json::Map<String, Value>) {
+pub(crate) fn normalize_frozen_projection(fields: &mut studio_json::Map<String, Value>) {
     if fields.get("kind").and_then(Value::as_str) == Some("agent") {
         for key in [
             "accountChange",
@@ -22,10 +22,10 @@ pub(crate) fn materialize_agent_defaults(value: &mut Value) {
     let fields = value.as_object_mut().expect("agent fixture");
     fields
         .entry("capacity")
-        .or_insert_with(|| serde_json::json!(studio_runtime_store::AgentCapacity::default()));
+        .or_insert_with(|| studio_json::json!(studio_runtime_store::AgentCapacity::default()));
     fields
         .entry("naming")
-        .or_insert_with(|| serde_json::json!(studio_runtime_store::AgentNaming::default()));
+        .or_insert_with(|| studio_json::json!(studio_runtime_store::AgentNaming::default()));
 }
 
 pub(crate) fn normalize_legacy_agent(value: &mut Value) {
@@ -60,7 +60,7 @@ fn normalize_agent(
     let normalized: String = tx
         .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
         .expect("normalized agent");
-    *value = serde_json::from_str(&normalized).expect("normalized agent JSON");
+    *value = studio_json::from_str(&normalized).expect("normalized agent JSON");
 }
 
 /// Frozen Python snapshots predate the two view collections. Validate their
@@ -97,13 +97,13 @@ pub(crate) fn assert_agent_view_projections(db: &rusqlite::Connection) {
             continue;
         }
         let summary: Value =
-            serde_json::from_str(raw.as_deref().expect("summary payload")).expect("summary JSON");
-        let detail: Value = serde_json::from_str(detail.0.as_deref().expect("detail payload"))
+            studio_json::from_str(raw.as_deref().expect("summary payload")).expect("summary JSON");
+        let detail: Value = studio_json::from_str(detail.0.as_deref().expect("detail payload"))
             .expect("detail JSON");
-        let legacy: Value = serde_json::from_str(legacy.0.as_deref().expect("legacy payload"))
+        let legacy: Value = studio_json::from_str(legacy.0.as_deref().expect("legacy payload"))
             .expect("legacy JSON");
         assert!(is_agent_view_collection(&summary["collection"]));
-        let mut union = serde_json::Map::new();
+        let mut union = studio_json::Map::new();
         for (projection, schema) in [
             (&summary, "AgentSummaryEntityDto"),
             (&detail, "AgentDetailEntityDto"),

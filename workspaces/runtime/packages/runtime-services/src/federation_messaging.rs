@@ -5,7 +5,7 @@ pub use crate::federation_limits::{
 };
 use crate::remote_transport::{RemoteTransportError, canonical_json};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::federation_ingress::MAX_ROOM_MEMBERS;
 use studio_runtime_store::federation_messaging::FederationTable;
 use thiserror::Error;
@@ -40,7 +40,7 @@ pub(crate) fn validate(schema: &str, value: &Value, location: &'static str) -> R
     Ok(())
 }
 fn decode<T: serde::de::DeserializeOwned>(value: Value, location: &'static str) -> Result<T> {
-    serde_json::from_value(value).map_err(|_| FederationMessageError::Invalid(location))
+    studio_json::from_value(value).map_err(|_| FederationMessageError::Invalid(location))
 }
 
 pub(crate) use studio_runtime_schema::persistence::FederationMessageKind as MessageKind;

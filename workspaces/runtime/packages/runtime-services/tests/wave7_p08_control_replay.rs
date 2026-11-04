@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use studio_runtime_providers::Method;
 use studio_runtime_services::{
@@ -218,7 +218,7 @@ async fn restart_at_each_control_transport_boundary_never_resends_an_uncertain_m
                 );
                 let request = || {
                     let body = json!({"id":"agent","action":action,"request_id":"control-one","settings":{"permissionMode":"plan"}});
-                    serde_json::from_value::<ControlRequest>(body).expect("request")
+                    studio_json::from_value::<ControlRequest>(body).expect("request")
                 };
                 tokio::select! {
                     _ = owner.reached.notified() => {},

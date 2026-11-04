@@ -12,7 +12,7 @@
 
 use crate::account_worker::retained::RequestActor;
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_providers::Method;
 use studio_runtime_providers::RequestTicket;
 use studio_runtime_schema::shared_values::{
@@ -102,7 +102,7 @@ pub use crate::account_driver::CodexLoginRequest as LoginRequest;
 #[derive(Clone, Deserialize)]
 pub struct ProfileRequest {
     pub account_key: Option<String>,
-    pub options: Option<serde_json::Map<String, Value>>,
+    pub options: Option<studio_json::Map<String, Value>>,
     pub label: Option<String>,
 }
 
@@ -336,7 +336,7 @@ impl LimitsSnapshot {
 
     pub fn into_value(self) -> Value {
         // This response came from JSON and contains only serializable typed fields.
-        serde::Serialize::serialize(&(self.response), serde_json::value::Serializer)
+        serde::Serialize::serialize(&(self.response), studio_json::value::Serializer)
             .expect("typed limits serialize")
     }
 }
@@ -373,7 +373,7 @@ mod limits_freshness_tests {
     use super::{
         AccountSessionError, AccountSessionFuture, AccountSessionPort, LimitsSnapshot, limits,
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::sync::{
         Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -1433,7 +1433,7 @@ impl AccountSessionPort for AccountSessionRuntime {
                 "account-worker/recovery-history",
             ))?;
             let Some(expected) = session.current_scope(account) else {
-                return Ok(serde_json::json!({"status":"superseded"}));
+                return Ok(studio_json::json!({"status":"superseded"}));
             };
             let result = session
                 .recover_connection(account.to_owned(), agent_id.to_owned())
@@ -1634,7 +1634,7 @@ impl AccountSessionPort for AccountSessionRuntime {
             }
             let normalized = LimitsSnapshot::read(
                 &update.scope.account,
-                serde_json::json!({"accountKey":update.scope.account,"at":update.observed_at,"data":update.data}),
+                studio_json::json!({"accountKey":update.scope.account,"at":update.observed_at,"data":update.data}),
             )?;
             let store = self
                 .store
@@ -1681,7 +1681,7 @@ impl AccountSessionPort for AccountSessionRuntime {
             .get(account)
         {
             return Ok(
-                serde::Serialize::serialize(&(value), serde_json::value::Serializer)
+                serde::Serialize::serialize(&(value), studio_json::value::Serializer)
                     .expect("typed limits serialize"),
             );
         }
@@ -1832,7 +1832,7 @@ impl AccountSessionPort for AccountSessionRuntime {
                                     request.login_id.clone(),
                                     request.login_id.clone(),
                                     "account/login/start",
-                                    serde_json::json!({"type":"chatgptDeviceCode"}),
+                                    studio_json::json!({"type":"chatgptDeviceCode"}),
                                     LOGIN_TIMEOUT,
                                 )
                                 .await;
@@ -1969,7 +1969,7 @@ impl AccountSessionPort for AccountSessionRuntime {
                             request.to_owned(),
                             format!("{request}:cancel"),
                             "account/login/cancel",
-                            serde_json::json!({"loginId":receipt["loginId"]}),
+                            studio_json::json!({"loginId":receipt["loginId"]}),
                             CANCEL_TIMEOUT,
                         )
                         .await;
@@ -2079,7 +2079,7 @@ async fn read_limits_with_freshness(
                 expected_scope: Some(scope.clone()),
                 deleted_actor_session: None,
                 method: Method::AccountRateLimitsRead,
-                params: serde_json::json!({}),
+                params: studio_json::json!({}),
                 deadline: std::time::Instant::now() + Duration::from_secs(10),
             },
         )
@@ -2133,7 +2133,7 @@ async fn read_limits_with_freshness(
     };
     let now = timestamp()?;
     let value =
-        serde_json::json!({"accountKey":account,"data":data,"at":now,"readAt":now,"error":null});
+        studio_json::json!({"accountKey":account,"data":data,"at":now,"readAt":now,"error":null});
     let value = LimitsSnapshot::read(account, value)?;
     let scope = read_scope.ok_or(AccountSessionError::Unknown)?;
     limits::persist(
@@ -2225,7 +2225,7 @@ struct ClaudeProfileInput {
 #[serde(untagged)]
 enum ClaudeWindowInput {
     Text(String),
-    Number(serde_json::Number),
+    Number(studio_json::Number),
 }
 
 #[derive(Deserialize)]
@@ -2243,9 +2243,9 @@ struct ClaudeModelObject {
 }
 
 pub fn normalize_profile(
-    options: serde_json::Map<String, Value>,
+    options: studio_json::Map<String, Value>,
     home: &Path,
-) -> Result<serde_json::Map<String, Value>, AccountSessionError> {
+) -> Result<studio_json::Map<String, Value>, AccountSessionError> {
     let invalid = || AccountSessionError::Refused("Invalid Claude profile options");
     // Path fields reject explicit null, whereas omitted fields are allowed.
     if ["configDir", "binaryPath"]
@@ -2259,7 +2259,7 @@ pub fn normalize_profile(
     if input.custom_models.len() > 100 {
         return Err(invalid());
     }
-    let mut options = serde_json::Map::new();
+    let mut options = studio_json::Map::new();
     for (field, value) in [
         ("configDir", input.config_dir),
         ("binaryPath", input.binary_path),
@@ -2309,7 +2309,7 @@ pub fn normalize_profile(
         if label.trim().is_empty() || label.chars().count() > 200 {
             return Err(invalid());
         }
-        models.push(serde_json::json!({"id":id,"label":label.trim()}));
+        models.push(studio_json::json!({"id":id,"label":label.trim()}));
     }
     options.insert("customModels".into(), Value::Array(models));
     if let Some(window) = input.auto_compact_window {
@@ -2325,7 +2325,7 @@ pub fn normalize_profile(
             if !(100_000..=1_000_000).contains(&value) {
                 return Err(invalid());
             }
-            options.insert("autoCompactWindow".into(), serde_json::json!(value));
+            options.insert("autoCompactWindow".into(), studio_json::json!(value));
         }
     }
     if input.launch_args.chars().count() > 4096 {
@@ -2344,7 +2344,7 @@ mod historical_receipt_tests {
         AccountSessionError, ConnectionScope, Method, ProviderResponse, RequestCertainty,
         RequestTicket, SessionOutcome, SessionReceipt, provider_receipt_matches,
     };
-    use serde_json::json;
+    use studio_json::json;
 
     fn scope(generation: u64) -> ConnectionScope {
         ConnectionScope {
@@ -2436,7 +2436,7 @@ mod historical_receipt_tests {
 mod persistence_tests {
     #![allow(clippy::unwrap_used)]
     use super::{AccountSessionError, persist_limits};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::{
         collections::BTreeMap,
         sync::{Arc, Mutex},
@@ -2452,7 +2452,7 @@ mod persistence_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        serde_json::from_str(&raw).unwrap()
+        studio_json::from_str(&raw).unwrap()
     }
 
     #[tokio::test]
@@ -2468,11 +2468,11 @@ mod persistence_tests {
                     json!({"stateDir":"fixture"}),
                     false,
                 )?;
-                let raw = serde_json::value::RawValue::from_string(
+                let raw = studio_json::OwnedRawJson::from_string(
                     json!({"accountKey":"other","at":1.0,"data":{"accountId":"other"}}).to_string(),
                 )?;
                 let view =
-                    studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "other", 1.0)?;
+                    studio_runtime_schema::usage_limits::RateLimitView::read(raw.as_str(), "other", 1.0)?;
                 SyncDocumentsRepository::put_entity(tx, "rateLimit", "other", view, false)?;
                 Ok(())
             })
@@ -2503,7 +2503,7 @@ mod persistence_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let entity: Value = serde_json::from_str(&raw).unwrap();
+        let entity: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(entity["value"]["observation"], value);
         assert_eq!(
             entity["value"]["projection"]["runway"]["next"]["color"],
@@ -2512,7 +2512,7 @@ mod persistence_tests {
         assert_eq!(
             serde::Serialize::serialize(
                 &(cache.lock().unwrap().get("default")),
-                serde_json::value::Serializer
+                studio_json::value::Serializer
             )
             .unwrap(),
             value
@@ -2589,7 +2589,7 @@ mod limits_runtime_tests {
     };
     use crate::{account_driver::AccountDriver, account_policy::AccountPolicyState};
     use futures_util::FutureExt;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use std::{
         collections::VecDeque,
         fs,
@@ -2697,7 +2697,7 @@ mod limits_runtime_tests {
         fs::create_dir_all(&home).unwrap();
         let registry_path = root.path().join("accounts/registry.json");
         fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
-        let registry = serde_json::to_vec(&json!({
+        let registry = studio_json::to_vec(&json!({
             "version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
             "defaultAccountKey":"default",
             "accounts":{"default":{
@@ -2850,7 +2850,7 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
+            studio_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
                 ["primary"]["usedPercent"],
             100.0
         );
@@ -2921,7 +2921,7 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"],
+            studio_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"],
             "current"
         );
     }
@@ -2949,7 +2949,7 @@ mod limits_runtime_tests {
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
-                if serde_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"] == "current" { break; }
+                if studio_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"] == "current" { break; }
                 changes.notified().await;
             }
         }).await.expect("invalid replies finish checking");
@@ -2982,7 +2982,7 @@ mod limits_runtime_tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
-                let value: Value = serde_json::from_str(&payload).unwrap();
+                let value: Value = studio_json::from_str(&payload).unwrap();
                 if value["value"]["projection"]["status"]["kind"] == "current" && value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"] == 0.0 { break; }
                 changes.notified().await;
             }
@@ -3029,7 +3029,7 @@ mod limits_runtime_tests {
             loop {
                 let value = f.runtime.limits_snapshot("default").unwrap();
                 let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
-                let view: Value = serde_json::from_str(&payload).unwrap();
+                let view: Value = studio_json::from_str(&payload).unwrap();
                 if value.get("error").and_then(Value::as_str).is_some()
                     && view["value"]["projection"]["status"]["kind"] == "current"
                     && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) {
@@ -3072,7 +3072,7 @@ mod limits_runtime_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let checking: Value = serde_json::from_str(&payload).unwrap();
+        let checking: Value = studio_json::from_str(&payload).unwrap();
         assert_eq!(
             checking["value"]["projection"]["status"]["kind"],
             "checking"
@@ -3088,7 +3088,7 @@ mod limits_runtime_tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
-                let view: Value = serde_json::from_str(&payload).unwrap();
+                let view: Value = studio_json::from_str(&payload).unwrap();
                 if view["value"]["projection"]["status"]["kind"] == "current" && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) { break; }
                 changes.notified().await;
             }
@@ -3111,7 +3111,7 @@ mod limits_runtime_tests {
         .unwrap();
         store.transaction(|tx| {
             let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0))?;
-            let mut view: Value = serde_json::from_str::<Value>(&raw)?["value"].clone();
+            let mut view: Value = studio_json::from_str::<Value>(&raw)?["value"].clone();
             let agent = |reset| json!({"eligibility":{"accountKey":"default","agentId":"a","model":"m","provider":"codex","state":"blocked","validUntil":null,"buckets":[],"overage":"unavailable"},"recovery":{"title":"Limit","message":"Wait","action":{"kind":"none"},"timing":{"kind":"waiting","resetAt":reset}}});
             view["projection"]["agents"] = json!({"a":agent(100.0),"b":agent(200.0)});
             studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
@@ -3148,7 +3148,7 @@ mod limits_runtime_tests {
             let payload: String = store.test_reader().unwrap().query_row(
                 "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0),
             ).unwrap();
-            serde_json::from_str::<Value>(&payload).unwrap()["value"].clone()
+            studio_json::from_str::<Value>(&payload).unwrap()["value"].clone()
         };
         assert_eq!(read_view()["projection"]["status"]["kind"], "checking");
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
@@ -3231,7 +3231,7 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
+            studio_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
                 ["primary"]["usedPercent"],
             100.0
         );
@@ -3268,7 +3268,7 @@ mod limits_runtime_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let envelope: Value = serde_json::from_str(&raw).unwrap();
+        let envelope: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(envelope["value"]["observation"]["at"], repeated.observed_at);
         assert!(envelope["value"]["projection"]["runway"]["computedAt"].is_number());
         assert_eq!(
@@ -3292,7 +3292,7 @@ mod limits_runtime_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let receipt: Value = serde_json::from_str(&raw).unwrap();
+        let receipt: Value = studio_json::from_str(&raw).unwrap();
         assert!(
             receipt.get("snapshot").is_none(),
             "observation receipts must not duplicate provider data serialization"
@@ -3458,7 +3458,7 @@ mod limits_runtime_tests {
             .await
             .unwrap();
         assert_eq!(
-            serde::Serialize::serialize(&(&cached), serde_json::value::Serializer).unwrap()["data"]
+            serde::Serialize::serialize(&(&cached), studio_json::value::Serializer).unwrap()["data"]
                 ["claudeRateLimit"]["overageStatus"],
             "allowed"
         );
@@ -3469,7 +3469,7 @@ mod limits_runtime_tests {
             .await
             .unwrap();
         assert_eq!(
-            serde::Serialize::serialize(&(&fresh), serde_json::value::Serializer).unwrap()["data"]
+            serde::Serialize::serialize(&(&fresh), studio_json::value::Serializer).unwrap()["data"]
                 ["rateLimits"]["primary"]["usedPercent"],
             0.0
         );

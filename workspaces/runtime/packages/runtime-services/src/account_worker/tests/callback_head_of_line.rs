@@ -58,7 +58,7 @@ async fn record_of(state: &State, id: &str) -> Value {
                 [id],
                 |r| r.get(0),
             )?;
-            Ok(serde_json::from_str(&raw).unwrap())
+            Ok(studio_json::from_str(&raw).unwrap())
         })
         .await
         .unwrap()
@@ -133,7 +133,7 @@ impl crate::provider_callbacks::tools::StatusWatchPort for HeldHandler {
         Box::pin(async {
             Ok(crate::provider_callbacks::tools::RulesActionResult {
                 value: studio_runtime_schema::raw_json::RawJson(
-                    serde_json::value::to_raw_value(&Value::Null).expect("JSON"),
+                    studio_json::to_raw_value(&Value::Null).expect("JSON"),
                 ),
                 cancel_monitor_ids: Vec::new(),
             })

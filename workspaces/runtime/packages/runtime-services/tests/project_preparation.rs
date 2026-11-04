@@ -1,5 +1,5 @@
 //! Deterministic interleavings between host preparation and a project writer.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_services::{host_project_runtime::PreparedHost, projects::ProjectsError};
 use studio_runtime_store::{AgentRecord, AgentRepository, ProjectsRepository, RuntimeStore};

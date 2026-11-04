@@ -3,7 +3,7 @@
 use crate::native_actions::{Action, Admission, NativeError};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc, time::Duration};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::persistence::{IdleEpisodeOutcome, RequestIdentity};
@@ -233,7 +233,7 @@ pub fn sync_unload_deadlines(
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, raw) in records {
-        let mut agent: Value = serde_json::from_str(&raw)?;
+        let mut agent: Value = studio_json::from_str(&raw)?;
         let mut episode: Episode = Episode::deserialize(&agent["idleCompactionEpisode"])
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
         if settled(connection, &episode.id)? {
@@ -327,7 +327,7 @@ impl Admission for IdleAdmission {
         }
         self.inner.check(tx, agent, action)?;
         record(tx, &self.episode, IdleEpisodeOutcome::Started, now)?;
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.idleCompactionEpisode.limits',json(?2),'$.idleCompactionEpisode.before',json(?3)) WHERE id=?1", params![agent["id"].as_str(),serde_json::to_string(&self.limits)?,json!({"status":agent["status"],"startAttempt":agent["startAttempt"],"turnEpoch":agent["turnEpoch"]}).to_string()])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.idleCompactionEpisode.limits',json(?2),'$.idleCompactionEpisode.before',json(?3)) WHERE id=?1", params![agent["id"].as_str(),studio_json::to_string(&self.limits)?,json!({"status":agent["status"],"startAttempt":agent["startAttempt"],"turnEpoch":agent["turnEpoch"]}).to_string()])?;
         Ok(())
     }
 }
@@ -469,7 +469,7 @@ async fn next_excluding(
                 })
                 .optional()?;
             raw.map(|(agent, raw)| {
-                serde_json::from_str::<EpisodeRecord>(&raw)
+                studio_json::from_str::<EpisodeRecord>(&raw)
                     .map(|record| (agent, record.episode))
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))
             })

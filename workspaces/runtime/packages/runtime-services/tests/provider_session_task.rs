@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use serde_json::json;
+use studio_json::json;
 use std::{
     collections::BTreeMap,
     sync::{

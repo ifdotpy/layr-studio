@@ -1,14 +1,14 @@
 pub(super) mod support;
 
 fn paired_request(
-    value: &serde_json::Value,
+    value: &studio_json::Value,
 ) -> studio_runtime_services::orchestration_wire::OrchestrationRequest {
     <studio_runtime_services::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value).expect("paired fixture")
 }
 
 /// The `send` command of `POST /api/commands`; the command id is the message id.
-fn send_command(id: &str, room: &str, text: &str, assets: &serde_json::Value) -> String {
-    serde_json::json!({
+fn send_command(id: &str, room: &str, text: &str, assets: &studio_json::Value) -> String {
+    studio_json::json!({
         "id": id, "client": "test", "number": 1, "kind": "send",
         "target": room, "body": {"text": text, "assets": assets}
     })
@@ -16,7 +16,7 @@ fn send_command(id: &str, room: &str, text: &str, assets: &serde_json::Value) ->
 }
 
 /// The delivery receipt row that a send response carries.
-fn receipt_of(response: &serde_json::Value) -> serde_json::Value {
+fn receipt_of(response: &studio_json::Value) -> studio_json::Value {
     response["rows"]
         .as_array()
         .and_then(|rows| {
@@ -68,14 +68,14 @@ async fn http_accepts_unrelated_operation_started_after_preparation() {
             &request_id,
             "late-operation-recipient",
             "hello",
-            &serde_json::json!([]),
+            &studio_json::json!([]),
         )))
         .expect("request");
     let response = app.oneshot(request).await.expect("HTTP response");
     operation.await.expect("operation writer joins");
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let receipt = receipt_of(
-        &serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
+        &studio_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
             .expect("command response"),
     );
     assert_eq!(receipt["status"], "queued");
@@ -131,13 +131,13 @@ async fn group_send_returns_public_recipient_status() {
         .expect("stream response");
     assert_eq!(stream_response.status(), axum::http::StatusCode::OK);
     let mut stream = stream_response.into_body().into_data_stream();
-    async fn resource(stream: &mut axum::body::BodyDataStream) -> serde_json::Value {
+    async fn resource(stream: &mut axum::body::BodyDataStream) -> studio_json::Value {
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
                 let bytes = stream.next().await.expect("frame").expect("bytes");
                 let frame = std::str::from_utf8(&bytes).expect("UTF-8");
                 if frame.starts_with("event: resources\n") {
-                    return serde_json::from_str(
+                    return studio_json::from_str(
                         frame
                             .lines()
                             .find_map(|line| line.strip_prefix("data: "))
@@ -170,13 +170,13 @@ async fn group_send_returns_public_recipient_status() {
             &id,
             "group",
             "hello",
-            &serde_json::json!([]),
+            &studio_json::json!([]),
         )))
         .expect("request");
     let response = app.oneshot(request).await.expect("HTTP response");
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let receipt = receipt_of(
-        &serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
+        &studio_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
             .expect("command response"),
     );
     assert_eq!(
@@ -271,13 +271,13 @@ async fn http_accepts_uploaded_asset_id_with_empty_message_text() {
             &request_id,
             "late-operation-recipient",
             "",
-            &serde_json::json!([asset["id"].clone()]),
+            &studio_json::json!([asset["id"].clone()]),
         )))
         .expect("request");
     let response = app.oneshot(request).await.expect("HTTP response");
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let receipt = receipt_of(
-        &serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
+        &studio_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
             .expect("command response"),
     );
     assert_eq!(receipt["status"], "queued");
@@ -291,8 +291,8 @@ async fn http_accepts_uploaded_asset_id_with_empty_message_text() {
             .expect("saved attachment metadata")
     })
     .await;
-    let metadata: serde_json::Value = serde_json::from_str(&raw).expect("metadata JSON");
-    assert_eq!(metadata["assets"], serde_json::json!([asset["id"]]));
+    let metadata: studio_json::Value = studio_json::from_str(&raw).expect("metadata JSON");
+    assert_eq!(metadata["assets"], studio_json::json!([asset["id"]]));
 }
 
 #[tokio::test]
@@ -364,21 +364,21 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
             .expect("message recipient");
             agent.extra.insert(
                 "remoteAnchor".into(),
-                serde_json::json!({"home":"remote-server","link":"remote-link"}),
+                studio_json::json!({"home":"remote-server","link":"remote-link"}),
             );
             AgentRepository::put(tx, &agent)?;
             tx.execute(
                 "INSERT INTO runtime_server_links(id,record) VALUES(?1,?2)",
                 (
                     "remote-link",
-                    serde_json::json!({"id":"remote-link","side":"remote","home":"remote-server","parent":"late-operation-recipient","parentEpoch":0,"workers":[]}).to_string(),
+                    studio_json::json!({"id":"remote-link","side":"remote","home":"remote-server","parent":"late-operation-recipient","parentEpoch":0,"workers":[]}).to_string(),
                 ),
             )?;
             tx.execute(
                 "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
                 (
                     "remote-server",
-                    serde_json::json!({"id":"remote-server","clientId":"client","kind":"server","label":"Remote","created":1,"publicKey":"public","status":"paired"}).to_string(),
+                    studio_json::json!({"id":"remote-server","clientId":"client","kind":"server","label":"Remote","created":1,"publicKey":"public","status":"paired"}).to_string(),
                 ),
             )?;
             Ok::<_, studio_runtime_store::StoreError>(())
@@ -414,7 +414,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
                 id,
                 "late-operation-recipient",
                 text,
-                &serde_json::json!(assets),
+                &studio_json::json!(assets),
             )))
             .expect("request")
     };
@@ -426,7 +426,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         .expect("HTTP response");
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let receipt = receipt_of(
-        &serde_json::from_slice(
+        &studio_json::from_slice(
             &to_bytes(response.into_body(), 65536)
                 .await
                 .expect("response body"),
@@ -441,7 +441,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         .expect("duplicate HTTP response");
     assert_eq!(duplicate.status(), axum::http::StatusCode::OK);
     let duplicate_receipt = receipt_of(
-        &serde_json::from_slice(
+        &studio_json::from_slice(
             &to_bytes(duplicate.into_body(), 65536)
                 .await
                 .expect("duplicate response body"),
@@ -484,7 +484,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         .await
         .expect("receipts HTTP response");
     assert_eq!(receipts_response.status(), axum::http::StatusCode::OK);
-    let receipts: serde_json::Value = serde_json::from_slice(
+    let receipts: studio_json::Value = studio_json::from_slice(
         &to_bytes(receipts_response.into_body(), 65536)
             .await
             .expect("receipts response body"),
@@ -502,7 +502,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
             .expect("paired remote event intent")
     })
     .await;
-    let envelope: serde_json::Value = serde_json::from_str(&raw).expect("outbox envelope");
+    let envelope: studio_json::Value = studio_json::from_str(&raw).expect("outbox envelope");
     assert_eq!(server, "remote-server");
     assert_eq!(envelope["action"], "input");
     assert_eq!(envelope["payload"]["anchor"], true);
@@ -516,21 +516,21 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
                 "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
                 (
                     "source-server",
-                    serde_json::json!({"id":"source-server","clientId":"source-client","kind":"server","label":"Source","created":1,"publicKey":"public","status":"paired"}).to_string(),
+                    studio_json::json!({"id":"source-server","clientId":"source-client","kind":"server","label":"Source","created":1,"publicKey":"public","status":"paired"}).to_string(),
                 ),
             )?;
             tx.execute(
                 "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
                 (
                     "attacker-server",
-                    serde_json::json!({"id":"attacker-server","clientId":"attacker-client","kind":"server","label":"Attacker","created":1,"publicKey":"public","status":"paired"}).to_string(),
+                    studio_json::json!({"id":"attacker-server","clientId":"attacker-client","kind":"server","label":"Attacker","created":1,"publicKey":"public","status":"paired"}).to_string(),
                 ),
             )?;
             tx.execute(
                 "INSERT INTO runtime_server_links(id,record) VALUES(?1,?2)",
                 (
                     "remote-link",
-                    serde_json::json!({"id":"remote-link","side":"home","server":"source-server","parent":"late-operation-recipient","parentEpoch":0,"workers":[]}).to_string(),
+                    studio_json::json!({"id":"remote-link","side":"home","server":"source-server","parent":"late-operation-recipient","parentEpoch":0,"workers":[]}).to_string(),
                 ),
             )?;
             Ok::<_, studio_runtime_store::StoreError>(())
@@ -571,7 +571,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         tx.execute("DELETE FROM request_results WHERE id=?1", [&inbox_for_reset])?;
-        let admission = serde_json::json!({"id":inbox_for_reset,"signature":signature,"created":created});
+        let admission = studio_json::json!({"id":inbox_for_reset,"signature":signature,"created":created});
         tx.execute(
             "INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,admission) VALUES(?1,?2,'running',NULL,100,'source-server',?3)",
             rusqlite::params![inbox_for_reset, signature, admission.to_string()],
@@ -588,10 +588,10 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         panic!("paired input and its recovered retry must both be applied");
     };
     assert_eq!(recovered, delivered, "recovery returns the saved receipt");
-    let first_receipt: serde_json::Value =
-        serde_json::from_str(first_receipt.value.get()).expect("first receipt");
-    let recovered_receipt: serde_json::Value =
-        serde_json::from_str(recovered_receipt.value.get()).expect("recovered receipt");
+    let first_receipt: studio_json::Value =
+        studio_json::from_str(first_receipt.value.get()).expect("first receipt");
+    let recovered_receipt: studio_json::Value =
+        studio_json::from_str(recovered_receipt.value.get()).expect("recovered receipt");
     assert_eq!(first_receipt["id"], recovered_receipt["id"]);
     let read_event_id = remote_event_id.clone();
     let (event_count, event_status, inbox_count, result) = support::read(
@@ -614,13 +614,13 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     assert_eq!(event_count, 1);
     assert_eq!(event_status, "pending");
     assert_eq!(inbox_count, 0);
-    let result: serde_json::Value = serde_json::from_str(&result).expect("request result JSON");
+    let result: studio_json::Value = studio_json::from_str(&result).expect("request result JSON");
     assert_eq!(result["reply"]["response"]["requestId"], remote_event_id);
     assert_eq!(result["reply"]["response"]["outcome"], "applied");
     assert_eq!(result["reply"]["response"]["value"], first_receipt.clone());
 
     let mut uncertain_envelope = envelope.clone();
-    uncertain_envelope["requestId"] = serde_json::json!(uuid::Uuid::now_v7().to_string());
+    uncertain_envelope["requestId"] = studio_json::json!(uuid::Uuid::now_v7().to_string());
     let uncertain_driver = OrchestrationDriver::new(
         receiver_store.clone(),
         Arc::new(NoTransport),
@@ -678,8 +678,8 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         .expect("queued Unicode paired input")
     })
     .await;
-    let unicode_envelope: serde_json::Value =
-        serde_json::from_str(&raw).expect("Unicode paired envelope");
+    let unicode_envelope: studio_json::Value =
+        studio_json::from_str(&raw).expect("Unicode paired envelope");
     assert_eq!(unicode_envelope["payload"]["text"], unicode_text);
     let unicode_delivery = driver
         .receive("source-server", &paired_request(&unicode_envelope), 104)
@@ -705,7 +705,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     assert_eq!(stored_text, unicode_text);
 
     let mut changed_content = envelope.clone();
-    changed_content["payload"]["text"] = serde_json::json!("Changed paired content");
+    changed_content["payload"]["text"] = studio_json::json!("Changed paired content");
     assert_eq!(
         driver
             .receive("source-server", &paired_request(&changed_content), 103)
@@ -715,8 +715,8 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         409
     );
     let mut followup = envelope.clone();
-    followup["requestId"] = serde_json::json!(uuid::Uuid::now_v7().to_string());
-    followup["payload"]["kind"] = serde_json::json!("followup");
+    followup["requestId"] = studio_json::json!(uuid::Uuid::now_v7().to_string());
+    followup["payload"]["kind"] = studio_json::json!("followup");
     let refused_followup = driver
         .receive("source-server", &paired_request(&followup), 105)
         .await
@@ -732,8 +732,8 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         403
     );
     let mut wrong_link = envelope.clone();
-    wrong_link["requestId"] = serde_json::json!("different-request-wrong-link");
-    wrong_link["payload"]["link"] = serde_json::json!("missing-link");
+    wrong_link["requestId"] = studio_json::json!("different-request-wrong-link");
+    wrong_link["payload"]["link"] = studio_json::json!("missing-link");
     assert_eq!(
         effects
             .execute("source-server", &paired_request(&wrong_link))
@@ -743,8 +743,8 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         404
     );
     let mut wrong_epoch = envelope.clone();
-    wrong_epoch["requestId"] = serde_json::json!("different-request-wrong-epoch");
-    wrong_epoch["payload"]["parentEpoch"] = serde_json::json!(1);
+    wrong_epoch["requestId"] = studio_json::json!("different-request-wrong-epoch");
+    wrong_epoch["payload"]["parentEpoch"] = studio_json::json!(1);
     assert_eq!(
         effects
             .execute("source-server", &paired_request(&wrong_epoch))
@@ -766,7 +766,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         tx.execute("DELETE FROM request_results WHERE id=?1", [&inbox_key])?;
-        let admission = serde_json::json!({"id":inbox_key,"signature":signature,"created":created});
+        let admission = studio_json::json!({"id":inbox_key,"signature":signature,"created":created});
         tx.execute(
             "INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,admission) VALUES(?1,?2,'running',NULL,100,'source-server',?3)",
             rusqlite::params![inbox_key, signature, admission.to_string()],

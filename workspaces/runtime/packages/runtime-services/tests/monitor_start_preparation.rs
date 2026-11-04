@@ -1,6 +1,6 @@
 //! Monitor admission uses current ownership while retaining prepared permissions.
 use crate::monitor_fixtures as fixtures;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::sync::Mutex;
 use studio_runtime_services::{
     monitor_driver::{self, MonitorNative, Submission},
@@ -27,7 +27,7 @@ impl MonitorNative for Port {
 async fn fixture() -> (tempfile::TempDir, RuntimeStore, PreparedStart) {
     let root = fixtures::tempdir();
     let mut case = fixtures::corpus(root.path()).remove(0);
-    let operation: Operation = serde_json::from_str(
+    let operation: Operation = studio_json::from_str(
         r#"{"agent":"agent","epoch":2,"accountKey":"default","connectionId":"connection"}"#,
     )
     .expect("operation");
