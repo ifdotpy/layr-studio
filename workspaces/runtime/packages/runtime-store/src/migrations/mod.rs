@@ -87,12 +87,8 @@ pub(crate) mod m2026_11_02_project_grant_peer_label;
 mod m2026_11_02_project_grants;
 mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;
-<<<<<<< head
 mod m2026_11_03_drop_completed_turns;
-||||||| base
-=======
 mod m2026_11_03_request_signature_digest;
->>>>>>> origin/main
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1493,16 +1489,6 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
-<<<<<<< head
-            id: "2026-11-03-drop-completed-turns",
-            introduced: NOVEMBER_3,
-            target: MigrationTarget::Canvas,
-            supported_source: "Installations with the legacy runtime_completed_turns table",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_11_03_drop_completed_turns::apply(c.transaction),
-||||||| base
-=======
             id: "2026-11-03-request-signature-digest",
             introduced: NOVEMBER_3,
             target: MigrationTarget::Canvas,
@@ -1510,7 +1496,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_03_request_signature_digest::apply(c.transaction),
->>>>>>> origin/main
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-03-drop-completed-turns",
+            introduced: NOVEMBER_3,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the legacy runtime_completed_turns table",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_03_drop_completed_turns::apply(c.transaction),
     },
 ];
 
