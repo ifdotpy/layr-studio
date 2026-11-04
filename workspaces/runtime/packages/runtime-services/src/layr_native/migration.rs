@@ -6,12 +6,11 @@ use super::{
 use serde_json::{Value, json};
 #[cfg(test)]
 use std::fs;
-use std::sync::Arc;
 use std::{collections::BTreeSet, path::Path};
-use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+use studio_runtime_schema::layr_progress::{CopyPhase, CopyUnit};
 use studio_runtime_store::path_identity::CanonicalPath;
 
-pub type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
+pub use super::runtime::ProgressSink;
 /// Minimum interval between terminal progress publications.
 pub const PROGRESS_PUBLICATION_INTERVAL: std::time::Duration =
     runtime::PROGRESS_PUBLICATION_INTERVAL;
