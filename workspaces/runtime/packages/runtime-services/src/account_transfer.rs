@@ -174,6 +174,22 @@ fn read_result(response: Option<&ProviderResponse>) -> Result<ReadResult, Transf
     Ok((Field::Value(body), spill))
 }
 
+/// The form of native request params kept in the transfer record. A large body,
+/// such as a whole Claude session for `claude/moveImport`, keeps only its digest:
+/// the record compares params and never sends them again, and its size is bounded.
+pub(crate) fn durable_params(
+    params: &serde_json::value::RawValue,
+) -> Result<Box<serde_json::value::RawValue>, TransferError> {
+    if params.get().len() <= studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES {
+        return Ok(params.to_owned());
+    }
+    serde_json::value::to_raw_value(&json!({"durableDigest":{
+        "sha256": studio_runtime_store::sha256_hex(params.get().as_bytes()),
+        "size": params.get().len(),
+    }}))
+    .map_err(|_| invalid("provider payload", "/"))
+}
+
 /// The reply body that `provider_read_receipt` leaves out of the record.
 pub(crate) fn spilled_reply(receipt: &SessionReceipt) -> Option<(String, Vec<u8>)> {
     read_result(receipt.response()).ok()?.1
@@ -239,6 +255,8 @@ impl From<crate::account_session_runtime::AccountSessionError> for TransferError
 const TRANSFER_PUBLIC_REASON_MAX_CHARS: usize = 1000;
 
 pub(crate) fn public_preparation_reason(error: &TransferError) -> String {
+    // The public reason is short; the log keeps the full cause once.
+    eprintln!("account transfer preparation failed: {error:?}");
     let reason = match error {
         TransferError::Refused(reason) => (*reason).to_owned(),
         TransferError::Stored {
@@ -1013,6 +1031,7 @@ impl Snapshot {
             .members
             .get(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
+        let params = &*durable_params(params)?;
         let params_value: Value =
             serde_json::from_str(params.get()).map_err(|_| invalid("provider payload", "/"))?;
         if !self.pending()
@@ -1700,6 +1719,7 @@ impl Snapshot {
                 "The transfer is not ready for a new native request",
             ));
         }
+        let params = &*durable_params(params)?;
         let params_value: Value =
             serde_json::from_str(params.get()).map_err(|_| invalid("provider payload", "/"))?;
         if !matches!(
@@ -3039,6 +3059,20 @@ mod provider_receipt_tests {
         );
         let encoded = decision.encoded().unwrap();
         assert!(encoded.find("\"z\":{").unwrap() < encoded.find("\"a\":{").unwrap());
+    }
+
+    #[test]
+    fn a_large_import_request_keeps_only_its_digest_in_the_record() {
+        // A 26 MB Claude session must not exceed the 8 MB transfer record.
+        let big = serde_json::value::to_raw_value(&serde_json::json!({
+            "session": {"turns": "x".repeat(studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES + 1)}
+        }))
+        .unwrap();
+        let kept = super::durable_params(&big).unwrap();
+        assert!(kept.get().len() < 200);
+        assert_eq!(super::durable_params(&big).unwrap().get(), kept.get());
+        let small = serde_json::value::to_raw_value(&serde_json::json!({"cwd":"/p"})).unwrap();
+        assert_eq!(super::durable_params(&small).unwrap().get(), small.get());
     }
 
     #[test]

@@ -676,6 +676,10 @@ async fn session_reply(
             .value()
             .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
         if matches!(result.kind(), ResponseKind::Rejected) {
+            eprintln!(
+                "account transfer read {} replays a provider rejection",
+                call.operation
+            );
             return Err(TransferError::Refused(
                 "The provider rejected a transfer read",
             ));
