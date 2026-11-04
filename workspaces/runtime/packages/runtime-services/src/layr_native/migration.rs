@@ -6,8 +6,15 @@ use super::{
 use serde_json::{Value, json};
 #[cfg(test)]
 use std::fs;
+use std::sync::Arc;
 use std::{collections::BTreeSet, path::Path};
+use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
 use studio_runtime_store::path_identity::CanonicalPath;
+
+pub type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
+/// Minimum interval between terminal progress publications.
+pub const PROGRESS_PUBLICATION_INTERVAL: std::time::Duration =
+    runtime::PROGRESS_PUBLICATION_INTERVAL;
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
 
@@ -164,6 +171,17 @@ pub fn migrate_with_options(
     dry_run: bool,
     options: Options,
 ) -> Result<Value> {
+    migrate_with_progress(state_dir, project, dry_run, options, None)
+}
+
+pub fn migrate_with_progress(
+    state_dir: &Path,
+    project: &Path,
+    dry_run: bool,
+    options: Options,
+    progress: Option<&ProgressSink>,
+) -> Result<Value> {
+    runtime::report(progress, CopyPhase::Sizing, 0, None, CopyUnit::Files);
     let project = CanonicalPath::existing(project).map(CanonicalPath::into_path_buf)?;
     let mut agent = studio_runtime_store::AgentRecord::new(
         "migration".into(),
@@ -450,7 +468,8 @@ pub fn migrate_with_options(
         return Err(NativeLayrError::Refused(refusals.join("\n")));
     }
     size.preflight(&target)?;
-    let ready = runtime::prepare_files_with_git_policy(state_dir, &record, options.without_git)?;
+    let ready =
+        runtime::prepare_files_reporting(state_dir, &record, options.without_git, progress)?;
     let main = PathBuf::from(
         ready["cwd"]
             .as_str()
@@ -480,7 +499,8 @@ pub fn migrate_with_options(
                 allocation.preflight(&main)
             },
             || {
-                let state_id = import_worktree_line(state_dir, &main, &plan, &relative, &name)?;
+                let state_id =
+                    import_worktree_line(state_dir, &main, &plan, &relative, &name, progress)?;
                 Ok(
                     json!({"line":name,"headCommit":imported_head,"worktreeSelection":selection,"stateId":state_id}),
                 )
@@ -504,7 +524,9 @@ pub(super) fn import_worktree_line(
     plan: &super::import::Plan,
     relative: &Path,
     name: &str,
+    progress: Option<&ProgressSink>,
 ) -> Result<String> {
+    runtime::report(progress, CopyPhase::CreatingLine, 0, None, CopyUnit::Files);
     run(state_dir, main, &["line", "new", name, "main"])?;
     let cwd = main
         .parent()
@@ -552,7 +574,22 @@ pub(super) fn import_worktree_line(
             .collect();
         clear_at(&destination, &cache_roots)?;
         // Reuse the pinned subtree even if its pathname was replaced after opening it.
-        plan.stage_open(&destination)
+        if progress.is_some() {
+            plan.stage_open_with_progress(
+                &destination,
+                Some(&|done, total| {
+                    runtime::report(
+                        progress,
+                        CopyPhase::Staging,
+                        done,
+                        Some(total),
+                        CopyUnit::Files,
+                    );
+                }),
+            )
+        } else {
+            plan.stage_open(&destination)
+        }
     })?;
     // A top-level line is a private container, distinct from a nested repository root.
     if relative.as_os_str().is_empty() {
@@ -560,6 +597,7 @@ pub(super) fn import_worktree_line(
     }
     super::git_guard::install_hook(state_dir, &cwd)?;
     runtime::save_imported_tree(state_dir, &cwd, "Import Git worktree")?;
+    runtime::report(progress, CopyPhase::WarmingCaches, 0, None, CopyUnit::Files);
     plan.warm_caches(state_dir, &cwd, relative)?;
     run(state_dir, &cwd, &["rev-parse", "head"])
 }
@@ -602,6 +640,29 @@ use clear::{clear_at, discard_inherited_cache};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_reports_typed_sizing_progress() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = seen.clone();
+        let progress: ProgressSink =
+            std::sync::Arc::new(move |value| captured.lock().unwrap().push(value));
+        migrate_with_progress(
+            fixture.path(),
+            &project,
+            true,
+            Options::default(),
+            Some(&progress),
+        )
+        .expect("inspect migration progress");
+        assert_eq!(
+            seen.lock().unwrap()[0].phase,
+            studio_runtime_schema::layr_progress::CopyPhase::Sizing
+        );
+    }
 
     #[test]
     fn a_failed_import_step_puts_the_line_git_folder_back() {
@@ -894,7 +955,17 @@ mod tests {
             binary_path(&state),
         )
         .expect("fixture operation succeeds");
-        let report = migrate(&state, &project, false).expect("fixture operation succeeds");
+        let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = observed.clone();
+        let progress: ProgressSink =
+            std::sync::Arc::new(move |value| captured.lock().unwrap().push(value));
+        let report =
+            migrate_with_progress(&state, &project, false, Options::default(), Some(&progress))
+                .expect("fixture operation succeeds");
+        assert!(observed.lock().unwrap().iter().any(
+            |p: &studio_runtime_schema::layr_progress::CopyProgress| p.phase
+                == studio_runtime_schema::layr_progress::CopyPhase::CreatingLine
+        ));
         let main = PathBuf::from(
             report["mainPath"]
                 .as_str()

@@ -29,12 +29,12 @@ pub enum NativeLayrError {
 }
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
-type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
+pub(crate) type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
 
 /// Minimum interval between progress publications, in milliseconds.
-const PROGRESS_PUBLICATION_INTERVAL: Duration = Duration::from_millis(250);
+pub(super) const PROGRESS_PUBLICATION_INTERVAL: Duration = Duration::from_millis(250);
 
-fn progress_channel() -> (
+pub(crate) fn progress_channel() -> (
     ProgressSink,
     tokio::sync::watch::Receiver<Option<CopyProgress>>,
 ) {
@@ -45,7 +45,7 @@ fn progress_channel() -> (
     (sink, receiver)
 }
 
-async fn next_progress(
+pub(crate) async fn next_progress(
     receiver: &mut tokio::sync::watch::Receiver<Option<CopyProgress>>,
     last: Option<tokio::time::Instant>,
 ) -> Option<CopyProgress> {
@@ -72,7 +72,7 @@ fn parse_import_progress(line: &[u8]) -> Option<CopyProgress> {
     })
 }
 
-fn progress_guard(current: &Value, expected: &Value) -> bool {
+pub(crate) fn progress_guard(current: &Value, expected: &Value) -> bool {
     current["id"] == expected["id"]
         && current["epoch"] == expected["epoch"]
         && matches!(current["status"].as_str(), Some("queued" | "starting"))
@@ -80,7 +80,7 @@ fn progress_guard(current: &Value, expected: &Value) -> bool {
             == studio_runtime_store::workspace_ready::workspace_generation(expected)
 }
 
-fn report(
+pub(crate) fn report(
     sink: Option<&ProgressSink>,
     phase: CopyPhase,
     done: u64,
@@ -604,6 +604,7 @@ fn create_worker_line(
     cwd: &Path,
     record: &Value,
     default_start: &str,
+    progress: Option<&ProgressSink>,
 ) -> Result<Value> {
     let requested = record["layrBaseState"].as_str();
     let start = requested.unwrap_or(default_start);
@@ -632,25 +633,19 @@ fn create_worker_line(
             Ok(())
         },
         || {
+            report(progress, CopyPhase::CreatingLine, 0, None, CopyUnit::Files);
             run(state_dir, main, &["line", "new", line, start])?;
             Ok(json!({"path":cwd,"line":line}))
         },
     )
 }
 
+#[cfg(test)]
 pub(super) fn prepare_files(state_dir: &Path, record: &Value) -> Result<Value> {
-    prepare_files_with_git_policy(state_dir, record, false)
+    prepare_files_reporting(state_dir, record, false, None)
 }
 
-pub(super) fn prepare_files_with_git_policy(
-    state_dir: &Path,
-    record: &Value,
-    without_git: bool,
-) -> Result<Value> {
-    prepare_files_reporting(state_dir, record, without_git, None)
-}
-
-fn prepare_files_reporting(
+pub(super) fn prepare_files_reporting(
     state_dir: &Path,
     record: &Value,
     without_git: bool,
@@ -849,7 +844,7 @@ fn prepare_files_reporting(
         .join(&line);
     if !lead && !reviewer {
         create_worker_line(
-            state_dir, &root, &main, &project, &line, &cwd, record, &start,
+            state_dir, &root, &main, &project, &line, &cwd, record, &start, progress,
         )?;
     }
     super::git_guard::install_hook(state_dir, &cwd)?;
@@ -893,7 +888,7 @@ fn prepare_files_reporting(
     Ok(result)
 }
 
-async fn publish_progress(
+pub(crate) async fn publish_progress(
     store: &RuntimeStore,
     expected: &Value,
     progress: Option<CopyProgress>,
@@ -1958,6 +1953,10 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         super::super::capability::TEST_BINARY.with(|slot| *slot.borrow_mut() = Some(binary));
         let record = json!({"id":"worker", "layrBaseState":"requested"});
+        let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = observed.clone();
+        let progress: ProgressSink =
+            std::sync::Arc::new(move |value| captured.lock().unwrap().push(value));
         let result = create_worker_line(
             state.path(),
             &root,
@@ -1967,6 +1966,16 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &record,
             "main",
+            Some(&progress),
+        );
+        assert_eq!(
+            observed.lock().unwrap().as_slice(),
+            &[CopyProgress {
+                phase: CopyPhase::CreatingLine,
+                done: 0,
+                total: None,
+                unit: CopyUnit::Files
+            }]
         );
         assert!(result.is_ok(), "{result:?}");
         let receipt_path = settings::metadata(state.path(), &root)
@@ -1988,6 +1997,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &record,
             "main",
+            None,
         )
         .unwrap();
         assert_eq!(replay, result.unwrap());
@@ -2001,7 +2011,8 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 "worker",
                 &main,
                 &changed,
-                "main"
+                "main",
+                None
             )
             .is_err()
         );
@@ -2021,7 +2032,8 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 "default",
                 &main,
                 &default,
-                "cached-main"
+                "cached-main",
+                None
             )
             .unwrap(),
             legacy_result
@@ -2036,6 +2048,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &default,
             "cached-main",
+            None,
         )
         .unwrap();
         let missing = json!({"id":"missing", "layrBaseState":"missing"});
@@ -2048,6 +2061,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &missing,
             "main",
+            None,
         )
         .unwrap_err();
         assert!(

@@ -196,6 +196,9 @@ pub use runtime::{
     NativeLayrError, agent_value, evidence, main_path, merge, operation, prepare, project_id,
     remove, run, save, save_turn,
 };
+pub(crate) use runtime::{
+    ProgressSink, next_progress, progress_channel, progress_guard, publish_progress, report,
+};
 
 /// Thread commands must resolve Studio's host binary before any user Cargo installation.
 pub fn thread_environment(state_root: &Path) -> serde_json::Map<String, Value> {
