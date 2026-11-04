@@ -255,6 +255,12 @@ pub fn atomic_replace_with(
     })()
 }
 
+impl From<studio_json::error::Error> for EncodeRegistryError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Serialization(value.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{decode_registry, decode_registry_typed};
@@ -298,11 +304,5 @@ mod tests {
         }
         let duplicate = source.replacen("\"version\":2.0", "\"version\":2,\"version\":2", 1);
         assert!(decode_registry(duplicate.as_bytes()).is_err());
-    }
-}
-
-impl From<studio_json::error::Error> for EncodeRegistryError {
-    fn from(value: studio_json::error::Error) -> Self {
-        Self::Serialization(value.into())
     }
 }

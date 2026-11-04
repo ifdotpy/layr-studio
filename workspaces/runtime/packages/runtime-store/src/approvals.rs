@@ -817,6 +817,12 @@ pub fn set_hidden(tx: &Connection, id: &ApprovalId, hidden: Option<&Hidden>) -> 
     Ok(())
 }
 
+impl From<studio_json::error::Error> for ApprovalError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1314,11 +1320,5 @@ mod tests {
         ));
         let expired = expire_due(&tx, Timestamp(101.0)).unwrap();
         assert_eq!(expired.len(), 1, "the restored timer fires");
-    }
-}
-
-impl From<studio_json::error::Error> for ApprovalError {
-    fn from(value: studio_json::error::Error) -> Self {
-        Self::Json(value.into())
     }
 }

@@ -835,7 +835,9 @@ mod typed_query_tests {
     fn provider_rejects_malformed_agent_fields() {
         use studio_json::json;
         let valid = json!({"compactions":0,"provider":"codex","id":"owner","rootId":"owner","epoch":1,"status":"idle","accountKey":"default"});
-        assert!(studio_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok());
+        assert!(
+            studio_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok()
+        );
         assert!(
             <studio_runtime_store::AgentRecord as serde::Deserialize>::deserialize(&valid).is_ok()
         );

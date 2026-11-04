@@ -308,6 +308,12 @@ impl Input {
     }
 }
 
+impl From<studio_json::error::Error> for CallbackError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::from(studio_json::Error::from(value))
+    }
+}
+
 #[cfg(test)]
 mod origin_tests {
     use super::*;
@@ -350,11 +356,5 @@ mod origin_tests {
         context.generation -= 1;
         context.agent = "another-agent".into();
         assert_ne!(origin, ReplyIdentity::new(&context, &rpc).key());
-    }
-}
-
-impl From<studio_json::error::Error> for CallbackError {
-    fn from(value: studio_json::error::Error) -> Self {
-        Self::from(studio_json::Error::from(value))
     }
 }
