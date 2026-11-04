@@ -1283,13 +1283,17 @@ fn agent_commit_needs_tick_in(
 
 // Keep the small active index as the outer loop. Without it, deadline reads
 // repeatedly pull the historical monitor records into the SQLite page cache.
-const MONITOR_DEADLINE_SQL: &str = "SELECT MIN(deadline) FROM (
+const MONITOR_DEADLINE_SQL: &str = "WITH active_monitors AS MATERIALIZED (
+                SELECT id, monitor_status, jsonb(record) AS record
+                FROM runtime_monitors INDEXED BY runtime_monitor_startup_active
+                WHERE monitor_status IN ('running','starting','approval') AND monitor_status='running'
+            ) SELECT MIN(deadline) FROM (
                 SELECT CASE
                     WHEN COALESCE(json_extract(m.record,'$.stallProbeGeneration'),-1)=json_extract(m.record,'$.activityGeneration')
                         THEN COALESCE(json_extract(m.record,'$.stallProbeStarted'),json_extract(m.record,'$.activityAt'),json_extract(m.record,'$.created'))+?1
                     ELSE COALESCE(json_extract(m.record,'$.activityAt'),json_extract(m.record,'$.created'))+COALESCE(json_extract(m.record,'$.stallTimeoutSeconds'),?2)
                 END AS deadline
-                FROM runtime_monitors m INDEXED BY runtime_monitor_startup_active CROSS JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent')
+                FROM active_monitors m CROSS JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent')
                 WHERE m.monitor_status IN ('running','starting','approval') AND m.monitor_status='running'
                   AND COALESCE(json_extract(m.record,'$.reattachRecovery.status'),'')!='running'
                   AND COALESCE(json_extract(m.record,'$.cancelRequested'),0)=0
@@ -1303,7 +1307,7 @@ const MONITOR_DEADLINE_SQL: &str = "SELECT MIN(deadline) FROM (
                        OR json_type(m.record,'$.stallProbeStarted') IN ('integer','real'))
                 UNION ALL
                 SELECT COALESCE(json_extract(m.record,'$.outputWakeAt'),0)+?3
-                FROM runtime_monitors m INDEXED BY runtime_monitor_startup_active CROSS JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent')
+                FROM active_monitors m CROSS JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent')
                 WHERE m.monitor_status IN ('running','starting','approval') AND m.monitor_status='running'
                   AND COALESCE(json_extract(m.record,'$.reattachRecovery.status'),'')!='running'
                   AND json_extract(a.record,'$.autoWake')=1
@@ -1313,7 +1317,7 @@ const MONITOR_DEADLINE_SQL: &str = "SELECT MIN(deadline) FROM (
                   AND EXISTS(SELECT 1 FROM json_each(m.record,'$.outputMatchesPending') WHERE value>0)
                 UNION ALL
                 SELECT COALESCE(json_extract(record,'$.cancelDispatch.nextAttemptAt'),0)
-                FROM runtime_monitors INDEXED BY runtime_monitor_startup_active
+                FROM active_monitors
                 WHERE monitor_status IN ('running','starting','approval') AND monitor_status='running'
                   AND json_extract(record,'$.cancelRequested')=1
                   AND COALESCE(json_extract(record,'$.cancelDispatch.status'),'pending')='pending'
@@ -2943,6 +2947,24 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual Callgrind fixture"]
+    fn monitor_deadline_callgrind_50() {
+        let db = rusqlite::Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval'); INSERT INTO runtime_agents VALUES('a','{\"autoWake\":true,\"epoch\":1}');").expect("schema");
+        for i in 0..50 {
+            let record = serde_json::json!({"status":"running", "agent":"a", "epoch":1, "created":10.0, "activityAt":10.0, "activityGeneration":1, "outputMatchesPending":{}, "outputMatchExcerpts":{"example":"x".repeat(4096)}});
+            db.execute(
+                "INSERT INTO runtime_monitors VALUES(?1,?2,'running')",
+                rusqlite::params![format!("m{i}"), record.to_string()],
+            )
+            .expect("monitor");
+        }
+        for _ in 0..100 {
+            std::hint::black_box(super::next_deadline_in(&db).expect("deadline"));
+        }
+    }
+
+    #[test]
     fn monitor_deadline_plan_drives_agent_lookups_from_active_monitors() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
         db.execute_batch(
@@ -2965,8 +2987,13 @@ mod tests {
             .expect("plan rows")
             .collect::<Result<_, _>>()
             .expect("plan details");
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("MATERIALIZE active_monitors")),
+            "{plan:?}"
+        );
         assert_eq!(
-            plan.iter().filter(|step| step.contains("SCAN a")).count(),
+            plan.iter().filter(|step| *step == "SCAN a").count(),
             0,
             "{plan:?}"
         );
@@ -2983,7 +3010,7 @@ mod tests {
             plan.iter()
                 .filter(|step| step.contains("USING INDEX runtime_monitor_startup_active"))
                 .count(),
-            3,
+            1,
             "{plan:?}"
         );
     }

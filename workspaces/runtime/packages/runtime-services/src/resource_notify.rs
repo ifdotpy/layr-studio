@@ -497,7 +497,24 @@ impl ResourceNotifications {
         &self,
         resources: &[T],
         after: Option<i64>,
+        read: F,
+    ) -> Result<ResourceChanges<T>, ResourceNotifyError>
+    where
+        T: ResourceIdentity,
+        F: FnMut(T) -> Fut,
+        Fut: std::future::Future<Output = Option<Vec<u8>>>,
+    {
+        self.changes_since_with_content_and_rejection(resources, after, read, |_| {})
+            .await
+    }
+
+    /// Reject sampled content that lost to a later checked revision.
+    pub async fn changes_since_with_content_and_rejection<T, F, Fut>(
+        &self,
+        resources: &[T],
+        after: Option<i64>,
         mut read: F,
+        mut rejected: impl FnMut(&T),
     ) -> Result<ResourceChanges<T>, ResourceNotifyError>
     where
         T: ResourceIdentity,
@@ -539,6 +556,7 @@ impl ResourceNotifications {
                 // A later sampled publication can finish first. Never overwrite it
                 // with an older read; keep this view's sampled revision conservative.
                 if existing.is_some_and(|index| content[index].checked_revision > *version) {
+                    rejected(resource);
                     if after.is_none_or(|after| *version > after) {
                         selected.push(resource.clone());
                         versions.push(*version);

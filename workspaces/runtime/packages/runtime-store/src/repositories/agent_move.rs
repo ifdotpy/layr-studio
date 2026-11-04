@@ -1,4 +1,5 @@
 //! Existing agent-move records, conditionally present after paired-channel initialization.
+use crate::CachedSql;
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
 use crate::{JsonRecord, RecordKeyMode, RecordQueryShape, StoreResult, Table};
 use rusqlite::{Connection, Transaction};
@@ -59,7 +60,7 @@ impl AgentMoveRepository {
         db: &Connection,
         agents: &std::collections::BTreeSet<String>,
     ) -> StoreResult<bool> {
-        let exists: bool = db.query_row(
+        let exists: bool = db.query_row_cached(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_agent_moves')",
             [], |row| row.get(0),
         )?;
