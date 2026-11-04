@@ -2112,6 +2112,30 @@ impl Worker {
             previous.1.abort();
         }
     }
+    /// Wake the agent after the recheck interval; its preparation checks free space again.
+    fn wait_for_disk_recheck(&mut self, agent_id: String, epoch: i64) {
+        let commands = self.commands.clone();
+        let key = agent_id.clone();
+        let task = tokio::spawn(async move {
+            let task_id = tokio::task::id();
+            tokio::time::sleep(crate::disk_space::RECHECK).await;
+            let _closed = commands
+                .send(AccountCommand::PreparationWaitFinished {
+                    agent_id: agent_id.clone(),
+                    task_id,
+                })
+                .await;
+            let _closed = commands
+                .send(AccountCommand::Wake { agent_id, epoch })
+                .await;
+        });
+        if let Some((_, previous)) = self
+            .preparation_waits
+            .insert(key, (epoch, task.abort_handle()))
+        {
+            previous.abort();
+        }
+    }
     async fn refresh_vm_claude_credentials(&mut self) -> Result<(), WorkerError> {
         let actors = self
             .vm_sessions
@@ -2457,6 +2481,9 @@ impl Worker {
                 deadline,
             )) => {
                 self.wait_for_deferred_deadline(agent_id.clone(), epoch, attempt, deadline);
+            }
+            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskWait(epoch)) => {
+                self.wait_for_disk_recheck(agent_id.clone(), epoch);
             }
             turn_preparation::Outcome::Unclaimed(
                 turn_preparation::Unclaimed::Nothing | turn_preparation::Unclaimed::NativeReview,
