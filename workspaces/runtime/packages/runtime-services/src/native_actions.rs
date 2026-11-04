@@ -1554,7 +1554,7 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(
     studio_json::from_value(value).map_err(|_| NativeError::Invalid(location))
 }
 
-pub(crate) fn checked_agent(value: &Value) -> Result<AgentRecord> {
+pub(crate) fn validate_agent(value: &Value) -> Result<()> {
     bounded(value, "agent")?;
     crate::context_repair::validate("PersistedAgentRecord", value, "agent").map_err(|_| {
         NativeError::InvalidStored {
@@ -1567,6 +1567,11 @@ pub(crate) fn checked_agent(value: &Value) -> Result<AgentRecord> {
             location: "record".into(),
         }
     })?;
+    Ok(())
+}
+
+pub(crate) fn checked_agent(value: &Value) -> Result<AgentRecord> {
+    validate_agent(value)?;
     Ok(AgentRecord::from_value(value.clone())?)
 }
 

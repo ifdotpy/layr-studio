@@ -604,6 +604,68 @@ fn invalid_worker_not_sent_receipts_keep_intent_unknown_and_unclaimable() {
 }
 
 #[test]
+fn review_plan_record_boundary_preserves_optional_and_extension_fields() {
+    let case = &corpus()["reviews"][0];
+    for variant in 0..3 {
+        let mut actor = case["actor"].clone();
+        match variant {
+            0 => {
+                actor.as_object_mut().unwrap().remove("fastMode");
+            }
+            1 => {
+                actor["fastMode"] = Value::Null;
+            }
+            _ => {
+                actor["futureReviewOption"] = json!({"nested": [null, 1]});
+            }
+        }
+        let make = |actor: Value, root: Value| {
+            ReviewPlan::from_records(
+                actor,
+                root,
+                case["args"].clone(),
+                "review-request".into(),
+                case["directory"].as_str().unwrap().into(),
+            )
+        };
+        let actor_record = studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();
+        let root_record =
+            studio_runtime_store::AgentRecord::from_value(case["root"].clone()).unwrap();
+        let normalized_actor = actor_record.value();
+        let normalized_root = root_record.value();
+        let old = make(normalized_actor, normalized_root).unwrap();
+        let typed = ReviewPlan::from_checked_records(
+            &actor_record,
+            &root_record,
+            case["args"].clone(),
+            "review-request".into(),
+            case["directory"].as_str().unwrap().into(),
+        )
+        .unwrap();
+        assert_eq!(
+            studio_json::to_string(old.spec()).unwrap(),
+            studio_json::to_string(typed.spec()).unwrap()
+        );
+        assert_eq!(
+            old.existing(&case["child"]).unwrap(),
+            typed.existing(&case["child"]).unwrap()
+        );
+        assert!(make(actor.clone(), case["root"].clone()).is_ok());
+        let mut mismatch = case["root"].clone();
+        mismatch["id"] = json!("other-root");
+        assert!(matches!(
+            make(actor.clone(), mismatch),
+            Err(NativeError::Changed)
+        ));
+        actor["epoch"] = json!("invalid");
+        assert!(matches!(
+            make(actor, case["root"].clone()),
+            Err(NativeError::InvalidStored { .. })
+        ));
+    }
+}
+
+#[test]
 fn review_prompt_uses_compact_json() {
     let case = &corpus()["reviews"][0];
     let plan = ReviewPlan::from_records(
@@ -845,6 +907,112 @@ impl native_review::ReviewCreator for Creator {
         Ok(())
     }
 }
+#[test]
+fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
+    let case = &corpus()["reviews"][0];
+    for change_root in [false, true] {
+        for variant in ["missing", "null", "unknown"] {
+            let mut actor = case["actor"].clone();
+            actor["rootId"] = json!("root");
+            actor["parentId"] = json!("root");
+            actor["isLead"] = json!(false);
+            let mut root = case["root"].clone();
+            root["id"] = json!("root");
+            root["rootId"] = json!("root");
+            let record = if change_root { &mut root } else { &mut actor };
+            match variant {
+                "missing" => {
+                    record.as_object_mut().unwrap().remove("effort");
+                }
+                "null" => {
+                    record["effort"] = Value::Null;
+                }
+                _ => {
+                    record["futureReviewOption"] = json!({"nested": [null, 1]});
+                }
+            }
+            let actor_record =
+                studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();
+            let root_record = studio_runtime_store::AgentRecord::from_value(root.clone()).unwrap();
+            let plans = [
+                ReviewPlan::from_records(
+                    actor.clone(),
+                    root.clone(),
+                    case["args"].clone(),
+                    "review-request".into(),
+                    case["directory"].as_str().unwrap().into(),
+                )
+                .unwrap(),
+                ReviewPlan::from_checked_records(
+                    &actor_record,
+                    &root_record,
+                    case["args"].clone(),
+                    "review-request".into(),
+                    case["directory"].as_str().unwrap().into(),
+                )
+                .unwrap(),
+            ];
+            let mut results = Vec::new();
+            for plan in &plans {
+                let make_db = || {
+                    let db = db(&json!({"agent":actor}));
+                    studio_runtime_store::agent_volatile::put(&db, "root", &root, false).unwrap();
+                    db
+                };
+                let mut changed = make_db();
+                let mut changed_record = if change_root {
+                    root.clone()
+                } else {
+                    actor.clone()
+                };
+                match variant {
+                    "missing" => changed_record["effort"] = Value::Null,
+                    "null" => {
+                        changed_record.as_object_mut().unwrap().remove("effort");
+                    }
+                    _ => {
+                        changed_record
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("futureReviewOption");
+                    }
+                }
+                let id = changed_record["id"].as_str().unwrap();
+                studio_runtime_store::agent_volatile::put(&changed, id, &changed_record, false)
+                    .unwrap();
+                let tx = changed.transaction().unwrap();
+                let mut child = case["child"].clone();
+                child["rootId"] = json!("root");
+                assert!(
+                    matches!(
+                        native_review::reserve(&tx, plan, &Creator(child.clone())),
+                        Err(NativeError::Changed)
+                    ),
+                    "{change_root} {variant}"
+                );
+                drop(tx);
+
+                let mut db = make_db();
+                let tx = db.transaction().unwrap();
+                let receipt = native_review::reserve(&tx, plan, &Creator(child)).unwrap();
+                tx.commit().unwrap();
+                let raw: String = db
+                    .query_row(
+                        "SELECT record FROM runtime_agents WHERE id=?1",
+                        [native_review::worker_id("review-request")],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                let mut persisted: Value = studio_json::from_str(&raw).unwrap();
+                // Each reservation issues a fresh action identity.
+                persisted["nativeReview"]["actionRequestId"] = Value::Null;
+                results.push((receipt, persisted));
+            }
+            assert_eq!(results[0], results[1], "{change_root} {variant}");
+        }
+    }
+}
+
 #[test]
 fn review_reservation_rolls_back_and_replays_without_second_child() {
     let case = &corpus()["reviews"][0];

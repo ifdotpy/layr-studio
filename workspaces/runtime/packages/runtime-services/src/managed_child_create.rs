@@ -523,9 +523,13 @@ pub(crate) async fn spawn_agents(
     event_write::assert_delegation(&root)
         .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
     let root_value = root.value();
-    let parent_cwd = parent_value.get("cwd").and_then(Value::as_str).ok_or(
-        crate::managed_host_tools::Error::Invalid("Select a project directory"),
-    )?;
+    let parent_cwd =
+        actor_record
+            .cwd
+            .as_deref()
+            .ok_or(crate::managed_host_tools::Error::Invalid(
+                "Select a project directory",
+            ))?;
     let parent_account = parent_value
         .get("accountKey")
         .and_then(Value::as_str)
@@ -1509,9 +1513,13 @@ pub(crate) async fn request_review(
     let parent_value = actor_record.value();
     let root = Box::new(stored_root(store, actor_record.root_id.clone()).await?);
     let root_value = root.value();
-    let parent_cwd = parent_value.get("cwd").and_then(Value::as_str).ok_or(
-        crate::managed_host_tools::Error::Invalid("Select a project directory"),
-    )?;
+    let parent_cwd =
+        actor_record
+            .cwd
+            .as_deref()
+            .ok_or(crate::managed_host_tools::Error::Invalid(
+                "Select a project directory",
+            ))?;
     let mut directory_path = args
         .get("cwd")
         .and_then(Value::as_str)
@@ -1526,9 +1534,13 @@ pub(crate) async fn request_review(
         })?
         .to_string_lossy()
         .into_owned();
-    let plan = crate::native_review::ReviewPlan::from_records(
-        parent_value.clone(),
-        root_value.clone(),
+    crate::native_actions::bounded(&parent_value, "review.actor")
+        .and_then(|()| crate::native_actions::validate_agent(&parent_value))
+        .and_then(|()| crate::native_actions::validate_agent(&root_value))
+        .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid native review request"))?;
+    let plan = crate::native_review::ReviewPlan::from_checked_records(
+        &actor_record,
+        &root,
         args.clone(),
         request_id.to_owned(),
         directory.clone(),

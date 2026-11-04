@@ -121,6 +121,23 @@ impl ReviewPlan {
         bounded(&actor, "review.actor")?;
         let checked = checked_agent(&actor)?;
         let checked_root = checked_agent(&root)?;
+        let mut plan = Self::from_checked_records(&checked, &checked_root, args, key, directory)?;
+        // Reservation compares the original missing/null shape at this boundary.
+        plan.actor = actor;
+        plan.root = root;
+        Ok(plan)
+    }
+
+    /// The caller validates both persisted records before entering this planner.
+    pub fn from_checked_records(
+        checked: &AgentRecord,
+        checked_root: &AgentRecord,
+        args: Value,
+        key: String,
+        directory: String,
+    ) -> Result<Self> {
+        let actor = checked.value();
+        let root = checked_root.value();
         if checked.root_id != checked_root.id {
             return Err(NativeError::Changed);
         }
@@ -150,7 +167,7 @@ impl ReviewPlan {
                 EffortSelection::Set(value.to_owned())
             });
         let (model, effort, fast_mode) =
-            execution_settings(&checked, &checked_root, &requested_model, &requested_effort);
+            execution_settings(checked, checked_root, &requested_model, &requested_effort);
         let fast_mode = fast_mode
             .or_else(|| actor.get("fastMode").and_then(Value::as_bool))
             .unwrap_or(false);
