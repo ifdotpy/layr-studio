@@ -127,6 +127,24 @@ test("a starting or migrating server is waited for, not called incompatible", as
   assert.equal(fetch.mock.calls.length, 3);
 });
 
+test("a reset first connection is retried, not reported as unverifiable", async () => {
+  let calls = 0;
+  await serve(
+    (req, res) => {
+      if (++calls === 1) {
+        req.socket.destroy();
+        return;
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(record));
+    },
+    async (origin) => {
+      assert.deepEqual(await identity(origin, state, timing), record);
+    },
+  );
+  assert.equal(calls, 2);
+});
+
 test("a server that never responds reaches a bounded failure", async () => {
   virtualTimeouts();
   vi.stubGlobal("fetch", async (_url: unknown, { signal }: RequestInit) =>
