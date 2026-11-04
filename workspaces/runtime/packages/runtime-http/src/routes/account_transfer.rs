@@ -186,17 +186,39 @@ async fn transfer(
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
             .as_secs_f64();
-        account_transfer_driver::request(
-            &store,
-            request_id.as_str(),
-            lead,
-            target,
-            scope.as_ref().map_or("team", |value| value.as_str()),
-            &target_provider,
-            now,
-        )
-        .await
-        .map_err(error)?
+        // An idle Claude chat moves between Claude accounts of this server by a
+        // file copy and one transaction; other chats use the transfer flow.
+        let catalog = state.model_catalog.clone();
+        let home = move |account: &str| catalog.account_profile(account).map(|(home, _)| home);
+        let simple = if target_provider == ProviderKind::Claude.key() {
+            studio_runtime_services::simple_move::move_claude_chat(
+                &store,
+                lead,
+                &home,
+                target,
+                request_id.as_str(),
+                scope.as_ref().map_or("team", |value| value.as_str()),
+                now,
+            )
+            .await
+            .map_err(error)?
+        } else {
+            None
+        };
+        match simple {
+            Some(moved) => moved,
+            None => account_transfer_driver::request(
+                &store,
+                request_id.as_str(),
+                lead,
+                target,
+                scope.as_ref().map_or("team", |value| value.as_str()),
+                &target_provider,
+                now,
+            )
+            .await
+            .map_err(error)?,
+        }
     };
     state.event_wake.notify_one();
     state.continuation_wake.notify_one();

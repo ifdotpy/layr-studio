@@ -176,6 +176,7 @@ pub mod questions_write;
 pub mod queue_write;
 pub mod radio;
 pub mod radio_runtime;
+pub mod simple_move;
 pub use radio_runtime::{
     Interrupt, InterruptOutcome, InterruptReceipt, InterruptTransport, NativeAcceptanceReceipt,
     RadioCreation, handoff_interrupt,
