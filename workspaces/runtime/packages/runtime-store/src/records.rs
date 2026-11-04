@@ -753,7 +753,19 @@ pub struct AgentRecord {
 #[serde(untagged)]
 pub enum NativeFailureHold {
     Boolean(bool),
+    Terminal {
+        #[serde(rename = "terminalFault")]
+        terminal_fault: TerminalFault,
+    },
     Unreadable(Value),
+}
+
+/// Terminal data faults preserve their evidence and cannot be resumed by a message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalFault {
+    InvalidAttempt,
+    PendingReceipt,
 }
 
 /// Normalize transfer values on decode while retaining historical JSON on disk.
@@ -839,12 +851,19 @@ impl AgentRecord {
     }
 
     pub fn clear_native_failure_hold(&mut self) {
+        if matches!(
+            self.native_failure_hold.value(),
+            Some(NativeFailureHold::Terminal { .. })
+        ) {
+            return;
+        }
         self.native_failure_hold = studio_runtime_schema::queue_command::Field::Missing;
     }
 
     pub fn native_failure_held(&self) -> bool {
         match self.native_failure_hold.value() {
             Some(NativeFailureHold::Boolean(value)) => *value,
+            Some(NativeFailureHold::Terminal { .. }) => true,
             Some(NativeFailureHold::Unreadable(value)) => crate::truthy(Some(value)),
             None => false,
         }
@@ -4176,6 +4195,33 @@ mod tests {
             record.value().get("prepareAttempt"),
             Some(&json!({"old":true}))
         );
+    }
+
+    #[test]
+    fn clear_native_failure_hold_preserves_terminal_faults() {
+        let mut record = agent(
+            json!({"compactions":0, "id":"agent", "rootId":"agent", "epoch":2, "status":"failed", "accountKey":"default"}),
+        );
+        for fault in [
+            super::TerminalFault::InvalidAttempt,
+            super::TerminalFault::PendingReceipt,
+        ] {
+            record.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+                super::NativeFailureHold::Terminal {
+                    terminal_fault: fault,
+                },
+            );
+            record.clear_native_failure_hold();
+            assert_eq!(
+                record.native_failure_hold.value(),
+                Some(&super::NativeFailureHold::Terminal {
+                    terminal_fault: fault
+                })
+            );
+        }
+        record.set_native_failure_hold(true);
+        record.clear_native_failure_hold();
+        assert!(record.native_failure_hold.is_missing());
     }
 
     #[test]

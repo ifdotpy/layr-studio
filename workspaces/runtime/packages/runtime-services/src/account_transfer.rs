@@ -2066,7 +2066,8 @@ pub fn typed_enroll(
             .clone()
             .try_map(|value| match value {
                 studio_runtime_store::NativeFailureHold::Boolean(value) => Ok(value),
-                studio_runtime_store::NativeFailureHold::Unreadable(_) => {
+                studio_runtime_store::NativeFailureHold::Unreadable(_)
+                | studio_runtime_store::NativeFailureHold::Terminal { .. } => {
                     Err(invalid("transfer agent", "/nativeFailureHold"))
                 }
             })?,

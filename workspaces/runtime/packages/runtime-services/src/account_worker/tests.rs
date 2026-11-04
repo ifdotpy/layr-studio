@@ -1321,6 +1321,28 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
     assert!(message.contains("value type missing"), "{message}");
     assert!(message.contains("length not applicable"), "{message}");
     assert_eq!(held["rootId"], 23);
+    let rejected_id = bad_id.clone();
+    state.bridge.run(move |store| async move {
+        store.transaction_with(move |tx| {
+            let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+            let result = crate::coordination::post_message_with_admission(
+                tx,
+                crate::coordination::PostManagedMessage {
+                    room: &rejected_id, id: &id, text: "must not send",
+                    delivery: studio_runtime_schema::delivery::DeliveryMoment::CurrentTurn,
+                    assets: &[],
+                },
+                &crate::message_admission::PreparedAdmission::default(),
+            );
+            assert!(result.is_err());
+            let held: bool = tx.query_row("SELECT hold_status='invalid' FROM runtime_agents WHERE id=?1", [&rejected_id], |row| row.get(0))?;
+            assert!(held);
+            let sent: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND text='must not send')", [&rejected_id], |row| row.get(0))?;
+            assert!(!sent);
+            Ok::<_, StoreError>(())
+        }).await?;
+        Ok(())
+    }).await.unwrap();
     assert!(
         peer.writes.try_recv().is_err(),
         "invalid agent has no provider effect"

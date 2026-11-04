@@ -354,26 +354,48 @@ pub(super) fn hold_agent(
         match AgentRepository::get(tx, &AgentId::from(agent_id)) {
             Ok(None) => Ok(HoldResult::Missing),
             Ok(Some(agent)) => {
-                if agent.status == AgentStatus::Paused
-                    || agent.native_failure_held()
-                    || agent.start_outcome_hold.is_some()
-                {
+                if agent.status == AgentStatus::Paused || agent.native_failure_held() {
                     return Ok(HoldResult::AlreadyHeld);
                 }
                 // A thread request still in flight releases the input itself,
                 // with its reply or its unknown outcome.
+                let pending = if agent.start_outcome_hold.is_some() {
+                    true
+                } else {
+                    match store::has_pending_thread_start(tx, agent_id) {
+                        Ok(pending) => pending,
+                        Err(error) if data_fault(&error).is_some() => true,
+                        Err(error) => return Err(error),
+                    }
+                };
+                let mut terminal =
+                    pending.then_some(studio_runtime_store::TerminalFault::PendingReceipt);
+                if terminal.is_none() && unsubmitted_attempt(&agent).is_none() {
+                    let reserved: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status='reserved')",
+                        [agent_id], |row| row.get(0),
+                    )?;
+                    if reserved {
+                        terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt);
+                    }
+                }
                 if let Some(identity) = unsubmitted_attempt(&agent)
-                    && !store::has_pending_thread_start(tx, agent_id)?
+                    && !pending
                 {
                     match in_savepoint(tx, AGENT_REQUEUE_SAVEPOINT, || {
                         Ok(SchedulerRepository::requeue_unsubmitted_attempt(
                             tx, &identity,
                         )?)
                     })? {
-                        Ok(_) => {}
+                        Ok(true) => {}
+                        Ok(false) => {
+                            terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt)
+                        }
                         // The attempt itself is the invalid data: its input
                         // stays reserved with the held agent.
-                        Err(error) if data_fault(&error).is_some() => {}
+                        Err(error) if data_fault(&error).is_some() => {
+                            terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt)
+                        }
                         Err(error) => return Err(error),
                     }
                 }
@@ -381,12 +403,34 @@ pub(super) fn hold_agent(
                     return Ok(HoldResult::Missing);
                 };
                 agent.status = AgentStatus::Failed;
-                agent.set_native_failure_hold(true);
+                if let Some(fault) = terminal {
+                    agent.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::NativeFailureHold::Terminal {
+                            terminal_fault: fault,
+                        },
+                    );
+                } else {
+                    agent.set_native_failure_hold(true);
+                }
                 agent.auto_wake = Some(false);
                 agent.in_flight = Some(false);
                 agent.error = studio_runtime_schema::queue_command::Field::Value(
                     studio_runtime_schema::provider_errors::AgentError::Message(
-                        (message).to_string(),
+                        if let Some(fault) = terminal {
+                            let cause = match fault {
+                                studio_runtime_store::TerminalFault::InvalidAttempt => {
+                                    "Attempt identity invalid"
+                                }
+                                studio_runtime_store::TerminalFault::PendingReceipt => {
+                                    "Start receipt unresolved"
+                                }
+                            };
+                            format!(
+                                "{cause}: {detail}. Copy the input into a new agent or message."
+                            )
+                        } else {
+                            message.clone()
+                        },
                     ),
                 );
                 AgentRepository::put(tx, &agent)?;

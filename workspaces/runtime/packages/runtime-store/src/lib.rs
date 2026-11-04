@@ -123,9 +123,9 @@ pub use records::{
     RecordPredicate, RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction,
     StartAttemptView, StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold,
     StoredTitleJob, StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId,
-    TaskRecord, TaskRepository, TerminalRecord, TitleJob, ToolResultRecord, TranscriptAssetId,
-    TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord, UnknownAgentStatus,
-    UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
+    TaskRecord, TaskRepository, TerminalFault, TerminalRecord, TitleJob, ToolResultRecord,
+    TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord,
+    UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
     WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };
 pub use repositories::agent_indexed_reads::{AgentIndexedReads, reserved_turn_input};
