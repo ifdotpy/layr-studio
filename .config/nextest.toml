@@ -86,6 +86,8 @@ inherits = "ci"
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 # JSON facade preserves serde_json behavior for typed, borrowed, and raw values.
 default-filter = '''
+    (package(=studio-runtime-schema) & kind(lib) & test(raw_request_record_bytes_survive_round_trip)) |
+    (package(=studio-runtime-http) & kind(lib) & test(accepted_body_reaches_handler_byte_exact)) |
     (package(=studio-json) & binary(=parity)) |
     (package(=studio-runtime-services) & kind(lib) & (test(create_refuses_line_in_symlinked_default_store) | test(unresolved_store_still_checks_lexical_line_paths) | test(agent_projection_uses_host_project_path_or_legacy_cwd) | test(agent_projections_fresh_seed_and_upgrade_marker_are_complete))) |
     (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
@@ -498,6 +500,8 @@ platform = 'cfg(target_os = "linux")'
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 default-filter = '''
+    (package(=studio-runtime-schema) & kind(lib) & test(raw_request_record_bytes_survive_round_trip)) |
+    (package(=studio-runtime-http) & kind(lib) & test(accepted_body_reaches_handler_byte_exact)) |
     (package(=studio-json) & binary(=parity)) |
     (package(=studio-runtime-services) & kind(lib) & (test(create_refuses_line_in_symlinked_default_store) | test(unresolved_store_still_checks_lexical_line_paths) | test(agent_projection_uses_host_project_path_or_legacy_cwd) | test(agent_projections_fresh_seed_and_upgrade_marker_are_complete))) |
     (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |

@@ -409,6 +409,17 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn raw_task_recovery_bytes_survive_round_trip() {
+        let input = r#"{"id":"t","agent":"a","created":1,"itemId":"i","kind":"command","status":"running","turnId":"u","type":"commandExecution","name":"run","reattachRecovery":{ "nested": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }}"#;
+        let record: TaskRecord = serde_json::from_slice(input.as_bytes()).unwrap();
+        assert_eq!(
+            record.reattach_recovery.as_ref().unwrap().0.get(),
+            r#"{ "nested": ["\u0061", 123456789012345678901234567890, {"x": 1e400}] }"#
+        );
+        assert_eq!(serde_json::to_vec(&record).unwrap(), input.as_bytes());
+    }
+
+    #[test]
     fn task_schema_matches_closed_shape() {
         check_schema_parity().unwrap();
         let value = json!({"id":"t","agent":"a","created":1,"itemId":"i","turnId":"u","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"});
