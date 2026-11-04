@@ -166,7 +166,7 @@ const UNSAFE_RUST_ALLOWLIST: [string, string][] = [
   ],
   [
     "workspaces/runtime/packages/runtime-services/src/layr_native/import/filesystem_ffi.rs",
-    "APFS descriptor clones and read-only filesystem case policy for native import.",
+    "APFS descriptor clones and read-only filesystem type and case policy for native workspaces.",
   ],
   [
     "workspaces/runtime/packages/runtime-services/src/layr_native/failed_import/flags_ffi.rs",

@@ -1,16 +1,24 @@
-//! Read-only native workspace settings.
-use super::manifest::{OperationStatus, RouteGroup, get};
+//! Native workspace settings.
+use super::extractors::ApiJson;
+use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::generated::{NativeLayrSettingsResponse, NativeLayrSettingsResponseVersion};
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State};
 use studio_runtime_services::layr_native::{capability, settings, store_path, versions};
 
 pub(crate) fn routes() -> RouteGroup {
-    RouteGroup::new(vec![get(
-        "/api/native-layr/settings",
-        OperationStatus::Implemented,
-        get_settings,
-    )])
+    RouteGroup::new(vec![
+        get(
+            "/api/native-layr/settings",
+            OperationStatus::Implemented,
+            get_settings,
+        ),
+        post(
+            "/api/native-layr/settings",
+            OperationStatus::Implemented,
+            set_settings,
+        ),
+    ])
 }
 
 async fn get_settings(
@@ -29,7 +37,73 @@ async fn get_settings(
     .map_err(|_| ApiError::internal())
 }
 
-fn settings_response(
+async fn set_settings(
+    State(state): State<HttpState>,
+    ApiJson(body): ApiJson<crate::generated::NativeLayrSettingsRequest>,
+) -> Result<Json<NativeLayrSettingsResponse>, ApiError> {
+    let state_dir = std::path::PathBuf::from(&state.state_dir);
+    let store = state.store.clone().ok_or_else(ApiError::internal)?;
+    let projects = store
+        .read_async("native-layr/settings/projects", |db| {
+            studio_runtime_store::ProjectsRepository::list_records(db)
+        })
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let result = studio_runtime_process::blocking_pool::spawn_blocking(
+        "runtime-http/routes/native_layr_settings/write",
+        move || {
+            let requested = body.store_root.as_deref().filter(|s| !s.is_empty());
+            let default_root = store_path(&state_dir);
+            let root = settings::validate_root(
+                &state_dir,
+                requested.map(std::path::Path::new).unwrap_or(&default_root),
+            )
+            .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
+            for (_, project) in &projects {
+                let project_path = std::path::Path::new(&project.path);
+                if project_path.is_absolute() {
+                    settings::check_project_overlap(root.as_path(), project_path)
+                        .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
+                }
+            }
+            settings::configure_resolved(&state_dir, &root, requested.is_none()).map_err(|e| {
+                match e {
+                    studio_runtime_services::layr_native::NativeLayrError::Refused(_) => {
+                        ApiError::native_layr_store(e.to_string())
+                    }
+                    studio_runtime_services::layr_native::NativeLayrError::Conflict(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Unknown(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Io(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Store(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Worker => {
+                        ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                    }
+                }
+            })?;
+            Ok::<_, ApiError>(Json(settings_response(
+                &state_dir,
+                capability::resolve_binary().ok().as_deref(),
+            )))
+        },
+    )
+    .await
+    .map_err(|_| ApiError::internal())??;
+    use studio_runtime_schema::{
+        resource_notification::ResourceNotifyRequest,
+        resource_ref::{EmptyResource, ResourceRef},
+    };
+    if let Ok(request) = ResourceNotifyRequest::new(
+        uuid::Uuid::new_v4().to_string(),
+        vec![ResourceRef::NativeLayrSettingsResource(EmptyResource {})],
+    ) && let Err(error) = state.resource_notifications.publish_once(&request)
+    {
+        eprintln!("Could not publish native Layr settings change: {error}");
+    }
+    state.event_wake.notify_one();
+    Ok(result)
+}
+
+pub(super) fn settings_response(
     state: &std::path::Path,
     binary: Option<&std::path::Path>,
 ) -> NativeLayrSettingsResponse {
@@ -59,6 +133,7 @@ fn settings_response(
         Err(error) => (None, Some(error.to_string())),
     };
     NativeLayrSettingsResponse {
+        readiness: Some(capability::for_store(state, &root)),
         version,
         store_root,
         error: store_error.or(version_error),

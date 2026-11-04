@@ -139,6 +139,7 @@ async fn transcript_initial(
         | ResourceRef::LimitsResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
+        | ResourceRef::NativeLayrSettingsResource(_)
         | ResourceRef::QueueResource(_)
         | ResourceRef::ReceiptsResource(_)
         | ResourceRef::RoomResource(_)
@@ -267,6 +268,7 @@ async fn view_value(
         | ResourceRef::LimitsResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
+        | ResourceRef::NativeLayrSettingsResource(_)
         | ResourceRef::QueueResource(_)
         | ResourceRef::ReceiptsResource(_)
         | ResourceRef::SessionCostResource(_)
@@ -444,6 +446,7 @@ resource_handlers! {
     LimitsResourceHandler => LimitsResource, passive_initial, NoCache;
     ModelsResourceHandler => ModelsResource, passive_initial, NoCache;
     MultiServerResourceHandler => MultiServerResource, passive_initial, NoCache;
+    NativeLayrSettingsResourceHandler => NativeLayrSettingsResource, passive_initial, NoCache;
     QueueResourceHandler => QueueResource, passive_initial, NoCache;
     ReceiptsResourceHandler => ReceiptsResource, passive_initial, NoCache;
     RenameProgressResourceHandler => RenameProgressResource, passive_initial, NoCache;
@@ -676,6 +679,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
         ResourceRef::SessionCostResource(_) | ResourceRef::CostsResource(_) => None,
         ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
+        | ResourceRef::NativeLayrSettingsResource(_)
         | ResourceRef::ReceiptsResource(_)
         | ResourceRef::RoomResource(_)
         | ResourceRef::StateResource(_)

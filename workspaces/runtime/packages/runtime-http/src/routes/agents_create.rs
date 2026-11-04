@@ -54,6 +54,7 @@ fn lead_intent(body: &generated::CreateLeadRequest) -> CreationIntent {
     CreationIntent {
         account_key: body.account_key.clone(),
         cwd: body.cwd.clone(),
+        layr_store_root: body.layr_store_root.clone(),
         daybreak_enabled: nullable_field!(body.daybreak_enabled),
         effort: match &body.effort {
             None => EffortSelection::Inherit,
@@ -349,6 +350,20 @@ pub(super) fn prepare_parent_workspace(
 #[cfg(test)]
 mod workspace_admission_tests {
     use super::*;
+
+    #[test]
+    fn lead_intent_preserves_native_store_override_for_replay() {
+        let request = generated::CreateLeadRequest {
+            layr_store_root: Some("/store".to_owned()),
+            workspace_mode: Some(generated::CreateLeadRequestWorkspaceMode::LayrNative),
+            ..Default::default()
+        };
+        let intent = lead_intent(&request);
+        assert_eq!(intent.layr_store_root.as_deref(), Some("/store"));
+        let persisted = serde_json::to_string(&intent).unwrap();
+        let restored: CreationIntent = serde_json::from_str(&persisted).unwrap();
+        assert_eq!(restored.layr_store_root.as_deref(), Some("/store"));
+    }
 
     #[test]
     fn native_parent_admits_native_layr_without_image_metadata() {
@@ -2468,12 +2483,16 @@ fn operation_error(error: OperationError) -> ApiError {
     let error = match error {
         OperationError::Create(MutationError::Request(error)) => return error.into(),
         error @ (OperationError::Invalid(_)
+        | OperationError::InvalidStore(_)
         | OperationError::Forbidden(_)
         | OperationError::Unavailable(_)
         | OperationError::Create(_)
         | OperationError::Store(_)
         | OperationError::Internal) => error,
     };
+    if let OperationError::InvalidStore(reason) = &error {
+        return ApiError::native_layr_store(reason);
+    }
     // A stale revision is rejected before any write, so the client may drop the
     // request and refresh from the canonical value.
     if matches!(error, OperationError::Create(MutationError::Stale)) {
@@ -2508,7 +2527,9 @@ fn operation_error(error: OperationError) -> ApiError {
         OperationError::Internal
         | OperationError::Store(_)
         | OperationError::Create(MutationError::Store(_)) => StatusCode::INTERNAL_SERVER_ERROR,
-        OperationError::Invalid(_) | OperationError::Create(_) => StatusCode::BAD_REQUEST,
+        OperationError::Invalid(_)
+        | OperationError::InvalidStore(_)
+        | OperationError::Create(_) => StatusCode::BAD_REQUEST,
     };
     if matches!(
         error,
@@ -2531,6 +2552,7 @@ fn operation_error(error: OperationError) -> ApiError {
             "worker-driver/settings-catalog",
         )) => "Worker model catalog is unavailable",
         OperationError::Invalid(_)
+        | OperationError::InvalidStore(_)
         | OperationError::Forbidden(_)
         | OperationError::Unavailable(_)
         | OperationError::Create(_)
