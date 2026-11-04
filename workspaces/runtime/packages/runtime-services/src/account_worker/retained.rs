@@ -2184,6 +2184,23 @@ mod validation_tests {
     }
 
     #[test]
+    fn transfer_source_accepts_a_claude_session_export() {
+        let mut request = turns_request("full", 1, false);
+        request.scope.account = "source-account".into();
+        request.expected_scope = Some(request.scope.clone());
+        request.operation = "transfer:transfer-a:agent-a:move-export".into();
+        request.method = Method::ClaudeMoveExport;
+        request.params = json!({"threadId":"source-thread"});
+        request.transfer = Some(TransferAuthorization {
+            transfer_id: "transfer-a".into(),
+            member: "agent-a".into(),
+            source_account: "source-account".into(),
+            thread_id: "source-thread".into(),
+        });
+        assert_eq!(validate(&request), Ok(()));
+    }
+
+    #[test]
     fn transfer_background_preflight_accepts_only_the_exact_bounded_source_shape() {
         let mut request = turns_request("full", 1, false);
         request.scope.account = "source-account".into();

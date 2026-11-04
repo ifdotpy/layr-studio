@@ -717,7 +717,7 @@ async fn session_reply(
             value,
         ));
     }
-    let admission = if call.method == Method::ThreadUnsubscribe {
+    let admission = if driver::source_call_needs_admission(call.method.as_str()) {
         driver::provider_admission(
             context.store,
             context.transfer,
@@ -788,6 +788,13 @@ async fn session_reply(
             || receipt.scope != scope
             || receipt.certainty() != RequestCertainty::Written
         {
+            eprintln!(
+                "account transfer read {} not written: certainty {:?}, not-sent reason {:?}, same scope {}",
+                call.operation,
+                receipt.certainty(),
+                receipt.not_sent_reason(),
+                receipt.scope == scope
+            );
             return Err(TransferError::Refused(
                 "The retained read receipt is not Written on the expected connection",
             ));
@@ -3471,6 +3478,15 @@ mod claude_move_import_tests {
         missing.as_object_mut().unwrap().remove("path");
         assert!(claude_import_params(&missing, &json!("/t"), &json!("default")).is_err());
         assert!(claude_import_params(&export(), &json!("/t"), &json!("other-model")).is_err());
+    }
+
+    #[test]
+    fn claude_export_gets_a_durable_request_identity() {
+        // The worker stores a move export, so an empty root identity is refused.
+        use crate::account_transfer_driver::source_call_needs_admission;
+        assert!(source_call_needs_admission("claude/moveExport"));
+        assert!(source_call_needs_admission("thread/unsubscribe"));
+        assert!(!source_call_needs_admission("thread/queue/list"));
     }
 
     #[test]
