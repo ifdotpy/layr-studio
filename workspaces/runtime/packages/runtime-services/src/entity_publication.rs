@@ -102,16 +102,11 @@ pub(crate) mod test_support {
         let (collection, id) = (collection.to_owned(), id.to_owned());
         store
             .test_read_transaction(move |tx| {
-<<<<<<< head
                 if studio_runtime_store::WORK_COLLECTIONS
                     .iter()
                     .chain(studio_runtime_store::DIRECT_COLLECTIONS)
                     .any(|name| *name == collection)
                 {
-||||||| base
-=======
-                if studio_runtime_store::WORK_COLLECTIONS.contains(&collection.as_str()) {
->>>>>>> https/main
                     return built_entity(tx, &collection, &id);
                 }
                 Ok(tx

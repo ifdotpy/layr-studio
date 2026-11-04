@@ -89,11 +89,7 @@ mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;
 mod m2026_11_03_drop_completed_turns;
 mod m2026_11_03_request_signature_digest;
-<<<<<<< head
 mod m2026_11_04_direct_read_time;
-||||||| base
-=======
->>>>>>> https/main
 mod m2026_11_04_work_read_time;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1528,7 +1524,6 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_04_work_read_time::apply(c.transaction),
     },
-<<<<<<< head
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-04-direct-read-time",
@@ -1539,9 +1534,6 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_04_direct_read_time::apply(c.transaction),
     },
-||||||| base
-=======
->>>>>>> https/main
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.

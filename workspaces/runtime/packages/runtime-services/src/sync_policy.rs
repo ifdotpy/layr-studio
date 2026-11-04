@@ -430,13 +430,6 @@ pub fn maintain_entity_projections_with_server_id(
             ("runtime_rooms", "room"),
             ("runtime_complaints", "complaint"),
             ("runtime_projects", "project"),
-<<<<<<< head
-||||||| base
-            ("runtime_rules", "rule"),
-            ("runtime_work", "work"),
-=======
-            ("runtime_rules", "rule"),
->>>>>>> https/main
         ] {
             let records = source_records.get(table).ok_or(StoreError::RecordContract(
                 "entity projection source snapshot is incomplete",
@@ -446,18 +439,6 @@ pub fn maintain_entity_projections_with_server_id(
                     eprintln!("ERROR project projection skipped invalid row id={id}");
                     continue;
                 }
-<<<<<<< head
-||||||| base
-                if matches!(collection, "rule" | "work") {
-                    publish_direct(transaction, collection, id, raw, &validate_projection)?;
-                    continue;
-                }
-=======
-                if collection == "rule" {
-                    publish_direct(transaction, collection, id, raw)?;
-                    continue;
-                }
->>>>>>> https/main
                 if collection == "room" {
                     let Ok(room) =
                         serde_json::from_str::<studio_runtime_schema::room_record::RoomRecord>(raw)
@@ -667,12 +648,6 @@ impl CheckedAgentRow {
 #[derive(Clone, Debug, Default)]
 pub struct EntityChanges {
     pub agents: BTreeSet<String>,
-<<<<<<< head
-||||||| base
-    pub requests: BTreeSet<String>,
-=======
-    pub requests: BTreeSet<String>,
->>>>>>> https/main
     /// Changed work rows. Their documents are built at read time (`entity_scope`); a
     /// change here refreshes only the owner agent's views.
     pub work: BTreeSet<String>,
@@ -833,59 +808,6 @@ pub fn publish_entity_changes(
     if !room_agents.is_empty() {
         publish_rooms_of(transaction, &room_agents, &changed_roots, validate)?;
     }
-<<<<<<< head
-||||||| base
-    // Approval rows publish through the same code as their writers.
-    for id in &changes.requests {
-        let id = studio_runtime_schema::approvals::ApprovalId(id.clone());
-        if let Some(row) = studio_runtime_store::approvals::get(transaction, &id)? {
-            crate::approval_sync::publish(transaction, &row)?;
-        }
-    }
-    for (id, raw) in &work {
-        if let Some(source) = &changes.source_work_changes {
-            let record = serde_json::from_str(raw)?;
-            let empty = Default::default();
-            let source = source.get(id).unwrap_or(&empty);
-            publish_work_history(transaction, id, &record, Some(source), validate)?;
-            publish_work_metadata(transaction, id, &record, validate)?;
-            publish_work_summary(transaction, id, raw)?;
-        } else {
-            publish_direct(transaction, "work", id, raw, validate)?;
-        }
-    }
-    // A dependency's status changes the published policy of each dependent,
-    // even when the dependent itself was not written in this transaction.
-    if !changes.work.is_empty() {
-        let mut query = transaction.prepare_cached(
-            "SELECT id,record FROM runtime_work WHERE EXISTS (SELECT 1 FROM json_each(record,'$.dependencies') dependency JOIN json_each(?1) changed ON dependency.value=changed.value)",
-        )?;
-        for row in query.query_map([serde_json::to_string(&changes.work)?], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })? {
-            let (id, raw) = row?;
-            if !changes.work.contains(&id) {
-                publish_work_metadata(transaction, &id, &serde_json::from_str(&raw)?, validate)?;
-            }
-        }
-    }
-    let present_work: BTreeSet<_> = work.iter().map(|(id, _)| id).collect();
-    for id in &changes.work {
-        if !present_work.contains(id) {
-            retire_if_live(transaction, "work", id, validate)?;
-            retire_if_live(transaction, "workDetail", id, validate)?;
-            retire_work_history(transaction, id, validate)?;
-        }
-    }
-=======
-    // Approval rows publish through the same code as their writers.
-    for id in &changes.requests {
-        let id = studio_runtime_schema::approvals::ApprovalId(id.clone());
-        if let Some(row) = studio_runtime_store::approvals::get(transaction, &id)? {
-            crate::approval_sync::publish(transaction, &row)?;
-        }
-    }
->>>>>>> https/main
     if !liveness_changed.is_empty() {
         maintain_task_window(transaction, validate)?;
         maintain_monitor_window(transaction, validate)?;
@@ -925,26 +847,6 @@ pub(crate) fn publish_summary_changes(
             &|_, _, _, _| true,
         )?;
     }
-<<<<<<< head
-||||||| base
-    for (collection, table, ids) in [
-        ("plan", "runtime_plans", &pending.plans),
-        ("annotation", "runtime_annotations", &pending.annotations),
-    ] {
-        for (id, raw) in records_by_id(transaction, table, ids)? {
-            publish_direct(transaction, collection, &id, &raw, &|_, _, _, _| true)?;
-        }
-    }
-=======
-    for (collection, table, ids) in [
-        ("plan", "runtime_plans", &pending.plans),
-        ("annotation", "runtime_annotations", &pending.annotations),
-    ] {
-        for (id, raw) in records_by_id(transaction, table, ids)? {
-            publish_direct(transaction, collection, &id, &raw)?;
-        }
-    }
->>>>>>> https/main
     let mut events = pending.receipt_events.clone();
     for id in &pending.receipt_items {
         let Some(item) = Table::<TranscriptItemRecord>::new(transaction)
@@ -1194,94 +1096,11 @@ pub(crate) fn publish_agent_projection(
     put_projection(transaction, "agent", id, compatibility, deleted, validate)
 }
 
-<<<<<<< head
 /// The client view of a plan row; None for a row without an id.
 pub(crate) fn plan_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
     let record: studio_runtime_store::PlanRecord =
         serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
             object: "plans",
-||||||| base
-/// Publish one rule or work row.
-fn publish_direct(
-    transaction: &Transaction<'_>,
-    collection: &str,
-    id: &str,
-    raw: &str,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
-) -> StoreResult<()> {
-    if collection == "annotation" {
-        let record: studio_runtime_store::AnnotationRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "annotations",
-                id: id.to_owned(),
-            })?;
-        if !record.id().is_empty() {
-            let view =
-                record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
-            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
-        }
-        return Ok(());
-    }
-    if collection == "plan" {
-        let record: studio_runtime_store::PlanRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "plans",
-                id: id.to_owned(),
-            })?;
-        if !record.id().is_empty() {
-            let view = record.sync_view(
-                &|value, field| crate::sync_views::bound_sync_text(value, field),
-                crate::sync_views::SYNC_ARRAY_ITEMS,
-                &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
-            );
-            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
-        }
-        return Ok(());
-    }
-    if collection == "rule" {
-        let invalid = || StoreError::InvalidStoredRecord {
-            object: "rules",
-=======
-/// Publish one rule or work row.
-fn publish_direct(
-    transaction: &Transaction<'_>,
-    collection: &str,
-    id: &str,
-    raw: &str,
-) -> StoreResult<()> {
-    if collection == "annotation" {
-        let record: studio_runtime_store::AnnotationRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "annotations",
-                id: id.to_owned(),
-            })?;
-        if !record.id().is_empty() {
-            let view =
-                record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
-            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
-        }
-        return Ok(());
-    }
-    if collection == "plan" {
-        let record: studio_runtime_store::PlanRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "plans",
-                id: id.to_owned(),
-            })?;
-        if !record.id().is_empty() {
-            let view = record.sync_view(
-                &|value, field| crate::sync_views::bound_sync_text(value, field),
-                crate::sync_views::SYNC_ARRAY_ITEMS,
-                &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
-            );
-            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
-        }
-        return Ok(());
-    }
-    if collection == "rule" {
-        let invalid = || StoreError::InvalidStoredRecord {
-            object: "rules",
->>>>>>> https/main
             id: id.to_owned(),
         })?;
     if record.id().is_empty() {
@@ -1295,7 +1114,6 @@ fn publish_direct(
     Ok(Some(serde_json::to_value(view)?))
 }
 
-<<<<<<< head
 /// The client view of an annotation row; None for a row without an id.
 pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<Value>> {
     let record: studio_runtime_store::AnnotationRecord =
@@ -1308,23 +1126,8 @@ pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<Value>>
     }
     let view = record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
     Ok(Some(serde_json::to_value(view)?))
-||||||| base
-    if collection == "work" {
-        let record = serde_json::from_str::<Value>(raw)?;
-        publish_work_detail(transaction, id, &record, validate)?;
-        return publish_work_summary(transaction, id, raw);
-    }
-    Err(StoreError::RecordContract(
-        "unsupported direct sync collection",
-    ))
-=======
-    Err(StoreError::RecordContract(
-        "unsupported direct sync collection",
-    ))
->>>>>>> https/main
 }
 
-<<<<<<< head
 /// The client view of a rule row: its id, agent and name.
 pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<Value> {
     let invalid = || StoreError::InvalidStoredRecord {
@@ -1339,159 +1142,6 @@ pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<Value> {
     Ok(json!({"agent": record.agent, "id": id, "name": record.name}))
 }
 
-||||||| base
-fn publish_work_summary(transaction: &Transaction<'_>, id: &str, raw: &str) -> StoreResult<()> {
-    let invalid = || StoreError::InvalidStoredRecord {
-        object: "work",
-        id: id.to_owned(),
-    };
-    let record: studio_runtime_store::WorkItemRecord =
-        serde_json::from_str(raw).map_err(|_| invalid())?;
-    if record.id().as_ref() != id {
-        return Err(invalid());
-    }
-    if let Some(projected) = crate::sync_views::project_work_record(&record) {
-        SyncDocumentsRepository::put_entity(transaction, "work", id, projected, false)?;
-    }
-    Ok(())
-}
-
-fn publish_work_detail(
-    transaction: &Transaction<'_>,
-    id: &str,
-    record: &Value,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
-) -> StoreResult<()> {
-    publish_work_history(transaction, id, record, None, validate)?;
-    publish_work_metadata(transaction, id, record, validate)
-}
-
-fn publish_work_metadata(
-    transaction: &Transaction<'_>,
-    id: &str,
-    record: &Value,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
-) -> StoreResult<()> {
-    #[cfg(test)]
-    work_publication_probe::metadata(id);
-    let refusal =
-        crate::work_write::current_submission_refusal(transaction, record).map_err(|error| {
-            match error {
-                crate::work_write::WorkWriteError::Expired => {
-                    studio_runtime_store::request_results::RequestResultError::Expired.into()
-                }
-                crate::work_write::WorkWriteError::Store(error) => error,
-                other @ crate::work_write::WorkWriteError::Event(_)
-                | other @ crate::work_write::WorkWriteError::NotImplemented(_)
-                | other @ crate::work_write::WorkWriteError::PreparationWorker => {
-                    StoreError::SchemaValidation(other.to_string())
-                }
-            }
-        })?;
-    let item = studio_runtime_store::WorkItemsRepository::work_record(transaction, id)?
-        .ok_or(StoreError::RecordContract("work detail source is missing"))?;
-    let mut statuses = BTreeMap::new();
-    for dependency in item.dependencies() {
-        if let Some(record) =
-            studio_runtime_store::WorkItemsRepository::work_record(transaction, dependency)?
-        {
-            statuses.insert(dependency.clone(), record.status());
-        }
-    }
-    let detail = crate::sync_views::work_detail_view(&item, record, refusal, &statuses)?;
-    // Validation sees the metadata without the policy, as before.
-    if !validate("workDetail", id, &detail.metadata, false) {
-        return Err(StoreError::InvalidSyncObject {
-            scope: "workDetail".to_owned(),
-            id: id.to_owned(),
-        });
-    }
-    SyncDocumentsRepository::put_entity(transaction, "workDetail", id, detail, false)?;
-    Ok(())
-}
-
-fn retire_work_history(
-    transaction: &Transaction<'_>,
-    id: &str,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
-) -> StoreResult<()> {
-    for kind in studio_runtime_store::entity_publication::WorkHistoryKind::ALL {
-        let mut statement = transaction.prepare_cached("SELECT id FROM sync_entities WHERE collection=?1 AND deleted=0 AND json_extract(payload,'$.value.taskId')=?2")?;
-        let ids = statement
-            .query_map([kind.collection(), id], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        for entry_id in ids {
-            retire_if_live(transaction, kind.collection(), &entry_id, validate)?;
-        }
-    }
-    Ok(())
-}
-
-fn publish_work_history(
-    transaction: &Transaction<'_>,
-    id: &str,
-    record: &Value,
-    changes: Option<&studio_runtime_store::entity_publication::WorkSourceChanges>,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
-) -> StoreResult<()> {
-    use studio_runtime_store::entity_publication::WorkHistoryKind;
-    for kind in WorkHistoryKind::ALL {
-        // An authoritative empty delta must not even enumerate source history.
-        let indices: Vec<usize> = match changes {
-            Some(changes) => changes
-                .histories()
-                .get(&kind)
-                .map(|indices| indices.iter().copied().collect())
-                .unwrap_or_default(),
-            None => (0..record[kind.field()].as_array().map_or(0, Vec::len)).collect(),
-        };
-        for index in indices {
-            let entry_id = format!("{id}:{index}");
-            let stored = studio_runtime_store::work_history::entry(transaction, id, kind, index)?;
-            match stored {
-                Some(value) => {
-                    let entry =
-                        crate::sync_views::work_history_entry(id, &record["rootId"], index, &value);
-                    #[cfg(test)]
-                    work_publication_probe::history(id, serde_json::to_vec(&entry)?.len());
-                    put_projection(
-                        transaction,
-                        kind.collection(),
-                        &entry_id,
-                        entry,
-                        false,
-                        validate,
-                    )?;
-                }
-                None => retire_if_live(transaction, kind.collection(), &entry_id, validate)?,
-            }
-        }
-        if changes.is_none() {
-            let length = record[kind.field()].as_array().map_or(0, Vec::len);
-            let mut statement = transaction.prepare_cached("SELECT id FROM sync_entities WHERE collection=?1 AND deleted=0 AND json_extract(payload,'$.value.taskId')=?2 AND json_extract(payload,'$.value.index')>=?3")?;
-            let stale = statement
-                .query_map(
-                    rusqlite::params![
-                        kind.collection(),
-                        id,
-                        i64::try_from(length).map_err(|_| StoreError::RecordContract(
-                            "work history length exceeds SQLite range"
-                        ))?
-                    ],
-                    |row| row.get::<_, String>(0),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            for entry_id in stale {
-                retire_if_live(transaction, kind.collection(), &entry_id, validate)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Seed the newly introduced scoped work views once, before the first SSE or runtime write.
-=======
->>>>>>> https/main
 /// Seed root agent views and the task and monitor windows once, before the first SSE
 /// or runtime write. Work documents need no seed: they are built at read time.
 pub(crate) fn seed_work_details(transaction: &Transaction<'_>) -> StoreResult<()> {
