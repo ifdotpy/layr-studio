@@ -788,6 +788,13 @@ async fn session_reply(
             || receipt.scope != scope
             || receipt.certainty() != RequestCertainty::Written
         {
+            eprintln!(
+                "account transfer read {} not written: certainty {:?}, not-sent reason {:?}, same scope {}",
+                call.operation,
+                receipt.certainty(),
+                receipt.not_sent_reason(),
+                receipt.scope == scope
+            );
             return Err(TransferError::Refused(
                 "The retained read receipt is not Written on the expected connection",
             ));
