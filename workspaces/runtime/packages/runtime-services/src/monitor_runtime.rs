@@ -1950,8 +1950,8 @@ mod recovery_selection_tests {
 #[cfg(test)]
 mod restart_tests {
     use studio_runtime_schema::approvals::{
-        AgentId, ApprovalId, ApprovalState, CloseReason, Delivery, Detail, ProviderObject,
-        Request, RpcId, Supervisor, Timestamp, TurnId,
+        AgentId, ApprovalId, ApprovalState, CloseReason, Delivery, Detail, ProviderObject, Request,
+        RpcId, Supervisor, Timestamp, TurnId,
     };
     use studio_runtime_store::approvals;
 
@@ -1995,8 +1995,12 @@ mod restart_tests {
                     state_dir: None,
                     handle: Some("handle".into()),
                 };
-                approvals::create(tx, provider_request("kept", Some(supervised)), Timestamp(1.0))
-                    .map_err(studio_runtime_store::StoreError::from)?;
+                approvals::create(
+                    tx,
+                    provider_request("kept", Some(supervised)),
+                    Timestamp(1.0),
+                )
+                .map_err(studio_runtime_store::StoreError::from)?;
                 approvals::create(tx, provider_request("closed", None), Timestamp(1.0))
                     .map_err(studio_runtime_store::StoreError::from)?;
                 super::recover_requests(tx, 10.0)?;
