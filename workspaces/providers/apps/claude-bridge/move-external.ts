@@ -468,6 +468,23 @@ export async function externalCatalog(
     ),
   };
 }
+/** A move keeps going without connectors whose catalog cannot be proven: the
+ * history stays whole and only calls to those connectors stop working. */
+export async function movableExternalCatalog<T extends CatalogResult>(
+  aliases: string[],
+  read: () => Promise<T>,
+): Promise<T | (CatalogResult & { droppedExternal: string[] })> {
+  try {
+    return await read();
+  } catch (error) {
+    if (!(error as { data?: { moveRefusal?: unknown } }).data?.moveRefusal)
+      throw error;
+    console.error(
+      "move continues without external connectors: " + aliases.map(safeName).join(", "),
+    );
+    return { catalogs: [], configs: {}, transports: {}, droppedExternal: aliases };
+  }
+}
 export function verifyExternalCatalog(
   source: ExternalServer[],
   target: ExternalServer[],

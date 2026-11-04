@@ -212,11 +212,8 @@ pub(crate) fn agent_team_root(connection: &Connection, id: &str) -> StoreResult<
         return Ok(None);
     }
     Ok(connection
-        .query_row(
-            "SELECT root_id FROM runtime_agents WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT root_id FROM runtime_agents WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
         .optional()?
         .flatten())
 }
@@ -281,34 +278,76 @@ pub(crate) fn pending(
         {
             // A deleted row has no id left; its writer owns the entity removal.
             let id = transaction
-                .query_row(
-                    &match source {
-                        Source::QueueAsset => "SELECT json_extract(record,'$.agent') FROM runtime_assets WHERE rowid=?1".to_owned(),
-                        Source::Agent | Source::Request | Source::Event | Source::EventMeta | Source::Item | Source::Plan | Source::Annotation | Source::Task | Source::Work | Source::Terminal | Source::Monitor | Source::Incident => format!("SELECT id FROM {} WHERE rowid=?1", source.table()),
-                    },
-                    [row_id],
-                    |row| row.get::<_, String>(0),
-                )
+                .prepare_cached(&match source {
+                    Source::QueueAsset => {
+                        "SELECT json_extract(record,'$.agent') FROM runtime_assets WHERE rowid=?1"
+                            .to_owned()
+                    }
+                    Source::Agent
+                    | Source::Request
+                    | Source::Event
+                    | Source::EventMeta
+                    | Source::Item
+                    | Source::Plan
+                    | Source::Annotation
+                    | Source::Task
+                    | Source::Work
+                    | Source::Terminal
+                    | Source::Monitor
+                    | Source::Incident => {
+                        format!("SELECT id FROM {} WHERE rowid=?1", source.table())
+                    }
+                })?
+                .query_row([row_id], |row| row.get::<_, String>(0))
                 .optional()?;
             ids.insert((*source, *row_id), id);
         }
     }
     let mut pending = PendingEntities::default();
     for ((source, _), id) in &ids {
+<<<<<<< head
+||||||| base
+        if *source != Source::Work {
+            continue;
+        }
+        if id.is_none() {
+            let mut statement = transaction.prepare(
+                "SELECT DISTINCT id FROM sync_entities WHERE collection IN ('work','workDetail') AND deleted=0 AND NOT EXISTS(SELECT 1 FROM runtime_work WHERE runtime_work.id=sync_entities.id)",
+            )?;
+            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                pending.work.insert(row?);
+            }
+        }
+    }
+    for ((source, _), id) in &ids {
+=======
+        if *source != Source::Work {
+            continue;
+        }
+        if id.is_none() {
+            let mut statement = transaction.prepare_cached(
+                "SELECT DISTINCT id FROM sync_entities WHERE collection IN ('work','workDetail') AND deleted=0 AND NOT EXISTS(SELECT 1 FROM runtime_work WHERE runtime_work.id=sync_entities.id)",
+            )?;
+            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                pending.work.insert(row?);
+            }
+        }
+    }
+    for ((source, _), id) in &ids {
+>>>>>>> https/main
         if *source == Source::Agent {
             if let Some(id) = id {
                 let root: Option<String> = transaction
-                    .query_row(
+                    .prepare_cached(
                         "SELECT root_id FROM runtime_agents WHERE id=?1 AND root_id<>id",
-                        [id],
-                        |row| row.get(0),
-                    )
+                    )?
+                    .query_row([id], |row| row.get(0))
                     .optional()?;
                 if let Some(root) = root {
                     pending.agents.insert(root);
                 }
             } else {
-                let mut statement = transaction.prepare(
+                let mut statement = transaction.prepare_cached(
                     "SELECT id FROM runtime_agents WHERE root_id=id AND deleted_at IS NULL",
                 )?;
                 for row in statement.query_map([], |row| row.get::<_, String>(0))? {
@@ -322,11 +361,8 @@ pub(crate) fn pending(
         ) {
             let owner = match (source, id) {
                 (Source::Event | Source::EventMeta, Some(id)) => transaction
-                    .query_row(
-                        "SELECT agent FROM runtime_events WHERE id=?1",
-                        [id],
-                        |row| row.get::<_, String>(0),
-                    )
+                    .prepare_cached("SELECT agent FROM runtime_events WHERE id=?1")?
+                    .query_row([id], |row| row.get::<_, String>(0))
                     .optional()?,
                 (_, id) => id.clone(),
             };
@@ -335,7 +371,7 @@ pub(crate) fn pending(
             } else {
                 // Deleted source rows no longer carry their owner. Recheck only
                 // existing queue views; this path never scans event history.
-                let mut statement = transaction.prepare(
+                let mut statement = transaction.prepare_cached(
                     "SELECT id FROM sync_entities WHERE collection='queue' AND deleted=0",
                 )?;
                 for id in statement.query_map([], |row| row.get::<_, String>(0))? {
@@ -349,7 +385,7 @@ pub(crate) fn pending(
             if let Some(id) = id {
                 pending.terminals.insert(id.clone());
             } else {
-                let mut statement = transaction.prepare(
+                let mut statement = transaction.prepare_cached(
                     "SELECT id FROM sync_entities WHERE collection='terminal' AND deleted=0",
                 )?;
                 for id in statement.query_map([], |row| row.get::<_, String>(0))? {
@@ -384,16 +420,15 @@ pub(crate) fn pending(
         }
         if let Some(id) = id {
             if let Some(agent) = transaction
-                .query_row("SELECT agent FROM approvals WHERE id=?1", [id], |row| {
-                    row.get::<_, Option<String>>(0)
-                })
+                .prepare_cached("SELECT agent FROM approvals WHERE id=?1")?
+                .query_row([id], |row| row.get::<_, Option<String>>(0))
                 .optional()?
                 .flatten()
             {
                 pending.agents.insert(agent);
             }
         } else {
-            let mut statement = transaction.prepare(
+            let mut statement = transaction.prepare_cached(
                 "SELECT id FROM sync_entities WHERE collection='agentSummary' AND deleted=0",
             )?;
             for row in statement.query_map([], |row| row.get::<_, String>(0))? {
@@ -441,4 +476,45 @@ pub(crate) fn pending(
         };
     }
     Ok(pending)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_resolves_changed_agents_and_events() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,root_id TEXT,deleted_at INTEGER); CREATE TABLE runtime_events(id TEXT,agent TEXT); CREATE TABLE sync_entities(id TEXT,collection TEXT,deleted INTEGER);").unwrap();
+        for i in 0..100 {
+            db.execute(
+                "INSERT INTO runtime_agents VALUES(?1,'root',NULL)",
+                [format!("agent-{i}")],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO runtime_events VALUES(?1,?2)",
+                [format!("event-{i}"), format!("agent-{i}")],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO runtime_events VALUES('event-only','event-only-owner')",
+            [],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let mut events: Vec<_> = (1..=100)
+            .flat_map(|id| [Event::Row(Source::Agent, id), Event::Row(Source::Event, id)])
+            .collect();
+        events.push(Event::Row(Source::Event, 101));
+        let result = pending(&tx, Journal(events)).unwrap();
+        assert_eq!(result.agents.len(), 101);
+        let expected_queues: BTreeSet<_> = (0..100)
+            .map(|i| format!("agent-{i}"))
+            .chain(["event-only-owner".to_owned()])
+            .collect();
+        assert_eq!(result.queues, expected_queues);
+        assert_eq!(result.receipt_events.len(), 101);
+    }
 }

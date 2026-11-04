@@ -460,6 +460,74 @@ mod tests {
     use serde::Deserialize;
 
     #[test]
+    fn project_import_written_by_current_version_is_readable_by_base_version() {
+        // Frozen from the base version: the persisted phase is required.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct BaseProjectImport {
+            project_id: String,
+            source: String,
+            request_id: String,
+            operation: String,
+            upload_id: String,
+            root: String,
+            phase: BasePhase,
+            archive_bytes: Option<u64>,
+            archive_sha256: Option<String>,
+        }
+        #[derive(Deserialize, PartialEq, Debug)]
+        #[serde(rename_all = "snake_case")]
+        enum BasePhase {
+            Planned,
+            Uploading,
+            Imported,
+            NotSent,
+            Unknown,
+        }
+        for (phase, expected) in [
+            (super::ProjectImportPhase::Planned, BasePhase::Planned),
+            (super::ProjectImportPhase::Uploading, BasePhase::Uploading),
+            (super::ProjectImportPhase::Imported, BasePhase::Imported),
+            (super::ProjectImportPhase::NotSent, BasePhase::NotSent),
+            (super::ProjectImportPhase::Unknown, BasePhase::Unknown),
+        ] {
+            let current = super::ProjectImport {
+                project_id: "p".into(),
+                source: "s".into(),
+                request_id: "r".into(),
+                operation: "o".into(),
+                upload_id: "u".into(),
+                root: "/".into(),
+                phase,
+                archive_bytes: None,
+                archive_sha256: None,
+            };
+            let serialized = serde_json::to_vec(&current).unwrap();
+            let old: BaseProjectImport = serde_json::from_slice(&serialized).unwrap();
+            assert_eq!(old.phase, expected);
+            assert_eq!(
+                (
+                    old.project_id,
+                    old.source,
+                    old.request_id,
+                    old.operation,
+                    old.upload_id,
+                    old.root
+                ),
+                (
+                    "p".into(),
+                    "s".into(),
+                    "r".into(),
+                    "o".into(),
+                    "u".into(),
+                    "/".into()
+                )
+            );
+            assert!(old.archive_bytes.is_none() && old.archive_sha256.is_none());
+        }
+    }
+
+    #[test]
     fn direct_and_value_attempt_decodes_accept_provider_payload() {
         let raw = r#"{"id":"attempt","nativeRequest":{"ticket":{"operation":"op","agent":"a","epoch":1,"account":"acct","thread":"thread","connection":"c","generation":1,"request":"r"},"method":"review/start","params":{"z":  1,"a":2}}}"#;
         let direct: StartAttemptView = serde_json::from_str(raw).unwrap();

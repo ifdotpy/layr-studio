@@ -1,3 +1,4 @@
+use crate::CachedSql;
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, functions::FunctionFlags, params};
@@ -634,7 +635,7 @@ fn verify_analytics_migration(canvas: &Connection, analytics: &Connection) -> St
 }
 
 pub fn table_exists(connection: &Connection, name: &str) -> StoreResult<bool> {
-    Ok(connection.query_row(
+    Ok(connection.query_row_cached(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
         params![name],
         |row| row.get(0),

@@ -2,7 +2,7 @@ import type { core } from "zod";
 type FixtureSchema = Omit<core.JSONSchema.ObjectSchema, "properties"> & {
   properties: Record<string, core.JSONSchema.JSONSchema>;
 };
-import { canonicalJson } from "./move.ts";
+import { canonicalJson, moveExportBlocked } from "./move.ts";
 import { TASK_COMMAND_TOOL_SCHEMA } from "./task-command-tool.generated.ts";
 import { test } from "vitest";
 
@@ -866,3 +866,10 @@ test.each(
     }
   },
 );
+
+test("background tasks do not block a session export, a running turn does", () => {
+  // The owner's rule: a chat moves while its background commands keep running.
+  assert.equal(moveExportBlocked({ turn: undefined, tasks: new Map([["t", {}]]) }), false);
+  assert.equal(moveExportBlocked({ turn: {}, tasks: new Map() }), true);
+  assert.equal(moveExportBlocked(undefined), false);
+});

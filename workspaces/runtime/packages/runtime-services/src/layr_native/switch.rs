@@ -153,13 +153,27 @@ fn summary(record: &Value) -> Result<Value> {
 /// A worker line receives the committed and pushed worktree content under the same
 /// receipt that preparation uses, so preparation then only verifies the line.
 fn prepare_switch(state_dir: &Path, source: &Value, target: &Value) -> Result<Value> {
-    if target["isLead"] != true {
-        import_worker(state_dir, source, target)?;
-    }
-    runtime::prepare_files(state_dir, target)
+    prepare_switch_reporting(state_dir, source, target, None)
 }
 
-fn import_worker(state_dir: &Path, source: &Value, target: &Value) -> Result<()> {
+fn prepare_switch_reporting(
+    state_dir: &Path,
+    source: &Value,
+    target: &Value,
+    progress: Option<&runtime::ProgressSink>,
+) -> Result<Value> {
+    if target["isLead"] != true {
+        import_worker(state_dir, source, target, progress)?;
+    }
+    runtime::prepare_files_reporting(state_dir, target, false, progress)
+}
+
+fn import_worker(
+    state_dir: &Path,
+    source: &Value,
+    target: &Value,
+    progress: Option<&runtime::ProgressSink>,
+) -> Result<()> {
     let id = source["id"].as_str().unwrap_or_default();
     let cwd = Path::new(source["cwd"].as_str().unwrap_or_default());
     let tree = PathBuf::from(migration::git(cwd, &["rev-parse", "--show-toplevel"])?.trim());
@@ -199,7 +213,7 @@ fn import_worker(state_dir: &Path, source: &Value, target: &Value) -> Result<()>
         },
         || {
             let _lock = runtime::lock(state_dir, &format!("migration:{project_id}"))?;
-            migration::import_worktree_line(state_dir, &main, &plan, &relative, &line)?;
+            migration::import_worktree_line(state_dir, &main, &plan, &relative, &line, progress)?;
             let path = main
                 .parent()
                 .ok_or_else(|| NativeLayrError::Refused("Invalid main path".into()))?
