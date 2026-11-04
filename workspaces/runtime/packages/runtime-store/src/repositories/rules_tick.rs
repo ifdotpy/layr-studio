@@ -1,7 +1,7 @@
 //! Bounded rule tick reads; rule writes reuse the canonical rules repository.
 
 use rusqlite::{Connection, params};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::{CachedSql, MonitorRecord, RuleRecord, StoreError, StoreResult};
 
@@ -38,7 +38,7 @@ impl RulesTickRepository {
             if raw.len() > MAX_RECORD_BYTES {
                 return Err(invalid());
             }
-            let rule: RuleRecord = serde_json::from_str(&raw).map_err(|_| invalid())?;
+            let rule: RuleRecord = studio_json::from_str(&raw).map_err(|_| invalid())?;
             if rule.id() != &id {
                 return Err(StoreError::InvalidStoredRecord {
                     object: "rules",
@@ -83,7 +83,7 @@ impl RulesTickRepository {
             if raw.len() > MAX_RECORD_BYTES {
                 return Err(invalid());
             }
-            let monitor: MonitorRecord = serde_json::from_str(&raw).map_err(|_| invalid())?;
+            let monitor: MonitorRecord = studio_json::from_str(&raw).map_err(|_| invalid())?;
             if monitor.id != id {
                 return Err(invalid());
             }
@@ -136,7 +136,7 @@ fn decode(raw: String, object: &'static str, id: &str) -> StoreResult<Value> {
     if raw.len() > MAX_RECORD_BYTES {
         return Err(invalid());
     }
-    serde_json::from_str(&raw).map_err(|_| invalid())
+    studio_json::from_str(&raw).map_err(|_| invalid())
 }
 
 #[cfg(test)]

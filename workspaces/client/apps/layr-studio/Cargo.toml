@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 studio-client-core = { path = "../../packages/client-core" }
-serde_json.workspace = true
+studio-json = { path = "../../../runtime/packages/json" }
 tokio.workspace = true
 
 [dev-dependencies]

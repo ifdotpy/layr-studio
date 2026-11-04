@@ -6,7 +6,7 @@ use crate::orchestration_worker::{
 };
 use crate::project_locations::LocationPayload;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::persistence::ServerOperationKind;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -34,7 +34,7 @@ impl OrchestrationRequest {
 impl OrchestrationRequest {
     pub(crate) fn remaining_value(&self) -> Option<Value> {
         self.command.remaining_payload().map(|payload| {
-            serde_json::json!({
+            studio_json::json!({
                 "requestId": self.request_id,
                 "operation": self.operation,
                 "action": self.command.kind(),
@@ -366,24 +366,24 @@ mod tests {
     #[test]
     fn envelope_requires_known_root_fields_and_action() {
         let body = r#"{"requestId":"r","operation":[],"action":"projects","payload":{}}"#;
-        assert!(serde_json::from_str::<OrchestrationRequest>(body).is_ok());
+        assert!(studio_json::from_str::<OrchestrationRequest>(body).is_ok());
         let extra =
             r#"{"requestId":"r","operation":[],"action":"projects","payload":{},"extra":1}"#;
-        assert!(serde_json::from_str::<OrchestrationRequest>(extra).is_err());
+        assert!(studio_json::from_str::<OrchestrationRequest>(extra).is_err());
         let unknown = r#"{"requestId":"r","operation":[],"action":"future","payload":{}}"#;
-        assert!(serde_json::from_str::<OrchestrationRequest>(unknown).is_err());
+        assert!(studio_json::from_str::<OrchestrationRequest>(unknown).is_err());
         let array_payload =
             r#"{"requestId":"r","operation":[],"action":"stop","payload":["l","w",1]}"#;
-        assert!(serde_json::from_str::<OrchestrationRequest>(array_payload).is_err());
+        assert!(studio_json::from_str::<OrchestrationRequest>(array_payload).is_err());
         let array_args = r#"{"requestId":"r","operation":[],"action":"move_send","payload":{"link":"l","worker":"w","epoch":1,"parentEpoch":1,"args":["a","x"]}}"#;
-        assert!(serde_json::from_str::<OrchestrationRequest>(array_args).is_err());
+        assert!(studio_json::from_str::<OrchestrationRequest>(array_args).is_err());
         let empty = r#"{"requestId":"","operation":[],"action":"projects","payload":{}}"#;
-        assert!(serde_json::from_str::<OrchestrationRequest>(empty).is_err());
+        assert!(studio_json::from_str::<OrchestrationRequest>(empty).is_err());
         let long = format!(
             r#"{{"requestId":"{}","operation":[],"action":"projects","payload":{{}}}}"#,
             "x".repeat(129)
         );
-        assert!(serde_json::from_str::<OrchestrationRequest>(&long).is_err());
+        assert!(studio_json::from_str::<OrchestrationRequest>(&long).is_err());
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod tests {
                 r#"{{"requestId":"r","operation":[],"action":"{action}","payload":{payload}}}"#
             );
             let request: OrchestrationRequest =
-                serde_json::from_str(&body).expect("known operation");
+                studio_json::from_str(&body).expect("known operation");
             assert_eq!(request.command.kind().as_str(), *action);
         }
     }

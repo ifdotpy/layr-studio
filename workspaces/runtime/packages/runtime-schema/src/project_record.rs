@@ -60,11 +60,11 @@ pub struct ProjectLive {
     #[schemars(with = "Option<String>")]
     pub home_server_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
-    pub created: Field<serde_json::Number>,
+    #[schemars(with = "Option<studio_json::Number>")]
+    pub created: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
-    pub updated: Field<serde_json::Number>,
+    #[schemars(with = "Option<studio_json::Number>")]
+    pub updated: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<bool>")]
     pub sidebar_hidden: Field<bool>,
@@ -211,11 +211,11 @@ pub struct ProjectRegistration {
     pub status: Field<WorkEffectStatus>,
 }
 
-pub(crate) fn schema() -> serde_json::Value {
+pub(crate) fn schema() -> studio_json::Value {
     schemars::schema_for!(ProjectRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: serde_json::Value = serde_json::from_slice(include_bytes!(
+    let stored: studio_json::Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-project-record.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -238,9 +238,9 @@ mod tests {
             r#"{"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":null,"locations":null}"#,
             r#"{"recordKind":"live","id":"p","path":"/p","name":"","peerTeams":[],"locations":[{"serverId":"s","path":"/p","projectId":"p","gitOrigin":null}]}"#,
         ] {
-            let expected: serde_json::Value = serde_json::from_str(raw).unwrap();
-            let record: ProjectRecord = serde_json::from_str(raw).unwrap();
-            assert_eq!(serde_json::to_value(record).unwrap(), expected);
+            let expected: studio_json::Value = studio_json::from_str(raw).unwrap();
+            let record: ProjectRecord = studio_json::from_str(raw).unwrap();
+            assert_eq!(studio_json::to_value(record).unwrap(), expected);
         }
     }
 
@@ -260,14 +260,14 @@ mod tests {
                 Field::Value(3),
             ),
         ] {
-            let ProjectRecord::Live(project) = serde_json::from_str(raw).unwrap() else {
+            let ProjectRecord::Live(project) = studio_json::from_str(raw).unwrap() else {
                 panic!("live")
             };
             assert_eq!(project.peer_teams_revision, expected);
-            let encoded = serde_json::to_value(ProjectRecord::Live(project)).unwrap();
+            let encoded = studio_json::to_value(ProjectRecord::Live(project)).unwrap();
             assert_eq!(
                 encoded.get("peerTeamsRevision"),
-                serde_json::from_str::<serde_json::Value>(raw)
+                studio_json::from_str::<studio_json::Value>(raw)
                     .unwrap()
                     .get("peerTeamsRevision")
             );

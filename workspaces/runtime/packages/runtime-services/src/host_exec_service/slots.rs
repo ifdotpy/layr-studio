@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::queue_command::Field;
 
 use super::protocol::{self, Failure, HostExecError, INVALID, Outcome, require};
@@ -233,7 +233,7 @@ impl HostService {
         };
         let text = fs::read_to_string(slot.join("slot.json")).map_err(|_| recovery())?;
         let metadata: SlotMetadata =
-            projection(serde_json::from_str(&text).map_err(|_| recovery())?);
+            projection(studio_json::from_str(&text).map_err(|_| recovery())?);
         require(
             metadata.generation.value().is_some_and(Value::is_string),
             &format!("The host slot metadata is invalid: {}", slot.display()),
@@ -271,7 +271,7 @@ impl HostService {
         let mut last = match fs::read_to_string(&counter) {
             Ok(text) => {
                 let value: GenerationCounter =
-                    projection(serde_json::from_str(&text).map_err(|_| recovery())?);
+                    projection(studio_json::from_str(&text).map_err(|_| recovery())?);
                 if value.last.is_missing() {
                     return Err(recovery().into());
                 }
@@ -293,7 +293,7 @@ impl HostService {
         for entry in fs::read_dir(project)?.flatten() {
             let number = fs::read_to_string(entry.path().join("slot.json"))
                 .ok()
-                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|text| studio_json::from_str::<Value>(&text).ok())
                 .and_then(|value| {
                     let metadata: SlotMetadata = projection(value);
                     super::integer(metadata.generation_number.value())
@@ -466,7 +466,7 @@ impl HostService {
             operation_id: String,
         }
         let owned = lease.is_file()
-            && serde_json::from_str::<Lease>(&fs::read_to_string(lease)?)?.operation_id
+            && studio_json::from_str::<Lease>(&fs::read_to_string(lease)?)?.operation_id
                 == op.operation_id;
         require(owned, "The operation no longer owns its slot", "lease_lost")?;
         Ok(path)
@@ -571,7 +571,7 @@ impl HostService {
             #[serde(default)]
             generation_number: Field<u64>,
         }
-        let meta: Generation = serde_json::from_str(&fs::read_to_string(slot.join("slot.json"))?)?;
+        let meta: Generation = studio_json::from_str(&fs::read_to_string(slot.join("slot.json"))?)?;
         let slot_name = slot
             .file_name()
             .and_then(|name| name.to_str())
@@ -773,7 +773,7 @@ impl HostService {
             for slot in slots {
                 let identity = fs::read_to_string(slot.join("lease.json"))
                     .ok()
-                    .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                    .and_then(|text| studio_json::from_str::<Value>(&text).ok())
                     .and_then(|value| {
                         value
                             .get("operationId")
@@ -809,7 +809,7 @@ impl HostService {
         for entry in listing {
             let Some(value) = fs::read_to_string(entry.path().join("status.json"))
                 .ok()
-                .and_then(|text| serde_json::from_str::<Op>(&text).ok())
+                .and_then(|text| studio_json::from_str::<Op>(&text).ok())
             else {
                 continue;
             };

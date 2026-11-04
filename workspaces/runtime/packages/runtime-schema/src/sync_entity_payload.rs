@@ -62,7 +62,7 @@ pub struct WorkReleaseEntity {
     #[schemars(with = "u64")]
     pub index: crate::recovery_record::NonnegativeInteger,
     #[schemars(schema_with = "json_value_schema")]
-    pub value: serde_json::Value,
+    pub value: studio_json::Value,
 }
 
 fn json_value_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -77,7 +77,7 @@ pub enum EdgeKind {
 }
 
 /// Render migrated variant schemas into the existing union components.
-pub(crate) fn schemas() -> Result<serde_json::Map<String, serde_json::Value>, String> {
+pub(crate) fn schemas() -> Result<studio_json::Map<String, studio_json::Value>, String> {
     let mut generator = schemars::generate::SchemaSettings::draft2020_12()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
         .into_generator();
@@ -85,12 +85,12 @@ pub(crate) fn schemas() -> Result<serde_json::Map<String, serde_json::Value>, St
     let mut schemas = generator.take_definitions(true);
     let variants = schema
         .get("oneOf")
-        .and_then(serde_json::Value::as_array)
+        .and_then(studio_json::Value::as_array)
         .ok_or("missing payload variants")?;
     for variant in variants {
         let collection = variant
             .pointer("/properties/collection/const")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .ok_or("missing payload collection")?;
         let mut chars = collection.chars();
         let first = chars.next().ok_or("empty payload collection")?;
@@ -107,7 +107,7 @@ pub(crate) fn schemas() -> Result<serde_json::Map<String, serde_json::Value>, St
 #[cfg(test)]
 mod tests {
     use super::SyncEntityPayload;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn edge_previous_wire_fixtures() {
@@ -126,7 +126,7 @@ mod tests {
         ] {
             let payload = json!({"collection":"edge","id":"e","value":value});
             assert_eq!(
-                serde_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
+                studio_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
                 valid,
                 "{payload}"
             );
@@ -160,7 +160,7 @@ mod tests {
         ] {
             let payload = json!({"collection":"chat","id":"c","value":value});
             assert_eq!(
-                serde_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
+                studio_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
                 valid,
                 "{payload}"
             );
@@ -198,7 +198,7 @@ mod tests {
         for (value, valid) in cases {
             let payload = json!({"collection":"workRelease","id":"r","value":value});
             assert_eq!(
-                serde_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
+                studio_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
                 valid,
                 "{payload}"
             );
@@ -222,7 +222,7 @@ mod tests {
             .next()
             .unwrap();
         let dispatch = "if matches!(collection, \"edge\" | \"chat\" | \"workRelease\") {";
-        let owner = "serde_json::from_value::<sync_entity_payload::SyncEntityPayload>";
+        let owner = "studio_json::from_value::<sync_entity_payload::SyncEntityPayload>";
         let owns_payloads = |text: &str| text.contains(dispatch) && text.contains(owner);
         assert!(owns_payloads(body));
         // Negative control: removing this dispatch must make the witness fail.

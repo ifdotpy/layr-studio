@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value, json};
 use thiserror::Error;
 
 const EXTERNALIZE_THRESHOLD: usize = 64 * 1024;
@@ -23,7 +23,7 @@ pub const TASK_PREVIEW_BYTES: usize = 512;
 enum OrderedValue {
     Null,
     Bool(bool),
-    Number(serde_json::Number),
+    Number(studio_json::Number),
     String(String),
     Array(Vec<Self>),
     Object(Vec<(String, Self)>),
@@ -142,7 +142,7 @@ impl<'de> Deserialize<'de> for OrderedValue {
             where
                 E: serde::de::Error,
             {
-                serde_json::Number::from_f64(value)
+                studio_json::Number::from_f64(value)
                     .map(OrderedValue::Number)
                     .ok_or_else(|| E::custom("non-finite JSON number"))
             }
@@ -197,7 +197,7 @@ pub enum PayloadBlobError {
     #[error("Payload blob filesystem operation failed")]
     Io(#[from] std::io::Error),
     #[error("Payload JSON operation failed")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -254,7 +254,7 @@ pub fn decide_externalize_json(
     table: &str,
     input: &str,
 ) -> Result<ExternalizeDecision, PayloadBlobError> {
-    let input = serde_json::from_str::<OrderedValue>(input)?;
+    let input = studio_json::from_str::<OrderedValue>(input)?;
     decide_externalize_ordered(table, input)
 }
 
@@ -282,7 +282,7 @@ fn decide_externalize_ordered(
             record.insert(field, value.into_value());
             continue;
         }
-        let bytes = serde_json::to_vec(&value)?;
+        let bytes = studio_json::to_vec(&value)?;
         if bytes.len() <= EXTERNALIZE_THRESHOLD {
             refs.remove(&field);
             record.insert(field, value.into_value());
@@ -356,7 +356,7 @@ pub fn decide_externalize_result(input: &Value) -> Result<ExternalizeDecision, P
 pub fn decide_externalize_result_json(
     input: &str,
 ) -> Result<ExternalizeDecision, PayloadBlobError> {
-    decide_externalize_result_ordered(serde_json::from_str::<OrderedValue>(input)?)
+    decide_externalize_result_ordered(studio_json::from_str::<OrderedValue>(input)?)
 }
 
 fn decide_externalize_result_ordered(
@@ -379,7 +379,7 @@ fn decide_externalize_result_ordered(
             writes: Vec::new(),
         });
     };
-    let bytes = serde_json::to_vec(&contents)?;
+    let bytes = studio_json::to_vec(&contents)?;
     if bytes.len() <= EXTERNALIZE_THRESHOLD {
         record.insert("contentItems".into(), contents.into_value());
         return Ok(ExternalizeDecision {
@@ -532,7 +532,7 @@ fn read_blob_without_symlinks(
 
 pub fn resolve_record(state_root: &Path, input: &Value) -> Result<Value, PayloadBlobError> {
     resolve_record_with(input, |reference| {
-        Ok(serde_json::from_slice(&load_blob(state_root, reference)?)?)
+        Ok(studio_json::from_slice(&load_blob(state_root, reference)?)?)
     })
 }
 
@@ -546,7 +546,7 @@ pub(crate) fn resolve_record_with(
         .cloned()
         .ok_or(PayloadBlobError::InvalidRecord)?;
     if let Some(refs) = record.remove("_payloadBlobs") {
-        let refs: std::collections::BTreeMap<String, Value> = serde_json::from_value(refs)?;
+        let refs: std::collections::BTreeMap<String, Value> = studio_json::from_value(refs)?;
         for (field, reference) in refs {
             record.insert(field, load(&reference)?);
         }
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn payload_preview_projects_only_retained_string_bytes() {
         for (table, field) in [("checkpoints", "items"), ("tool_requests", "result")] {
-            let source = serde_json::json!({"id":"record", field:[{"text":"x".repeat(70_000)}]});
+            let source = studio_json::json!({"id":"record", field:[{"text":"x".repeat(70_000)}]});
             super::PROJECTED_STRING_BYTES.set(0);
             let decision = super::decide_externalize(table, &source).expect("decision");
             assert_eq!(decision.writes.len(), 1);
@@ -687,7 +687,7 @@ mod tests {
                 "the discarded payload must not be projected into the record"
             );
         }
-        let source = serde_json::json!({"contentItems":[{"text":"x".repeat(70_000)}]});
+        let source = studio_json::json!({"contentItems":[{"text":"x".repeat(70_000)}]});
         super::PROJECTED_STRING_BYTES.set(0);
         let decision = super::decide_externalize_result(&source).expect("result decision");
         assert_eq!(decision.writes.len(), 1);
@@ -698,7 +698,7 @@ mod tests {
         PayloadBlobError, decide_externalize, decide_externalize_result, load_blob, resolve_record,
         task_preview, trim_task, write_blobs,
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn blob_reference_shapes_preserve_validation() {
@@ -781,7 +781,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("checkpoint");
-        let record: Value = serde_json::from_str(&record).expect("JSON");
+        let record: Value = studio_json::from_str(&record).expect("JSON");
         assert_eq!(
             resolve_record(root.path(), &record).expect("hydrate"),
             source

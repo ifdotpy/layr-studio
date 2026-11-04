@@ -7,7 +7,7 @@ use std::sync::Arc;
 use rusqlite::params;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::{
     multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
     multi_server_protocol::NonNegativeNumber,
@@ -32,7 +32,7 @@ pub struct StoredPeer(PersistedAccessClient);
 
 impl StoredPeer {
     pub fn from_raw(raw: &str) -> Option<Self> {
-        serde_json::from_str::<studio_runtime_schema::http_ingress::Object<PersistedAccessClient>>(
+        studio_json::from_str::<studio_runtime_schema::http_ingress::Object<PersistedAccessClient>>(
             raw,
         )
         .ok()
@@ -305,7 +305,7 @@ pub fn decide_probe(
         .as_ref()
         .map(|v| v.created.clone())
         .map(Ok)
-        .unwrap_or_else(|| NonNegativeNumber::try_from(serde_json::Number::from(now)))
+        .unwrap_or_else(|| NonNegativeNumber::try_from(studio_json::Number::from(now)))
         .map_err(|_| refused(400, "invalid_peer", "The peer identity is invalid"))?;
     let invalid = || refused(400, "invalid_peer", "The peer identity is invalid");
     let record = PersistedAccessClient {
@@ -360,7 +360,7 @@ pub async fn record_probe(
         let enabled:bool=tx.query_row("SELECT auto_pair FROM runtime_access_settings WHERE id=1",[],|r|r.get(0))?;
         let decision=decide_probe(&snapshot,&origin,&peer,previous.as_deref(),client.as_deref(),enabled,now)?;
         if let Some(record)=&decision.record {
-            let raw=serde_json::to_string(record).map_err(|_| refused(500,"invalid_peer","The peer identity is invalid"))?;
+            let raw=studio_json::to_string(record).map_err(|_| refused(500,"invalid_peer","The peer identity is invalid"))?;
             tx.execute("INSERT INTO runtime_access_discovered(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![id,raw])?;
             tx.execute("DELETE FROM runtime_access_discovered WHERE id IN (SELECT id FROM runtime_access_discovered ORDER BY json_extract(record,'$.lastSeen') DESC,id LIMIT -1 OFFSET ?1)",[MAX_DISCOVERED])?;
         }
@@ -371,7 +371,7 @@ pub async fn record_probe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn discovery_tolerates_bad_peer_fields_and_rejects_tags() {

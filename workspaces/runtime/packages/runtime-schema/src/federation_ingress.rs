@@ -154,12 +154,12 @@ impl<'de> Deserialize<'de> for LocalMembers {
 #[cfg(test)]
 mod tests {
     use super::FederationRequest;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn federation_limits_match_openapi() {
-        let doc: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let schemas = &doc["components"]["schemas"];
         assert_eq!(
             schemas["CreateRoomRequest"]["properties"]["local_members"]["maxItems"],
@@ -191,7 +191,7 @@ mod tests {
             json!({"action":"create_room","peer_id":"p","local_members":["a"]}),
             json!({"action":"room_options","room_id":"r","disclosure":{"shareNames":null}}),
         ] {
-            assert!(serde_json::from_value::<FederationRequest>(value).is_ok());
+            assert!(studio_json::from_value::<FederationRequest>(value).is_ok());
         }
         for value in [
             json!({"action":"status","extra":true}),
@@ -202,7 +202,7 @@ mod tests {
             json!({"action":"accept_peer","invitation":[]}),
         ] {
             assert!(
-                serde_json::from_value::<FederationRequest>(value.clone()).is_err(),
+                studio_json::from_value::<FederationRequest>(value.clone()).is_err(),
                 "{value}"
             );
         }

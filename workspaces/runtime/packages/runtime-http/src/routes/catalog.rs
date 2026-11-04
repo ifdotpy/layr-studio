@@ -165,12 +165,12 @@ async fn limits_response(
             None,
         )
         .map_err(|_| ApiError::internal())?;
-        snapshot["eligibility"] = serde_json::to_value(
+        snapshot["eligibility"] = studio_json::to_value(
             studio_runtime_services::usage_resume::eligibility(&limits, &agent, now),
         )
         .map_err(|_| ApiError::internal())?;
     }
-    serde_json::from_value(snapshot)
+    studio_json::from_value(snapshot)
         .map(Json)
         .map_err(|_| ApiError::internal())
 }
@@ -188,11 +188,11 @@ fn limit_error_snapshot(
     let object = snapshot.as_object_mut().ok_or_else(ApiError::internal)?;
     object.insert(
         "error".to_owned(),
-        serde_json::Value::String(message.to_owned()),
+        studio_json::Value::String(message.to_owned()),
     );
     object.insert(
         "checkedAt".to_owned(),
-        serde_json::Value::from(
+        studio_json::Value::from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| ApiError::internal())?
@@ -216,8 +216,8 @@ mod tests {
         extract::ConnectInfo,
         http::Request,
     };
-    use serde_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_services::{
         account_driver::AccountDriver, account_policy::AccountPolicyState,
     };
@@ -239,7 +239,7 @@ mod tests {
             }]},
             "vendorData":{"opaque":null}
         });
-        let registry = serde_json::to_vec(&json!({
+        let registry = studio_json::to_vec(&json!({
             "version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
             "defaultAccountKey":"default",
             "accounts":{"default":{
@@ -287,7 +287,7 @@ mod tests {
         let body = to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("body");
-        let body: Value = serde_json::from_slice(&body).expect("JSON");
+        let body: Value = studio_json::from_slice(&body).expect("JSON");
         assert_eq!(body["accountKey"], "default");
         assert_eq!(
             body["data"],
@@ -308,7 +308,7 @@ mod tests {
             claude["provider"] = json!("claude");
             claude["deleted"] = json!(true);
             let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":row,"claude":claude},"logins":{}});
-            let bytes = serde_json::to_vec(&registry).expect("registry JSON");
+            let bytes = studio_json::to_vec(&registry).expect("registry JSON");
             let path = root.path().join("registry.json");
             std::fs::write(&path, &bytes).expect("registry");
             let policy = AccountPolicyState::from_startup(Some(&bytes), []).expect("policy");
@@ -346,7 +346,7 @@ mod tests {
             let body = to_bytes(response.into_body(), 1024 * 1024)
                 .await
                 .expect("body");
-            let body: Value = serde_json::from_slice(&body).expect("JSON");
+            let body: Value = studio_json::from_slice(&body).expect("JSON");
             assert_eq!(body["accounts"][0]["provider"], "codex");
             assert_eq!(body["archivedAccounts"][0]["provider"], "claude");
             assert_eq!(std::fs::read(&path).expect("registry unchanged"), bytes);

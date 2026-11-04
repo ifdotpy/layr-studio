@@ -2,9 +2,9 @@
 //! provider owner: adapters stage its existing durable effects, never send here.
 use crate::agent_management::{Action, ManagementError};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use studio_json::Value;
 use studio_runtime_store::{RuntimeStore, Transaction};
 
 pub type LifecycleCommitFuture<'a> =

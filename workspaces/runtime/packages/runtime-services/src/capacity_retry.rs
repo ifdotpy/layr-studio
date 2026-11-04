@@ -6,7 +6,7 @@ use crate::continuation::{
     ProposedRecord, Result, Snapshot, WaitStatus, account, flag, now_checked, present, text,
 };
 use crate::usage_resume::TASK_CHANGED;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::continuation_snapshot::PreparationSettings;
 use studio_runtime_schema::shared_values::{DISK_FULL_MAX_RESUMES, DISK_FULL_RECHECK_SECONDS};
 const WAIT_MAX: f64 = 300.0;

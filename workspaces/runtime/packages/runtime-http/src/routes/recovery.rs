@@ -7,7 +7,7 @@ use crate::error::ApiError;
 use crate::router::HttpState;
 use axum::Json;
 use axum::extract::State;
-use serde_json::Value;
+use studio_json::Value;
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![post(
         "/api/connection-recovery",

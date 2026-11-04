@@ -2,10 +2,10 @@
 
 use super::{CardSource, card_id, load, poll_once, save};
 use crate::linux_vm_guest::{GuestError, GuestRpc};
-use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Answer, Approval, ApprovalState, BrowserCard, BrowserOutcome, BrowserPhase, BrowserSource,
     CloseReason, Decision, Principal, Timestamp,
@@ -110,7 +110,7 @@ fn request_entity(
         })
         .expect("request entity reads")
         .map(|(deleted, payload)| {
-            let payload: Value = serde_json::from_str(&payload).expect("entity JSON");
+            let payload: Value = studio_json::from_str(&payload).expect("entity JSON");
             (deleted, payload["value"].clone())
         })
 }

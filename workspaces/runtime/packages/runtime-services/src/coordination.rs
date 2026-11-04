@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::delivery::DeliveryMoment;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::{
@@ -133,7 +133,7 @@ pub fn create_chat(
         id: id.to_owned(),
         name: name.to_owned(),
         members: members.clone(),
-        original_members: serde_json::to_string(&members).map_err(StoreError::from)?,
+        original_members: studio_json::to_string(&members).map_err(StoreError::from)?,
     };
     CoordinationRepository::put_group(transaction, &group)?;
     for member in members {
@@ -215,7 +215,7 @@ pub(crate) fn remote_message_receipt(
         return Ok(None);
     };
     let metadata = QueueWriteRepository::metadata(connection, id)?.unwrap_or_else(|| {
-        Value::Object(serde_json::Map::from_iter([
+        Value::Object(studio_json::Map::from_iter([
             ("assets".into(), Value::Array(Vec::new())),
             (
                 "delivery".into(),
@@ -411,7 +411,7 @@ fn post_managed_message(
     QueueWriteRepository::put_metadata(
         transaction,
         input.id,
-        &Value::Object(serde_json::Map::from_iter([
+        &Value::Object(studio_json::Map::from_iter([
             ("assets".into(), Value::Array(input.assets.to_vec())),
             ("acceptedAt".into(), Value::from(created)),
             (
@@ -647,7 +647,7 @@ fn send_followup_inner(
         let projection = studio_runtime_store::projection_value(&recipient);
         crate::agents_create::publish_agent(transaction, &projection)?;
     }
-    let mut metadata = Value::Object(serde_json::Map::from_iter([
+    let mut metadata = Value::Object(studio_json::Map::from_iter([
         ("assets".into(), Value::Array(Vec::new())),
         ("acceptedAt".into(), Value::from(now)),
         ("delivery".into(), Value::String(delivery.as_str().into())),
@@ -890,7 +890,7 @@ pub fn post_message(
         author: "user".to_owned(),
         text: text.to_owned(),
         at: crate::event_write::unix_time().map_err(event_write_error)?,
-        deliveries: serde_json::to_string(&deliveries)
+        deliveries: studio_json::to_string(&deliveries)
             .map_err(|_| CoordinationError::InvalidRequest("Invalid message delivery state"))?,
     };
     CoordinationRepository::put_message(transaction, &message)?;
@@ -998,7 +998,7 @@ fn require_single_team<'a>(
 fn validate_group(
     group: &studio_runtime_store::ChatGroup,
 ) -> Result<Vec<String>, CoordinationError> {
-    let members: Vec<String> = serde_json::from_str(&group.original_members).map_err(|_| {
+    let members: Vec<String> = studio_json::from_str(&group.original_members).map_err(|_| {
         CoordinationError::InvalidStored {
             object: "groups",
             id: group.id.clone(),
@@ -1061,7 +1061,7 @@ fn parse_deliveries(
     BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
     CoordinationError,
 > {
-    serde_json::from_str(raw).map_err(|_| invalid_stored("messages", id))
+    studio_json::from_str(raw).map_err(|_| invalid_stored("messages", id))
 }
 
 fn message_receipt(message: ValidatedMessage, newly_queued: bool) -> GroupMessageReply {
@@ -1153,7 +1153,7 @@ pub(crate) fn event_write_error(error: crate::event_write::EventWriteError) -> C
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::delivery::DeliveryMoment;
     use studio_runtime_store::Connection;
 
@@ -1532,7 +1532,7 @@ mod tests {
         crate::queue_write::action(
             &transaction,
             "lead",
-            &serde_json::from_str::<studio_runtime_schema::queue_command::QueueCommand>(
+            &studio_json::from_str::<studio_runtime_schema::queue_command::QueueCommand>(
                 &format!(r#"{{"action":"send_now","id":"{id}","request_id":"{promote}"}}"#),
             ).expect("valid queue command"),
             "promotion-fixture",
@@ -1634,7 +1634,7 @@ mod tests {
             &self,
             _tx: &studio_runtime_store::Transaction<'_>,
             _agent: &studio_runtime_store::AgentRecord,
-        ) -> Result<Vec<serde_json::Value>, CoordinationError> {
+        ) -> Result<Vec<studio_json::Value>, CoordinationError> {
             Ok(Vec::new())
         }
     }
@@ -1707,8 +1707,8 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("event metadata exists");
-        let metadata: serde_json::Value =
-            serde_json::from_str(&metadata).expect("metadata is valid JSON");
+        let metadata: studio_json::Value =
+            studio_json::from_str(&metadata).expect("metadata is valid JSON");
         assert_eq!(metadata["delivery"], json!(DeliveryMoment::NextTurn));
         assert_eq!(metadata["assets"], json!([]));
         assert!(metadata.get("senderId").is_none());
@@ -1720,8 +1720,8 @@ mod tests {
     fn mac_handoff_survives_p03_precommit_and_postcommit_restarts() {
         use super::{SystemFollowup, send_system_followup};
         use crate::linux_vm_guest::{GuestError, GuestRpc};
-        use serde_json::Value;
         use std::time::Duration;
+        use studio_json::Value;
 
         struct Guest(std::sync::Mutex<usize>);
         impl GuestRpc for Guest {
@@ -2045,7 +2045,7 @@ mod tests {
                 rusqlite::params![
                     id,
                     signature,
-                    serde_json::to_string(&legacy).unwrap(),
+                    studio_json::to_string(&legacy).unwrap(),
                     chrono::Utc::now().timestamp_millis()
                 ],
             )
@@ -2258,7 +2258,8 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("chat projection reads");
-        let payload: serde_json::Value = serde_json::from_str(&payload).expect("projection parses");
+        let payload: studio_json::Value =
+            studio_json::from_str(&payload).expect("projection parses");
         assert_eq!(
             payload["value"]["tail"]
                 .as_str()

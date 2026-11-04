@@ -1,6 +1,6 @@
 //! Transactional work-item assignment used by the worker creation path.
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::{AgentRecord, Transaction, WorkItemsRepository, WorkStatus};
 
 use crate::event_write::{self, EventWriteError};
@@ -59,7 +59,7 @@ pub fn assign_in_transaction(
     let saved_owner = work.owner();
     let version = work
         .version()
-        .and_then(serde_json::Number::as_i64)
+        .and_then(studio_json::Number::as_i64)
         .ok_or_else(|| invalid_work(task_id))?;
     if saved_owner == Some(owner_id) {
         return Ok(Assignment {
@@ -88,7 +88,7 @@ pub fn assign_in_transaction(
     let mut work = work.into_value();
     work["owner"] = Value::String(owner_id.to_owned());
     work["version"] = Value::from(next_version);
-    work["updated"] = serde_json::Number::from_f64(now)
+    work["updated"] = studio_json::Number::from_f64(now)
         .map(Value::Number)
         .ok_or_else(|| invalid_work(task_id))?;
     WorkItemsRepository::update_work(tx, task_id, &work)?;

@@ -6,7 +6,7 @@ use serde::ser::{
 };
 use std::collections::BTreeMap;
 
-type Result<T> = std::result::Result<T, serde_json::Error>;
+type Result<T> = std::result::Result<T, studio_json::Error>;
 #[derive(Clone, Copy)]
 struct Serializer<'a> {
     item: &'a str,
@@ -28,7 +28,7 @@ pub(super) fn serialize<T: Serialize + ?Sized>(
         key: false,
     })
 }
-fn invalid_key() -> serde_json::Error {
+fn invalid_key() -> studio_json::Error {
     ser::Error::custom("key must be a string")
 }
 
@@ -89,7 +89,7 @@ impl<'a> Serializer<'a> {
 macro_rules! integer_methods { ($($method:ident($ty:ty)),*) => {$ (fn $method(self, v: $ty) -> Result<String> { Ok(v.to_string()) })*}; }
 impl<'a> ser::Serializer for Serializer<'a> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     type SerializeSeq = Array<'a>;
     type SerializeTuple = Array<'a>;
     type SerializeTupleStruct = Array<'a>;
@@ -124,7 +124,7 @@ impl<'a> ser::Serializer for Serializer<'a> {
     }
     fn serialize_f32(self, v: f32) -> Result<String> {
         if self.key && v.is_finite() {
-            serde_json::to_string(&v)
+            studio_json::to_string(&v)
         } else {
             self.serialize_f64(f64::from(v))
         }
@@ -137,7 +137,7 @@ impl<'a> ser::Serializer for Serializer<'a> {
                 Ok("null".into())
             }
         } else if self.key {
-            serde_json::to_string(&v)
+            studio_json::to_string(&v)
         } else {
             Ok(python_float_json(v))
         }
@@ -188,7 +188,7 @@ impl<'a> ser::Serializer for Serializer<'a> {
         name: &'static str,
         v: &T,
     ) -> Result<String> {
-        if name == "$serde_json::private::RawValue" {
+        if name == "$studio_json::private::RawValue" {
             return Err(ser::Error::custom(
                 "raw JSON cannot be canonicalized without decoding",
             ));
@@ -229,7 +229,7 @@ impl<'a> ser::Serializer for Serializer<'a> {
         self.object(None)
     }
     fn serialize_struct(self, name: &'static str, _: usize) -> Result<Object<'a>> {
-        if name == "$serde_json::private::RawValue" {
+        if name == "$studio_json::private::RawValue" {
             return Err(ser::Error::custom(
                 "raw JSON cannot be canonicalized without decoding",
             ));
@@ -261,7 +261,7 @@ impl Array<'_> {
 }
 impl SerializeSeq for Array<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_element<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<()> {
         self.push(v)
     }
@@ -271,7 +271,7 @@ impl SerializeSeq for Array<'_> {
 }
 impl SerializeTuple for Array<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_element<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<()> {
         self.push(v)
     }
@@ -281,7 +281,7 @@ impl SerializeTuple for Array<'_> {
 }
 impl SerializeTupleStruct for Array<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_field<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<()> {
         self.push(v)
     }
@@ -291,7 +291,7 @@ impl SerializeTupleStruct for Array<'_> {
 }
 impl SerializeTupleVariant for Array<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_field<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<()> {
         self.push(v)
     }
@@ -327,7 +327,7 @@ impl Object<'_> {
 }
 impl SerializeMap for Object<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_key<T: Serialize + ?Sized>(&mut self, key: &T) -> Result<()> {
         self.pending = Some(key.serialize(self.serializer.key())?);
         Ok(())
@@ -336,7 +336,7 @@ impl SerializeMap for Object<'_> {
         let key = self
             .pending
             .take()
-            .ok_or_else(|| ser::Error::custom("missing map key"))?;
+            .ok_or_else(|| <studio_json::Error as ser::Error>::custom("missing map key"))?;
         self.insert(key, value)
     }
     fn end(self) -> Result<String> {
@@ -345,7 +345,7 @@ impl SerializeMap for Object<'_> {
 }
 impl SerializeStruct for Object<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_field<T: Serialize + ?Sized>(
         &mut self,
         key: &'static str,
@@ -359,7 +359,7 @@ impl SerializeStruct for Object<'_> {
 }
 impl SerializeStructVariant for Object<'_> {
     type Ok = String;
-    type Error = serde_json::Error;
+    type Error = studio_json::Error;
     fn serialize_field<T: Serialize + ?Sized>(
         &mut self,
         key: &'static str,

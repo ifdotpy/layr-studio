@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use tempfile::TempDir;
 
 use super::{

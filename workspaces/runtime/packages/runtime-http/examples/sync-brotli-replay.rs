@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!(
         "{}",
-        serde_json::json!({
+        studio_json::json!({
             "quality":quality,"lgwin":lgwin,"events":frames,"plainBytes":input.len(),
             "compressedBytes":compressed.len(),"wallUs":wall_us,"cpuUs":cpu_us,
             "maxEventWallUs":max_flush_us,"peakEncoderHeapBytes":memory.peak,

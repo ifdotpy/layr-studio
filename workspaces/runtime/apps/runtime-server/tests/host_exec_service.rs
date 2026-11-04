@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::host_exec_service::{
     LEASE_FILE, SERVICE_READY_LINE,
     lifecycle::{ensure_service, service_call},
@@ -270,7 +270,7 @@ impl Drop for State {
                 .filter_map(|path| {
                     std::fs::read(path)
                         .ok()
-                        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                        .and_then(|bytes| studio_json::from_slice::<Value>(&bytes).ok())
                 })
                 .collect::<Vec<_>>();
             let pending =
@@ -286,7 +286,7 @@ impl Drop for State {
         }
         for path in self.launches.get_mut() {
             if let Ok(bytes) = std::fs::read(path)
-                && let Ok(record) = serde_json::from_slice::<Value>(&bytes)
+                && let Ok(record) = studio_json::from_slice::<Value>(&bytes)
             {
                 if record["phase"] != "exited" {
                     cleanup_unproved = true;

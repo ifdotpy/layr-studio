@@ -1,7 +1,7 @@
 //! Durable per-account usage observations and their compact sync projections.
 
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::records::{RecordOrder, RecordPredicate, Table, UsageResumeRecord};
 use crate::schema::{SchemaRequirements, TableRequirement};
@@ -79,7 +79,7 @@ pub struct LimitsStamp {
 impl LimitsStamp {
     pub fn read(raw: Option<String>) -> StoreResult<Self> {
         Ok(raw
-            .map(|raw| serde_json::from_str::<Option<Self>>(&raw))
+            .map(|raw| studio_json::from_str::<Option<Self>>(&raw))
             .transpose()?
             .flatten()
             .unwrap_or_default())
@@ -123,12 +123,12 @@ pub fn normalized_limits_view(
         #[derive(serde::Deserialize)]
         struct Entity<'a> {
             #[serde(borrow)]
-            value: &'a serde_json::value::RawValue,
+            value: studio_json::RawJson<'a>,
         }
         #[derive(serde::Deserialize)]
         struct Projected<'a> {
             #[serde(borrow)]
-            observation: &'a serde_json::value::RawValue,
+            observation: studio_json::RawJson<'a>,
         }
         #[derive(serde::Deserialize)]
         struct Legacy {
@@ -137,16 +137,17 @@ pub fn normalized_limits_view(
             #[serde(flatten)]
             response: UsageLimitsResponse,
         }
-        let entity: Entity<'_> = serde_json::from_slice(bytes).ok()?;
-        if let Ok(view) = serde_json::from_str::<RateLimitView>(entity.value.get())
+        let entity: Entity<'_> = studio_json::from_slice(bytes).ok()?;
+        if let Ok(view) = studio_json::from_str::<RateLimitView>(entity.value.as_str())
             && view.observation.account_key == account
         {
             return Some(view);
         }
-        let observation = serde_json::from_str::<Projected<'_>>(entity.value.get())
-            .map(|view| view.observation)
-            .unwrap_or(entity.value);
-        let value: Legacy = serde_json::from_str(observation.get()).ok()?;
+        let value: Legacy = match studio_json::from_str::<Projected<'_>>(entity.value.as_str()) {
+            Ok(view) => studio_json::from_str(view.observation.as_str()),
+            Err(_) => studio_json::from_str(entity.value.as_str()),
+        }
+        .ok()?;
         (value.response.account_key == account)
             .then(|| RateLimitView::from_observation(value.response, now))
     })();
@@ -229,7 +230,7 @@ impl StreamFields {
 fn agent_scope_fields(agent: &crate::AgentRecord) -> StoreResult<AgentScopeFields> {
     use serde::Deserialize;
     use serde::de::IntoDeserializer;
-    let fields = serde::de::value::MapDeserializer::<_, serde_json::Error>::new(
+    let fields = serde::de::value::MapDeserializer::<_, studio_json::error::Error>::new(
         agent
             .extra
             .iter()
@@ -405,7 +406,7 @@ pub fn put_limits_observation(
     ensure_account(tx, account)?;
     tx.execute(
         "UPDATE runtime_account_state SET limits_observation=?2 WHERE account=?1",
-        (account, serde_json::to_string(observation)?),
+        (account, studio_json::to_string(observation)?),
     )?;
     Ok(())
 }
@@ -455,7 +456,7 @@ pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
                 {
                     return Err(("/".into(), "resourceLimit".into()));
                 }
-                let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+                let mut deserializer = studio_json::Deserializer::from_slice(bytes);
                 serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
                     let path = error.path().to_string();
                     let path = path
@@ -563,7 +564,7 @@ pub fn authentication_recovery_account_keys(
 mod tests {
     use super::{authentication_recovery_account_keys, limits_snapshots};
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn metadata_only_vm_stream_has_no_provider_state() {
@@ -577,7 +578,7 @@ mod tests {
             r#"{"streams":{},"connection":"c"}"#,
             r#"{"streams":{},"ack":0}"#,
         ] {
-            let fields: super::StreamFields = serde_json::from_str(stream).unwrap();
+            let fields: super::StreamFields = studio_json::from_str(stream).unwrap();
             assert!(fields.into_state().is_err());
         }
     }

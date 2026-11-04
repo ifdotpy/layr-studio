@@ -3,7 +3,7 @@ use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get};
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::tool_requests::{self, Action, ToolRequestError};
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![get(
@@ -87,7 +87,7 @@ fn resolve_payload_response(state_root: &std::path::Path, value: Value) -> Resul
             Value::Object(values) => values
                 .into_iter()
                 .map(|(key, value)| Ok((key, resolve(state_root, value)?)))
-                .collect::<Result<serde_json::Map<_, _>, ApiError>>()
+                .collect::<Result<studio_json::Map<_, _>, ApiError>>()
                 .map(Value::Object),
             value @ Value::Null
             | value @ Value::Bool(_)
@@ -118,7 +118,7 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::resolve_payload_response;
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn tool_request_list_is_returned_as_json() {
@@ -160,8 +160,8 @@ mod tests {
             .unwrap();
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        let body: studio_json::Value =
+            studio_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
         assert_eq!(body, json!({"requests":[]}));
     }
 

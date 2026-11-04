@@ -34,7 +34,7 @@ impl GuestRpc for NotificationGuest {
                 json!({"method":"item/completed","params":{
                     "threadId":thread,"turnId":"vm-turn","item":{"id":"answer","type":"agentMessage",
                         "text":"VM answer","phase":"final_answer"}}}),
-                serde_json::from_str(terminal["payload"].as_str().expect("terminal payload"))
+                studio_json::from_str(terminal["payload"].as_str().expect("terminal payload"))
                     .expect("terminal JSON"),
             ] {
                 VmTurnGuest::enqueue_frame(&mut state, handle, payload);
@@ -204,10 +204,10 @@ async fn vm_stream_persistence_preserves_agent_fields() {
             let mut streams = crate::notification_dispatch::NotificationStreamBuffer::default();
             store::persist_streams(tx, "default", &mut streams)?;
             let (after, raw): (String, String) = tx.query_row("SELECT record,json_extract(record,'$.providerStream.streams') FROM runtime_agents WHERE id=?1", [&actor], |r| Ok((r.get(0)?,r.get(1)?)))?;
-            let saved: store::AccountStreams = serde_json::from_str(&raw).expect("typed streams");
+            let saved: store::AccountStreams = studio_json::from_str(&raw).expect("typed streams");
             assert!(!saved.revision.is_empty());
-            let mut before: Value = serde_json::from_str(&before).expect("before record");
-            let mut after: Value = serde_json::from_str(&after).expect("after record");
+            let mut before: Value = studio_json::from_str(&before).expect("before record");
+            let mut after: Value = studio_json::from_str(&after).expect("after record");
             before.as_object_mut().expect("object").remove("providerStream");
             after.as_object_mut().expect("object").remove("providerStream");
             assert_eq!(before, after);
@@ -267,11 +267,11 @@ async fn vm_notification_scope_keeps_native_and_sibling_receipts_and_observation
                 let dispatched = dispatch_notification_with_effects(tx, actor, &context,
                     &NotificationStreamBuffer::default(), &authority, &frame, now(),
                     &crate::notification_runtime_effects::RuntimeNotificationEffects).expect("distinct source admission");
-                let effects = serde_json::to_string(&dispatched.post_commit).expect("observations");
+                let effects = studio_json::to_string(&dispatched.post_commit).expect("observations");
                 assert!(effects.contains(&expected_handle), "observation lost its journal namespace: {effects}");
                 let (metadata, _) = dispatched.stream_update.expect("stream update").persisted_parts();
-                let encoded = serde_json::to_string(&metadata).expect("metadata JSON");
-                let metadata: Value = serde_json::from_str(&encoded).expect("metadata JSON");
+                let encoded = studio_json::to_string(&metadata).expect("metadata JSON");
+                let metadata: Value = studio_json::from_str(&encoded).expect("metadata JSON");
                 assert_eq!(metadata["entries"][0]["key"]["account"], "default");
                 assert_eq!(metadata["entries"][0]["key"]["agent_id"],actor);
                 let scoped = ProviderDeliveryIdentity {provider_handle:expected_handle,generation:1,cursor:7};

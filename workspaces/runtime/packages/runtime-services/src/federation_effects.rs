@@ -5,8 +5,8 @@ use crate::federation_messaging::{
 };
 use crate::remote_transport::{self as transport, RemoteIdentity};
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,
 };
@@ -204,13 +204,13 @@ pub async fn handle(
     }
     if matches!(request.action, FederationAction::Pair) {
         let body: PairRequest =
-            serde_json::from_slice(request.raw).map_err(|_| Error::Invalid("body"))?;
+            studio_json::from_slice(request.raw).map_err(|_| Error::Invalid("body"))?;
         if body.protocol.as_f64() != Some(PROTOCOL as f64) {
             return Err(Error::Invalid("body"));
         }
         return handle_pair(Arc::clone(&store), request, observed, body, now).await;
     }
-    let body: Value = serde_json::from_slice(request.raw).map_err(|_| Error::Invalid("body"))?;
+    let body: Value = studio_json::from_slice(request.raw).map_err(|_| Error::Invalid("body"))?;
     // A lead message is authorized by its project grant, not by a federation peer.
     if matches!(request.action, FederationAction::Message)
         && crate::federation_lead::is_lead_envelope(&body)
@@ -259,7 +259,7 @@ pub async fn handle(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PairRequest {
-    protocol: serde_json::Number,
+    protocol: studio_json::Number,
     invite_id: String,
     token: String,
     state_id: String,
@@ -349,7 +349,7 @@ async fn handle_project_pair(
             .optional()
             .map_err(StoreError::from)?;
         let mut invite: Value = invite
-            .map(|raw| serde_json::from_str(&raw))
+            .map(|raw| studio_json::from_str(&raw))
             .transpose()
             .map_err(|_| Error::Invalid("invite"))?
             .ok_or(Error::Forbidden("invalid pairing invitation"))?;
@@ -478,7 +478,7 @@ async fn handle_pair(
             .optional()
             .map_err(StoreError::from)?;
         let mut invite: Value = invite
-            .map(|raw| serde_json::from_str(&raw))
+            .map(|raw| studio_json::from_str(&raw))
             .transpose()
             .map_err(|_| Error::Invalid("invite"))?
             .ok_or(Error::Forbidden("invalid pairing invitation"))?;
@@ -505,7 +505,7 @@ async fn handle_pair(
             .optional()
             .map_err(StoreError::from)?;
         let mut peer: Value = existing
-            .map(|raw| serde_json::from_str(&raw))
+            .map(|raw| studio_json::from_str(&raw))
             .transpose()
             .map_err(|_| Error::Invalid("peer"))?
             .unwrap_or_else(|| json!({
@@ -829,7 +829,7 @@ pub(crate) fn acknowledge_outbox(
         let mut deliveries: std::collections::BTreeMap<
             String,
             studio_runtime_schema::persistence::RecipientDelivery,
-        > = serde_json::from_str(&raw).map_err(StoreError::from)?;
+        > = studio_json::from_str(&raw).map_err(StoreError::from)?;
         deliveries.insert(
             format!("remote:{peer}"),
             studio_runtime_schema::persistence::RecipientDelivery {
@@ -840,7 +840,7 @@ pub(crate) fn acknowledge_outbox(
         tx.execute(
             "UPDATE runtime_chat_messages SET deliveries=?1 WHERE id=?2",
             params![
-                serde_json::to_string(&deliveries).map_err(StoreError::from)?,
+                studio_json::to_string(&deliveries).map_err(StoreError::from)?,
                 id
             ],
         )

@@ -6,7 +6,7 @@ use axum::Json;
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
 use axum::http::{HeaderMap, Request, StatusCode};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::federation::{self, FederationError};
 use studio_runtime_services::federation_effects;
 
@@ -240,7 +240,7 @@ async fn manage(
                 .map_err(map_service_error)?;
             let snapshot = super::generated_json::<crate::generated::FederationSnapshot>(snapshot)?;
             Ok(Json(
-                serde_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
+                studio_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
             ))
         }
         FederationRequest::CreateProjectInvite { .. }
@@ -274,7 +274,7 @@ async fn manage(
             }
             let snapshot = super::generated_json::<crate::generated::FederationSnapshot>(result)?;
             Ok(Json(
-                serde_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
+                studio_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
             ))
         }
     }
@@ -358,7 +358,7 @@ mod ingress_tests {
             .unwrap();
         assert_eq!(snapshot["enabled"], true);
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2)", rusqlite::params!["room", serde_json::json!({"id":"room", "peerId":"peer", "peerLabel":"Peer", "name":"Room", "status":"pending", "localMembers":[], "remoteMembers":[], "shareNames":false, "shareStatus":false, "created":1}).to_string()])?;
+            tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2)", rusqlite::params!["room", studio_json::json!({"id":"room", "peerId":"peer", "peerLabel":"Peer", "name":"Room", "status":"pending", "localMembers":[], "remoteMembers":[], "shareNames":false, "shareStatus":false, "created":1}).to_string()])?;
             Ok(())
         }).await.unwrap();
         let request = Request::builder()
@@ -398,7 +398,7 @@ fn refused_from_outside(
 ) -> bool {
     let outside = crate::middleware::forwarded_source(headers)
         .is_some_and(|source| !crate::middleware::is_tailnet_ip(source));
-    let lead = serde_json::from_slice::<serde_json::Value>(raw)
+    let lead = studio_json::from_slice::<studio_json::Value>(raw)
         .is_ok_and(|body| studio_runtime_services::federation_lead::is_lead_envelope(&body));
     outside && !(matches!(action, federation_effects::FederationAction::Message) && lead)
 }

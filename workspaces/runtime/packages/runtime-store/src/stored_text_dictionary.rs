@@ -372,7 +372,7 @@ mod tests {
     use super::*;
 
     fn record(index: usize) -> String {
-        serde_json::json!({
+        studio_json::json!({
             "id": format!("item-{index:06}"),
             "agentId": format!("agent-{:03}", index % 17),
             "rootId": "root-a",
@@ -401,8 +401,9 @@ mod tests {
     }
 
     fn initialize_analytics(connection: Connection) -> Connection {
-        let snapshot: serde_json::Value =
-            serde_json::from_str(include_str!("runtime-state-schema.json")).expect("schema source");
+        let snapshot: studio_json::Value =
+            studio_json::from_str(include_str!("runtime-state-schema.json"))
+                .expect("schema source");
         let table = snapshot["analytics.sqlite3"]["sqlite_master"]
             .as_array()
             .expect("schema objects")

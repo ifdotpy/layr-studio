@@ -141,7 +141,7 @@ mod tests {
         let mut request = Request {
             id: "native-sign-in".into(),
             method: studio_client_core::desktop::SIGN_IN_PREPARE_METHOD.into(),
-            params: serde_json::json!({"permit":42,"_nativeWindow":"forged","value":{"url":"https://example.com", "requestId":"card"}}),
+            params: studio_json::json!({"permit":42,"_nativeWindow":"forged","value":{"url":"https://example.com", "requestId":"card"}}),
         };
         assert!(super::native_action_needs_gesture(&mut request, "main").unwrap());
         assert!(request.params.get("permit").is_none());
@@ -152,7 +152,7 @@ mod tests {
         request.params["value"]["preparation"] = "forged".into();
         assert!(!super::native_action_needs_gesture(&mut request, "main").unwrap());
         assert!(request.params.get("permit").is_none());
-        request.params["value"]["preparation"] = serde_json::Value::Null;
+        request.params["value"]["preparation"] = studio_json::Value::Null;
         assert!(!super::native_action_needs_gesture(&mut request, "main").unwrap());
         request.method = studio_client_core::desktop::SIGN_IN_CANCEL_METHOD.into();
         assert!(!super::native_action_needs_gesture(&mut request, "main").unwrap());
@@ -458,7 +458,7 @@ async fn client_request(
             {
                 let p = &request.params;
                 let approval = studio_client_core::pair_approval::Approval::parse(p)?;
-                let read = |params: serde_json::Value| {
+                let read = |params: studio_json::Value| {
                     let window = window.clone();
                     let state = state.clone();
                     async move {
@@ -481,12 +481,12 @@ async fn client_request(
                     }
                 };
                 let before =
-                    read(serde_json::json!({"path":"/api/multi-server","method":"GET"})).await?;
+                    read(studio_json::json!({"path":"/api/multi-server","method":"GET"})).await?;
                 let peer = studio_client_core::pair_approval::approved_peer(&before, p, &approval)?;
-                let invitation = read(serde_json::json!({"path":"/api/multi-server","method":"POST","requestId":approval.invite_request_id,"body":{"action":"ui_invite","serverId":approval.server_id,"requestId":approval.invite_request_id}})).await?;
+                let invitation = read(studio_json::json!({"path":"/api/multi-server","method":"POST","requestId":approval.invite_request_id,"body":{"action":"ui_invite","serverId":approval.server_id,"requestId":approval.invite_request_id}})).await?;
                 studio_client_core::pair_approval::check_invitation(&invitation, p, &peer)?;
                 let after =
-                    read(serde_json::json!({"path":"/api/multi-server","method":"GET"})).await?;
+                    read(studio_json::json!({"path":"/api/multi-server","method":"GET"})).await?;
                 studio_client_core::pair_approval::approved_peer(&after, p, &approval)?;
             }
             let directory =
@@ -544,12 +544,12 @@ async fn client_request(
         let scope = request.params["scope"].as_str().ok_or("Missing scope.")?;
         let result = if request.method == "preferences.legacy" {
             studio_client_core::store_move::legacy_preferences(&store, scope)
-                .map(|rows| serde_json::json!(rows))
+                .map(|rows| studio_json::json!(rows))
         } else {
-            let keys: Vec<String> = serde_json::from_value(request.params["keys"].clone())
+            let keys: Vec<String> = studio_json::from_value(request.params["keys"].clone())
                 .map_err(|_| "Invalid preference keys.")?;
             studio_client_core::store_move::clear_legacy_preferences(&store, scope, &keys)
-                .map(|()| serde_json::Value::Null)
+                .map(|()| studio_json::Value::Null)
         };
         return Ok(match result {
             Ok(value) => Response::success(request.id, value),
@@ -795,7 +795,7 @@ pub fn run() {
             })
             .visible(!hidden);
             let window = if let Some(error) = startup_error {
-                let message = serde_json::to_string(&format!(
+                let message = studio_json::to_string(&format!(
                     "The application could not start. {error}"
                 ))?;
                 window.initialization_script(format!(
@@ -925,7 +925,7 @@ pub fn import_server_credentials() -> Result<(), String> {
             return Err("Server credentials exceed the import limit.".into());
         }
         let source =
-            serde_json::from_slice(&bytes).map_err(|_| "Invalid server credential archive.")?;
+            studio_json::from_slice(&bytes).map_err(|_| "Invalid server credential archive.")?;
         let vault = studio_client_core::server_keys::FileVault::new(&directory);
         #[cfg(target_os = "macos")]
         studio_client_core::server_keys::move_keychain_keys(&vault, &directory.to_string_lossy())?;

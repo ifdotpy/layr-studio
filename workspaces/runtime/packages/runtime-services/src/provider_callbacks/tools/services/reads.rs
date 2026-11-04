@@ -4,14 +4,14 @@ use crate::submit_gates::{
     AuthorizationRecords, AuthorizationScope, EventDenial, StoredEvent, authorize_events,
 };
 use rusqlite::OptionalExtension;
-use serde_json::Map;
+use studio_json::Map;
 use studio_runtime_store::{TranscriptItem, TranscriptRepository, TranscriptStoreError};
 
 pub(super) fn chat(
     tx: &Transaction<'_>,
     snapshot: &CallbackSnapshot,
     args: &Value,
-) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let room = text(args, "room_id")?;
     messages::authorize_room(tx, snapshot, room)?;
     let page = crate::coordination_reads::chat_read(tx, room, args["before"].as_i64(), None, 100)?;
@@ -38,7 +38,7 @@ struct BriefMessage<'a> {
 
 pub(crate) fn project_chat(
     page: &crate::coordination_reads::ChatRead,
-) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let room = page.room.brief();
     let messages = &page.messages;
     let mut selected = Vec::new();
@@ -72,12 +72,12 @@ pub(crate) fn project_chat(
         let mut candidate = vec![brief];
         candidate.extend(selected.iter().cloned());
         // Conservative byte bound includes the model's escaped text envelope.
-        let inner = serde_json::to_string(&ChatPreview {
+        let inner = studio_json::to_string(&ChatPreview {
             room: &room,
             messages: &candidate,
         })?;
         let bytes =
-            r#"[{"text":,"type":"inputText"}]"#.len() + serde_json::to_string(&inner)?.len();
+            r#"[{"text":,"type":"inputText"}]"#.len() + studio_json::to_string(&inner)?.len();
         if !selected.is_empty() && bytes > 13000 {
             break;
         }
@@ -88,7 +88,7 @@ pub(crate) fn project_chat(
     } else {
         None
     };
-    Ok(serde_json::value::to_raw_value(&ChatProjection {
+    Ok(studio_json::to_raw_value(&ChatProjection {
         room: &room,
         messages: &selected,
         next_before: next,
@@ -225,7 +225,7 @@ fn studio_input(
         },
         Some(&saved.3),
     )?;
-    let metadata: Value = serde_json::from_str(&saved.3)?;
+    let metadata: Value = studio_json::from_str(&saved.3)?;
     let body = payloads.studio_input(&metadata["studioInput"])?;
     excerpt(
         key,
@@ -338,7 +338,7 @@ fn event(
         meta.as_deref(),
     )?;
     let mut metadata = match meta {
-        Some(raw) => match serde_json::from_str::<Value>(&raw) {
+        Some(raw) => match studio_json::from_str::<Value>(&raw) {
             Ok(Value::Object(metadata)) => metadata,
             _ => return Err(CallbackError::Stored(format!("runtime_event_meta/{id}"))),
         },
@@ -460,7 +460,7 @@ fn command_output(
             .map(String::as_str)
             .ok_or_else(unreadable)?,
     };
-    let payload: Value = serde_json::from_str(raw).map_err(|_| unreadable())?;
+    let payload: Value = studio_json::from_str(raw).map_err(|_| unreadable())?;
     let output = payload["aggregatedOutput"]
         .as_str()
         .ok_or(CallbackError::Invalid(

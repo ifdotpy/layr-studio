@@ -352,7 +352,7 @@ mod tests {
     use super::*;
     use crate::RuntimeStore;
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     fn agents() -> Vec<Value> {
         vec![

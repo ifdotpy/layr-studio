@@ -13,7 +13,7 @@ pub struct RemoteReply {
     pub request_id: String,
     pub outcome: studio_runtime_schema::persistence::RemoteOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub value: Option<Box<serde_json::value::RawValue>>,
+    pub value: Option<studio_json::OwnedRawJson>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -42,13 +42,13 @@ pub struct AccessPending {
     pub client: String,
     pub request_id: String,
     pub session: String,
-    pub record: Box<serde_json::value::RawValue>,
+    pub record: studio_json::OwnedRawJson,
     pub admission: AdmittedRequest,
 }
 
 /// Immutable federation content fingerprint, including the original domain ID.
 /// The signed UUID root is transport provenance and does not change old content hashes.
-pub fn federation_envelope_signature(envelope: &serde_json::Value) -> crate::StoreResult<String> {
+pub fn federation_envelope_signature(envelope: &studio_json::Value) -> crate::StoreResult<String> {
     let mut immutable = envelope
         .as_object()
         .cloned()
@@ -57,7 +57,7 @@ pub fn federation_envelope_signature(envelope: &serde_json::Value) -> crate::Sto
         immutable.remove(key);
     }
     Ok(crate::sha256_hex(
-        crate::python_json_compact(&serde_json::Value::Object(immutable)).as_bytes(),
+        crate::python_json_compact(&studio_json::Value::Object(immutable)).as_bytes(),
     ))
 }
 
@@ -75,7 +75,7 @@ pub fn remote_operation_key(
     if let Ok(identity) = RequestIdentity::new(namespace, authority, root, operation) {
         return identity.id().to_owned();
     }
-    serde_json::to_string(&(namespace, authority, root, operation))
+    studio_json::to_string(&(namespace, authority, root, operation))
         .expect("string tuple serializes")
 }
 
@@ -99,7 +99,7 @@ pub fn replay_remote<R: serde::de::DeserializeOwned>(
     now_ms: i64,
 ) -> Result<Option<ResultEnvelope<R>>, RequestResultError> {
     RequestResults::replay(db, id, signature, now_ms)?
-        .map(|stored| serde_json::from_str(&stored.result).map_err(Into::into))
+        .map(|stored| studio_json::from_str(&stored.result).map_err(Into::into))
         .transpose()
 }
 

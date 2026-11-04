@@ -17,6 +17,6 @@ pub(super) fn run(args: &[String]) -> super::Result<ExitCode> {
     }
     let guest = UnixGuestRpc::for_runtime_state(&state);
     let project = ProjectSync::open(&guest, &vault::linux_vm_state_dir(&state), project)?;
-    println!("{}", serde_json::to_string_pretty(&project.plan()?)?);
+    println!("{}", studio_json::to_string_pretty(&project.plan()?)?);
     Ok(ExitCode::SUCCESS)
 }

@@ -166,7 +166,7 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
     let actor_identity = common_identity && agent_record.epoch == actor.epoch;
     if call.method == Method::ClaudeShellPolicy {
         let settings = studio_runtime_store::OrchestrationSettingsRepository::shell_policy(tx)?;
-        if call.params["settings"] != serde_json::to_value(settings).map_err(StoreError::from)?
+        if call.params["settings"] != studio_json::to_value(settings).map_err(StoreError::from)?
             || call.params["eligible"].as_bool().is_none()
             || call.params["critical"].as_bool().is_none()
             || !call.operation.starts_with("shell-policy:")
@@ -467,7 +467,7 @@ fn authorize_recovered_monitor_cancel(
     struct CancelParams {
         process_id: String,
     }
-    let Ok(params) = serde_json::from_value::<CancelParams>(call.params.clone()) else {
+    let Ok(params) = studio_json::from_value::<CancelParams>(call.params.clone()) else {
         return Ok(false);
     };
     if call.operation != format!("monitor-cancel:{}", params.process_id) {
@@ -545,7 +545,7 @@ fn thread_started_for_actor(
         return Ok(false);
     };
     let provenance: ThreadProvenance =
-        serde_json::from_str(&provenance).map_err(StoreError::from)?;
+        studio_json::from_str(&provenance).map_err(StoreError::from)?;
     Ok(provenance.actor == *actor
         && provenance.scope.account == call.scope.account
         && provenance.scope.generation == call.scope.generation)
@@ -1252,7 +1252,7 @@ mod replay_identity_tests {
     use super::*;
 
     fn monitor_fixture() -> studio_runtime_store::MonitorRecord {
-        serde_json::from_str(r#"{"id":"watch","agent":"agent-1","epoch":7,"status":"running","requestId":"watch","created":1.0,"activityAt":1.0,"activityGeneration":0,"bytes":0,"command":"true","cwd":"/fixture","interactive":false,"livenessCommand":"","log":"/fixture/watch.log","stallTimeoutSeconds":0,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":1000,"wakeOn":"exit"}"#).expect("monitor fixture")
+        studio_json::from_str(r#"{"id":"watch","agent":"agent-1","epoch":7,"status":"running","requestId":"watch","created":1.0,"activityAt":1.0,"activityGeneration":0,"bytes":0,"command":"true","cwd":"/fixture","interactive":false,"livenessCommand":"","log":"/fixture/watch.log","stallTimeoutSeconds":0,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":1000,"wakeOn":"exit"}"#).expect("monitor fixture")
     }
 
     #[tokio::test]
@@ -1557,7 +1557,7 @@ mod replay_identity_tests {
             actor: call.actor.clone().expect("actor"),
             operation: call.operation.clone(),
         };
-        let raw = serde_json::to_string(&provenance).expect("provenance");
+        let raw = studio_json::to_string(&provenance).expect("provenance");
         tx.execute(
             "INSERT INTO runtime_agents VALUES('agent-1',?1)",
             [format!(r#"{{"threadProvenance":{{"thread-1":{raw}}}}}"#)],
@@ -1868,7 +1868,7 @@ mod replay_identity_tests {
             let mut watch = monitor_fixture();
             watch.cancel_requested = Some(true);
             watch.reattached_connection_id = Some("new-connection".into());
-            watch.operation = Some(serde_json::from_str(r#"{"agent":"agent-1","epoch":7,"accountKey":"default","connectionId":"old"}"#)?);
+            watch.operation = Some(studio_json::from_str(r#"{"agent":"agent-1","epoch":7,"accountKey":"default","connectionId":"old"}"#)?);
             studio_runtime_store::Table::new(tx).put(&watch)?;
             Ok::<_,studio_runtime_store::StoreError>(())
         }).await.expect("seed deleted owner and proved handle");
@@ -1972,7 +1972,7 @@ mod replay_identity_tests {
             watch.interactive = true;
             watch.cancel_requested = Some(true);
             watch.reattached_connection_id = Some("reconnected-source".into());
-            watch.operation = Some(serde_json::from_str(r#"{"agent":"agent-1","epoch":7,"accountKey":"default","connectionId":"old-connection"}"#).expect("operation"));
+            watch.operation = Some(studio_json::from_str(r#"{"agent":"agent-1","epoch":7,"accountKey":"default","connectionId":"old-connection"}"#).expect("operation"));
             studio_runtime_store::Table::new(tx).put(&watch)?;
             Ok::<_,WorkerError>(())
         }).await.expect("original command and transferred owner");
@@ -1996,7 +1996,7 @@ mod replay_identity_tests {
                     SUBMITTED_READS.with(|count| count.set(count.get() + 1));
                 }
             }));
-            let operation = serde_json::from_value(json!({"agent":"agent-1","epoch":7,"accountKey":"default","connectionId":"old-connection"})).expect("operation");
+            let operation = studio_json::from_value(json!({"agent":"agent-1","epoch":7,"accountKey":"default","connectionId":"old-connection"})).expect("operation");
             assert!(super::super::monitor_command_scope(tx,"watch",&operation)?.is_some());
             tx.trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT, None);
             assert_eq!(SUBMITTED_READS.with(std::cell::Cell::get), 1);

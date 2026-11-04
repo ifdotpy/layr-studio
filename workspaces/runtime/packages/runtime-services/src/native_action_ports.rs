@@ -4,8 +4,8 @@ use crate::message_admission::MessageAdmission;
 use crate::native_actions::{
     Acceptance, Action, Admission, Delivery, NativeError, NativeRequest, Result,
 };
-use serde_json::Value;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, Transaction};
@@ -65,7 +65,7 @@ impl Admission for MessageNativeAdmission {
             if value.get("provider").and_then(Value::as_str) != Some(ProviderKind::Codex.key()) {
                 return Err(NativeError::Invalid("review/provider"));
             }
-            if value.get("daybreakEnabled") == Some(&serde_json::json!(true)) {
+            if value.get("daybreakEnabled") == Some(&studio_json::json!(true)) {
                 return Err(NativeError::Invalid("review/daybreak"));
             }
             let root_value = root.value();
@@ -156,9 +156,9 @@ impl Acceptance for NativeActionAcceptance {
                     .as_str()
                     .filter(|turn| !turn.is_empty())
                     .ok_or(NativeError::Unknown)?;
-                value["turnId"] = serde_json::json!(turn);
-                value["inFlight"] = serde_json::json!(true);
-                value["status"] = serde_json::json!("running");
+                value["turnId"] = studio_json::json!(turn);
+                value["inFlight"] = studio_json::json!(true);
+                value["status"] = studio_json::json!("running");
                 value["error"] = Value::Null;
             }
             Delivery::Written(_) if request.method == "thread/compact/start" => {
@@ -170,9 +170,9 @@ impl Acceptance for NativeActionAcceptance {
                 }
             }
             Delivery::Rejected(_) => {
-                value["status"] = serde_json::json!("failed");
-                value["inFlight"] = serde_json::json!(false);
-                value["error"] = serde_json::json!("The provider rejected the native action.");
+                value["status"] = studio_json::json!("failed");
+                value["inFlight"] = studio_json::json!(false);
+                value["error"] = studio_json::json!("The provider rejected the native action.");
             }
             Delivery::NotSent | Delivery::Unknown | Delivery::Written(_) => return Ok(()),
         }
@@ -221,7 +221,7 @@ fn admission_error(error: crate::coordination::CoordinationError) -> NativeError
 #[cfg(test)]
 mod admission_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     #[tokio::test]

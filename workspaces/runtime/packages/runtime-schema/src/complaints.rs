@@ -2,7 +2,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -50,19 +50,19 @@ mod tests {
 
     #[test]
     fn complaint_response_status_is_closed_and_matches_openapi() {
-        let openapi = serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
             .expect("OpenAPI parses");
         check_schema_parity(&openapi).expect("complaint status owner parity");
         for status in ["in_progress", "resolved", "declined"] {
             let parsed: ComplaintResponseStatus =
-                serde_json::from_value(json!(status)).expect("response status");
+                studio_json::from_value(json!(status)).expect("response status");
             assert_eq!(
-                serde_json::to_value(parsed).expect("status wire value"),
+                studio_json::to_value(parsed).expect("status wire value"),
                 status
             );
         }
         for status in ["open", "answered", "stopped", "unknown"] {
-            assert!(serde_json::from_value::<ComplaintResponseStatus>(json!(status)).is_err());
+            assert!(studio_json::from_value::<ComplaintResponseStatus>(json!(status)).is_err());
         }
     }
 }

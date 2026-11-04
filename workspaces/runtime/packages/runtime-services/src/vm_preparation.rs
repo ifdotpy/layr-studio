@@ -9,7 +9,6 @@ use crate::{
 };
 use base64::Engine;
 use serde::Deserialize;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -20,6 +19,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use studio_json::Value;
 use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
@@ -884,7 +884,7 @@ impl Preparation<'_> {
             let import_operation = studio_runtime_store::sha256_hex(import_request_id.as_bytes());
             let upload_root =
                 format!("/var/lib/codex-studio/projects/layr-import-{import_operation}");
-            project_import = Some(serde_json::json!({
+            project_import = Some(studio_json::json!({
                 "projectId":project_id,"source":source,"requestId":import_request_id,
                 "operation":import_operation,"uploadId":import_operation,
                 "root":upload_root,"phase":"planned"
@@ -892,7 +892,7 @@ impl Preparation<'_> {
             (
                 "line.bind",
                 vm_guest_request_id("layr-bind", &request.agent),
-                serde_json::json!({"projectId":project_id,"agentId":request.agent,"line":"main"}),
+                studio_json::json!({"projectId":project_id,"agentId":request.agent,"line":"main"}),
             )
         } else {
             let parent = parent.as_ref().ok_or(NativeError::Changed)?;
@@ -904,7 +904,7 @@ impl Preparation<'_> {
                 .and_then(Value::as_str)
                 .filter(|id| !id.is_empty())
                 .ok_or(NativeError::Changed)?;
-            let mut params = serde_json::json!({
+            let mut params = studio_json::json!({
                 "projectId":project_id,"agentId":request.agent,"parentAgentId":parent["id"],
                 "readOnly":agent.get("role").and_then(Value::as_str)==Some("reviewer"),
                 "subpath":agent.get("layrSubpath").and_then(Value::as_str).unwrap_or("."),
@@ -971,7 +971,7 @@ impl Preparation<'_> {
             match guest_call(
                 Arc::clone(guest),
                 "project.ensure".into(),
-                serde_json::json!({"projectId":project_id}),
+                studio_json::json!({"projectId":project_id}),
                 None,
                 std::time::Duration::from_secs(30),
             )
@@ -1076,15 +1076,15 @@ impl Preparation<'_> {
                     _ => return Err(NativeError::Changed),
                 }
                 current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
-                    serde_json::json!("submitted");
+                    studio_json::json!("submitted");
                 current["startAttempt"]["vmWorkspacePreparation"]["error"] = Value::Null;
                 if current["startAttempt"]["vmWorkspacePreparation"].get("projectImport").is_some() {
-                    current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] = serde_json::json!("planned");
+                    current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] = studio_json::json!("planned");
                 }
                 AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                 return Ok("new".to_owned());
             }
-            current["startAttempt"]["vmWorkspacePreparation"] = serde_json::json!({
+            current["startAttempt"]["vmWorkspacePreparation"] = studio_json::json!({
                 "requestId":phase_request_id,"method":phase_method,"params":phase_params,"phase":"submitted"
             });
             if let Some(import) = phase_import.as_ref() {
@@ -1121,9 +1121,9 @@ impl Preparation<'_> {
                         if saved["requestId"] != import_record["requestId"] {
                             return Err(NativeError::Changed);
                         }
-                        saved["phase"] = serde_json::json!("uploading");
-                        saved["archiveBytes"] = serde_json::json!(archive_bytes);
-                        saved["archiveSha256"] = serde_json::json!(archive_sha);
+                        saved["phase"] = studio_json::json!("uploading");
+                        saved["archiveBytes"] = studio_json::json!(archive_bytes);
+                        saved["archiveSha256"] = studio_json::json!(archive_sha);
                         AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                         Ok(())
                     })
@@ -1168,19 +1168,19 @@ impl Preparation<'_> {
                                     return Err(NativeError::Changed);
                                 }
                                 current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
-                                    serde_json::json!(if not_sent {
+                                    studio_json::json!(if not_sent {
                                         "not_sent"
                                     } else {
                                         "unknown"
                                     });
                                 current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]
-                                    ["phase"] = serde_json::json!(if not_sent {
+                                    ["phase"] = studio_json::json!(if not_sent {
                                     "not_sent"
                                 } else {
                                     "unknown"
                                 });
                                 current["startAttempt"]["vmWorkspacePreparation"]["error"] =
-                                    serde_json::json!(detail);
+                                    studio_json::json!(detail);
                                 AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                                 Ok(())
                             })
@@ -1230,12 +1230,12 @@ impl Preparation<'_> {
                         return Err(NativeError::Changed);
                     }
                     current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] =
-                        serde_json::json!("imported");
+                        studio_json::json!("imported");
                     AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                     Ok(())
                 })
                 .await?;
-            bind_params = serde_json::json!({
+            bind_params = studio_json::json!({
                 "projectId":imported["projectId"],"agentId":request.agent,"line":"main"
             });
         }
@@ -1273,9 +1273,9 @@ impl Preparation<'_> {
                             return Err(NativeError::Changed);
                         }
                         current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
-                            serde_json::json!(if uncertain { "unknown" } else { "failed" });
+                            studio_json::json!(if uncertain { "unknown" } else { "failed" });
                         current["startAttempt"]["vmWorkspacePreparation"]["error"] =
-                            serde_json::json!(error_text);
+                            studio_json::json!(error_text);
                         AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                         Ok(())
                     })
@@ -1341,18 +1341,18 @@ impl Preparation<'_> {
                 if let Some(scratch) = result.get("scratch").filter(|value| value.is_string()) {
                     current["layrScratch"] = scratch.clone();
                 }
-                current["environment"] = serde_json::json!("linux");
-                current["worktree"] = serde_json::json!(false);
-                current["layrReady"] = serde_json::json!(true);
+                current["environment"] = studio_json::json!("linux");
+                current["worktree"] = studio_json::json!(false);
+                current["layrReady"] = studio_json::json!(true);
                 current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
-                    serde_json::json!("completed");
+                    studio_json::json!("completed");
                 AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                 Ok(())
             })
             .await?;
         let mut connected = agent;
-        connected["layrProjectId"] = serde_json::json!(connected_project_id);
-        connected["layrLine"] = serde_json::json!(connected_line);
+        connected["layrProjectId"] = studio_json::json!(connected_project_id);
+        connected["layrLine"] = studio_json::json!(connected_line);
         Self::verify_vm_connection(guest.as_ref(), &connected)?;
         Ok(())
     }
@@ -1365,7 +1365,7 @@ impl Preparation<'_> {
         guest
             .call(
                 "health",
-                &serde_json::json!({}),
+                &studio_json::json!({}),
                 None,
                 std::time::Duration::from_secs(15),
             )
@@ -1379,7 +1379,7 @@ impl Preparation<'_> {
         let context = guest
             .call(
                 "agent.context",
-                &serde_json::json!({"agentId":agent_id}),
+                &studio_json::json!({"agentId":agent_id}),
                 Some(&vm_guest_request_id("layr-context", agent_id)),
                 std::time::Duration::from_secs(20),
             )
@@ -1419,7 +1419,7 @@ impl Preparation<'_> {
         let operation = field("operation")?;
         let upload_id = field("uploadId")?;
         let root = field("root")?;
-        let begin = serde_json::json!({
+        let begin = studio_json::json!({
             "uploadId":upload_id,"root":root,"totalBytes":archive.bytes,
             "sha256":archive.sha256,"mode":"full","deletePaths":[]
         });
@@ -1441,7 +1441,7 @@ impl Preparation<'_> {
             }
             let existing = guest.call(
                 "project.ensure",
-                &serde_json::json!({"projectId":project_id}),
+                &studio_json::json!({"projectId":project_id}),
                 None,
                 short_timeout,
             )?;
@@ -1468,7 +1468,7 @@ impl Preparation<'_> {
             if count == 0 {
                 break;
             }
-            let params = serde_json::json!({
+            let params = studio_json::json!({
                 "uploadId":upload_id,"seq":sequence,
                 "data":base64::engine::general_purpose::STANDARD.encode(&chunk[..count])
             });
@@ -1490,7 +1490,7 @@ impl Preparation<'_> {
         }
         guest.call(
             "upload.commit",
-            &serde_json::json!({"uploadId":upload_id}),
+            &studio_json::json!({"uploadId":upload_id}),
             Some(&format!("{operation}:upload")),
             Duration::from_secs(1810),
         )?;
@@ -1503,7 +1503,7 @@ impl Preparation<'_> {
         );
         let project = guest.stream(
             "project.import",
-            &serde_json::json!({
+            &studio_json::json!({
                 "projectId":project_id,"source":root,"owner":Value::Null,
                 "incremental":false,"expectedStateId":Value::Null
             }),
@@ -1552,12 +1552,12 @@ fn write_vm_project_registration(
             .map_err(|_| NativeError::Unavailable("workspace-state/vm-project-registration"))?;
     }
     let path = directory.join("project.json");
-    let value = serde_json::json!({
+    let value = studio_json::json!({
         "projectId": project_id,
         "source": source,
         "importStateId": import_state_id,
     });
-    let bytes = serde_json::to_vec(&value)
+    let bytes = studio_json::to_vec(&value)
         .map_err(|_| NativeError::Unavailable("workspace-state/vm-project-registration"))?;
     crate::atomic_file::replace(&path, &bytes, Some(0o600), true)
         .map_err(|_| NativeError::Unavailable("workspace-state/vm-project-registration"))
@@ -1666,13 +1666,13 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         write_vm_project_registration(state.path(), "project-1", "/host/project", Some("state-1"))
             .expect("imported project registration writes");
-        let value: Value = serde_json::from_slice(
+        let value: Value = studio_json::from_slice(
             &fs::read(state.path().join("layr-projects/project-1/project.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
             value,
-            serde_json::json!({
+            studio_json::json!({
                 "projectId":"project-1", "source":"/host/project", "importStateId":"state-1"
             })
         );
@@ -1867,7 +1867,7 @@ mod tests {
                     detail: None,
                     uncertain: false,
                 }),
-                "project.ensure" if self.existing_project => Ok(serde_json::json!({
+                "project.ensure" if self.existing_project => Ok(studio_json::json!({
                     "projectId":params["projectId"],"stateId":"existing-state"
                 })),
                 "project.ensure" => Err(GuestError::Rejected {
@@ -1885,18 +1885,18 @@ mod tests {
                 }
                 "project.import" => {
                     on_frame(
-                        serde_json::json!({"event":"workspace.copy","data":{"phase":"importing_project","done":4,"unit":"files"}}),
+                        studio_json::json!({"event":"workspace.copy","data":{"phase":"importing_project","done":4,"unit":"files"}}),
                     )?;
                     *self.project_id.lock().unwrap() =
                         params["projectId"].as_str().map(str::to_owned);
-                    Ok(serde_json::json!({"projectId":params["projectId"]}))
+                    Ok(studio_json::json!({"projectId":params["projectId"]}))
                 }
-                "line.bind" => Ok(serde_json::json!({
+                "line.bind" => Ok(studio_json::json!({
                     "cwd":"/vm/project", "projectId":params["projectId"],
                     "line":"main", "owner":"vm-lead", "home":"/vm",
                     "stateId":"state-1"
                 })),
-                "agent.context" => Ok(serde_json::json!({
+                "agent.context" => Ok(studio_json::json!({
                     "projectId":self.project_id.lock().unwrap().clone(), "line":"main"
                 })),
                 _ => Ok(Value::Null),
@@ -1943,7 +1943,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let agent = AgentRecord::from_value(serde_json::json!({"compactions":0,"accountKey":"default",
+        let agent = AgentRecord::from_value(studio_json::json!({"compactions":0,"accountKey":"default",
             "id":"vm-lead","rootId":"vm-lead","epoch":1,"status":"starting","provider":"codex",
             "executionMode":"vm","isLead":true,"autoWake":true,"cwd":source,"hostProjectPath":source,
             "projectId":"project-1","startAttempt":{"id":"attempt-1"}})).unwrap();
@@ -2002,7 +2002,7 @@ mod tests {
         };
         let guest = UploadPreflightGuest::new("");
         let intent =
-            serde_json::json!({"projectId":"p", "operation":"o", "uploadId":"u", "root":"/p"});
+            studio_json::json!({"projectId":"p", "operation":"o", "uploadId":"u", "root":"/p"});
         let values = Arc::new(Mutex::new(Vec::new()));
         let capture = Arc::clone(&values);
         let sink: ProgressSink = Arc::new(move |progress| capture.lock().unwrap().push(progress));
@@ -2032,7 +2032,7 @@ mod tests {
         let guest = UploadPreflightGuest::new("")
             .with_begin_conflict()
             .with_existing_project();
-        let intent = serde_json::json!({
+        let intent = studio_json::json!({
             "projectId":"stable-project", "operation":"stable-operation",
             "uploadId":"stable-operation", "root":"/projects/stable"
         });
@@ -2064,7 +2064,7 @@ mod tests {
         fs::create_dir(&state).unwrap();
         let store = RuntimeStore::open(Some(&state)).await.unwrap();
         let agent =
-            AgentRecord::from_value(serde_json::json!({"compactions":0,"accountKey":"default",
+            AgentRecord::from_value(studio_json::json!({"compactions":0,"accountKey":"default",
                 "id":"vm-lead", "rootId":"vm-lead", "epoch":1, "status":"starting",
                 "provider":"codex", "executionMode":"vm", "isLead":true, "autoWake":true,
                 "cwd":source, "hostProjectPath":source, "projectId":"project-1",
@@ -2137,7 +2137,7 @@ mod tests {
             saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
             "completed"
         );
-        let old: OldProjectImport = serde_json::from_value(
+        let old: OldProjectImport = studio_json::from_value(
             saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"].clone(),
         )
         .expect("older binaries can read the persisted import");
@@ -2166,7 +2166,7 @@ mod tests {
             .await
             .expect("open test store");
         let agent =
-            AgentRecord::from_value(serde_json::json!({"compactions":0,"accountKey":"default",
+            AgentRecord::from_value(studio_json::json!({"compactions":0,"accountKey":"default",
                 "id":"vm-lead", "rootId":"vm-lead", "epoch":1, "status":"starting",
                 "provider":"codex", "executionMode":"vm", "isLead":true, "autoWake":true,
                 "cwd":source, "hostProjectPath":source, "projectId":"project-1",

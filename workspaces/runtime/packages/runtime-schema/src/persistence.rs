@@ -28,7 +28,7 @@ impl AdmittedRequest {
     }
     /// Derive a completion identity without refreshing the owner's issuance time.
     pub fn derive_result(&self, namespace: &str, operation: &[&str], signature: &str) -> Self {
-        let id = serde_json::to_string(&("owner-result", namespace, &self.id, operation))
+        let id = studio_json::to_string(&("owner-result", namespace, &self.id, operation))
             .expect("owner result identity serializes");
         Self {
             id,
@@ -93,9 +93,9 @@ macro_rules! domain {
         impl rusqlite::types::ToSql for $name {
             fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
                 // Serialize directly to a string at the SQL boundary; no Value carrier.
-                let json = serde_json::to_string(self)
+                let json = studio_json::to_string(self)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                let wire: String = serde_json::from_str(&json)
+                let wire: String = studio_json::from_str(&json)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 Ok(rusqlite::types::ToSqlOutput::Owned(wire.into()))
             }
@@ -429,7 +429,7 @@ impl RequestIdentity {
         let (seconds, nanos) = timestamp.to_unix();
         let issued_ms = (seconds * 1_000 + u64::from(nanos) / 1_000_000) as i64;
         // All inputs are strings, so tuple serialization cannot fail.
-        let id = serde_json::to_string(&(namespace, authority, uuid.to_string(), operation))
+        let id = studio_json::to_string(&(namespace, authority, uuid.to_string(), operation))
             .expect("string tuple serializes");
         Ok(Self { id, issued_ms })
     }
@@ -445,7 +445,7 @@ impl RequestIdentity {
         admitted_ms: i64,
     ) -> Self {
         // All inputs are strings, so tuple serialization cannot fail.
-        let id = serde_json::to_string(&(namespace, authority, root_request_id, operation))
+        let id = studio_json::to_string(&(namespace, authority, root_request_id, operation))
             .expect("string tuple serializes");
         Self {
             id,
@@ -509,28 +509,29 @@ mod tests {
             }),
             CapturedScope::Unproven,
         ] {
-            let bytes = serde_json::to_vec(&scope).unwrap();
-            let decoded: CapturedScope = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(serde_json::to_vec(&decoded).unwrap(), bytes);
+            let bytes = studio_json::to_vec(&scope).unwrap();
+            let decoded: CapturedScope = studio_json::from_slice(&bytes).unwrap();
+            assert_eq!(studio_json::to_vec(&decoded).unwrap(), bytes);
         }
     }
     #[test]
     fn receipt_recipient_delivery_schema_matches_nullable_owner() {
-        let openapi: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
-        let document = serde_json::json!({"$ref":"#/components/schemas/RecipientDelivery","components":openapi["components"]});
+        let openapi: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
+        let document = studio_json::json!({"$ref":"#/components/schemas/RecipientDelivery","components":openapi["components"]});
         let validator = jsonschema::validator_for(&document).expect("recipient schema");
         let record = RecipientDelivery {
             status: DeliveryStatus::Queued,
             error: None,
         };
         assert!(
-            validator.is_valid(&serde_json::to_value(record).expect("typed recipient")),
+            validator.is_valid(&studio_json::to_value(record).expect("typed recipient")),
             "wire schema accepts owner null error"
         );
-        assert!(!validator.is_valid(&serde_json::json!("queued")));
-        assert!(!validator.is_valid(&serde_json::json!({"status":"future","error":null})));
-        assert!(!validator.is_valid(&serde_json::json!({"status":"failed:reason","error":null})));
+        assert!(!validator.is_valid(&studio_json::json!("queued")));
+        assert!(!validator.is_valid(&studio_json::json!({"status":"future","error":null})));
+        assert!(!validator.is_valid(&studio_json::json!({"status":"failed:reason","error":null})));
     }
     #[cfg(feature = "sqlite")]
     pub(super) fn check_sql_enum<T>()
@@ -559,9 +560,9 @@ mod tests {
         assert!(ddl.contains(&enum_check::<T>("value")));
         for wire in T::VARIANTS {
             let parsed: T =
-                serde_json::from_str(&format!("\"{wire}\"")).expect("serde matches strum");
+                studio_json::from_str(&format!("\"{wire}\"")).expect("serde matches strum");
             assert_eq!(
-                serde_json::to_string(&parsed).expect("serde"),
+                studio_json::to_string(&parsed).expect("serde"),
                 format!("\"{wire}\"")
             );
             db.execute("INSERT INTO witness VALUES(?1)", [&parsed])
@@ -579,7 +580,7 @@ mod tests {
             db.execute("INSERT INTO witness VALUES('bogus')", [])
                 .is_err()
         );
-        assert!(serde_json::from_str::<T>("\"bogus\"").is_err());
+        assert!(studio_json::from_str::<T>("\"bogus\"").is_err());
     }
     #[cfg(feature = "sqlite")]
     #[test]

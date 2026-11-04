@@ -2,8 +2,8 @@
 use crate::MAX_SAFE_INTEGER;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::Value;
 
 /// Largest draft text, measured in Unicode code points.
 pub const MAX_DRAFT_TEXT_CODEPOINTS: usize = 100_000;
@@ -87,7 +87,7 @@ impl DraftVersion {
             .entry("id")
             .or_insert_with(|| Value::String(id.into()));
         let version: Self =
-            serde_json::from_value(Value::Object(fields)).map_err(|error| error.to_string())?;
+            studio_json::from_value(Value::Object(fields)).map_err(|error| error.to_string())?;
         version.validate()?;
         if version.id != id {
             return Err("Invalid draft document.".into());
@@ -360,7 +360,7 @@ mod tests {
         let mut master = branch("one", "master", 10);
         master
             .extra
-            .insert("futureField".into(), serde_json::json!({"nested":true}));
+            .insert("futureField".into(), studio_json::json!({"nested":true}));
         master.alternatives = vec!["\u{ffff}".into(), "🦀".into()];
         let merged = merge(&master, &branch("one", "fork", 9)).unwrap();
         assert_eq!(merged.extra, master.extra);

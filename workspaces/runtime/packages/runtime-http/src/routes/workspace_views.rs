@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::work_policy;
 use studio_runtime_services::workspace_files::WorkspaceContext;
 use studio_runtime_services::workspace_views::{
@@ -182,7 +182,7 @@ fn git_changes(cwd: &str) -> Result<Value, ApiError> {
 struct ReportedChangePayload {
     diff: String,
     #[serde(rename = "turnId")]
-    turn_id: Option<Box<serde_json::value::RawValue>>,
+    turn_id: Option<studio_json::OwnedRawJson>,
 }
 
 fn reported_changes(connection: &Connection, agent: &str) -> Result<Value, ApiError> {
@@ -210,7 +210,7 @@ fn reported_changes(connection: &Connection, agent: &str) -> Result<Value, ApiEr
     }
     let raw = text.or_else(|| item.record.text().value().cloned());
     let studio_runtime_schema::json_object::JsonObject(payload): studio_runtime_schema::json_object::JsonObject<ReportedChangePayload> =
-        serde_json::from_str(raw.as_deref().unwrap_or_default()).map_err(|_| {
+        studio_json::from_str(raw.as_deref().unwrap_or_default()).map_err(|_| {
             ApiError::new(StatusCode::BAD_REQUEST, "The recorded changes are invalid")
         })?;
     let files = reported_change_files(&payload.diff);
@@ -427,7 +427,7 @@ fn workspace_view(
 fn record_values<T: serde::Serialize>(records: Vec<T>) -> Result<Vec<Value>, ApiError> {
     records
         .into_iter()
-        .map(|record| serde_json::to_value(record).map_err(|_| ApiError::internal()))
+        .map(|record| studio_json::to_value(record).map_err(|_| ApiError::internal()))
         .collect()
 }
 
@@ -608,12 +608,12 @@ mod tests {
 
     #[test]
     fn workspace_tasks_serialize_the_typed_projection() {
-        let task: studio_runtime_store::TaskRecord = serde_json::from_str(
+        let task: studio_runtime_store::TaskRecord = studio_json::from_str(
             r#"{"id":"a:item","agent":"a","created":1,"itemId":"item","kind":"command","status":"running","turnId":"turn","type":"commandExecution","name":"run","outputFile":"logs/out"}"#,
         ).unwrap();
         let tasks = super::project_task_records(vec![task]).unwrap();
-        let encoded = serde_json::to_string(&tasks).unwrap();
-        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = studio_json::to_string(&tasks).unwrap();
+        let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
         assert_eq!(actual[0]["id"], "a:item");
         assert_eq!(actual[0]["outputFile"], "logs/out");
         assert!(actual[0].get("itemId").is_none());
@@ -624,8 +624,8 @@ mod tests {
         use axum::body::{Body, to_bytes};
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use serde_json::{Value, json};
         use std::sync::Arc;
+        use studio_json::{Value, json};
         use studio_runtime_store::RuntimeStore;
         use tower::ServiceExt;
 
@@ -729,7 +729,7 @@ mod tests {
             let response = app.clone().oneshot(request).await.unwrap();
             assert_eq!(response.status(), status, "{text}");
             let body: Value =
-                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                studio_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                     .unwrap();
             for (key, value) in expected.as_object().unwrap() {
                 assert_eq!(&body[key], value);
@@ -739,22 +739,22 @@ mod tests {
 
     #[test]
     fn reported_payload_preserves_opaque_turn_ids_after_json_admission() {
-        use serde_json::Value;
+        use studio_json::Value;
         for raw in [
             r#"{"diff":"ok"}"#,
             r#"{"diff":"ok","turnId":null}"#,
             r#"{"diff":"ok","turnId":{"future":[1]}}"#,
         ] {
-            let value: Value = serde_json::from_str(raw).unwrap();
+            let value: Value = studio_json::from_str(raw).unwrap();
             let expected = value.get("turnId").cloned().unwrap_or(Value::Null);
-            let payload: super::ReportedChangePayload = serde_json::from_str(raw).unwrap();
-            let actual = payload
-                .turn_id
-                .map_or(Value::Null, |raw| serde_json::from_str(raw.get()).unwrap());
+            let payload: super::ReportedChangePayload = studio_json::from_str(raw).unwrap();
+            let actual = payload.turn_id.map_or(Value::Null, |raw| {
+                studio_json::from_str(raw.as_str()).unwrap()
+            });
             assert_eq!(actual, expected);
         }
         assert!(
-            serde_json::from_str::<Value>(&format!(
+            studio_json::from_str::<Value>(&format!(
                 "{{\"diff\":\"ok\",\"extra\":{}}}",
                 "[".repeat(140) + &"]".repeat(140)
             ))
@@ -767,8 +767,8 @@ mod tests {
         use axum::body::{Body, to_bytes};
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use serde_json::{Value, json};
         use std::sync::Arc;
+        use studio_json::{Value, json};
         use studio_runtime_store::{RuntimeStore, StoreError};
         use tower::ServiceExt;
 
@@ -809,7 +809,7 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body");
-        let value: Value = serde_json::from_slice(&bytes).expect("JSON");
+        let value: Value = studio_json::from_slice(&bytes).expect("JSON");
         assert_eq!(value["tasks"][0]["id"], "c");
         assert_eq!(value["tasks"][1]["id"], "b");
         assert_eq!(value["hasMore"], true);
@@ -827,8 +827,8 @@ mod tests {
         use axum::body::{Body, to_bytes};
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use serde_json::{Value, json};
         use std::sync::Arc;
+        use studio_json::{Value, json};
         use studio_runtime_store::{RuntimeStore, StoreError};
         use tower::ServiceExt;
 
@@ -867,7 +867,7 @@ mod tests {
         let response = app.clone().oneshot(request()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+            studio_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(body["checkpoints"].as_array().unwrap().len(), 1);
         assert_eq!(body["checkpoints"][0]["future"]["kept"], true);
@@ -928,11 +928,11 @@ mod tests {
     #[test]
     fn a_result_from_before_result_files_keeps_the_workspace_view_available() {
         // Results submitted before result files existed keep their text inline.
-        let legacy = serde_json::json!({
+        let legacy = studio_json::json!({
             "id": "result-1", "agent": "worker-1", "text": "done", "checks": "tests",
             "revision": "abc", "files": [], "created": 1788712208.47
         });
-        let view = serde_json::json!({
+        let view = studio_json::json!({
             "work": [{
                 "id": "task-1", "rootId": "lead-1", "title": "Task", "status": "accepted",
                 "created": 1.0, "updated": 2.0, "version": 3, "results": [legacy]
@@ -947,13 +947,13 @@ mod tests {
     #[test]
     fn review_work_from_before_creator_tracking_keeps_the_workspace_view_available() {
         // Work written before createdBy existed reaches the inbox without a creator.
-        let legacy = serde_json::json!({
+        let legacy = studio_json::json!({
             "id": "work-1", "rootId": "lead-1", "title": "Task", "description": "Old row",
             "status": "review", "created": 1.0, "updated": 2.0, "version": 3,
             "dependencies": [], "decisions": [], "results": [],
             "blockedBy": [], "displayStatus": "review"
         });
-        let view = serde_json::json!({
+        let view = studio_json::json!({
             "work": [legacy.clone()], "annotations": [], "checkpoints": [], "plans": [],
             "rules": [], "tasks": [], "tasksHistoryLimit": 100, "monitors": [],
             "inbox": [{
@@ -963,7 +963,7 @@ mod tests {
         });
         let typed = super::super::generated_json::<crate::generated::WorkspaceView>(view)
             .expect("review work without createdBy is part of the view");
-        let wire = serde_json::to_value(typed).expect("the view serializes");
+        let wire = studio_json::to_value(typed).expect("the view serializes");
         assert!(wire["inbox"][0]["work"].get("createdBy").is_none());
     }
 }

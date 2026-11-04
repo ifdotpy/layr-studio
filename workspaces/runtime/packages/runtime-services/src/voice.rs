@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::MAX_SAFE_INTEGER;
 use studio_runtime_store::{
     AgentId, AgentRepository, Connection, RuntimeStore, StoreError, VoiceRecord, VoiceRepository,
@@ -78,7 +78,7 @@ pub enum VoiceError {
     #[error(transparent)]
     EventWrite(#[from] EventWriteError),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
 }
 
 pub struct VoiceRecordInput {
@@ -116,7 +116,7 @@ pub async fn record(store: &RuntimeStore, input: VoiceRecordInput) -> Result<Val
         internal,
     } = input;
     let payload = payload.unwrap_or_else(|| json!({}));
-    let encoded = serde_json::to_string(&payload)?;
+    let encoded = studio_json::to_string(&payload)?;
     let input = VoiceRecord {
         sequence: 0,
         id: event_id,
@@ -159,7 +159,7 @@ pub async fn record(store: &RuntimeStore, input: VoiceRecordInput) -> Result<Val
             }
             if let Some(previous) = VoiceRepository::record(transaction, &input.id)? {
                 validate_record(&previous)?;
-                let old_payload: Value = serde_json::from_str(&previous.payload)
+                let old_payload: Value = studio_json::from_str(&previous.payload)
                     .map_err(|_| invalid("voice_records", &previous.id))?;
                 if previous.agent != input.agent
                     || previous.session != input.session
@@ -328,7 +328,7 @@ pub async fn records(
     let mut delivered = Vec::new();
     for (delivery_id, batch) in delivered_batches {
         let values: Vec<Value> =
-            serde_json::from_str(&batch).map_err(|_| invalid("voice_deliveries", &delivery_id))?;
+            studio_json::from_str(&batch).map_err(|_| invalid("voice_deliveries", &delivery_id))?;
         if values.iter().any(|value| !value.is_string()) {
             return Err(invalid("voice_deliveries", &delivery_id));
         }
@@ -406,7 +406,7 @@ pub async fn approvals(store: &RuntimeStore, agent_id: &str) -> Result<Value, Vo
         {
             requests.push(serde::Serialize::serialize(
                 &row,
-                serde_json::value::Serializer,
+                studio_json::value::Serializer,
             )?);
         }
     }
@@ -452,10 +452,10 @@ pub async fn submit(
     let edited_text = edited_text.map(str::to_owned);
     store.transaction_with_error(move |transaction| {
         checked_agent(transaction, &agent_id)?;
-        let input_records = serde_json::to_string(&record_ids)?;
+        let input_records = studio_json::to_string(&record_ids)?;
         let text = match VoiceRepository::delivery(transaction, &message_id)? {
             Some(old) => {
-                let old_records: Vec<String> = serde_json::from_str(&old.records)
+                let old_records: Vec<String> = studio_json::from_str(&old.records)
                     .map_err(|_| invalid("voice_deliveries", &old.id))?;
                 if old.agent != agent_id
                     || old_records != record_ids
@@ -470,7 +470,7 @@ pub async fn submit(
             None => {
                 let mut reserved = BTreeSet::new();
                 for (delivery_id, batch) in VoiceRepository::deliveries(transaction, &agent_id)? {
-                    let identities: Vec<String> = serde_json::from_str(&batch)
+                    let identities: Vec<String> = studio_json::from_str(&batch)
                         .map_err(|_| invalid("voice_deliveries", &delivery_id))?;
                     reserved.extend(identities);
                 }
@@ -485,7 +485,7 @@ pub async fn submit(
                         return Err(VoiceError::InvalidRequest("Unknown transcript record"));
                     };
                     validate_record(&row)?;
-                    let payload: Value = serde_json::from_str(&row.payload)
+                    let payload: Value = studio_json::from_str(&row.payload)
                         .map_err(|_| invalid("voice_records", &id))?;
                     if row.agent != agent_id || !matches!(row.kind.as_str(), "user" | "courier") {
                         return Err(VoiceError::InvalidRequest("Unknown transcript record"));
@@ -664,7 +664,7 @@ fn validate_record_input(record: &VoiceRecord, payload: &Value) -> Result<(), Vo
 
 fn validate_record_content(record: &VoiceRecord) -> Result<(), VoiceError> {
     let payload: Value =
-        serde_json::from_str(&record.payload).map_err(|_| invalid("voice_records", &record.id))?;
+        studio_json::from_str(&record.payload).map_err(|_| invalid("voice_records", &record.id))?;
     if record.id.is_empty()
         || record.id.chars().count() > MAX_IDENTITY
         || record.agent.is_empty()
@@ -719,3 +719,9 @@ fn invalid(object: &'static str, id: &str) -> VoiceError {
 #[cfg(test)]
 #[path = "../tests/wave7_p03_gate_tests/voice.rs"]
 mod ingress_tests;
+
+impl From<studio_json::error::Error> for VoiceError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
+    }
+}

@@ -8,8 +8,8 @@ use crate::{
     scheduler::lifecycle_transaction_with,
     task_recovery::{TaskRecoveryEffects, TaskRecoverySnapshot},
 };
-use serde_json::Value;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_store::{
     AgentId, AgentRepository, RuntimeStore, TaskId, TaskRecord, TaskRepository, Transaction,
 };
@@ -85,7 +85,7 @@ impl TaskRecoveryEffects for TaskRecoveryStore {
             let raw = AgentRepository::get_raw(tx, &AgentId::from(agent))?;
             if raw
                 .as_deref()
-                .map(serde_json::from_str::<Value>)
+                .map(studio_json::from_str::<Value>)
                 .transpose()
                 .map_err(|_| RecoveryError::CommitFailed)?
                 .as_ref()
@@ -296,7 +296,7 @@ impl TaskCompletionWriter for RuntimeTaskCompletionWriter {
                 let raw = AgentRepository::get_raw(tx, &AgentId::from(owner))?;
                 if raw
                     .as_deref()
-                    .map(serde_json::from_str::<Value>)
+                    .map(studio_json::from_str::<Value>)
                     .transpose()
                     .map_err(|_| RecoveryError::CommitFailed)?
                     .as_ref()

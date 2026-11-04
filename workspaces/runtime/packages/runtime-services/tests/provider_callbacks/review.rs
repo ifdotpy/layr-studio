@@ -51,7 +51,7 @@ fn record(store: &RuntimeStore, table: &str, id: &str) -> Value {
             |r| r.get(0),
         )
         .unwrap();
-    let mut record = serde_json::from_str(&raw).unwrap();
+    let mut record = studio_json::from_str(&raw).unwrap();
     studio_runtime_store::agent_volatile::merge_if_agent(
         &store.test_reader().unwrap(),
         table,
@@ -66,7 +66,7 @@ pub(super) fn canonical_response(value: &Value) -> Value {
     for item in result["contentItems"].as_array_mut().unwrap() {
         if let Some(value) = item["text"]
             .as_str()
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .and_then(|s| studio_json::from_str::<Value>(s).ok())
         {
             item["text"] = value;
         }
@@ -527,7 +527,7 @@ async fn model_projection_matches_python_and_keeps_full_result() {
     .unwrap()
     .expect("the current request result preserves the full reply");
     let value: Value =
-        serde_json::from_str(full["contentItems"][0]["text"].as_str().unwrap()).unwrap();
+        studio_json::from_str(full["contentItems"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(value["description"], work["description"]);
     let huge =
         json!({"success":true,"contentItems":[{"type":"image","data":"z".repeat(1_100_000)}]});

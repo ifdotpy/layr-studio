@@ -3,8 +3,8 @@
 //! projection, not a replacement for the lossless provider error JSON record.
 use serde::de::value::{Error, StrDeserializer};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 
 // Reserved for the complete original provider value; marks the normalized wire form.
 const STUDIO_RAW_EVIDENCE: &str = "studioRawEvidence";
@@ -20,14 +20,14 @@ pub struct NativeProviderError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_error_info: Option<CodexErrorInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
+    #[schemars(with = "Option<studio_json::Value>")]
     pub claude_failure: Option<crate::claude_failure::ClaudeFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub data: Option<Box<serde_json::value::RawValue>>,
+    #[schemars(with = "Option<studio_json::Value>")]
+    pub data: Option<studio_json::OwnedRawJson>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub additional_details: Option<Box<serde_json::value::RawValue>>,
+    #[schemars(with = "Option<studio_json::Value>")]
+    pub additional_details: Option<studio_json::OwnedRawJson>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -39,10 +39,13 @@ impl PartialEq for NativeProviderError {
             && self.codex_error_info == other.codex_error_info
             && self.claude_failure == other.claude_failure
             && self.extra == other.extra
-            && self.data.as_deref().map(|value| value.get())
-                == other.data.as_deref().map(|value| value.get())
-            && self.additional_details.as_deref().map(|value| value.get())
-                == other.additional_details.as_deref().map(|value| value.get())
+            && self.data.as_ref().map(|value| value.as_str())
+                == other.data.as_ref().map(|value| value.as_str())
+            && self.additional_details.as_ref().map(|value| value.as_str())
+                == other
+                    .additional_details
+                    .as_ref()
+                    .map(|value| value.as_str())
     }
 }
 
@@ -136,7 +139,7 @@ impl<'de> Deserialize<'de> for AgentError {
             failure.present();
             Some(failure)
         });
-        let raw = |value: Value| serde_json::value::RawValue::from_string(value.to_string());
+        let raw = |value: Value| studio_json::OwnedRawJson::from_string(value.to_string());
         let data = fields
             .remove("data")
             .filter(|v| !v.is_null())
@@ -178,7 +181,7 @@ fn readable_message(value: &Value, depth: usize) -> Option<String> {
             }),
         Value::String(text) => {
             if text.len() <= 65_536 {
-                if let Ok(parsed) = serde_json::from_str::<Value>(text)
+                if let Ok(parsed) = studio_json::from_str::<Value>(text)
                     && parsed != *value
                     && let Some(message) = readable_message(&parsed, depth + 1)
                 {
@@ -209,7 +212,7 @@ fn readable_message(value: &Value, depth: usize) -> Option<String> {
                         level -= 1;
                         if level == 0
                             && let Some(begin) = start.take()
-                            && let Ok(parsed) = serde_json::from_str::<Value>(&text[begin..=index])
+                            && let Ok(parsed) = studio_json::from_str::<Value>(&text[begin..=index])
                             && let Some(message) = readable_message(&parsed, depth + 1)
                         {
                             return Some(message);
@@ -235,7 +238,7 @@ impl AgentError {
         match self {
             Self::Message(message) => message.clone(),
             // Provider error fields contain only validated JSON values and strings.
-            Self::Provider(error) => serde_json::to_string(error).expect("valid provider error"),
+            Self::Provider(error) => studio_json::to_string(error).expect("valid provider error"),
         }
     }
 
@@ -265,8 +268,8 @@ impl AgentError {
     }
 
     /// Decode receipts through the same path as persisted errors.
-    pub fn from_receipt(value: Value) -> Result<Self, serde_json::Error> {
-        serde_json::from_value(value)
+    pub fn from_receipt(value: Value) -> Result<Self, studio_json::Error> {
+        studio_json::from_value(value)
     }
 }
 
@@ -318,7 +321,7 @@ fn without_annotations(value: &Value) -> Value {
 /// Compatibility is scoped to the consumed error leaf, including its open
 /// future-value branch and structured payloads. Documentation changes are inert.
 pub fn codex_error_schema_compatible(notification: &Value) -> bool {
-    let Ok(mut owner) = serde_json::from_str::<Value>(CODEX_ERROR_SCHEMA) else {
+    let Ok(mut owner) = studio_json::from_str::<Value>(CODEX_ERROR_SCHEMA) else {
         return false;
     };
     let Some(candidate) = notification.pointer("/definitions/CodexErrorInfo") else {
@@ -343,7 +346,7 @@ pub fn codex_error_schema_compatible(notification: &Value) -> bool {
 /// the existing TypeScript renderer. No complete vendor protocol is imported.
 pub fn schemas() -> Result<Value, String> {
     let mut leaf: Value =
-        serde_json::from_str(CODEX_ERROR_SCHEMA).map_err(|error| error.to_string())?;
+        studio_json::from_str(CODEX_ERROR_SCHEMA).map_err(|error| error.to_string())?;
     let definitions = leaf
         .as_object_mut()
         .ok_or("Codex error schema must be an object")?
@@ -364,7 +367,7 @@ pub fn schemas() -> Result<Value, String> {
         "NonSteerableTurnKind": definitions["NonSteerableTurnKind"],
         "KnownCodexErrorKind": schemars::schema_for!(KnownCodexErrorKind),
     });
-    serde_json::from_str(
+    studio_json::from_str(
         &document
             .to_string()
             .replace("#/definitions/", "#/components/schemas/"),
@@ -378,7 +381,7 @@ mod tests {
 
     #[test]
     fn native_provider_error_contract_matches_owner() {
-        let document: Value = serde_json::from_slice(crate::OPENAPI).unwrap();
+        let document: Value = studio_json::from_slice(crate::OPENAPI).unwrap();
         assert_eq!(
             document["components"]["schemas"]["NativeProviderError"],
             native_provider_error_schema()
@@ -388,15 +391,15 @@ mod tests {
     #[test]
     fn plain_studio_disconnect_remains_a_string_after_round_trip() {
         let raw = json!(crate::shared_values::PROVIDER_DISCONNECTED_TURN_ERROR);
-        let decoded: AgentError = serde_json::from_value(raw.clone()).unwrap();
-        assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
+        let decoded: AgentError = studio_json::from_value(raw.clone()).unwrap();
+        assert_eq!(studio_json::to_value(decoded).unwrap(), raw);
     }
 
     #[test]
     fn provider_raw_evidence_key_remains_provider_data() {
         let raw = json!({"message":"failure","rawEvidence":{"provider":42},"extra":null});
-        let error: AgentError = serde_json::from_value(raw.clone()).unwrap();
-        let value = serde_json::to_value(error).unwrap();
+        let error: AgentError = studio_json::from_value(raw.clone()).unwrap();
+        let value = studio_json::to_value(error).unwrap();
         assert_eq!(value.get("rawEvidence"), raw.get("rawEvidence"));
         assert_eq!(value.get("studioRawEvidence"), Some(&raw));
     }
@@ -408,9 +411,9 @@ mod tests {
             json!({"message":r#"HTTP 500: {"error":{"message":"Failed","codexErrorInfo":"misalignmentPolicyViolation"}}"#}),
             json!(r#""Service unavailable""#),
         ] {
-            let error: AgentError = serde_json::from_value(raw.clone()).unwrap();
+            let error: AgentError = studio_json::from_value(raw.clone()).unwrap();
             assert_eq!(error.known_kind(), None);
-            let normalized = serde_json::to_value(error).unwrap();
+            let normalized = studio_json::to_value(error).unwrap();
             assert_eq!(normalized.get("studioRawEvidence"), Some(&raw));
         }
     }
@@ -422,10 +425,10 @@ mod tests {
             json!({"message":{"message":"inner", "code":"inner", "detail":1}, "code":"outer"}),
         ] {
             let normalized =
-                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+                studio_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
             assert_eq!(normalized.get("studioRawEvidence"), Some(&receipt));
-            let decoded: AgentError = serde_json::from_value(normalized.clone()).unwrap();
-            assert_eq!(serde_json::to_value(decoded).unwrap(), normalized);
+            let decoded: AgentError = studio_json::from_value(normalized.clone()).unwrap();
+            assert_eq!(studio_json::to_value(decoded).unwrap(), normalized);
         }
     }
 
@@ -441,13 +444,13 @@ mod tests {
             format!("HTTP error {{\"requestId\":\"abc\"}} then {nested}"),
         ] {
             let direct =
-                serde_json::to_value(AgentError::from_receipt(json!(raw)).unwrap()).unwrap();
+                studio_json::to_value(AgentError::from_receipt(json!(raw)).unwrap()).unwrap();
             assert_eq!(direct.get("message"), Some(&json!("Service unavailable")));
             assert_eq!(direct.get("code"), None);
             assert_eq!(direct.get("studioRawEvidence"), Some(&json!(raw)));
             let receipt = json!({"message":raw,"codexErrorInfo":"httpConnectionFailed"});
             let wrapped =
-                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+                studio_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
             assert_eq!(wrapped.get("message"), Some(&json!("Service unavailable")));
             assert_eq!(wrapped.get("code"), None);
             assert_eq!(
@@ -458,17 +461,17 @@ mod tests {
         }
         let rpc = r#"{"message":"RPC rejected","code":-32600}"#;
         assert_eq!(
-            serde_json::to_value(AgentError::from_receipt(json!(rpc)).unwrap()).unwrap(),
+            studio_json::to_value(AgentError::from_receipt(json!(rpc)).unwrap()).unwrap(),
             json!({"message":"RPC rejected","studioRawEvidence":rpc})
         );
         let quoted = r#""Service unavailable""#;
         assert_eq!(
-            serde_json::to_value(AgentError::from_receipt(json!(quoted)).unwrap()).unwrap(),
+            studio_json::to_value(AgentError::from_receipt(json!(quoted)).unwrap()).unwrap(),
             json!({"message":"Service unavailable","studioRawEvidence":quoted})
         );
         let nested = json!({"error":{"message":"Nested failure"}});
         assert_eq!(
-            serde_json::to_value(AgentError::from_receipt(nested).unwrap()).unwrap(),
+            studio_json::to_value(AgentError::from_receipt(nested).unwrap()).unwrap(),
             json!({"message":"Nested failure","error":{"message":"Nested failure"},"studioRawEvidence":{"error":{"message":"Nested failure"}}})
         );
         for raw in [
@@ -486,9 +489,9 @@ mod tests {
             );
         }
         let raw = json!({"message":"  ","codexErrorInfo":"serverOverloaded"}).to_string();
-        let actual = serde_json::to_value(AgentError::from_receipt(json!(raw)).unwrap()).unwrap();
+        let actual = studio_json::to_value(AgentError::from_receipt(json!(raw)).unwrap()).unwrap();
         assert_eq!(actual, json!({"message":"  ","studioRawEvidence":raw}));
-        let actual = serde_json::to_value(
+        let actual = studio_json::to_value(
             AgentError::from_receipt(json!({"data":{"codexErrorInfo":"serverOverloaded"}}))
                 .unwrap(),
         )
@@ -506,7 +509,7 @@ mod tests {
             "This content was flagged for possible biological risk.",
         ];
         for message in biological {
-            let actual = serde_json::to_value(
+            let actual = studio_json::to_value(
                 AgentError::from_receipt(json!({"message":message,"codexErrorInfo":"other"}))
                     .unwrap(),
             )
@@ -521,7 +524,7 @@ mod tests {
         ] {
             let receipt = json!({"message":raw,"codexErrorInfo":"other"});
             let actual =
-                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+                studio_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
             assert_eq!(actual.get("message"), Some(&json!("Restricted")));
             assert_eq!(actual.get("code"), None);
             assert_eq!(actual.get("codexErrorInfo"), Some(&json!("other")));
@@ -533,7 +536,7 @@ mod tests {
             r#"HTTP 500: {"error":{"message":"Failed","codexErrorInfo":"misalignmentPolicyViolation"}}"#,
             r#"{"message":"Failed","metadata":{"error":{"code":"bio_policy"}}}"#,
         ] {
-            let actual = serde_json::to_value(
+            let actual = studio_json::to_value(
                 AgentError::from_receipt(json!({"message":raw,"codexErrorInfo":"other"})).unwrap(),
             )
             .unwrap();
@@ -564,7 +567,7 @@ mod tests {
             AgentError::from_receipt(receipt).unwrap().display_text(),
             r#"<img src=x onerror="alert(1)"> {text}"#
         );
-        let disk = serde_json::to_value(
+        let disk = studio_json::to_value(
             AgentError::from_receipt(json!({"message":"Disk is full.","data":{"diskFull":true}}))
                 .unwrap(),
         )
@@ -583,7 +586,7 @@ mod tests {
         ] {
             let receipt = json!({"error":{"message":"no", "vendorNested":true}, "codexErrorInfo":info, "vendorExtension":[1,null]});
             let normalized =
-                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+                studio_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
             assert_eq!(
                 normalized.get("codexErrorInfo"),
                 receipt.get("codexErrorInfo")
@@ -596,7 +599,7 @@ mod tests {
         }
         let encoded = json!(r#"{"error":{"message":"Write failed","data":{"diskFull":true}}}"#);
         let normalized =
-            serde_json::to_value(AgentError::from_receipt(encoded.clone()).unwrap()).unwrap();
+            studio_json::to_value(AgentError::from_receipt(encoded.clone()).unwrap()).unwrap();
         assert_eq!(normalized.get("message"), Some(&json!("Write failed")));
         assert_eq!(normalized.get("studioRawEvidence"), Some(&encoded));
         assert_eq!(normalized.get("codexErrorInfo"), None);
@@ -624,13 +627,17 @@ mod tests {
         assert_eq!(error.message, r#"{"detail":"no"}"#);
         assert_eq!(error.code, None);
         assert_eq!(error.extra.get("studioRawEvidence"), Some(&receipt));
-        assert_eq!(error.data.as_deref().unwrap().get(), r#"{"trace":"x"}"#);
-        assert!(serde_json::to_string(&error).unwrap().contains("discarded"));
+        assert_eq!(error.data.as_ref().unwrap().as_str(), r#"{"trace":"x"}"#);
+        assert!(
+            studio_json::to_string(&error)
+                .unwrap()
+                .contains("discarded")
+        );
     }
 
     #[test]
     fn known_error_classification_matches_vendor_leaf() {
-        let leaf: Value = serde_json::from_str(CODEX_ERROR_SCHEMA).expect("vendor leaf");
+        let leaf: Value = studio_json::from_str(CODEX_ERROR_SCHEMA).expect("vendor leaf");
         let mut known = Vec::new();
         for branch in leaf["anyOf"].as_array().expect("vendor variants") {
             if let Some(values) = branch["enum"].as_array() {
@@ -676,7 +683,7 @@ mod tests {
 
     #[test]
     fn error_leaf_compatibility_rejects_variant_and_payload_drift() {
-        let leaf: Value = serde_json::from_str(CODEX_ERROR_SCHEMA).expect("vendor leaf");
+        let leaf: Value = studio_json::from_str(CODEX_ERROR_SCHEMA).expect("vendor leaf");
         let mut error = leaf.clone();
         error
             .as_object_mut()

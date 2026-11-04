@@ -13,7 +13,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     let (mut normalized, mut unreadable) = (0, 0);
     for (id, raw) in rows {
-        let state: crate::transfer_record::AgentTransferState = match serde_json::from_str::<
+        let state: crate::transfer_record::AgentTransferState = match studio_json::from_str::<
             crate::transfer_record::AgentTransferSummary,
         >(&raw)
         {
@@ -23,10 +23,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
             Err(error) => {
                 if let Ok(existing) =
-                    serde_json::from_str::<crate::transfer_record::UnreadableTransferSummary>(&raw)
+                    studio_json::from_str::<crate::transfer_record::UnreadableTransferSummary>(&raw)
                 {
                     normalized += 1;
-                    let serialized = serde_json::to_string(&existing)?;
+                    let serialized = studio_json::to_string(&existing)?;
                     tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1", rusqlite::params![id, serialized])?;
                     continue;
                 }
@@ -41,7 +41,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 )
             }
         };
-        let normalized = serde_json::to_string(&state)?;
+        let normalized = studio_json::to_string(&state)?;
         tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1", rusqlite::params![id, normalized])?;
     }
     eprintln!(
@@ -88,7 +88,7 @@ mod tests {
         for row in rows {
             let (id, record) = row.unwrap();
             let summary =
-                serde_json::from_str::<serde_json::Value>(&record).unwrap()["accountTransfer"]
+                studio_json::from_str::<studio_json::Value>(&record).unwrap()["accountTransfer"]
                     .clone();
             original.push((id.clone(), summary));
             db.execute(
@@ -115,7 +115,7 @@ mod tests {
                 )
                 .unwrap();
             assert!(
-                serde_json::from_str::<serde_json::Value>(&migrated).unwrap() == summary,
+                studio_json::from_str::<studio_json::Value>(&migrated).unwrap() == summary,
                 "migration changed a known summary"
             );
         }
@@ -136,7 +136,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let agent: serde_json::Value = serde_json::from_str(&value).unwrap();
+        let agent: studio_json::Value = studio_json::from_str(&value).unwrap();
         assert_eq!(agent["name"], "Kept");
         assert_eq!(agent["accountTransfer"]["kind"], "unreadable");
         assert!(

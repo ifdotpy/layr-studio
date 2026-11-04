@@ -5,7 +5,7 @@
 //! failure (or a default revision).
 
 use rusqlite::OptionalExtension;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::{
     bounded_integer::BoundedInteger, bounded_text::BoundedText, http_ingress::Object,
     queue_command::Field,
@@ -89,7 +89,7 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
                 .optional()
                 .map_err(studio_runtime_store::StoreError::from)?
                 .unwrap_or_else(|| "{}".to_owned());
-            let project: Value = serde_json::from_str(&project).map_err(|_| {
+            let project: Value = studio_json::from_str(&project).map_err(|_| {
                 EventWriteError::InvalidStoredObject {
                     object: "runtime_projects",
                     id: path.to_owned(),
@@ -270,7 +270,7 @@ fn invalid_agent(agent: &AgentRecord) -> EventWriteError {
 #[cfg(test)]
 mod tests {
     use super::apply;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
 
     const CHAT: &str = "organized-chat";
@@ -280,7 +280,7 @@ mod tests {
         use super::OrganizationRequest;
         use studio_runtime_schema::http_ingress::Object;
         assert!(
-            serde_json::from_str::<Object<OrganizationRequest>>(
+            studio_json::from_str::<Object<OrganizationRequest>>(
                 r#"{"id":"agent","archived":true}"#
             )
             .is_ok()
@@ -290,7 +290,7 @@ mod tests {
             r#"{"id":"agent","expected_revision":9007199254740992}"#,
             r#"{"id":"agent","read_state":["thread","turn",true,0]}"#,
         ] {
-            assert!(serde_json::from_str::<Object<OrganizationRequest>>(raw).is_err());
+            assert!(studio_json::from_str::<Object<OrganizationRequest>>(raw).is_err());
         }
     }
 
@@ -305,11 +305,11 @@ mod tests {
                 )?)
             })
             .expect("the chat entity reads");
-        serde_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
+        studio_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
     }
 
     async fn organize(store: &RuntimeStore, body: &str) {
-        let studio_runtime_schema::http_ingress::Object(body) = serde_json::from_str::<
+        let studio_runtime_schema::http_ingress::Object(body) = studio_json::from_str::<
             studio_runtime_schema::http_ingress::Object<super::OrganizationRequest>,
         >(body)
         .unwrap();

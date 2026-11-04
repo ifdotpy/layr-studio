@@ -4,7 +4,7 @@ use crate::continuation::{
     Result, Snapshot, UsageDraft, WaitStatus, now_checked, text,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_schema::provider_errors::{
@@ -61,8 +61,8 @@ impl LimitsObservation {
             response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
         }
         let encoded =
-            serde_json::to_vec(&raw).map_err(|_| ContinuationError::Invalid("/limits".into()))?;
-        let JsonObject(Input { response, stale }) = serde_json::from_slice(&encoded)
+            studio_json::to_vec(&raw).map_err(|_| ContinuationError::Invalid("/limits".into()))?;
+        let JsonObject(Input { response, stale }) = studio_json::from_slice(&encoded)
             .map_err(|_| ContinuationError::Invalid("/limits".into()))?;
         Ok(Self {
             response,
@@ -274,7 +274,7 @@ fn claude_policy() -> &'static ClaudeUsagePolicy {
             .split_once("export default `")
             .expect("usage policy export");
         let json = json.trim().strip_suffix("`;").expect("usage policy string");
-        serde_json::from_str(json).expect("shared Claude usage policy")
+        studio_json::from_str(json).expect("shared Claude usage policy")
     })
 }
 fn model_family(agent: &AgentRecord) -> Option<&'static str> {
@@ -551,7 +551,7 @@ pub fn tick(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Result<Decisi
         r.update(U::PlannedAt(reset.filter(|t| *t > now)));
         r.update(U::ResetAt(reset));
         r.update(U::LastCheckedAt(
-            limits.response.at.and_then(serde_json::Number::from_f64),
+            limits.response.at.and_then(studio_json::Number::from_f64),
         ));
         r.update(U::WaitingForAuth(auth));
         r.update(U::Reason(

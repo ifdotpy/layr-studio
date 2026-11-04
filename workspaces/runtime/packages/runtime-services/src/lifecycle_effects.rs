@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, AgentStatus, ContinuationRepository, ContinuationTable,
     RuntimeStore, SchedulerRepository, Transaction,
@@ -490,7 +490,7 @@ impl ProductionLifecyclePorts {
             .unwrap_or_default();
         for (id, server, body) in pending {
             let Ok(envelope) =
-                serde_json::from_str::<crate::orchestration_wire::OrchestrationRequest>(&body)
+                studio_json::from_str::<crate::orchestration_wire::OrchestrationRequest>(&body)
             else {
                 eprintln!("stored cross-server stop intent is invalid: {id}");
                 continue;
@@ -517,7 +517,7 @@ impl ProductionLifecyclePorts {
                         tx,
                     )?
                 {
-                    let record: AgentRecord = serde_json::from_str(&raw)
+                    let record: AgentRecord = studio_json::from_str(&raw)
                         .map_err(studio_runtime_store::StoreError::from)?;
                     if needs_deleted_settlement(&record) {
                         pending.push(id);
@@ -1061,7 +1061,7 @@ fn owned_work_records(
     Ok(rows
         .into_iter()
         .filter_map(|raw| {
-            serde_json::from_str::<studio_runtime_schema::work_item_record::WorkItem>(&raw).ok()
+            studio_json::from_str::<studio_runtime_schema::work_item_record::WorkItem>(&raw).ok()
         })
         .collect())
 }
@@ -1261,7 +1261,7 @@ pub(crate) fn notify_parent_of_disconnect(
     let Some(raw) = AgentRepository::get_raw(tx, &AgentId::from(agent_id))? else {
         return Ok(());
     };
-    let stopped: Value = serde_json::from_str(&raw).map_err(|_| {
+    let stopped: Value = studio_json::from_str(&raw).map_err(|_| {
         studio_runtime_store::StoreError::InvalidStoredObject {
             table: "runtime_agents",
             id: agent_id.into(),
@@ -1475,7 +1475,7 @@ fn enqueue_turn_result(
         &parent,
         format!("child:{}:{turn_id}", agent.id.0),
         "child_result",
-        serde_json::to_string(&payload)?,
+        studio_json::to_string(&payload)?,
         at,
     )
     .map_err(|error| match error {
@@ -1601,8 +1601,8 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(serde_json::from_str::<Value>(&rows[1].1).is_err());
-        assert!(serde_json::from_str::<Value>(&rows[2].1).is_err());
+        assert!(studio_json::from_str::<Value>(&rows[1].1).is_err());
+        assert!(studio_json::from_str::<Value>(&rows[2].1).is_err());
         let tx = db.transaction().unwrap();
         let work = owned_work_records(&tx, "child").unwrap();
         assert_eq!(work.len(), 1);
@@ -1706,7 +1706,7 @@ mod tests {
             .unwrap();
         assert_eq!(events.len(), 3);
         for (_, text) in events {
-            let payload: Value = serde_json::from_str(&text).unwrap();
+            let payload: Value = studio_json::from_str(&text).unwrap();
             assert_eq!(payload["tasks"][0]["task_id"], "second");
             assert_eq!(payload["tasks"][1]["task_id"], "first");
             assert_eq!(payload["tasks"][2]["task_id"], "third");

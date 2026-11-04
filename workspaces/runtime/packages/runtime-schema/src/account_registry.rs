@@ -3,8 +3,8 @@ use crate::{
     claude_options::ClaudeOptionsRecord, json_object::JsonObject, provider_kind::ProviderKind,
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Number;
 use std::collections::BTreeMap;
+use studio_json::Number;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -307,22 +307,22 @@ fn running<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
+    use studio_json::{Value, json};
 
     #[test]
     fn login_receipt_preserves_missing_and_null_fields() {
         let input = json!({"requestId":"r","accountKey":"a","status":"pending","email":null});
-        let receipt: LoginReceipt = serde_json::from_value(input.clone()).unwrap();
-        assert_eq!(serde_json::to_value(receipt).unwrap(), input);
+        let receipt: LoginReceipt = studio_json::from_value(input.clone()).unwrap();
+        assert_eq!(studio_json::to_value(receipt).unwrap(), input);
     }
 
     #[test]
     fn registry_schema_constraints_are_tracked() {
         let mut schema: Value =
-            serde_json::from_str(include_str!("schemas/account-registry.schema.json")).unwrap();
+            studio_json::from_str(include_str!("schemas/account-registry.schema.json")).unwrap();
         let defs = schema.as_object_mut().unwrap().remove("$defs").unwrap();
-        let mut watched = serde_json::Map::new();
+        let mut watched = studio_json::Map::new();
         watched.insert("AccountRegistryRecord".into(), schema);
         for name in [
             "AccountRecord",
@@ -337,7 +337,7 @@ mod tests {
             watched.insert(name.into(), defs[name].clone());
         }
         assert_eq!(
-            Sha256::digest(serde_json::to_vec(&watched).unwrap())
+            Sha256::digest(studio_json::to_vec(&watched).unwrap())
                 .iter()
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>(),
@@ -384,7 +384,7 @@ mod tests {
                     !crate::validate("account-registry/AccountRegistryRecord", &value).unwrap()
                 );
                 assert!(
-                    serde_json::from_value::<JsonObject<AccountRegistry>>(value.clone()).is_err(),
+                    studio_json::from_value::<JsonObject<AccountRegistry>>(value.clone()).is_err(),
                     "{value}"
                 );
             }
@@ -551,7 +551,7 @@ mod tests {
         }
         for v in values {
             assert_eq!(
-                serde_json::from_value::<JsonObject<AccountRegistry>>(v.clone()).is_ok(),
+                studio_json::from_value::<JsonObject<AccountRegistry>>(v.clone()).is_ok(),
                 crate::validate("account-registry/AccountRegistryRecord", &v).unwrap(),
                 "{v}"
             );

@@ -1,9 +1,9 @@
-use serde_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, AgentRepository, MonitorRecord, RuntimeStore, Table};
 
 pub fn monitor(root: &Path) -> MonitorRecord {
-    let mut record: MonitorRecord = serde_json::from_str(r#"{"id":"f8fc5c50-e4e4-50bc-8ff5-885105058c9d","agent":"agent","epoch":2,"turnId":null,"requestId":"monitor-corpus","command":"printf marker","cwd":"/","timeout_ms":3600000,"stallTimeoutSeconds":1800,"livenessCommand":"","activityAt":2000.0,"activityGeneration":0,"stallWakeGeneration":-1,"wakeOn":"exit","successExitCodes":[0,2],"outputPatterns":[],"outputEventSequence":0,"outputEventCount":0,"outputEventIds":[],"status":"running","created":2000.0,"tail":"","bytes":0,"interactive":false,"log":"/monitor.log","operation":{"agent":"agent","epoch":2,"accountKey":"default","connectionId":"connection"},"cancelRequested":false}"#).expect("monitor fixture");
+    let mut record: MonitorRecord = studio_json::from_str(r#"{"id":"f8fc5c50-e4e4-50bc-8ff5-885105058c9d","agent":"agent","epoch":2,"turnId":null,"requestId":"monitor-corpus","command":"printf marker","cwd":"/","timeout_ms":3600000,"stallTimeoutSeconds":1800,"livenessCommand":"","activityAt":2000.0,"activityGeneration":0,"stallWakeGeneration":-1,"wakeOn":"exit","successExitCodes":[0,2],"outputPatterns":[],"outputEventSequence":0,"outputEventCount":0,"outputEventIds":[],"status":"running","created":2000.0,"tail":"","bytes":0,"interactive":false,"log":"/monitor.log","operation":{"agent":"agent","epoch":2,"accountKey":"default","connectionId":"connection"},"cancelRequested":false}"#).expect("monitor fixture");
     record.cwd = root.to_string_lossy().into_owned();
     record.log = root
         .join("monitor-logs")
@@ -65,7 +65,7 @@ pub async fn seed(store: &RuntimeStore, case: &Value, monitor: MonitorRecord) {
             tx.execute("DELETE FROM runtime_monitors", [])?;
             if let Some(events) = case["priorEvents"].as_array() {
                 for e in events {
-                    tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES(?,?,?,?,?,?,?,?,?)", rusqlite::params![e["id"].as_str(),e["agent"].as_str(),e["kind"].as_str(),serde_json::to_string(&e["text"]).expect("event"),e["status"].as_str(),e["created"].as_f64(),e["epoch"].as_i64(),e["turn_id"].as_str(),e["error"].as_str()])?;
+                    tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES(?,?,?,?,?,?,?,?,?)", rusqlite::params![e["id"].as_str(),e["agent"].as_str(),e["kind"].as_str(),studio_json::to_string(&e["text"]).expect("event"),e["status"].as_str(),e["created"].as_f64(),e["epoch"].as_i64(),e["turn_id"].as_str(),e["error"].as_str()])?;
                 }
             }
             let mut actor = case["actor"].clone();
@@ -80,9 +80,9 @@ pub async fn seed(store: &RuntimeStore, case: &Value, monitor: MonitorRecord) {
 pub fn events(store: &RuntimeStore) -> Value {
     let connection = store.test_reader().expect("monitor fixture");
     let mut query = connection.prepare("SELECT id,agent,kind,text,status,created,epoch,turn_id,error FROM runtime_events ORDER BY id").expect("monitor fixture");
-    let rows = query.query_map([], |r| Ok(serde_json::json!({
+    let rows = query.query_map([], |r| Ok(studio_json::json!({
         "id":r.get::<_, String>(0)?, "agent":r.get::<_, String>(1)?, "kind":r.get::<_, String>(2)?,
-        "text":serde_json::from_str::<Value>(&r.get::<_, String>(3)?).expect("monitor fixture"), "status":r.get::<_, String>(4)?, "created":r.get::<_, f64>(5)?, "epoch":r.get::<_, i64>(6)?, "turn_id":r.get::<_, Option<String>>(7)?, "error":r.get::<_, Option<String>>(8)?
+        "text":studio_json::from_str::<Value>(&r.get::<_, String>(3)?).expect("monitor fixture"), "status":r.get::<_, String>(4)?, "created":r.get::<_, f64>(5)?, "epoch":r.get::<_, i64>(6)?, "turn_id":r.get::<_, Option<String>>(7)?, "error":r.get::<_, Option<String>>(8)?
     }))).expect("monitor fixture").collect::<Result<Vec<_>, _>>().expect("monitor fixture");
     Value::Array(rows)
 }

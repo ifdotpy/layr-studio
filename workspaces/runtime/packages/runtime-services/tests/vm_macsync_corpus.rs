@@ -1,10 +1,10 @@
 use rusqlite::{Connection, params};
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_services::{
     coordination,
     linux_vm_guest::{GuestError, GuestRpc, GuestSpaceProbe, UnixGuestRpc},
@@ -142,7 +142,7 @@ struct Fixtures {
 }
 
 fn fixtures() -> Fixtures {
-    serde_json::from_str(include_str!("vm_macsync_fixtures.json"))
+    studio_json::from_str(include_str!("vm_macsync_fixtures.json"))
         .expect("frozen Python VM and Mac sync corpus")
 }
 
@@ -217,11 +217,11 @@ fn vm_and_mac_functions_match_frozen_corpus_for_each_resolution_choice() {
 
         let state = rust_root.path().join("state");
         let guest = FakeGuest(std::sync::Mutex::new(Vec::new()));
-        let settings_read = serde_json::to_value(
+        let settings_read = studio_json::to_value(
             linux_vm_settings::get_settings(&state.join("linux-vm")).expect("Rust settings read"),
         )
         .expect("settings JSON");
-        let settings_set = serde_json::to_value(
+        let settings_set = studio_json::to_value(
             linux_vm_settings::set_settings(
                 &state.join("linux-vm"),
                 linux_vm_settings::VmSettings {
@@ -293,7 +293,7 @@ fn vm_and_mac_functions_match_frozen_corpus_for_each_resolution_choice() {
                 .get(name)
                 .expect("frozen persisted file")
                 .clone();
-            let right: Value = serde_json::from_slice(
+            let right: Value = studio_json::from_slice(
                 &std::fs::read(rust_sync.join(name)).expect("Rust persisted file"),
             )
             .expect("Rust JSON");
@@ -335,7 +335,7 @@ fn vm_and_mac_functions_match_frozen_corpus_for_each_resolution_choice() {
             .guest_calls
             .iter()
             .filter(|call| call.method.starts_with("sync.mac."))
-            .map(|call| serde_json::to_value(call).expect("guest call JSON"))
+            .map(|call| studio_json::to_value(call).expect("guest call JSON"))
             .collect();
         let rust_sync_calls: Vec<Value> = guest
             .0
@@ -396,7 +396,8 @@ fn vm_and_mac_functions_match_frozen_corpus_for_each_resolution_choice() {
                     |row| row.get(0),
                 )
                 .expect("Rust P03 metadata");
-            let mut rust_meta: Value = serde_json::from_str(&metadata).expect("Rust metadata JSON");
+            let mut rust_meta: Value =
+                studio_json::from_str(&metadata).expect("Rust metadata JSON");
             let mut python_meta = expected_meta.clone();
             clean_time(&mut rust_meta);
             clean_time(&mut python_meta);
@@ -438,7 +439,7 @@ fn darwin_memory_over_the_host_ceiling_is_rejected_before_persisting() {
             .replace("on this Mac", "on this computer")
     );
     assert_eq!(
-        serde_json::from_slice::<Value>(&before).expect("Rust seed JSON"),
+        studio_json::from_slice::<Value>(&before).expect("Rust seed JSON"),
         expected.settings_before
     );
     assert_eq!(
@@ -447,7 +448,7 @@ fn darwin_memory_over_the_host_ceiling_is_rejected_before_persisting() {
         "invalid Darwin setting must not be persisted"
     );
     assert_eq!(
-        serde_json::from_slice::<Value>(
+        studio_json::from_slice::<Value>(
             &std::fs::read(settings_dir.join("settings.json")).expect("persisted Rust settings"),
         )
         .expect("Rust settings JSON"),

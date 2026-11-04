@@ -35,7 +35,7 @@ pub async fn write<W: AsyncWrite + Unpin, T: Serialize>(
     writer: &mut W,
     value: &T,
 ) -> io::Result<()> {
-    let data = serde_json::to_vec(value).map_err(|_| invalid("The head cannot be encoded"))?;
+    let data = studio_json::to_vec(value).map_err(|_| invalid("The head cannot be encoded"))?;
     let length = u32::try_from(data.len())
         .ok()
         .filter(|length| *length as usize <= MAX_HEAD);
@@ -52,7 +52,7 @@ pub async fn read<R: AsyncRead + Unpin, T: DeserializeOwned>(reader: &mut R) -> 
     }
     let mut data = vec![0; length];
     reader.read_exact(&mut data).await?;
-    serde_json::from_slice(&data).map_err(|_| invalid("The head is invalid"))
+    studio_json::from_slice(&data).map_err(|_| invalid("The head is invalid"))
 }
 
 fn token(name: &str) -> bool {

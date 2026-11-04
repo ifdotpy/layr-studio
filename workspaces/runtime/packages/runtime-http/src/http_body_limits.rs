@@ -35,9 +35,9 @@ mod tests {
         let max = studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS;
         let escaped = "\\ud83d\\ude00".repeat(max);
         let command = format!(r#"{{"text":"{escaped}"}}"#);
-        let nested = serde_json::to_string(&command).expect("nested JSON");
+        let nested = studio_json::to_string(&command).expect("nested JSON");
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&command).expect("command")["text"]
+            studio_json::from_str::<studio_json::Value>(&command).expect("command")["text"]
                 .as_str()
                 .expect("text")
                 .chars()

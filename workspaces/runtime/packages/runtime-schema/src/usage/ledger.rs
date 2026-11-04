@@ -4,8 +4,8 @@ use crate::provider_kind::ProviderKind;
 use crate::queue_command::Field;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 
 /// Budget fault while at least one provider response has unresolved usage.
 pub const MISSING_FINAL_USAGE: &str = "missingFinalUsage";
@@ -76,7 +76,7 @@ pub fn bound_diagnostics<T: Serialize>(values: &mut Vec<T>) -> bool {
     let mut bytes = 2;
     let mut keep = 0;
     for value in values.iter().take(LEDGER_DIAGNOSTIC_ITEMS) {
-        let Ok(encoded) = serde_json::to_vec(value) else {
+        let Ok(encoded) = studio_json::to_vec(value) else {
             break;
         };
         let next = bytes + encoded.len() + usize::from(keep != 0);
@@ -94,7 +94,7 @@ pub fn bound_diagnostics<T: Serialize>(values: &mut Vec<T>) -> bool {
 /// Generated persisted-budget constraints share the retention owner's item bound.
 /// Older rows lack the bounds version and remain readable for lazy normalization.
 pub fn budget_state_schema() -> Value {
-    let mut schema: Value = serde_json::from_str(include_str!(
+    let mut schema: Value = studio_json::from_str(include_str!(
         "../schemas/persisted-budget-state.schema.json"
     ))
     .expect("budget schema");
@@ -371,7 +371,7 @@ impl UsageLedgerRow {
     pub fn observation_from_typed_analytics_str(
         raw: &str,
     ) -> Result<UsageObservation, UsageParseError> {
-        let row: AnalyticsReceipt = serde_json::from_str(raw)?;
+        let row: AnalyticsReceipt = studio_json::from_str(raw)?;
         if row.usage_identity.is_missing() && row.receipt_key.is_missing() {
             return Ok(row.studio_usage);
         }
@@ -416,11 +416,11 @@ mod typed_analytics_tests {
 
     #[test]
     fn ledger_deserialization_rejects_mismatched_observation_identity() {
-        let observation: UsageObservation = serde_json::from_value(json!({"kind":"response","responseId":"response","model":"model","evidence":"live","tokens":{"uncachedInput":12,"cacheReadInput":3,"cacheWriteInput":2,"output":7}})).expect("usage");
+        let observation: UsageObservation = studio_json::from_value(json!({"kind":"response","responseId":"response","model":"model","evidence":"live","tokens":{"uncachedInput":12,"cacheReadInput":3,"cacheWriteInput":2,"output":7}})).expect("usage");
         let ledger = UsageLedgerRow::capture("agent", Some("thread"), observation);
-        let row = serde_json::to_value(&ledger).expect("ledger");
+        let row = studio_json::to_value(&ledger).expect("ledger");
         assert_eq!(
-            serde_json::from_value::<UsageLedgerRow>(row.clone()).expect("round trip"),
+            studio_json::from_value::<UsageLedgerRow>(row.clone()).expect("round trip"),
             ledger
         );
         for identity in [
@@ -429,20 +429,20 @@ mod typed_analytics_tests {
         ] {
             let mut invalid = row.clone();
             invalid["usageIdentity"] = identity;
-            assert!(serde_json::from_value::<UsageLedgerRow>(invalid).is_err());
+            assert!(studio_json::from_value::<UsageLedgerRow>(invalid).is_err());
         }
         let mut legacy = row;
         legacy["receiptKey"] = Value::Null;
         legacy["presentationMetadata"] = json!(true);
         assert!(
-            serde_json::from_value::<UsageLedgerRow>(legacy.clone())
+            studio_json::from_value::<UsageLedgerRow>(legacy.clone())
                 .expect("nullable legacy receipt")
                 .receipt_key()
                 .is_none()
         );
         legacy.as_object_mut().expect("object").remove("receiptKey");
         assert!(
-            serde_json::from_value::<UsageLedgerRow>(legacy)
+            studio_json::from_value::<UsageLedgerRow>(legacy)
                 .expect("omitted legacy receipt")
                 .receipt_key()
                 .is_none()
@@ -456,16 +456,16 @@ mod typed_analytics_tests {
             models: None,
         };
         let ledger = UsageLedgerRow::capture("agent", None, cumulative);
-        let mut row = serde_json::to_value(&ledger).expect("counter ledger");
+        let mut row = studio_json::to_value(&ledger).expect("counter ledger");
         row["usageIdentity"]["scope"] = json!("claudeQuery");
-        assert!(serde_json::from_value::<UsageLedgerRow>(row).is_err());
+        assert!(studio_json::from_value::<UsageLedgerRow>(row).is_err());
     }
 
     #[test]
     fn provider_identity_typed_ledger_preserves_receipt_and_identity_checks() {
-        let observation: UsageObservation = serde_json::from_value(json!({"kind":"response","responseId":"response","model":"model","evidence":"live","tokens":{"uncachedInput":12,"cacheReadInput":3,"cacheWriteInput":2,"output":7}})).expect("typed usage");
+        let observation: UsageObservation = studio_json::from_value(json!({"kind":"response","responseId":"response","model":"model","evidence":"live","tokens":{"uncachedInput":12,"cacheReadInput":3,"cacheWriteInput":2,"output":7}})).expect("typed usage");
         let ledger = UsageLedgerRow::capture("agent", Some("thread"), observation);
-        let mut row = serde_json::to_value(&ledger).expect("ledger");
+        let mut row = studio_json::to_value(&ledger).expect("ledger");
         row["agentId"] = json!("agent");
         row["threadId"] = json!("thread");
         assert_eq!(
@@ -489,7 +489,7 @@ mod typed_analytics_tests {
             models: None,
         };
         let ledger = UsageLedgerRow::capture("agent", Some("thread"), observation);
-        let mut row = serde_json::to_value(&ledger).expect("counter ledger");
+        let mut row = studio_json::to_value(&ledger).expect("counter ledger");
         row["agentId"] = json!("agent");
         row["threadId"] = json!("thread");
         assert_eq!(

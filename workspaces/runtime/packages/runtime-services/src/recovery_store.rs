@@ -10,8 +10,8 @@ use crate::{
     recovery_runtime::ObservationSource,
     scheduler::lifecycle_transaction_with,
 };
-use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, QueueEventId, QueueEventRepository, RuntimeStore,
     StoreError, Transaction,
@@ -114,7 +114,7 @@ impl RecoveryStore {
                 return Ok(RecoveryEffectResult::plain(RecoveryOutcome::Superseded));
             };
             let current: Value =
-                serde_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
+                studio_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
             if &current != a {
                 return Ok(RecoveryEffectResult::plain(RecoveryOutcome::Superseded));
             }
@@ -361,7 +361,7 @@ impl RecoveryStore {
             RecoverySnapshot::from_record(updated.clone())
                 .map_err(|_| RecoveryError::CommitFailed)?;
             let record: AgentRecord =
-                serde_json::from_value(updated).map_err(|_| RecoveryError::CommitFailed)?;
+                studio_json::from_value(updated).map_err(|_| RecoveryError::CommitFailed)?;
             AgentRepository::put(tx, &record)?;
             Ok(RecoveryEffectResult::plain(RecoveryOutcome::Applied(result)))
             })()?;
@@ -577,7 +577,7 @@ impl CompletionWriter for LifecycleCompletionWriter {
                     let raw = AgentRepository::get_raw(tx, &AgentId::from(id))?
                         .ok_or(RecoveryError::CommitFailed)?;
                     let current = RecoverySnapshot::from_record(
-                        serde_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?,
+                        studio_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?,
                     )?;
                     return self.complete(
                         tx,
@@ -702,7 +702,7 @@ impl CompletionWriter for LifecycleCompletionWriter {
                     }
                     let raw = AgentRepository::get_raw(tx, &AgentId::from(id))?
                         .ok_or(RecoveryError::CommitFailed)?;
-                    serde_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?
+                    studio_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?
                 } else {
                     let mut updated = a.clone();
                     updated["status"] = turn["status"].clone();
@@ -940,7 +940,7 @@ fn interrupted_continuation(
             .collect::<Result<Vec<_>, _>>()?;
         for raw in rows {
             let task: studio_runtime_store::TaskRecord =
-                serde_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
+                studio_json::from_str(&raw).map_err(|_| RecoveryError::CommitFailed)?;
             let name = task
                 .command
                 .as_deref()
@@ -1001,7 +1001,7 @@ fn put_agent(tx: &Transaction<'_>, value: Value) -> Result<(), RecoveryError> {
     RecoverySnapshot::from_record(value.clone())?;
     AgentRepository::put(
         tx,
-        &serde_json::from_value::<AgentRecord>(value).map_err(|_| RecoveryError::CommitFailed)?,
+        &studio_json::from_value::<AgentRecord>(value).map_err(|_| RecoveryError::CommitFailed)?,
     )?;
     Ok(())
 }

@@ -27,7 +27,7 @@ use process_wrap::std::CommandWrap;
 use regex::Regex;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_process::child_priority::ChildPriority;
 use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_store::{RuntimeStore, StoreError, SyncDocumentsRepository};
@@ -241,7 +241,7 @@ fn upstream_enabled_from_payload(payload: Option<String>) -> Result<bool, Provid
     let Some(payload) = payload else {
         return Ok(true);
     };
-    let value = serde_json::from_str::<Value>(&payload)
+    let value = studio_json::from_str::<Value>(&payload)
         .map_err(|_| ProviderVersionsError::PreferenceRead)?;
     let fields = value
         .pointer("/value/fields")
@@ -289,7 +289,7 @@ impl ProviderVersionStore for SyncProviderVersionStore {
                 )
                 .optional()?;
             let current: Value = match raw {
-                Some(text) => serde_json::from_str(&text).map_err(|_| StoreError::InvalidSyncObject {
+                Some(text) => studio_json::from_str(&text).map_err(|_| StoreError::InvalidSyncObject {
                     scope: "workspace".into(),
                     id: "current".into(),
                 })?,
@@ -540,7 +540,7 @@ impl UpstreamFetch for NpmReleaseFetcher {
             .read_to_vec()
             .map_err(|_| ProviderPortError)?;
         let JsonObject(document): JsonObject<RegistryDocument> =
-            serde_json::from_slice(&bytes).map_err(|_| ProviderPortError)?;
+            studio_json::from_slice(&bytes).map_err(|_| ProviderPortError)?;
         let latest = document.dist_tags.and_then(|tags| tags.0.latest);
         Ok(UpstreamReply {
             status,
@@ -1349,7 +1349,7 @@ fn read_cache(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
         Err(_) => return Ok(Default::default()),
     };
-    let Ok(JsonObject(document)) = serde_json::from_str::<
+    let Ok(JsonObject(document)) = studio_json::from_str::<
         JsonObject<CacheDocument<std::collections::BTreeMap<String, JsonObject<CacheEntry>>>>,
     >(&text) else {
         return Ok(Default::default());
@@ -1379,7 +1379,7 @@ fn save_cache(
     path: &Path,
     cache: &std::collections::BTreeMap<String, CacheEntry>,
 ) -> Result<(), ProviderVersionsError> {
-    let bytes = serde_json::to_vec(&CacheDocument {
+    let bytes = studio_json::to_vec(&CacheDocument {
         version: cache_format_version(),
         packages: cache,
     })

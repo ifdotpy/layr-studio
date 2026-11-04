@@ -84,16 +84,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&overflow).unwrap(),
-            serde_json::json!({"workerDefaults":{}})
+            studio_json::from_str::<studio_json::Value>(&overflow).unwrap(),
+            studio_json::json!({"workerDefaults":{}})
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&agent).unwrap(),
-            serde_json::json!({"workerDefaults":{"model":"m"},"future":42})
+            studio_json::from_str::<studio_json::Value>(&agent).unwrap(),
+            studio_json::json!({"workerDefaults":{"model":"m"},"future":42})
         );
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&transfer).unwrap(),
-            serde_json::json!({"members":{"agent":{"settings":{"workerDefaults":{"model":"m"}},"targetSettings":{"workerDefaults":{"delegationDepth":2}}}}})
+            studio_json::from_str::<studio_json::Value>(&transfer).unwrap(),
+            studio_json::json!({"members":{"agent":{"settings":{"workerDefaults":{"model":"m"}},"targetSettings":{"workerDefaults":{"delegationDepth":2}}}}})
         );
     }
 }

@@ -7,9 +7,9 @@ use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use studio_json::Value;
 #[cfg(test)]
 use studio_runtime_schema::terminal_ingress::{
     TERMINAL_COLS_MAX, TERMINAL_COLS_MIN, TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS,
@@ -187,7 +187,7 @@ async fn create(
             .map_or(TERMINAL_ROWS_DEFAULT, |value| value.get() as u64);
         let request_id = body.id.as_str();
         let shell = terminal_shell().await;
-        let environment = serde_json::json!({
+        let environment = studio_json::json!({
             "TERM":"xterm-256color",
             "COLORTERM":"truecolor"
         });
@@ -400,7 +400,7 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
     use axum::http::{Request, StatusCode};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::{RuntimeStore, TerminalsRepository};
     use tower::ServiceExt;
 
@@ -410,7 +410,7 @@ mod tests {
             json!({"id":"i", "agent":"a"}),
             json!({"id":"i", "agent":"a", "cols":100, "rows":28}),
         ] {
-            let body: super::TerminalCreateBody = serde_json::from_value(value.clone()).unwrap();
+            let body: super::TerminalCreateBody = studio_json::from_value(value.clone()).unwrap();
             assert_eq!(
                 studio_runtime_schema::json_compat::python_json_serialized(&body).unwrap(),
                 studio_runtime_schema::json_compat::python_json(&value)
@@ -421,9 +421,9 @@ mod tests {
             json!({"id":"i", "agent":"a", "cols":1}),
             json!({"id":"i", "agent":"a", "extra":true}),
         ] {
-            assert!(serde_json::from_value::<super::TerminalCreateBody>(value).is_err());
+            assert!(studio_json::from_value::<super::TerminalCreateBody>(value).is_err());
         }
-        let doc: Value = serde_json::from_str(include_str!("../../openapi.json")).unwrap();
+        let doc: Value = studio_json::from_str(include_str!("../../openapi.json")).unwrap();
         let p = &doc["components"]["schemas"]["TerminalCreate"]["properties"];
         assert_eq!(
             p["id"]["maxLength"],
@@ -499,7 +499,7 @@ mod tests {
         let bytes = to_bytes(response.into_body(), 4096)
             .await
             .expect("response body reads");
-        let body: Value = serde_json::from_slice(&bytes).expect("error envelope parses");
+        let body: Value = studio_json::from_slice(&bytes).expect("error envelope parses");
         assert_eq!(
             body,
             json!({"error":"Terminal restart cleanup is still pending"})

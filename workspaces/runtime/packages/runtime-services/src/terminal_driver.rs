@@ -9,7 +9,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::event_write::request_signature as receipt_signature;
 use base64::Engine as _;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::TerminalActionFailure;
 use studio_runtime_store::{
     AgentId, AgentRepository, ArchiveAppend, RuntimeStore, StoreError, TerminalRecord,
@@ -134,7 +134,7 @@ fn replay_action(
         Some(TerminalActionFailure::Disconnected) => {
             Err(TerminalError::Session(SessionError::Disconnected))
         }
-        None => serde_json::from_str(response)
+        None => studio_json::from_str(response)
             .map_err(|_| TerminalError::InvalidStoredObject(id.into())),
     }
 }
@@ -1086,7 +1086,7 @@ impl<S: TerminalSession> TerminalDriver<S> {
         identity: Option<&studio_runtime_process::PtyIdentity>,
     ) -> Result<(), TerminalError> {
         let identity = identity
-            .map(serde_json::to_value)
+            .map(studio_json::to_value)
             .transpose()
             .map_err(|_| TerminalError::InvalidStoredObject(id.to_owned()))?;
         let terminal_id = id.to_owned();
@@ -1219,7 +1219,7 @@ mod tests {
         TerminalEvent, TerminalNotification, TerminalOutcome, TerminalSession, decode_utf8,
         history_output, new_id, output, receipt_signature, terminal_title,
     };
-    use serde_json::Value;
+    use studio_json::Value;
     use studio_runtime_schema::terminal_ingress::{TerminalAction, TerminalInput};
     use studio_runtime_store::path_identity::CanonicalPath;
     use studio_runtime_store::{
@@ -1382,7 +1382,7 @@ mod tests {
     }
 
     async fn create(driver: &TerminalDriver<FakeSession>, cwd: &Path) -> Value {
-        let submitted = serde_json::json!({"id":request_id("create:request").as_str(),"agent":"agent","cols":100,"rows":28});
+        let submitted = studio_json::json!({"id":request_id("create:request").as_str(),"agent":"agent","cols":100,"rows":28});
         driver
             .create(TerminalCreate {
                 request_id: request_id("create:request").as_str(),
@@ -1392,7 +1392,7 @@ mod tests {
                 columns: 100,
                 rows: 28,
                 shell: "/bin/sh",
-                environment: serde_json::json!({}),
+                environment: studio_json::json!({}),
                 submitted_request: &submitted,
             })
             .await
@@ -1433,7 +1433,7 @@ mod tests {
     async fn receipts_match_python_sorted_json_hashes() {
         assert_eq!(
             receipt_signature(
-                &serde_json::json!({"action":"input","id":"term","text":"Ж🙂","request_id":"req"})
+                &studio_json::json!({"action":"input","id":"term","text":"Ж🙂","request_id":"req"})
             ),
             "0424690f3f6c2f444e348cf716bbb16785ccc47fd4e736725fa324ef0c667d6c"
         );
@@ -1442,13 +1442,13 @@ mod tests {
     #[tokio::test]
     async fn explicit_invalid_dimensions_and_untrimmed_long_titles_are_refused() {
         for value in [
-            serde_json::json!({"id":"i","cols":true}),
-            serde_json::json!({"id":"i","rows":-1}),
-            serde_json::json!({"id":"i","cols":1001}),
-            serde_json::json!({"id":"i","rows":501}),
+            studio_json::json!({"id":"i","cols":true}),
+            studio_json::json!({"id":"i","rows":-1}),
+            studio_json::json!({"id":"i","cols":1001}),
+            studio_json::json!({"id":"i","rows":501}),
         ] {
             assert!(
-                serde_json::from_value::<studio_runtime_schema::terminal_ingress::TerminalResize>(
+                studio_json::from_value::<studio_runtime_schema::terminal_ingress::TerminalResize>(
                     value
                 )
                 .is_err()
@@ -1466,12 +1466,12 @@ mod tests {
         let record = create(&driver, &state.root).await;
         let id = record["id"].as_str().expect("terminal id");
         let text = "x".repeat(INPUT_LIMIT);
-        let request = serde_json::json!({"id":id,"text":text,"request_id":request_id("input-limit-valid").as_str()});
+        let request = studio_json::json!({"id":id,"text":text,"request_id":request_id("input-limit-valid").as_str()});
         let result = driver
             .action("input", &request)
             .await
             .expect("64 KiB input");
-        assert_eq!(result, serde_json::json!({"ok":true,"delivery":"sent"}));
+        assert_eq!(result, studio_json::json!({"ok":true,"delivery":"sent"}));
         let decoded = {
             let request = driver.session.requests.lock().expect("requests");
             let (_, method, params) = request.last().expect("input request");
@@ -1493,7 +1493,7 @@ mod tests {
         )
         .expect("receipt read");
         let requests_before = driver.session.requests.lock().expect("requests").len();
-        let too_large = serde_json::json!({"id":id,"text":"é".repeat(INPUT_LIMIT / 2 + 1),"request_id":request_id("input-limit-too-large").as_str()});
+        let too_large = studio_json::json!({"id":id,"text":"é".repeat(INPUT_LIMIT / 2 + 1),"request_id":request_id("input-limit-too-large").as_str()});
         let input = <TerminalInput as serde::Deserialize>::deserialize(&too_large)
             .expect("input is within the character limit");
         assert!(before.is_none());
@@ -1550,7 +1550,7 @@ mod tests {
         .expect("terminal exists");
         stored
             .record
-            .set("error", serde_json::json!("old error"))
+            .set("error", studio_json::json!("old error"))
             .expect("valid terminal extension");
         let seed_id = id.clone();
         state
@@ -1590,11 +1590,11 @@ mod tests {
         let state = test_state().await;
         let driver = test_driver(&state, FakeSession::default());
         let id = "python-terminal";
-        let result = serde_json::json!({"id":id,"agent":"agent","title":"Terminal","cwd":state.root,
+        let result = studio_json::json!({"id":id,"agent":"agent","title":"Terminal","cwd":state.root,
             "status":"running","created":1.0,"updated":1.0,"exitCode":null});
         let typed = TerminalRecord::from_value(result.clone()).expect("terminal record");
         let submitted =
-            serde_json::json!({"id":"python-create","agent":"agent","cols":100,"rows":28});
+            studio_json::json!({"id":"python-create","agent":"agent","cols":100,"rows":28});
         let signature = receipt_signature(&submitted);
         let transaction_id = id.to_owned();
         let transaction_signature = signature.clone();
@@ -1605,7 +1605,7 @@ mod tests {
             .expect("store")
             .transaction(move |tx| {
                 TerminalsRepository::put(tx, &transaction_id, &typed, "", 0)?;
-                tx.execute("INSERT INTO request_results(id,signature,result,created) VALUES('python-create',?1,?2,?3)",rusqlite::params![transaction_signature,serde_json::json!({"actor":null,"reply":{"response":transaction_result,"failure":null},"references":[transaction_id]}).to_string(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_millis() as i64])?;
+                tx.execute("INSERT INTO request_results(id,signature,result,created) VALUES('python-create',?1,?2,?3)",rusqlite::params![transaction_signature,studio_json::json!({"actor":null,"reply":{"response":transaction_result,"failure":null},"references":[transaction_id]}).to_string(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_millis() as i64])?;
                 Ok(())
             })
             .await
@@ -1619,7 +1619,7 @@ mod tests {
                 columns: 100,
                 rows: 28,
                 shell: "/bin/sh",
-                environment: serde_json::json!({}),
+                environment: studio_json::json!({}),
                 submitted_request: &submitted,
             })
             .await
@@ -1633,7 +1633,7 @@ mod tests {
         let state = test_state().await;
         let driver = test_driver(&state, FakeSession::default());
         let _created = create(&driver, &state.root).await;
-        let changed = serde_json::json!({"id":request_id("create:request").as_str(),"agent":"agent","cols":100,"rows":29});
+        let changed = studio_json::json!({"id":request_id("create:request").as_str(),"agent":"agent","cols":100,"rows":29});
         let result = driver
             .create(TerminalCreate {
                 request_id: request_id("create:request").as_str(),
@@ -1643,7 +1643,7 @@ mod tests {
                 columns: 100,
                 rows: 28,
                 shell: "/bin/sh",
-                environment: serde_json::json!({}),
+                environment: studio_json::json!({}),
                 submitted_request: &changed,
             })
             .await;
@@ -1667,7 +1667,7 @@ mod tests {
                 record
                     .set(
                         "_processIdentity",
-                        serde_json::json!({"pid":2345,"session":2345,"start_time_ticks":98765}),
+                        studio_json::json!({"pid":2345,"session":2345,"start_time_ticks":98765}),
                     )
                     .expect("valid terminal extension");
                 TerminalsRepository::update_record(transaction, &transaction_id, &record)
@@ -1685,7 +1685,7 @@ mod tests {
                 .orphan_identities
                 .lock()
                 .expect("orphan identity lock"),
-            vec![serde_json::json!({"pid":2345,"session":2345,"start_time_ticks":98765})]
+            vec![studio_json::json!({"pid":2345,"session":2345,"start_time_ticks":98765})]
         );
         let row = TerminalsRepository::get(&store.test_reader().expect("read"), id)
             .expect("terminal row")
@@ -1755,7 +1755,7 @@ mod tests {
              BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;",
             )
             .expect("install create fail point");
-        let request = serde_json::json!({"id":request_id("create-failpoint").as_str(),"agent":"agent","cols":100,"rows":28});
+        let request = studio_json::json!({"id":request_id("create-failpoint").as_str(),"agent":"agent","cols":100,"rows":28});
         assert!(
             driver
                 .create(TerminalCreate {
@@ -1766,7 +1766,7 @@ mod tests {
                     columns: 100,
                     rows: 28,
                     shell: "/bin/sh",
-                    environment: serde_json::json!({}),
+                    environment: studio_json::json!({}),
                     submitted_request: &request,
                 })
                 .await
@@ -1802,7 +1802,7 @@ mod tests {
         let session = FakeSession::default();
         *session.error.lock().expect("fake error") = Some(SessionError::Rejected);
         let driver = test_driver(&state, session);
-        let request = serde_json::json!({"id":request_id("create-rejected").as_str(),"agent":"agent","cols":100,"rows":28});
+        let request = studio_json::json!({"id":request_id("create-rejected").as_str(),"agent":"agent","cols":100,"rows":28});
         assert!(
             driver
                 .create(TerminalCreate {
@@ -1813,7 +1813,7 @@ mod tests {
                     columns: 100,
                     rows: 28,
                     shell: "/bin/sh",
-                    environment: serde_json::json!({}),
+                    environment: studio_json::json!({}),
                     submitted_request: &request,
                 })
                 .await
@@ -1846,7 +1846,7 @@ mod tests {
         let session = FakeSession::default();
         *session.error.lock().expect("fake error") = Some(SessionError::Rejected);
         let driver = test_driver(&state, session);
-        let request = serde_json::json!({"id":request_id("create-delete-fail").as_str(),"agent":"agent","cols":100,"rows":28});
+        let request = studio_json::json!({"id":request_id("create-delete-fail").as_str(),"agent":"agent","cols":100,"rows":28});
         let database = rusqlite::Connection::open(state.root.join("canvas.sqlite3"))
             .expect("open rejected create database");
         database
@@ -1865,7 +1865,7 @@ mod tests {
                     columns: 100,
                     rows: 28,
                     shell: "/bin/sh",
-                    environment: serde_json::json!({}),
+                    environment: studio_json::json!({}),
                     submitted_request: &request,
                 })
                 .await
@@ -1997,7 +1997,7 @@ mod tests {
             driver
                 .action(
                     "input",
-                    &serde_json::json!({"id":id,"text":"harmless","request_id":request_id("input-failpoint").as_str()})
+                    &studio_json::json!({"id":id,"text":"harmless","request_id":request_id("input-failpoint").as_str()})
                 )
                 .await
                 .is_err()
@@ -2034,8 +2034,8 @@ mod tests {
             .expect("id")
             .to_owned();
         *driver.session.error.lock().expect("fake error") = Some(SessionError::UnknownOutcome);
-        let uncertain = serde_json::json!({"ok":false,"delivery":"uncertain","error":"Input delivery is uncertain. Check the terminal before sending it again."});
-        let unknown_request = serde_json::json!({"id":id,"text":"once","request_id":request_id("input-unknown").as_str()});
+        let uncertain = studio_json::json!({"ok":false,"delivery":"uncertain","error":"Input delivery is uncertain. Check the terminal before sending it again."});
+        let unknown_request = studio_json::json!({"id":id,"text":"once","request_id":request_id("input-unknown").as_str()});
         assert_eq!(
             driver
                 .action("input", &unknown_request)
@@ -2060,7 +2060,7 @@ mod tests {
              BEGIN SELECT RAISE(ABORT, 'injected settlement failure'); END;",
             )
             .expect("install receipt settlement fail point");
-        let settlement_request = serde_json::json!({"id":id,"text":"once-too","request_id":request_id("input-settlement").as_str()});
+        let settlement_request = studio_json::json!({"id":id,"text":"once-too","request_id":request_id("input-settlement").as_str()});
         assert!(driver.action("input", &settlement_request).await.is_err());
         database
             .execute_batch("DROP TRIGGER fail_input_settlement;")
@@ -2109,7 +2109,7 @@ mod tests {
         }
         drop(connection);
 
-        let before_send = serde_json::json!({"action":"input","id":id,"text":"not-sent","request_id":request_id("input-before-send").as_str()});
+        let before_send = studio_json::json!({"action":"input","id":id,"text":"not-sent","request_id":request_id("input-before-send").as_str()});
         let signature = receipt_signature(&before_send);
         let transaction_signature = signature.clone();
         let transaction_result = uncertain.to_string();
@@ -2142,7 +2142,7 @@ mod tests {
             driver
                 .action(
                     "input",
-                    &serde_json::json!({"id":id,"text":"not-sent","request_id":request_id("input-before-send").as_str()})
+                    &studio_json::json!({"id":id,"text":"not-sent","request_id":request_id("input-before-send").as_str()})
                 )
                 .await
                 .expect("reserved replay"),
@@ -2171,7 +2171,7 @@ mod tests {
             .as_str()
             .expect("id")
             .to_owned();
-        let saved_identity = serde_json::json!({"pid":7,"process_group":7,"session":7,"start_time_ticks":11,"boot_id":"boot"});
+        let saved_identity = studio_json::json!({"pid":7,"process_group":7,"session":7,"start_time_ticks":11,"boot_id":"boot"});
         let mut seeded = TerminalsRepository::get(
             &state
                 .store
@@ -2206,7 +2206,7 @@ mod tests {
             .expect("install close fail point");
         assert!(
             driver
-                .action("close", &serde_json::json!({"id":id}))
+                .action("close", &studio_json::json!({"id":id}))
                 .await
                 .is_err()
         );
@@ -2276,7 +2276,7 @@ mod tests {
             .as_str()
             .expect("id")
             .to_owned();
-        let recovery_identity = serde_json::json!({"pid":73,"process_group":73,"session":73,"start_time_ticks":51,"boot_id":"test-boot"});
+        let recovery_identity = studio_json::json!({"pid":73,"process_group":73,"session":73,"start_time_ticks":51,"boot_id":"test-boot"});
         let transaction_id = id.clone();
         let transaction_identity = recovery_identity.clone();
         state
@@ -2297,7 +2297,7 @@ mod tests {
         *driver.session.error.lock().expect("fake error") = Some(SessionError::UnknownOutcome);
         assert!(
             driver
-                .action("close", &serde_json::json!({"id":id}))
+                .action("close", &studio_json::json!({"id":id}))
                 .await
                 .is_err()
         );
@@ -2351,7 +2351,7 @@ mod tests {
             .as_str()
             .expect("terminal ID")
             .to_owned();
-        let identity = serde_json::json!({"pid":91,"process_group":91,"session":91,"start_time_ticks":42,"boot_id":"boot"});
+        let identity = studio_json::json!({"pid":91,"process_group":91,"session":91,"start_time_ticks":42,"boot_id":"boot"});
         let transaction_id = id.clone();
         let transaction_identity = identity.clone();
         state
@@ -2517,7 +2517,7 @@ mod tests {
             .as_str()
             .expect("first ID")
             .to_owned();
-        let second_request = serde_json::json!({"id":request_id("create:second").as_str(),"agent":"agent","cols":100,"rows":28});
+        let second_request = studio_json::json!({"id":request_id("create:second").as_str(),"agent":"agent","cols":100,"rows":28});
         let second = driver
             .create(TerminalCreate {
                 request_id: request_id("create:second").as_str(),
@@ -2527,7 +2527,7 @@ mod tests {
                 columns: 100,
                 rows: 28,
                 shell: "/bin/sh",
-                environment: serde_json::json!({}),
+                environment: studio_json::json!({}),
                 submitted_request: &second_request,
             })
             .await
@@ -2535,7 +2535,7 @@ mod tests {
             .as_str()
             .expect("second ID")
             .to_owned();
-        let identity = serde_json::json!({"pid":2345,"process_group":2345,"session":2345,"start_time_ticks":98765,"boot_id":"boot"});
+        let identity = studio_json::json!({"pid":2345,"process_group":2345,"session":2345,"start_time_ticks":98765,"boot_id":"boot"});
         let transaction_ids = [first.clone(), second.clone()];
         let transaction_identity = identity.clone();
         state
@@ -2648,7 +2648,7 @@ mod tests {
             .as_str()
             .expect("first ID")
             .to_owned();
-        let second_request = serde_json::json!({"id":request_id("create:second-error").as_str(),"agent":"agent","cols":100,"rows":28});
+        let second_request = studio_json::json!({"id":request_id("create:second-error").as_str(),"agent":"agent","cols":100,"rows":28});
         let second = driver
             .create(TerminalCreate {
                 request_id: request_id("create:second-error").as_str(),
@@ -2658,7 +2658,7 @@ mod tests {
                 columns: 100,
                 rows: 28,
                 shell: "/bin/sh",
-                environment: serde_json::json!({}),
+                environment: studio_json::json!({}),
                 submitted_request: &second_request,
             })
             .await
@@ -2666,7 +2666,7 @@ mod tests {
             .as_str()
             .expect("second ID")
             .to_owned();
-        let identity = serde_json::json!({"pid":2345,"process_group":2345,"session":2345,"start_time_ticks":98765,"boot_id":"boot"});
+        let identity = studio_json::json!({"pid":2345,"process_group":2345,"session":2345,"start_time_ticks":98765,"boot_id":"boot"});
         let transaction_ids = [first.clone(), second.clone()];
         let transaction_identity = identity.clone();
         state
@@ -2795,7 +2795,7 @@ mod tests {
             .expect("terminal id")
             .to_owned();
         let store = state.store.as_ref().expect("store");
-        let saved_identity = serde_json::json!({"pid":7,"process_group":7,"session":7,"start_time_ticks":11,"boot_id":"boot"});
+        let saved_identity = studio_json::json!({"pid":7,"process_group":7,"session":7,"start_time_ticks":11,"boot_id":"boot"});
         let mut record = TerminalsRepository::get(&store.test_reader().expect("read"), &id)
             .expect("terminal row")
             .expect("terminal exists")
@@ -2809,8 +2809,8 @@ mod tests {
             .await
             .expect("seed private process identity");
         for (action, args) in [
-            ("rename", serde_json::json!({"id":id,"title":"Shell"})),
-            ("close", serde_json::json!({"id":id})),
+            ("rename", studio_json::json!({"id":id,"title":"Shell"})),
+            ("close", studio_json::json!({"id":id})),
         ] {
             let visible = driver.action(action, &args).await.expect("terminal action");
             let row = TerminalsRepository::get(&store.test_reader().expect("read"), &id)
@@ -2853,7 +2853,7 @@ mod tests {
                     }
                 }
                 Value::String(text) => {
-                    if let Ok(mut nested) = serde_json::from_str::<Value>(text) {
+                    if let Ok(mut nested) = studio_json::from_str::<Value>(text) {
                         normalize(&mut nested, root);
                         *text = nested.to_string();
                     }
@@ -2892,7 +2892,7 @@ mod tests {
             }
             let connection = store.test_reader().expect("read action corpus rows");
             let archive = store.test_terminal_output().expect("read archive rows");
-            serde_json::json!({
+            studio_json::json!({
                 // The Python oracle predates the Rust-owned output_generation column.
                 "user_terminals":rows(&connection,"user_terminals","id,record,output,offset"),
                 "user_terminal_output":rows(&archive,"user_terminal_output","*"),
@@ -2912,9 +2912,9 @@ mod tests {
         }
         // Keep the recorded return/row contract; the old Python launcher wire is retired.
         let oracle: Value =
-            serde_json::from_str(include_str!("../tests/terminal_action_corpus.json"))
+            studio_json::from_str(include_str!("../tests/terminal_action_corpus.json"))
                 .expect("frozen terminal actions");
-        let python_actions: Vec<ActionCase> = serde_json::from_value(oracle["actions"].clone())
+        let python_actions: Vec<ActionCase> = studio_json::from_value(oracle["actions"].clone())
             .expect("frozen terminal action results");
         assert_eq!(python_actions.len(), 7);
         let store = state.store.as_ref().expect("store").clone();
@@ -2924,7 +2924,7 @@ mod tests {
             action_clock,
             action_id,
         );
-        let create_request = serde_json::json!({
+        let create_request = studio_json::json!({
             "id":request_id("action-create").as_str(), "agent":"agent", "cols":91, "rows":33
         });
         let create_result = driver
@@ -2936,7 +2936,7 @@ mod tests {
                 columns: 91,
                 rows: 33,
                 shell: "/bin/sh",
-                environment: serde_json::json!({}),
+                environment: studio_json::json!({}),
                 submitted_request: &create_request,
             })
             .await
@@ -2952,21 +2952,21 @@ mod tests {
         for (action, data) in [
             (
                 "rename",
-                serde_json::json!({"id":rust_id,"title":"  Shell  "}),
+                studio_json::json!({"id":rust_id,"title":"  Shell  "}),
             ),
             (
                 "input",
-                serde_json::json!({"id":rust_id,"text":"hi🙂","request_id":request_id("actions-input").as_str()}),
+                studio_json::json!({"id":rust_id,"text":"hi🙂","request_id":request_id("actions-input").as_str()}),
             ),
             (
                 "input",
-                serde_json::json!({"id":rust_id,"text":"hi🙂","request_id":request_id("actions-input").as_str()}),
+                studio_json::json!({"id":rust_id,"text":"hi🙂","request_id":request_id("actions-input").as_str()}),
             ),
             (
                 "resize",
-                serde_json::json!({"id":rust_id,"cols":91,"rows":33}),
+                studio_json::json!({"id":rust_id,"cols":91,"rows":33}),
             ),
-            ("close", serde_json::json!({"id":rust_id})),
+            ("close", studio_json::json!({"id":rust_id})),
         ] {
             rust_results.push((
                 driver.action(action, &data).await.expect("Rust action"),
@@ -2974,7 +2974,7 @@ mod tests {
             ));
             rust_tables.push(snapshot(&store));
         }
-        let rejected = serde_json::json!({
+        let rejected = studio_json::json!({
             "id":rust_id,"text":"different","request_id":request_id("actions-input").as_str()
         });
         let rust_rejection = driver.action("input", &rejected).await;
@@ -2993,16 +2993,16 @@ mod tests {
             (
                 format!("terminal-input:{}", request_id("actions-input")),
                 "process/writeStdin".into(),
-                serde_json::json!({"processHandle":rust_id,"deltaBase64":"aGnwn5mC"}),
+                studio_json::json!({"processHandle":rust_id,"deltaBase64":"aGnwn5mC"}),
             )
         );
         assert_eq!(requests[2].1, "process/resizePty");
         assert_eq!(
             requests[2].2,
-            serde_json::json!({"processHandle":rust_id,"size":{"cols":91,"rows":33}})
+            studio_json::json!({"processHandle":rust_id,"size":{"cols":91,"rows":33}})
         );
         assert_eq!(requests[3].1, "process/kill");
-        assert_eq!(requests[3].2, serde_json::json!({"processHandle":rust_id}));
+        assert_eq!(requests[3].2, studio_json::json!({"processHandle":rust_id}));
         drop(requests);
 
         // Terminals record the canonical cwd (macOS `/var` is `/private/var`).
@@ -3050,7 +3050,7 @@ mod tests {
         let terminal = create(&driver, &state.root).await;
         let id = terminal["id"].as_str().expect("terminal");
         *driver.session.error.lock().expect("error") = Some(SessionError::UnknownOutcome);
-        let close = serde_json::json!({"id":id});
+        let close = studio_json::json!({"id":id});
         for _ in 0..2 {
             assert!(matches!(
                 driver.action("close", &close).await,
@@ -3156,7 +3156,7 @@ mod tests {
         let record = create(&driver, &state.root).await;
         let id = record["id"].as_str().expect("terminal id");
         *driver.session.error.lock().expect("fake error lock") = Some(SessionError::UnknownOutcome);
-        let request = serde_json::json!({"id":id,"text":"hi","request_id":request_id("input-request").as_str()});
+        let request = studio_json::json!({"id":id,"text":"hi","request_id":request_id("input-request").as_str()});
         assert_eq!(
             driver
                 .action("input", &request)
@@ -3197,7 +3197,7 @@ mod tests {
         let driver = test_driver(&state, FakeSession::default());
         assert!(matches!(
             driver
-                .action("close", &serde_json::json!({"id":"arbitrary-secret"}))
+                .action("close", &studio_json::json!({"id":"arbitrary-secret"}))
                 .await,
             Err(TerminalError::UnknownTerminal)
         ));
@@ -3257,7 +3257,7 @@ mod tests {
             let id = id.clone();
             tokio::spawn(async move {
                 driver
-                    .action("resize", &serde_json::json!({"id":id,"cols":90}))
+                    .action("resize", &studio_json::json!({"id":id,"cols":90}))
                     .await
             })
         };
@@ -3272,7 +3272,7 @@ mod tests {
         let mut record = row.record;
         record.set_status("exited");
         record
-            .set("title", serde_json::json!("concurrent rename"))
+            .set("title", studio_json::json!("concurrent rename"))
             .expect("valid terminal extension");
         let transaction_id = id.clone();
         store

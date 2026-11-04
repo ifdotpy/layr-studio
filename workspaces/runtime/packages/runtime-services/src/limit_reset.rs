@@ -4,8 +4,8 @@ use crate::account_session_runtime::{
     AccountSessionError, AccountSessionPort, ProviderRequest, ProviderResponse, RequestCertainty,
 };
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::persistence::{
     RequestIdentity, ResetCreditCertainty, ResetCreditOutcome, ResetCreditStatus,
@@ -37,7 +37,7 @@ pub enum ResetError {
     #[error("reset-credit persistence failed")]
     Sql(#[from] rusqlite::Error),
     #[error("reset-credit persistence failed")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -75,7 +75,7 @@ fn now() -> Result<f64, ResetError> {
 }
 
 fn from_record(value: Value) -> Result<Attempt, ResetError> {
-    serde_json::from_value(value)
+    studio_json::from_value(value)
         .map_err(|_| ResetError::Invalid("The reset attempt record is invalid"))
 }
 
@@ -101,7 +101,7 @@ async fn read_attempts(
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             let mut attempts = Vec::new();
             for row in rows {
-                attempts.push(from_record(serde_json::from_str(&row?)?)?);
+                attempts.push(from_record(studio_json::from_str(&row?)?)?);
             }
             if let Some(alias) = alias
                 && let Some(attempt) = attempts.iter().find(|attempt| attempt.id == alias)
@@ -154,7 +154,7 @@ async fn save_attempt(
 ) -> Result<(), ResetError> {
     let mut attempt = attempt.clone();
     attempt.updated = Some(now()?);
-    let record = serde_json::to_string(&attempt)
+    let record = studio_json::to_string(&attempt)
         .map_err(|_| ResetError::Invalid("The reset attempt record is invalid"))?;
     let request_id = request_id.to_owned();
     store.transaction_with(move |tx| {
@@ -191,7 +191,7 @@ async fn reserve_attempt(
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             let mut attempts = Vec::new();
             for row in rows {
-                attempts.push(from_record(serde_json::from_str(&row?)?)?);
+                attempts.push(from_record(studio_json::from_str(&row?)?)?);
             }
             if let Some(alias) = alias {
                 let attempt = attempts
@@ -253,7 +253,7 @@ async fn reserve_attempt(
                     }
                 },
             );
-            let record = serde_json::to_string(&candidate)?;
+            let record = studio_json::to_string(&candidate)?;
             tx.execute(
                 "INSERT INTO runtime_limit_reset_attempts (id,record) VALUES (?1,?2)",
                 (&candidate.id, record),
@@ -424,7 +424,7 @@ pub async fn consume_reset(
             reserved.updated = Some(now()?);
             tx.execute(
                 "UPDATE runtime_limit_reset_attempts SET record=?2 WHERE id=?1",
-                (&reserved.id, serde_json::to_string(&reserved)?),
+                (&reserved.id, studio_json::to_string(&reserved)?),
             )?;
             tx.execute(
                 "INSERT OR IGNORE INTO runtime_limit_reset_requests(id,attempt_id) VALUES(?1,?2)",
@@ -517,11 +517,11 @@ mod tests {
         ProviderRequest, ProviderResponse, RequestCertainty, SessionReceipt,
     };
     use serde::Deserialize;
-    use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::future::Future;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier, Mutex};
+    use studio_json::{Value, json};
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
     use studio_runtime_schema::persistence::{RequestIdentity, ResetCreditStatus};
     use studio_runtime_store::RuntimeStore;

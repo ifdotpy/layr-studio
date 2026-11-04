@@ -1,11 +1,11 @@
 //! Fake clocks and pressure sources exercise durable monitor admission and I/O.
 #![allow(clippy::unwrap_used)]
 use crate::monitor_fixtures as fixtures;
-use serde_json::{Value, json};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+use studio_json::{Value, json};
 use studio_runtime_schema::shell_policy::Settings;
 use studio_runtime_services::{
     monitor_driver::{self, MonitorNative, Submission},
@@ -151,7 +151,7 @@ async fn checkin_is_durable_once_per_output_generation_and_does_not_double_stall
         })
         .unwrap();
     assert_eq!(
-        serde_json::from_str::<Value>(&raw).unwrap()["delivery"],
+        studio_json::from_str::<Value>(&raw).unwrap()["delivery"],
         "next_turn"
     );
     let selected = id.clone();

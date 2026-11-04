@@ -17,7 +17,7 @@ use studio_runtime_schema::studio_errors::MonitorRecoveryReason;
 use tokio::sync::Notify;
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_services::account_session_runtime::{
     AccountSessionError, AccountSessionPort, NotSentReason as BrokerNotSentReason, ProviderRequest,
@@ -84,7 +84,7 @@ enum CommandResponse {
 }
 #[derive(Deserialize)]
 struct ConfigurationResponse {
-    config: serde_json::Map<String, Value>,
+    config: studio_json::Map<String, Value>,
 }
 #[derive(Deserialize)]
 struct ConfigurationFailure {
@@ -239,7 +239,7 @@ impl RetainedMonitorPort {
         response: ProviderResponse,
     ) -> Result<(), MonitorError> {
         let outcome = match response {
-            ProviderResponse::Reply(value) => serde_json::from_value(value)
+            ProviderResponse::Reply(value) => studio_json::from_value(value)
                 .map_err(|_| MonitorError::Refused("Invalid monitor exit response"))?,
             ProviderResponse::Rejected(value) => CommandExit::Error(value.to_string()),
         };
@@ -766,14 +766,14 @@ impl RetainedMonitorPort {
         let config = match config_receipt.into_response() {
             Some(ProviderResponse::Reply(value)) => {
                 let response: ConfigurationResponse =
-                    serde_json::from_value(value).map_err(|_| {
+                    studio_json::from_value(value).map_err(|_| {
                         MonitorError::Refused("Monitor configuration response is invalid")
                     })?;
                 Value::Object(response.config)
             }
             Some(ProviderResponse::Rejected(value)) => {
                 let failure: ConfigurationFailure =
-                    serde_json::from_value(value).map_err(|_| {
+                    studio_json::from_value(value).map_err(|_| {
                         MonitorError::Refused("Provider configuration rejection is invalid")
                     })?;
                 return Err(MonitorError::ConfigurationRejected {
@@ -806,7 +806,7 @@ impl RetainedMonitorPort {
             .map_err(|_| MonitorError::Refused("Monitor sandbox policy refused the command"))?;
         let start = studio_runtime_services::monitor_runtime::PreparedStart {
             monitor: monitor.clone(),
-            actor: serde_json::to_value(actor).map_err(studio_runtime_store::StoreError::from)?,
+            actor: studio_json::to_value(actor).map_err(studio_runtime_store::StoreError::from)?,
             operation,
             params,
         };
@@ -1054,7 +1054,7 @@ impl RetainedMonitorPort {
         apply_turn_permissions(&mut params, &prepared_action.settings, &actor)?;
         let prepared = studio_runtime_services::monitor_runtime::PreparedStart {
             monitor: monitor.clone(),
-            actor: serde_json::to_value(&actor).map_err(|error| error.to_string())?,
+            actor: studio_json::to_value(&actor).map_err(|error| error.to_string())?,
             operation: operation.clone(),
             params,
         };
@@ -1584,7 +1584,7 @@ impl MonitorPort for RetainedMonitorPort {
             }
             let observation: studio_runtime_process::OperationStatusResult<CommandResponse> =
                 match receipt.into_response() {
-                    Some(ProviderResponse::Reply(value)) => match serde_json::from_value(value) {
+                    Some(ProviderResponse::Reply(value)) => match studio_json::from_value(value) {
                         Ok(observation) => observation,
                         Err(_) => {
                             return Ok(ReattachOutcome::Pending);
@@ -2118,7 +2118,7 @@ mod tests {
     }
     impl<T: serde::Serialize> TestJson for T {
         fn value(&self) -> Value {
-            serde_json::to_value(self).expect("serialize test record")
+            studio_json::to_value(self).expect("serialize test record")
         }
     }
     use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
@@ -2131,7 +2131,7 @@ mod tests {
     #[test]
     fn monitor_launch_applies_prepared_environment() {
         let actor: studio_runtime_store::AgentRecord =
-            serde_json::from_value(owner(Path::new("/"), true)).unwrap();
+            studio_json::from_value(owner(Path::new("/"), true)).unwrap();
         let mut params = json!({});
         let settings = json!({"sandboxPolicy":{"type":"dangerFullAccess"},"env":{"LAYR_ROOT":"/store","LAYR_DIRECT":"0","LAYR_SOCKET":"/socket","PATH":"/managed:/usr/bin"}});
         apply_turn_permissions(&mut params, &settings, &actor).unwrap();
@@ -2154,7 +2154,7 @@ mod tests {
                 raw_monitor["accountKey"] = monitor_account.clone();
                 let mut raw_actor = owner(Path::new("/"), true);
                 raw_actor["accountKey"] = actor_account.clone();
-                let monitor = serde_json::from_value::<studio_runtime_store::MonitorRecord>(
+                let monitor = studio_json::from_value::<studio_runtime_store::MonitorRecord>(
                     raw_monitor.clone(),
                 )
                 .expect("monitor");
@@ -2183,7 +2183,7 @@ mod tests {
                 raw["permissionMode"] = mode.clone();
                 raw["approvalPolicy"] = policy.clone();
                 let actor: studio_runtime_store::AgentRecord =
-                    match serde_json::from_value(raw.clone()) {
+                    match studio_json::from_value(raw.clone()) {
                         Ok(actor) => actor,
                         Err(_) if mode == "bad" || policy.is_number() => continue,
                         Err(error) => panic!("actor fixture: {error}"),
@@ -2207,10 +2207,10 @@ mod tests {
 
     #[test]
     fn terminal_exit_requires_a_definitive_outcome() {
-        assert!(serde_json::from_value::<CommandExit>(json!({})).is_err());
-        assert!(serde_json::from_value::<CommandExit>(json!({"error":""})).is_err());
+        assert!(studio_json::from_value::<CommandExit>(json!({})).is_err());
+        assert!(studio_json::from_value::<CommandExit>(json!({"error":""})).is_err());
         assert!(
-            serde_json::from_value::<CommandExit>(json!({"exitCode":1,"error":"diagnostic"}))
+            studio_json::from_value::<CommandExit>(json!({"exitCode":1,"error":"diagnostic"}))
                 .is_ok()
         );
     }
@@ -2403,7 +2403,7 @@ mod tests {
             transfer: None,
             deleted_actor_session: None,
             method: Method::CommandExec,
-            params: serde_json::to_value(Params {
+            params: studio_json::to_value(Params {
                 process_id: "watch",
                 cwd: root,
                 command: ["true"],
@@ -2470,7 +2470,7 @@ mod tests {
                     &key,
                     None,
                     Some(RequestResult::Reply(
-                        serde_json::to_value(Exit { exit_code: 0 }).expect("exit"),
+                        studio_json::to_value(Exit { exit_code: 0 }).expect("exit"),
                     )),
                     1,
                 )?;
@@ -2495,7 +2495,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(actor)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)
             })
@@ -2629,13 +2629,13 @@ mod tests {
         };
         let mut watch = starting_watch(root.path(), "watch");
         watch["status"] = json!("running");
-        watch["operation"] = serde_json::to_value(&operation).expect("operation");
+        watch["operation"] = studio_json::to_value(&operation).expect("operation");
         let owner = owner(root.path(), true);
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
                 studio_runtime_store::Table::new(tx)
-                    .put(&serde_json::from_value::<studio_runtime_store::MonitorRecord>(watch)?)?;
+                    .put(&studio_json::from_value::<studio_runtime_store::MonitorRecord>(watch)?)?;
                 // Refuse every exit queue write until the disk is freed.
                 tx.execute_batch("CREATE TRIGGER fail_exit_write BEFORE UPDATE ON runtime_monitors WHEN json_extract(NEW.record,'$.streamQueue[0].kind')='exit' BEGIN SELECT RAISE(ABORT,'database or disk is full'); END;")?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -2782,12 +2782,12 @@ mod tests {
         };
         let mut watch = starting_watch(root.path(), "watch");
         watch["status"] = json!("running");
-        watch["operation"] = serde_json::to_value(&operation).expect("operation");
+        watch["operation"] = studio_json::to_value(&operation).expect("operation");
         let owner = owner(root.path(), true);
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -3089,7 +3089,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -3221,7 +3221,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -3235,11 +3235,11 @@ mod tests {
             })
             .await
             .expect("stored operation");
-        let decoded: Operation = serde_json::from_str(&saved).expect("typed stored operation");
+        let decoded: Operation = studio_json::from_str(&saved).expect("typed stored operation");
         assert_eq!(decoded, operation);
         assert_eq!(
-            serde_json::from_str::<Value>(&saved).expect("stored JSON"),
-            serde_json::to_value(&decoded).expect("round-trip JSON")
+            studio_json::from_str::<Value>(&saved).expect("stored JSON"),
+            studio_json::to_value(&decoded).expect("round-trip JSON")
         );
         retained_submit(&store, &call, &request, false).await;
         studio_runtime_services::monitor_runtime::recover_on_startup(&store, now)
@@ -3402,7 +3402,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -3576,7 +3576,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -3925,7 +3925,7 @@ mod tests {
             store
                 .transaction(move |tx| {
                     AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                    studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                    studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                         studio_runtime_store::MonitorRecord,
                     >(watch)?)?;
                     Ok::<_, studio_runtime_store::StoreError>(())
@@ -4016,7 +4016,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -4053,7 +4053,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(actor)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -4082,7 +4082,7 @@ mod tests {
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -4139,7 +4139,7 @@ mod tests {
         store
             .transaction_with(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                     studio_runtime_store::MonitorRecord,
                 >(watch)?)?;
                 Ok::<(), studio_runtime_store::StoreError>(())
@@ -4201,16 +4201,16 @@ mod tests {
         let fields = watch.as_object_mut().expect("watch object");
         fields.insert(
             "status".into(),
-            serde_json::to_value(studio_runtime_services::monitor_policy::MonitorStatus::Running)
+            studio_json::to_value(studio_runtime_services::monitor_policy::MonitorStatus::Running)
                 .expect("status"),
         );
         fields.insert(
             "operation".into(),
-            serde_json::to_value(&operation).expect("operation"),
+            studio_json::to_value(&operation).expect("operation"),
         );
         let owner = AgentRecord::from_value(owner(root.path(), true)).expect("owner");
         let watch =
-            serde_json::from_value::<studio_runtime_store::MonitorRecord>(watch).expect("watch");
+            studio_json::from_value::<studio_runtime_store::MonitorRecord>(watch).expect("watch");
         store
             .transaction_with(move |tx| {
                 AgentRepository::put(tx, &owner)?;
@@ -4276,7 +4276,7 @@ mod tests {
             "fingerprint":null,"lastAt":1.0,"lastExitCode":null,"error":null,
             "lastOutput":"","lastFinished":1.0});
         let check = RuleSnapshot::from_stored(
-            &serde_json::from_value(rule.clone()).unwrap(),
+            &studio_json::from_value(rule.clone()).unwrap(),
             owner.clone(),
         )
         .expect("rule snapshot")
@@ -4284,7 +4284,7 @@ mod tests {
         store
             .transaction_with(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                RulesRepository::put(tx, &serde_json::from_value::<RuleRecord>(rule)?)?;
+                RulesRepository::put(tx, &studio_json::from_value::<RuleRecord>(rule)?)?;
                 Ok::<(), studio_runtime_store::StoreError>(())
             })
             .await
@@ -4313,16 +4313,16 @@ mod tests {
             "fingerprint":null,"lastAt":1.0,"lastExitCode":null,"error":null,
             "lastOutput":"","lastFinished":1.0});
         let check = RuleSnapshot::from_stored(
-            &serde_json::from_value(rule.clone()).unwrap(),
+            &studio_json::from_value(rule.clone()).unwrap(),
             owner.clone(),
         )
         .expect("rule snapshot")
         .check();
-        rule["launchIntent"] = serde_json::to_value(&check).expect("launch intent");
+        rule["launchIntent"] = studio_json::to_value(&check).expect("launch intent");
         store
             .transaction_with(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(owner)?)?;
-                RulesRepository::put(tx, &serde_json::from_value::<RuleRecord>(rule)?)?;
+                RulesRepository::put(tx, &studio_json::from_value::<RuleRecord>(rule)?)?;
                 Ok::<(), studio_runtime_store::StoreError>(())
             })
             .await
@@ -4357,7 +4357,7 @@ mod tests {
                 0,
             ),
             (
-                serde_json::from_str(
+                studio_json::from_str(
                     r#"{"accepted":false,"accepted":true,"response":{"exitCode":0}}"#,
                 )
                 .unwrap(),
@@ -4376,7 +4376,7 @@ mod tests {
             watch["operation"] = json!(operation);
             store
                 .transaction(move |tx| {
-                    studio_runtime_store::Table::new(tx).put(&serde_json::from_value::<
+                    studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
                         studio_runtime_store::MonitorRecord,
                     >(watch)?)?;
                     Ok::<_, studio_runtime_store::StoreError>(())

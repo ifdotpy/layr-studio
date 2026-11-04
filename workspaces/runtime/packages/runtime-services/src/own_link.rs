@@ -25,7 +25,7 @@ pub fn peer_owns_link(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().unwrap();

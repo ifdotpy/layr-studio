@@ -3,9 +3,9 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::federation_ingress::{
     FederationInvitation, FederationRequest, InvitationScope,
 };
@@ -353,7 +353,7 @@ async fn accept_peer(
                 .optional()
                 .map_err(StoreError::from)?;
             if let Some(existing) = existing {
-                let existing: Value = serde_json::from_str(&existing).map_err(|_| {
+                let existing: Value = studio_json::from_str(&existing).map_err(|_| {
                     StoreError::SchemaMismatch("invalid federation peer".to_owned())
                 })?;
                 if existing["inviteId"] != invite_id_for_write
@@ -773,7 +773,7 @@ mod project_tests;
 #[cfg(test)]
 mod tests {
     use super::manage_with_origin_and_whoami;
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn create_invite_uses_injected_tailscale_whoami_without_host_access() {
@@ -785,7 +785,7 @@ mod tests {
         );
         manage_with_origin_and_whoami(
             std::sync::Arc::clone(&store),
-            &serde_json::from_str(r#"{"action":"set_enabled","enabled":true}"#).unwrap(),
+            &studio_json::from_str(r#"{"action":"set_enabled","enabled":true}"#).unwrap(),
             None,
             None,
         )
@@ -794,7 +794,7 @@ mod tests {
         let whoami = json!({"status":"verified","user":"owner@example.test","node":"node-1"});
         let result = manage_with_origin_and_whoami(
             std::sync::Arc::clone(&store),
-            &serde_json::from_str(r#"{"action":"create_invite","label":"Test server"}"#).unwrap(),
+            &studio_json::from_str(r#"{"action":"create_invite","label":"Test server"}"#).unwrap(),
             Some("https://studio.example.ts.net"),
             Some(&whoami),
         )
@@ -813,7 +813,7 @@ mod tests {
             })
             .await
             .expect("identity row reads");
-        let identity: serde_json::Value = serde_json::from_str(&identity).expect("identity JSON");
+        let identity: studio_json::Value = studio_json::from_str(&identity).expect("identity JSON");
         assert_eq!(identity["tailscaleUser"], "owner@example.test");
         assert_eq!(identity["tailscaleStatus"], "verified");
     }

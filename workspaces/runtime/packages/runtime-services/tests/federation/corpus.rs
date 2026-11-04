@@ -3,11 +3,11 @@ use crate::{
     federation_messaging::FederationMessageError, remote_transport as transport,
 };
 use rusqlite::params;
-use serde_json::{Value, json};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_store::RuntimeStore;
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,
@@ -225,7 +225,7 @@ fn rows(store: &RuntimeStore, table: &str) -> Vec<Value> {
     let mut stmt = db.prepare(&sql).expect("fixture operation");
     stmt.query_map([], |r| r.get::<_, String>(0))
         .expect("fixture operation")
-        .map(|r| serde_json::from_str(&r.expect("fixture operation")).expect("fixture operation"))
+        .map(|r| studio_json::from_str(&r.expect("fixture operation")).expect("fixture operation"))
         .collect()
 }
 fn counts(store: &RuntimeStore) -> Value {
@@ -256,7 +256,7 @@ fn effect_rows(store: &RuntimeStore) -> (Vec<Value>, Vec<Value>) {
         .expect("fixture operation");
     let chat = stmt
         .query_map([], |r| {
-            Ok(json!({"seq":r.get::<_,i64>(0)?,"id":r.get::<_,String>(1)?,"room":r.get::<_,String>(2)?,"sender":r.get::<_,String>(3)?,"text":r.get::<_,String>(4)?,"created":r.get::<_,f64>(5)?,"deliveries":serde_json::from_str::<Value>(&r.get::<_,String>(6)?).expect("fixture operation")}))
+            Ok(json!({"seq":r.get::<_,i64>(0)?,"id":r.get::<_,String>(1)?,"room":r.get::<_,String>(2)?,"sender":r.get::<_,String>(3)?,"text":r.get::<_,String>(4)?,"created":r.get::<_,f64>(5)?,"deliveries":studio_json::from_str::<Value>(&r.get::<_,String>(6)?).expect("fixture operation")}))
         })
         .expect("fixture operation")
         .collect::<Result<Vec<_>, _>>()
@@ -266,7 +266,7 @@ fn effect_rows(store: &RuntimeStore) -> (Vec<Value>, Vec<Value>) {
         .expect("fixture operation");
     let events = stmt
         .query_map([], |r| {
-            Ok(json!({"id":r.get::<_,String>(0)?,"agent":r.get::<_,String>(1)?,"kind":r.get::<_,String>(2)?,"text":serde_json::from_str::<Value>(&r.get::<_,String>(3)?).expect("fixture operation")}))
+            Ok(json!({"id":r.get::<_,String>(0)?,"agent":r.get::<_,String>(1)?,"kind":r.get::<_,String>(2)?,"text":studio_json::from_str::<Value>(&r.get::<_,String>(3)?).expect("fixture operation")}))
         })
         .expect("fixture operation")
         .collect::<Result<Vec<_>, _>>()
@@ -388,7 +388,7 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
     let ExchangeOutcome::Applied(queued) = queued else {
         panic!("remote callback should be queued")
     };
-    let decoded: Value = serde_json::from_str(queued.value.get()).expect("queued receipt");
+    let decoded: Value = studio_json::from_str(queued.value.as_str()).expect("queued receipt");
     assert_eq!(decoded["status"], "queued");
     assert_eq!(rows(&store, "runtime_federation_outbox").len(), 1);
 
@@ -471,7 +471,7 @@ async fn authenticated_consumer() {
     let (_, store) = corpus.store("auth", false).await;
     let identity = corpus.signing_identity();
     let body =
-        serde_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
+        studio_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
             .expect("fixture operation");
     let nonce = "outer-authenticated-nonce-123";
     let action = effects::FederationAction::Message;
@@ -515,7 +515,7 @@ async fn authenticated_consumer() {
     .expect("fixture operation");
     let local = &corpus.data["seed"]["local"];
     let receipt = transport::verify_federation_response(
-        &serde_json::to_vec(&response).expect("fixture operation"),
+        &studio_json::to_vec(&response).expect("fixture operation"),
         local["publicKey"].as_str().expect("fixture operation"),
         Some(local["stateId"].as_str().expect("fixture operation")),
         corpus.now() as i64,
@@ -545,7 +545,7 @@ async fn unified_signature_verifies_and_its_nonce_replay_is_refused_from_the_one
     let (_, store) = corpus.store("unified-auth", false).await;
     let identity = corpus.signing_identity();
     let body =
-        serde_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
+        studio_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
             .expect("fixture operation");
     let local_id = corpus.data["seed"]["local"]["stateId"]
         .as_str()
@@ -680,7 +680,7 @@ async fn federation_inbound_authentication_refusals() {
     let corpus = Corpus::new();
     let identity = corpus.signing_identity();
     let body =
-        serde_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
+        studio_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
             .expect("fixture operation");
     let action = effects::FederationAction::Message;
     let sign = |timestamp: i64, nonce: &str| {
@@ -872,7 +872,7 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
         .await
         .expect("local signing identity");
     let receipt = transport::verify_federation_response(
-        &serde_json::to_vec(&first).expect("signed response"),
+        &studio_json::to_vec(&first).expect("signed response"),
         local.public_key_pem(),
         Some(local.id()),
         corpus.now() as i64,
@@ -1027,7 +1027,7 @@ async fn legacy_federated_conflict_does_not_poison_original_command() {
     let cutoff = chrono::Utc::now().timestamp_millis() + 60_000;
     store.transaction(move |tx| { tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [cutoff])?; Ok(()) }).await.expect("cutover");
     let command = |delivery: &str| -> studio_runtime_schema::command::CommandRequest {
-        serde_json::from_str(&format!(r#"{{"id":"{id}","client":"web-1","number":1,"kind":"send","target":"{}","body":{{"text":"user message","delivery":"{delivery}"}}}}"#, corpus.room())).expect("command")
+        studio_json::from_str(&format!(r#"{{"id":"{id}","client":"web-1","number":1,"kind":"send","target":"{}","body":{{"text":"user message","delivery":"{delivery}"}}}}"#, corpus.room())).expect("command")
     };
     let changed = command("next_turn");
     store
@@ -1075,7 +1075,7 @@ async fn legacy_federated_conflict_does_not_poison_original_command() {
     )
     .await
     .expect("original retry");
-    assert_eq!(first.get(), retry.get());
+    assert_eq!(first.as_str(), retry.as_str());
 }
 
 #[tokio::test]
@@ -1102,7 +1102,7 @@ async fn federation_user_message_uses_the_local_lead_and_stable_idempotency_key(
     )
     .await
     .expect("idempotent federated user message");
-    assert_eq!(first.get(), replay.get());
+    assert_eq!(first.as_str(), replay.as_str());
     assert!(
         matches!(
             delivery::user_message(
@@ -1393,7 +1393,7 @@ impl delivery::FederationTransport for PeerTransport {
                 return Err(transport::RemoteTransportError::ExchangeUnknown);
             }
             Ok(delivery::FederationTransportResponse {
-                body: serde_json::to_vec(&response).expect("fixture operation"),
+                body: studio_json::to_vec(&response).expect("fixture operation"),
                 link_advert: self.link_advert.map(str::to_owned),
             })
         })
@@ -1403,11 +1403,11 @@ impl delivery::FederationTransport for PeerTransport {
 fn message_receipt_round_trips_wire_shape() {
     let raw =
         r#"{"protocol":1,"messageId":"message","accepted":true,"room":"room","sequence":null}"#;
-    let receipt: super::core::MessageReceipt = serde_json::from_str(raw).expect("wire receipt");
-    let encoded = serde_json::to_string(&receipt).expect("serialize receipt");
+    let receipt: super::core::MessageReceipt = studio_json::from_str(raw).expect("wire receipt");
+    let encoded = studio_json::to_string(&receipt).expect("serialize receipt");
     assert_eq!(
-        serde_json::from_str::<Value>(&encoded).expect("encoded receipt"),
-        serde_json::from_str::<Value>(raw).expect("wire JSON")
+        studio_json::from_str::<Value>(&encoded).expect("encoded receipt"),
+        studio_json::from_str::<Value>(raw).expect("wire JSON")
     );
 }
 
@@ -1434,7 +1434,7 @@ async fn lost_push_response() {
         .await
         .expect("fixture operation");
     assert_eq!(
-        result.get(),
+        result.as_str(),
         delivery::send_message(
             std::sync::Arc::clone(&sender),
             "lead",
@@ -1446,7 +1446,7 @@ async fn lost_push_response() {
         )
         .await
         .expect("fixture operation")
-        .get()
+        .as_str()
     );
     assert!(
         delivery::send_message(
@@ -1705,7 +1705,7 @@ async fn spoofed_origin() {
         })
         .await
         .expect("bind trusted origin");
-    let raw = serde_json::to_vec(&json!({"protocol":1})).expect("body");
+    let raw = studio_json::to_vec(&json!({"protocol":1})).expect("body");
     let before = counts(&store);
     let request = || effects::SignedRequest {
         action: effects::FederationAction::Status,
@@ -1848,7 +1848,7 @@ async fn oversized_batches() {
         store.transaction(move |tx| {
             match table {
                 Table::Outbox => {
-                    studio_runtime_store::remote_outbox::RemoteOutbox::put(tx,studio_runtime_store::remote_outbox::RemoteEffect::FederationMessage,&peer_id,"large","signature",studio_runtime_schema::persistence::OutboxStatus::Pending,Some(0),serde_json::from_str::<Value>(&raw).expect("record"),0)?;
+                    studio_runtime_store::remote_outbox::RemoteOutbox::put(tx,studio_runtime_store::remote_outbox::RemoteEffect::FederationMessage,&peer_id,"large","signature",studio_runtime_schema::persistence::OutboxStatus::Pending,Some(0),studio_json::from_str::<Value>(&raw).expect("record"),0)?;
                     0
                 }
                 Table::Inbox => tx.execute("INSERT INTO runtime_federation_inbox(peer_id,message_id,record) VALUES(?1,'large',?2)",params![peer_id,raw])?,
@@ -1948,7 +1948,7 @@ fn peer_lead_events(store: &RuntimeStore) -> Vec<Value> {
         .query_map([], |row| row.get::<_, String>(0))
         .expect("fixture operation")
         .map(|text| {
-            serde_json::from_str(&text.expect("fixture operation")).expect("fixture operation")
+            studio_json::from_str(&text.expect("fixture operation")).expect("fixture operation")
         })
         .collect()
 }

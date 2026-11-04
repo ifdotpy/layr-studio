@@ -9,7 +9,7 @@ use studio_runtime_store::workspace_ready::overlaps;
 
 use crate::bounded_child::{self, ChildError};
 use crate::event_write::truthy;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     CaptureKind, CheckpointsRepository, RuntimeStore, StoreError, StoredCheckpointObject,
     WorkspaceSnapshot,
@@ -870,7 +870,7 @@ fn validate_internal_record(
 }
 
 fn canonical_cwd(
-    record: &serde_json::Map<String, Value>,
+    record: &studio_json::Map<String, Value>,
 ) -> Result<CanonicalPath, CheckpointsError> {
     let path = record
         .get("cwd")
@@ -1058,19 +1058,19 @@ pub(crate) fn now_seconds() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{CheckpointsError, ensure_workspace_idle};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::{StoredCheckpointObject, WorkspaceSnapshot};
 
     #[test]
     fn image_workspace_blocks_checkpoint_operations() {
         let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"imageWorkspace":true}"#;
-        let image: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        let image: studio_runtime_store::AgentRecord = studio_json::from_str(raw).unwrap();
         assert!(matches!(
             super::ensure_workspace_agent_available(&image),
             Err(CheckpointsError::ExecutionWorkspace)
         ));
         let ordinary: studio_runtime_store::AgentRecord =
-            serde_json::from_str(&raw.replace("true", "false")).unwrap();
+            studio_json::from_str(&raw.replace("true", "false")).unwrap();
         assert!(super::ensure_workspace_agent_available(&ordinary).is_ok());
     }
 

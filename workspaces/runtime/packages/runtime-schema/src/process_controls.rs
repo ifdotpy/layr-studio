@@ -2,9 +2,9 @@
 use crate::monitor_record::MonitorText;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 
 /// Renderer classification for an existing task or process.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -227,7 +227,7 @@ pub struct ProcessListing {
 // JSON Schema integer ingress accepts integral decimal spellings. The retained
 // transport value, rather than this numeric projection, remains identity evidence.
 fn epoch<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-    let number = serde_json::Number::deserialize(deserializer)?;
+    let number = studio_json::Number::deserialize(deserializer)?;
     number
         .as_u64()
         .filter(|value| *value <= crate::shared_values::MAX_SAFE_INTEGER as u64)
@@ -426,8 +426,8 @@ impl ProcessControlRequest {
 }
 
 #[cfg(test)]
-fn parse_fixture(value: &Value) -> Result<ProcessControlRequest, serde_json::Error> {
-    serde_json::from_value(value.clone())
+fn parse_fixture(value: &Value) -> Result<ProcessControlRequest, studio_json::Error> {
+    studio_json::from_value(value.clone())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -463,7 +463,7 @@ pub struct ProcessEntry {
     #[serde(flatten)]
     pub outcome: ProcessOutcome,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: studio_json::Map<String, Value>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -493,7 +493,7 @@ pub struct ProcessActionResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<ProcessResponse>,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: studio_json::Map<String, Value>,
 }
 /// A response stop or background entry, or the receipt of HTTP monitor input.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -590,11 +590,11 @@ pub(crate) fn apply_background_views(document: &mut Value) {
         ("MonitorEntityDto", "MonitorState"),
     ] {
         let fields = &mut schemas[name]["properties"];
-        fields["agent"] = serde_json::json!({"type":"string"});
-        fields["created"] = serde_json::json!({"type":"number"});
-        fields["status"] = serde_json::json!({"$ref":format!("#/components/schemas/{status}")});
+        fields["agent"] = studio_json::json!({"type":"string"});
+        fields["created"] = studio_json::json!({"type":"number"});
+        fields["status"] = studio_json::json!({"$ref":format!("#/components/schemas/{status}")});
         fields["display"] =
-            serde_json::json!({"$ref":"#/components/schemas/BackgroundTaskDisplay"});
+            studio_json::json!({"$ref":"#/components/schemas/BackgroundTaskDisplay"});
         let required = schemas[name]["required"]
             .as_array_mut()
             .expect("entity required fields");
@@ -606,9 +606,9 @@ pub(crate) fn apply_background_views(document: &mut Value) {
         }
     }
     schemas["TaskEntityDto"]["properties"]["kind"] =
-        serde_json::json!({"$ref":"#/components/schemas/TaskRecordKind"});
+        studio_json::json!({"$ref":"#/components/schemas/TaskRecordKind"});
     schemas["MonitorEntityDto"]["properties"]["outputFile"] =
-        serde_json::json!({"type":["string","null"]});
+        studio_json::json!({"type":["string","null"]});
     let required = schemas["TaskEntityDto"]["required"]
         .as_array_mut()
         .expect("task required fields");
@@ -616,9 +616,9 @@ pub(crate) fn apply_background_views(document: &mut Value) {
         required.push(Value::String("kind".into()));
     }
     schemas["ManagedProcessRecord"] =
-        serde_json::json!({"$ref":"#/components/schemas/ProcessView"});
-    schemas["ProcessList"] = serde_json::json!({"$ref":"#/components/schemas/ProcessListing"});
-    schemas["TaskRecordView"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/TaskEntityDto"},{"$ref":"#/components/schemas/MonitorEntityDto"}]});
+        studio_json::json!({"$ref":"#/components/schemas/ProcessView"});
+    schemas["ProcessList"] = studio_json::json!({"$ref":"#/components/schemas/ProcessListing"});
+    schemas["TaskRecordView"] = studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/TaskEntityDto"},{"$ref":"#/components/schemas/MonitorEntityDto"}]});
 }
 
 #[cfg(test)]
@@ -626,22 +626,22 @@ mod tests {
     #[test]
     fn background_display_rejects_removed_boolean_shape() {
         let old = r#"{"kind":"command","kindLabel":"command","title":"Command","active":true,"indicator":"working","label":"running","inBackgroundList":false,"canStop":true,"canInput":false,"canResize":true,"canReadOutput":true,"canApprove":false}"#;
-        assert!(serde_json::from_str::<super::BackgroundTaskDisplay>(old).is_err());
-        assert!(serde_json::from_str::<super::ProcessStdinState>("\"closedAndOpen\"").is_err());
+        assert!(studio_json::from_str::<super::BackgroundTaskDisplay>(old).is_err());
+        assert!(studio_json::from_str::<super::ProcessStdinState>("\"closedAndOpen\"").is_err());
     }
     use super::*;
 
     #[test]
     fn result_processes_defaults_to_empty_and_rejects_null() {
         let result: ProcessActionResult =
-            serde_json::from_str(r#"{"requestId":"request","status":"completed"}"#)
+            studio_json::from_str(r#"{"requestId":"request","status":"completed"}"#)
                 .expect("missing processes");
         assert_eq!(
-            serde_json::to_value(result).unwrap()["processes"],
+            studio_json::to_value(result).unwrap()["processes"],
             json!([])
         );
         assert!(
-            serde_json::from_str::<ProcessActionResult>(
+            studio_json::from_str::<ProcessActionResult>(
                 r#"{"requestId":"request","status":"completed","processes":null}"#,
             )
             .is_err()
@@ -653,8 +653,8 @@ mod tests {
         let result = json!({"requestId":"request", "status":"completed", "processes":[], "response": {
             "kind":"monitor_input", "monitorId":"monitor", "status":"acknowledged"
         }, "legacy":null});
-        let typed =
-            serde_json::from_str::<ProcessActionResult>(&result.to_string()).expect("valid result");
+        let typed = studio_json::from_str::<ProcessActionResult>(&result.to_string())
+            .expect("valid result");
         let receipt = ProcessReceipt::found(typed);
         let ProcessReceipt::Found(found) = &receipt else {
             panic!("expected found receipt")
@@ -668,14 +668,14 @@ mod tests {
             }))
         ));
         assert_eq!(
-            serde_json::from_str::<Value>(
-                &serde_json::to_string(&receipt).expect("serialize receipt")
+            studio_json::from_str::<Value>(
+                &studio_json::to_string(&receipt).expect("serialize receipt")
             )
             .expect("decode receipt"),
             json!({"found":true,"result":result})
         );
         assert!(
-            serde_json::from_str::<ProcessActionResult>(
+            studio_json::from_str::<ProcessActionResult>(
                 r#"{"requestId":"request","status":"invalid"}"#
             )
             .is_err()
@@ -685,11 +685,11 @@ mod tests {
     #[test]
     fn process_entry_retains_opaque_extensions() {
         let raw = r#"{"key":"key","agent":"agent","status":"stopped","nativeExtension":[null,"retained"]}"#;
-        let entry: ProcessEntry = serde_json::from_str(raw).expect("process entry");
-        let encoded = serde_json::to_string(&entry).expect("serialize entry");
+        let entry: ProcessEntry = studio_json::from_str(raw).expect("process entry");
+        let encoded = studio_json::to_string(&entry).expect("serialize entry");
         assert_eq!(
-            serde_json::from_str::<Value>(&encoded).expect("JSON"),
-            serde_json::from_str::<Value>(raw).expect("fixture")
+            studio_json::from_str::<Value>(&encoded).expect("JSON"),
+            studio_json::from_str::<Value>(raw).expect("fixture")
         );
     }
 
@@ -771,11 +771,11 @@ mod tests {
     #[test]
     fn process_outcomes_require_status_specific_evidence() {
         for status in ["stale", "failed"] {
-            assert!(serde_json::from_value::<ProcessOutcome>(json!({"status":status})).is_err());
-            assert!(serde_json::from_value::<ResponseOutcome>(json!({"status":status})).is_err());
+            assert!(studio_json::from_value::<ProcessOutcome>(json!({"status":status})).is_err());
+            assert!(studio_json::from_value::<ResponseOutcome>(json!({"status":status})).is_err());
         }
-        assert!(serde_json::from_value::<ProcessOutcome>(json!({"status":"invented"})).is_err());
-        assert!(serde_json::from_value::<ResponseOutcome>(json!({"status":"invented"})).is_err());
+        assert!(studio_json::from_value::<ProcessOutcome>(json!({"status":"invented"})).is_err());
+        assert!(studio_json::from_value::<ResponseOutcome>(json!({"status":"invented"})).is_err());
     }
 }
 
@@ -833,7 +833,7 @@ mod ingress_tests {
             let mut input = valid.clone();
             input[field] = invalid;
             assert!(
-                serde_json::from_value::<ProcessControlRequest>(input.clone()).is_err(),
+                studio_json::from_value::<ProcessControlRequest>(input.clone()).is_err(),
                 "accepted {input}"
             );
         }

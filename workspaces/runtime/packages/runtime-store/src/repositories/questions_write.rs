@@ -39,7 +39,7 @@ impl QuestionsWriteRepository {
     }
 
     pub fn put_complaint(transaction: &Transaction<'_>, id: &str, record: &str) -> StoreResult<()> {
-        let typed: crate::ComplaintRecord = serde_json::from_str(record)?;
+        let typed: crate::ComplaintRecord = studio_json::from_str(record)?;
         if typed.id() != id {
             return Err(crate::StoreError::InvalidStoredObject {
                 table: "runtime_complaints",
@@ -58,7 +58,7 @@ impl QuestionsWriteRepository {
         transaction: &Transaction<'_>,
         record: &crate::ComplaintRecord,
     ) -> StoreResult<()> {
-        let encoded = serde_json::to_string(record)?;
+        let encoded = studio_json::to_string(record)?;
         transaction.execute(
             "INSERT INTO runtime_complaints(id,record) VALUES (?1,?2) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
@@ -89,7 +89,7 @@ mod complaint_tests {
         )
         .unwrap();
         let raw = r#"{"id":"c","leadId":"l","author":"user","text":"é😀","recipient":"lead","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]}"#;
-        let complaint: ComplaintRecord = serde_json::from_str(raw).unwrap();
+        let complaint: ComplaintRecord = studio_json::from_str(raw).unwrap();
         let tx = db.transaction().unwrap();
         QuestionsWriteRepository::put_typed_complaint(&tx, &complaint).unwrap();
         let stored: String = tx
@@ -101,7 +101,7 @@ mod complaint_tests {
             .unwrap();
         assert!(stored.contains("é😀"));
         assert_eq!(
-            serde_json::from_str::<ComplaintRecord>(&stored)
+            studio_json::from_str::<ComplaintRecord>(&stored)
                 .unwrap()
                 .id(),
             "c"

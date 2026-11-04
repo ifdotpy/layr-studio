@@ -49,7 +49,7 @@ fn cargo_build(cwd: &Path) -> (Duration, Vec<Value>) {
     let artifacts = String::from_utf8(output.stdout.bytes)
         .expect("Cargo JSON")
         .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("Cargo message"))
+        .map(|line| studio_json::from_str::<Value>(line).expect("Cargo message"))
         .filter(|message| message["reason"] == "compiler-artifact")
         .collect();
     (started.elapsed(), artifacts)

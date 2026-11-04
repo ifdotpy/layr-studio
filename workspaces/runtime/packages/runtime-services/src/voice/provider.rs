@@ -15,8 +15,8 @@ use std::{
 };
 
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::persistence::{OutboxKind, RequestIdentity};
 #[cfg(test)]
@@ -208,7 +208,7 @@ pub(super) fn saved_scope(
     )?;
     match raw {
         Some(raw) => Ok(studio_runtime_schema::persistence::CapturedScope::Known(
-            serde_json::from_str(&raw).map_err(|_| VoiceProviderError::ContextChanged)?,
+            studio_json::from_str(&raw).map_err(|_| VoiceProviderError::ContextChanged)?,
         )),
         None => Ok(studio_runtime_schema::persistence::CapturedScope::Unproven),
     }
@@ -843,8 +843,8 @@ pub async fn is_monitor_approval(
             if speech.agent != agent_id || speech.kind != "orchestrator" {
                 return Ok(false);
             }
-            let metadata: ApprovalSpeechMetadata =
-                serde_json::from_str(&speech.payload).map_err(|_| VoiceProviderError::Operation)?;
+            let metadata: ApprovalSpeechMetadata = studio_json::from_str(&speech.payload)
+                .map_err(|_| VoiceProviderError::Operation)?;
             let Some(request_id) = metadata.request_id.as_deref() else {
                 return Ok(false);
             };
@@ -896,7 +896,7 @@ pub async fn approve_monitor(
         return Ok(value);
     }
     let request_for_answer = request_id.clone();
-    let data = serde_json::json!({"decision":"accept"});
+    let data = studio_json::json!({"decision":"accept"});
     let answer = crate::monitor_runtime::answer_approval(
         &store,
         &request_for_answer,
@@ -909,7 +909,7 @@ pub async fn approve_monitor(
         Ok(Some(answer)) if answer.accepted => {
             let result = answer.response;
             let saved =
-                serde_json::to_string(&result).map_err(|_| VoiceProviderError::Operation)?;
+                studio_json::to_string(&result).map_err(|_| VoiceProviderError::Operation)?;
             let update_id = request_id.clone();
             let update_saved = saved;
             store.transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
@@ -1012,7 +1012,7 @@ pub async fn approve(
     let state_value = state.to_owned();
     let result = json!({"status": "answered"});
     let result_json = (certainty == VoiceWriteCertainty::Written)
-        .then(|| serde_json::to_string(&result))
+        .then(|| studio_json::to_string(&result))
         .transpose()
         .map_err(|_| VoiceProviderError::Operation)?;
     store
@@ -1068,7 +1068,7 @@ async fn reserve_approval(
         let Some((played_seq, played_payload)) = played else {
             return Err(VoiceProviderError::ContextChanged);
         };
-        let played_payload: Value = serde_json::from_str(&played_payload)
+        let played_payload: Value = studio_json::from_str(&played_payload)
             .map_err(|_| VoiceProviderError::Operation)?;
         if played_payload.get("record_id").and_then(Value::as_str) != Some(speech_id.as_str())
             || transcript.sequence <= played_seq
@@ -1081,7 +1081,7 @@ async fn reserve_approval(
         if speech.agent != agent_id || speech.kind != "orchestrator" {
             return Err(policy::VoiceError::UnknownSession.into());
         }
-        let metadata: ApprovalSpeechMetadata = serde_json::from_str(&speech.payload)
+        let metadata: ApprovalSpeechMetadata = studio_json::from_str(&speech.payload)
             .map_err(|_| VoiceProviderError::Operation)?;
         let request_id = metadata
             .request_id.as_deref()
@@ -1096,7 +1096,7 @@ async fn reserve_approval(
             if status == "expired" { return Err(VoiceProviderError::Expired); }
             if status == "accepted" {
                 let value = result.as_ref().ok_or(VoiceProviderError::Operation)?;
-                return Ok(ApprovalDispatch::Replay(serde_json::from_str(value).map_err(|_| VoiceProviderError::Operation)?));
+                return Ok(ApprovalDispatch::Replay(studio_json::from_str(value).map_err(|_| VoiceProviderError::Operation)?));
             }
             if status == "uncertain" {
                 use studio_runtime_schema::approvals as typed;
@@ -1119,7 +1119,7 @@ async fn reserve_approval(
                     let replay = json!({"status":"answered","replayed":true});
                     transaction.execute(
                         "UPDATE voice_approvals SET status='accepted',result=?1 WHERE id=?2",
-                        rusqlite::params![serde_json::to_string(&replay).map_err(|_| VoiceProviderError::Operation)?, request_id.as_str()],
+                        rusqlite::params![studio_json::to_string(&replay).map_err(|_| VoiceProviderError::Operation)?, request_id.as_str()],
                     )?;
                     return Ok(ApprovalDispatch::Replay(replay));
                 }
@@ -1138,7 +1138,7 @@ async fn reserve_approval(
         .map_err(studio_runtime_store::StoreError::from)?
         .ok_or(VoiceProviderError::ContextUnavailable)?;
         let fingerprint = super::approval_fingerprint(
-            &serde::Serialize::serialize(&current, serde_json::value::Serializer)
+            &serde::Serialize::serialize(&current, studio_json::value::Serializer)
                 .map_err(|_| VoiceProviderError::Operation)?,
         );
         let is_monitor = matches!(current.request, typed::Request::MonitorStart { .. });
@@ -1937,7 +1937,8 @@ async fn attach_start_context(
             if scope.connection != context.connection_id || scope.generation != context.generation {
                 return Err(VoiceProviderError::ContextChanged);
             }
-            let scope = serde_json::to_string(&scope).map_err(|_| VoiceProviderError::Operation)?;
+            let scope =
+                studio_json::to_string(&scope).map_err(|_| VoiceProviderError::Operation)?;
             let updated = transaction.execute(
                 "UPDATE voice_sessions SET connection_id=?1,provider_scope=?6 \
              WHERE id=?2 AND agent=?3 AND native_thread=?4 AND account_key=?5 \
@@ -2086,7 +2087,7 @@ mod tests {
         let (_directory, store) = voice_outbox_fixture().await;
         store.transaction(|tx| {
             tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('speech','agent','session','orchestrator','','','',?1,1)", [r#"{"request_id":"r"}"#])?;
-            crate::provider_callbacks::legacy_view::insert(tx, &serde_json::json!({"id":"r","agent":"agent","method":"monitor/approve","status":"pending","createdAt":1,"params":{}}))?;
+            crate::provider_callbacks::legacy_view::insert(tx, &studio_json::json!({"id":"r","agent":"agent","method":"monitor/approve","status":"pending","createdAt":1,"params":{}}))?;
             Ok(())
         }).await.expect("seed approval");
         assert!(
@@ -2177,7 +2178,7 @@ mod tests {
         store.transaction(|tx| {
             let agent = AgentRepository::get(tx, &AgentId::from("agent"))?.expect("agent");
             let scope = studio_runtime_store::account_state::current_provider_scope(tx, &agent).expect("attached scope");
-            tx.execute("INSERT INTO voice_sessions(id,agent,created,native_thread,account_key,connection_id,provider_scope,state) VALUES('session','agent',1,'thread','account',?1,?2,'ready')", rusqlite::params![scope.connection,serde_json::to_string(&scope).expect("scope")])?;
+            tx.execute("INSERT INTO voice_sessions(id,agent,created,native_thread,account_key,connection_id,provider_scope,state) VALUES('session','agent',1,'thread','account',?1,?2,'ready')", rusqlite::params![scope.connection,studio_json::to_string(&scope).expect("scope")])?;
             Ok(())
         }).await.expect("seed voice session");
         (directory, Arc::new(store))
@@ -2324,7 +2325,7 @@ mod tests {
             )
             .expect("abandoned result");
         let result: ResultEnvelope<AbandonedResult> =
-            serde_json::from_str(&raw).expect("typed result");
+            studio_json::from_str(&raw).expect("typed result");
         assert_eq!(
             result.reply,
             AbandonedResult::Abandoned {

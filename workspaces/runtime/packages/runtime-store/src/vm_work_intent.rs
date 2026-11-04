@@ -79,8 +79,8 @@ mod tests {
     #[test]
     fn accepted_completion_retains_merge_receipt() {
         let stored = r#"{"status":"completed","requestId":"rpc","owner":"a","revision":"rev","resultId":"r","merge":{"from_state":"old","to_state":"new"}}"#;
-        let intent: Intent<Acceptance, AcceptanceResult> = serde_json::from_str(stored).unwrap();
-        let text = serde_json::to_string(&intent).unwrap();
+        let intent: Intent<Acceptance, AcceptanceResult> = studio_json::from_str(stored).unwrap();
+        let text = studio_json::to_string(&intent).unwrap();
         assert!(text.contains(r#""merge":{"from_state":"old","to_state":"new"}"#));
     }
     #[test]
@@ -89,10 +89,10 @@ mod tests {
             from_state: None,
             to_state: "resolved".into(),
         };
-        let value = serde_json::to_string(&receipt).unwrap();
+        let value = studio_json::to_string(&receipt).unwrap();
         assert_eq!(value, r#"{"to_state":"resolved"}"#);
         assert_eq!(
-            serde_json::from_str::<MergeReceipt>(&value).unwrap(),
+            studio_json::from_str::<MergeReceipt>(&value).unwrap(),
             receipt
         );
     }
@@ -100,7 +100,7 @@ mod tests {
     fn accepted_completion_round_trips_without_result_field() {
         let stored = r#"{"status":"completed","requestId":"rpc","owner":"a","revision":"rev","resultId":"r"}"#;
         let intent: Intent<Acceptance, AcceptanceResult> =
-            serde_json::from_str(stored).expect("stored completion");
-        assert_eq!(serde_json::to_string(&intent).expect("serialized"), stored);
+            studio_json::from_str(stored).expect("stored completion");
+        assert_eq!(studio_json::to_string(&intent).expect("serialized"), stored);
     }
 }

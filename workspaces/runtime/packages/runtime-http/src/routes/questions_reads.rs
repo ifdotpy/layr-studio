@@ -6,8 +6,8 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
+use studio_json::Value;
 use studio_runtime_services::questions_reads::{self, QuestionsReadsError};
 use studio_runtime_store::QuestionsReadsRepository;
 
@@ -76,7 +76,7 @@ pub(crate) async fn checkpoints(
 }
 
 fn checkpoint_response(value: Value, headers: HeaderMap) -> Result<Response, ApiError> {
-    let body = serde_json::to_vec(&value).map_err(|_| ApiError::internal())?;
+    let body = studio_json::to_vec(&value).map_err(|_| ApiError::internal())?;
     let digest = Sha256::digest(&body);
     let etag = format!(
         "\"{}\"",
@@ -174,7 +174,7 @@ fn invalid_stored_object(object: &'static str, id: &str) -> ApiError {
 mod tests {
     use super::checkpoint_response;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn checkpoint_response_supports_entity_tag_revalidation() {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use gungraun::{Dhat, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
 use rusqlite::Connection;
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_services::change_notifications::ChangeNotificationHub;
 use studio_runtime_services::resource_notify::{LiveDelta, ResourceNotifications};

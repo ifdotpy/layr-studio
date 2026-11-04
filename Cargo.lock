@@ -6717,9 +6717,9 @@ dependencies = [
  "rustls",
  "security-framework",
  "serde",
- "serde_json",
  "sha2 0.11.1",
  "studio-client-domain",
+ "studio-json",
  "studio-request-signing",
  "studio-runtime-schema",
  "tempfile",
@@ -6738,7 +6738,7 @@ dependencies = [
  "pulldown-cmark",
  "schemars 1.2.3",
  "serde",
- "serde_json",
+ "studio-json",
  "unicode-segmentation",
 ]
 
@@ -6746,9 +6746,9 @@ dependencies = [
 name = "studio-client-wasm"
 version = "0.1.0"
 dependencies = [
- "serde_json",
  "sha2 0.11.1",
  "studio-client-domain",
+ "studio-json",
  "studio-request-signing",
  "wasm-bindgen",
 ]
@@ -6757,7 +6757,7 @@ dependencies = [
 name = "studio-diagnostics"
 version = "0.1.0"
 dependencies = [
- "serde_json",
+ "studio-json",
 ]
 
 [[package]]
@@ -6782,9 +6782,9 @@ dependencies = [
  "objc2-ui-kit",
  "objc2-web-kit",
  "serde",
- "serde_json",
  "sha2 0.11.1",
  "studio-client-core",
+ "studio-json",
  "tauri",
  "tauri-build",
  "tokio",
@@ -6795,7 +6795,7 @@ name = "studio-operations"
 version = "0.1.0"
 dependencies = [
  "serde",
- "serde_json",
+ "studio-json",
  "studio-test-deps",
 ]
 
@@ -6803,8 +6803,8 @@ dependencies = [
 name = "studio-operator-cli"
 version = "0.1.0"
 dependencies = [
- "serde_json",
  "studio-client-core",
+ "studio-json",
  "tempfile",
  "tokio",
 ]
@@ -6820,7 +6820,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
- "serde_json",
+ "studio-json",
  "tokio",
 ]
 
@@ -6831,7 +6831,7 @@ dependencies = [
  "notify",
  "rusqlite",
  "rustix",
- "serde_json",
+ "studio-json",
  "studio-runtime-proc-sys",
  "studio-runtime-process",
  "studio-runtime-store",
@@ -6867,9 +6867,9 @@ dependencies = [
  "openapi-to-rust",
  "rusqlite",
  "serde",
- "serde_json",
  "serde_path_to_error",
  "sha2 0.11.1",
+ "studio-json",
  "studio-runtime-process",
  "studio-runtime-providers",
  "studio-runtime-schema",
@@ -6912,8 +6912,8 @@ dependencies = [
  "pty-process",
  "rustix",
  "serde",
- "serde_json",
  "strum",
+ "studio-json",
  "studio-runtime-priority-sys",
  "studio-runtime-proc-sys",
  "studio-runtime-providers",
@@ -6929,7 +6929,7 @@ name = "studio-runtime-providers"
 version = "0.1.0"
 dependencies = [
  "serde",
- "serde_json",
+ "studio-json",
  "studio-runtime-schema",
  "studio-test-deps",
  "thiserror 2.0.21",
@@ -6945,10 +6945,10 @@ dependencies = [
  "rusqlite",
  "schemars 1.2.3",
  "serde",
- "serde_json",
  "sha2 0.11.1",
  "strum",
  "studio-client-domain",
+ "studio-json",
  "studio-request-signing",
  "thiserror 2.0.21",
  "unicode-general-category",
@@ -6971,8 +6971,8 @@ dependencies = [
  "rusqlite",
  "rustix",
  "serde",
- "serde_json",
  "sha2 0.11.1",
+ "studio-json",
  "studio-runtime-http",
  "studio-runtime-process",
  "studio-runtime-providers",
@@ -7020,13 +7020,13 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
- "serde_json",
  "serde_path_to_error",
  "sha2 0.11.1",
  "shlex",
  "socket2",
  "spki",
  "strum",
+ "studio-json",
  "studio-operations",
  "studio-request-signing",
  "studio-runtime-process",
@@ -7059,10 +7059,10 @@ dependencies = [
  "rusqlite",
  "schemars 1.2.3",
  "serde",
- "serde_json",
  "serde_path_to_error",
  "sha2 0.11.1",
  "strum",
+ "studio-json",
  "studio-runtime-providers",
  "studio-runtime-schema",
  "studio-runtime-store",
@@ -7097,9 +7097,9 @@ dependencies = [
  "regex",
  "rustix",
  "serde",
- "serde_json",
  "serde_path_to_error",
  "sha2 0.11.1",
+ "studio-json",
  "sysinfo",
  "tar",
  "tempfile",

@@ -32,7 +32,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
         let repaired: String = row.get(2)?;
-        if let Ok(record) = serde_json::from_str::<TaskRecord>(&repaired)
+        if let Ok(record) = studio_json::from_str::<TaskRecord>(&repaired)
             && record.id().as_ref() == id
             && repaired != raw
         {
@@ -84,7 +84,7 @@ mod tests {
             )
             .unwrap();
         let task: studio_runtime_schema::task_record::TaskRecord =
-            serde_json::from_str(&repaired).unwrap();
+            studio_json::from_str(&repaired).unwrap();
         assert_eq!(task.id().as_ref(), "a:i");
         assert_eq!(
             db.query_row(
@@ -109,7 +109,7 @@ mod tests {
                 .unwrap();
             assert_eq!(stored, raw);
             assert!(
-                serde_json::from_str::<studio_runtime_schema::task_record::TaskRecord>(&stored)
+                studio_json::from_str::<studio_runtime_schema::task_record::TaskRecord>(&stored)
                     .is_err()
             );
         }

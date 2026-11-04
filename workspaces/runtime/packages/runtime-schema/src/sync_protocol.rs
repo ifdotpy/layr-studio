@@ -46,14 +46,14 @@ pub fn subscription_entity_scopes()
         std::collections::BTreeMap<String, SubscriptionEntityScope>,
     > = std::sync::OnceLock::new();
     SCOPES.get_or_init(|| {
-        let document: serde_json::Value =
-            serde_json::from_slice(crate::OPENAPI).expect("committed OpenAPI parses");
+        let document: studio_json::Value =
+            studio_json::from_slice(crate::OPENAPI).expect("committed OpenAPI parses");
         entity_scopes_from_document(&document).expect("committed subscription scopes are valid")
     })
 }
 
 pub(crate) fn entity_scopes_from_document(
-    document: &serde_json::Value,
+    document: &studio_json::Value,
 ) -> Result<std::collections::BTreeMap<String, SubscriptionEntityScope>, String> {
     let schemas = &document["components"]["schemas"];
     let mapping = schemas["ResourceRef"]["discriminator"]["mapping"]
@@ -68,7 +68,7 @@ pub(crate) fn entity_scopes_from_document(
         if let Some(scope) = schemas[name].get("x-studio-entity-scope") {
             scopes.insert(
                 kind.clone(),
-                serde_json::from_value(scope.clone()).map_err(|error| error.to_string())?,
+                studio_json::from_value(scope.clone()).map_err(|error| error.to_string())?,
             );
         }
     }
@@ -79,7 +79,7 @@ pub(crate) fn entity_scopes_from_document(
 pub fn global_entity_collections_json() -> &'static str {
     static COLLECTIONS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     COLLECTIONS.get_or_init(|| {
-        serde_json::to_string(&subscription_entity_scopes()["state"].collections)
+        studio_json::to_string(&subscription_entity_scopes()["state"].collections)
             .expect("collections serialize")
     })
 }
@@ -132,7 +132,7 @@ mod tests {
                     .any(|part| has_property(schemas, part, property))
         }
         let document: Document =
-            serde_json::from_slice(crate::OPENAPI).expect("committed OpenAPI document");
+            studio_json::from_slice(crate::OPENAPI).expect("committed OpenAPI document");
         let schemas = &document.components.schemas;
         let mapping = &schemas
             .get("SyncEntityPayload")
@@ -181,7 +181,7 @@ mod tests {
     }
     #[test]
     fn subscription_resume_cursor_is_typed_and_bounded() {
-        use serde_json::json;
+        use studio_json::json;
         assert!(
             crate::first_error(
                 "SubscriptionCursor",
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn entity_v4_schema_requires_typed_values_and_omits_delete_values() {
-        use serde_json::json;
+        use studio_json::json;
         let valid = json!({"op":"upsert","collection":"workspace","id":"current","seq":1,"value":{"stateDir":"temporary"}});
         assert!(
             crate::first_error("SyncEntity", &valid)

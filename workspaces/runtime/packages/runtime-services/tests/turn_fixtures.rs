@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 
 // The current agent contract retired the lead role and yoloMode. Apply this
 // only to newly seeded agents and newly captured sources, never saved inputs.
@@ -71,7 +71,7 @@ struct Concat {
 #[serde(untagged)]
 enum Scalar {
     Text(String),
-    Number(serde_json::Number),
+    Number(studio_json::Number),
     Boolean(bool),
     Null(()),
 }
@@ -123,12 +123,12 @@ impl FixtureValue {
     }
 }
 pub(crate) fn load<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> T {
-    let fixture: Fixture = serde_json::from_slice(bytes).expect("typed compact JSON fixture");
+    let fixture: Fixture = studio_json::from_slice(bytes).expect("typed compact JSON fixture");
     let mut values = Vec::new();
     for value in fixture.values {
         values.push(value.expand(&values));
     }
-    serde_json::from_value(fixture.root.expand(&values)).expect("typed frozen JSON fixture")
+    studio_json::from_value(fixture.root.expand(&values)).expect("typed frozen JSON fixture")
 }
 
 #[derive(Deserialize)]

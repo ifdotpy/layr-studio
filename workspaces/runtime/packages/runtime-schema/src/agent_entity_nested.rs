@@ -227,32 +227,32 @@ pub struct AgentActivity {
 }
 
 pub(crate) fn object(
-    value: &mut serde_json::Value,
-) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
+    value: &mut studio_json::Value,
+) -> Result<&mut studio_json::Map<String, studio_json::Value>, String> {
     value
         .as_object_mut()
         .ok_or_else(|| "agent schema must be an object".into())
 }
 
 pub(crate) fn property<'a>(
-    schema: &'a mut serde_json::Value,
+    schema: &'a mut studio_json::Value,
     name: &str,
-) -> Result<&'a mut serde_json::Value, String> {
+) -> Result<&'a mut studio_json::Value, String> {
     object(schema)?
         .get_mut("properties")
-        .and_then(serde_json::Value::as_object_mut)
+        .and_then(studio_json::Value::as_object_mut)
         .and_then(|properties| properties.get_mut(name))
         .ok_or_else(|| format!("missing agent schema property {name}"))
 }
 
-pub(crate) fn title(schema: &mut serde_json::Value, name: &str) -> Result<(), String> {
+pub(crate) fn title(schema: &mut studio_json::Value, name: &str) -> Result<(), String> {
     object(schema)?.insert("title".into(), name.into());
     Ok(())
 }
 
 // Keep the established OpenAPI nullable spelling while retaining schemars bounds.
 pub(crate) fn nullable(
-    schema: &mut serde_json::Value,
+    schema: &mut studio_json::Value,
     name: &str,
     label: &str,
     default: bool,
@@ -262,7 +262,7 @@ pub(crate) fn nullable(
     let value_object = object(&mut value)?;
     let types = value_object
         .get("type")
-        .and_then(serde_json::Value::as_array)
+        .and_then(studio_json::Value::as_array)
         .ok_or_else(|| format!("{name} must have nullable type"))?;
     if types.len() != 2 || types[1] != "null" || !types[0].is_string() {
         return Err(format!("{name} must have one type and null"));
@@ -271,25 +271,25 @@ pub(crate) fn nullable(
     value_object.insert("type".into(), kind.clone());
     if kind == "number" {
         match value_object.remove("format") {
-            Some(serde_json::Value::String(format)) if format == "double" => {}
+            Some(studio_json::Value::String(format)) if format == "double" => {}
             _ => return Err(format!("{name} must use the double number format")),
         }
     }
     let variants = if kind == "boolean" || kind == "array" {
-        serde_json::json!([value,{"type":"null"}])
+        studio_json::json!([value,{"type":"null"}])
     } else {
-        serde_json::json!([{"type":"null"},value])
+        studio_json::json!([{"type":"null"},value])
     };
-    *prop = serde_json::json!({"anyOf":variants,"title":label});
+    *prop = studio_json::json!({"anyOf":variants,"title":label});
     if default {
-        object(prop)?.insert("default".into(), serde_json::Value::Null);
+        object(prop)?.insert("default".into(), studio_json::Value::Null);
     }
     Ok(())
 }
 
 fn inline_nullable_reference(
-    schema: &mut serde_json::Value,
-    definitions: &serde_json::Map<String, serde_json::Value>,
+    schema: &mut studio_json::Value,
+    definitions: &studio_json::Map<String, studio_json::Value>,
     name: &str,
     label: &str,
     flatten: bool,
@@ -298,16 +298,16 @@ fn inline_nullable_reference(
     let obj = object(prop)?;
     let variants = obj
         .get("anyOf")
-        .and_then(serde_json::Value::as_array)
+        .and_then(studio_json::Value::as_array)
         .ok_or_else(|| format!("{name} must be a nullable reference"))?;
     if variants.len() != 2
-        || variants[1].get("type").and_then(serde_json::Value::as_str) != Some("null")
+        || variants[1].get("type").and_then(studio_json::Value::as_str) != Some("null")
     {
         return Err(format!("{name} must be a nullable reference"));
     }
     let reference = variants[0]
         .get("$ref")
-        .and_then(serde_json::Value::as_str)
+        .and_then(studio_json::Value::as_str)
         .and_then(|value| value.strip_prefix("#/components/schemas/"))
         .ok_or_else(|| format!("{name} must reference a generated definition"))?;
     let definition = definitions
@@ -323,24 +323,24 @@ fn inline_nullable_reference(
         }
         let mut union = definition_object
             .get("anyOf")
-            .and_then(serde_json::Value::as_array)
+            .and_then(studio_json::Value::as_array)
             .cloned()
             .ok_or("union definition must have variants")?;
         if union.len() != 2 {
             return Err("union definition must have two variants".into());
         }
-        union.insert(1, serde_json::json!({"type":"null"}));
+        union.insert(1, studio_json::json!({"type":"null"}));
         union
     } else {
-        vec![definition, serde_json::json!({"type":"null"})]
+        vec![definition, studio_json::json!({"type":"null"})]
     };
     obj.insert("anyOf".into(), variants.into());
-    obj.insert("default".into(), serde_json::Value::Null);
+    obj.insert("default".into(), studio_json::Value::Null);
     obj.insert("title".into(), label.into());
     Ok(())
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 14], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 14], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -410,12 +410,12 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 14], Strin
         (
             "daybreakEnabled",
             "Daybreakenabled",
-            Some(serde_json::json!(false)),
+            Some(studio_json::json!(false)),
         ),
         (
             "delegationDepth",
             "Delegationdepth",
-            Some(serde_json::json!(1)),
+            Some(studio_json::json!(1)),
         ),
     ] {
         let prop = property(&mut defaults, name)?;
@@ -444,7 +444,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 14], Strin
         let prop_object = object(prop)?;
         let types = prop_object
             .get("type")
-            .and_then(serde_json::Value::as_array)
+            .and_then(studio_json::Value::as_array)
             .ok_or_else(|| format!("{name} must have nullable type"))?;
         if types.len() != 2 || types[1] != "null" {
             return Err(format!("{name} must have one type and null"));
@@ -452,7 +452,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 14], Strin
         let kind = types[0].clone();
         let mut inner = prop.clone();
         object(&mut inner)?.insert("type".into(), kind);
-        *prop = serde_json::json!({"anyOf":[inner,{"type":"null"}]});
+        *prop = studio_json::json!({"anyOf":[inner,{"type":"null"}]});
     }
     let mut tool = ActiveToolDto::json_schema(&mut generator).to_value();
     title(&mut tool, "ActiveToolDto")?;
@@ -485,7 +485,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 14], Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn overview_preserves_missing_null_and_values() {
@@ -494,30 +494,30 @@ mod tests {
             json!({"task":null,"resultTruncated":false}),
             json!({"task":"work","resultFile":"path"}),
         ] {
-            let overview: AgentOverview = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(overview).unwrap(), value);
+            let overview: AgentOverview = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(overview).unwrap(), value);
         }
-        assert!(serde_json::from_value::<AgentOverview>(json!({"extra":true})).is_err());
+        assert!(studio_json::from_value::<AgentOverview>(json!({"extra":true})).is_err());
     }
 
     #[test]
     fn worker_defaults_preserve_keys_and_reject_missing_or_null_required_fields() {
         let valid = json!({"model":null,"effort":null,"fastMode":false});
-        assert!(serde_json::from_value::<WorkerDefaultsDto>(valid.clone()).is_ok());
+        assert!(studio_json::from_value::<WorkerDefaultsDto>(valid.clone()).is_ok());
         let null_options = json!({"model":null,"effort":null,"fastMode":false,"daybreakEnabled":null,"delegationDepth":null});
-        let defaults: WorkerDefaultsDto = serde_json::from_value(null_options).unwrap();
-        assert_eq!(serde_json::to_value(defaults).unwrap(), valid);
+        let defaults: WorkerDefaultsDto = studio_json::from_value(null_options).unwrap();
+        assert_eq!(studio_json::to_value(defaults).unwrap(), valid);
         for invalid in [
             json!({"effort":null,"fastMode":false}),
             json!({"model":null,"effort":null,"fastMode":null}),
             json!({"model":null,"effort":null,"fastMode":false,"delegationDepth":4}),
         ] {
-            assert!(serde_json::from_value::<WorkerDefaultsDto>(invalid).is_err());
+            assert!(studio_json::from_value::<WorkerDefaultsDto>(invalid).is_err());
         }
         for key in [String::new(), "x".repeat(201)] {
             let value = json!({"model":null,"effort":null,"fastMode":false,"accountKey":key});
-            let defaults: WorkerDefaultsDto = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(defaults).unwrap(), value);
+            let defaults: WorkerDefaultsDto = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(defaults).unwrap(), value);
         }
     }
 
@@ -527,18 +527,18 @@ mod tests {
             json!({}),
             json!({"model":null,"fastMode":false,"updatedAt":1.5}),
         ] {
-            let settings: ExecutionSettingsDto = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(settings).unwrap(), value);
+            let settings: ExecutionSettingsDto = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(settings).unwrap(), value);
         }
-        assert!(serde_json::from_value::<ExecutionSettingsDto>(json!({"extra":true})).is_err());
+        assert!(studio_json::from_value::<ExecutionSettingsDto>(json!({"extra":true})).is_err());
     }
 
     #[test]
     fn native_status_preserves_optional_fields_and_rejects_unknown_phase() {
         let value = json!({"phase":"safety","error":"failed","at":null});
-        let status: AgentNativeStatus = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(status).unwrap(), value);
-        assert!(serde_json::from_value::<AgentNativeStatus>(json!({"phase":"unknown"})).is_err());
+        let status: AgentNativeStatus = studio_json::from_value(value.clone()).unwrap();
+        assert_eq!(studio_json::to_value(status).unwrap(), value);
+        assert!(studio_json::from_value::<AgentNativeStatus>(json!({"phase":"unknown"})).is_err());
     }
 
     #[test]
@@ -572,8 +572,8 @@ mod tests {
 
     #[test]
     fn published_native_status_error_matches_serde() {
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let root = json!({"$ref":"#/components/schemas/AgentNativeStatus","components":document["components"]});
         let validator = jsonschema::validator_for(&root).unwrap();
         for (value, valid) in [
@@ -582,7 +582,7 @@ mod tests {
         ] {
             assert_eq!(validator.is_valid(&value), valid);
             assert_eq!(
-                serde_json::from_value::<AgentNativeStatus>(value).is_ok(),
+                studio_json::from_value::<AgentNativeStatus>(value).is_ok(),
                 valid
             );
         }
@@ -606,8 +606,8 @@ mod tests {
             .into_generator();
         let mut changed = ChangedActivity::json_schema(&mut generator).to_value();
         nullable(&mut changed, "tools", "Tools", true).unwrap();
-        let published: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let published: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         assert_ne!(
             changed["properties"]["tools"],
             published["components"]["schemas"]["AgentActivity"]["properties"]["tools"]
@@ -616,8 +616,8 @@ mod tests {
 
     #[test]
     fn published_components_match_owners() {
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }

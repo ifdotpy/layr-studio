@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::ProviderKind;
 use studio_runtime_schema::shared_values::TITLE_EFFECT_SIGNATURE;
 
@@ -185,7 +185,7 @@ fn patches(
                 .and_then(Value::as_object)
                 .ok_or_else(|| invalid("transfer members"))?;
             for (id, member) in members {
-                let path = format!("$.members.{}", serde_json::to_string(id)?);
+                let path = format!("$.members.{}", studio_json::to_string(id)?);
                 provider_patch(
                     member,
                     &path,
@@ -242,7 +242,7 @@ fn table_updates(
     let mut updates = Vec::new();
     for row in rows {
         let (id, mut raw) = row?;
-        let value: Value = serde_json::from_str(&raw)?;
+        let value: Value = studio_json::from_str(&raw)?;
         let changes = patches(table, &value, accounts, ProviderFormat::Historical)
             .map_err(|error| invalid(&format!("{table} rowid {id}: {error}")))?;
         if changes.is_empty() {
@@ -276,7 +276,7 @@ fn validate_current_table(
     while let Some(row) = rows.next()? {
         let id: i64 = row.get(0)?;
         let raw: String = row.get(1)?;
-        let value = serde_json::from_str(&raw)?;
+        let value = studio_json::from_str(&raw)?;
         patches(table, &value, accounts, ProviderFormat::Current).map_err(|_| {
             StoreError::InvalidStoredRecord {
                 object: table,
@@ -300,7 +300,7 @@ fn legacy_orphan_usage_updates(db: &Connection) -> StoreResult<Vec<(i64, String)
     while let Some(row) = rows.next()? {
         let id: i64 = row.get(0)?;
         let raw: String = row.get(1)?;
-        let value: Value = serde_json::from_str(&raw)?;
+        let value: Value = studio_json::from_str(&raw)?;
         // Before this cutover the cost reader decoded ownerless rows as Codex.
         // Complete evidence becomes neutral; sparse categories remain unknown.
         let provider = match value.get("provider") {
@@ -315,7 +315,7 @@ fn legacy_orphan_usage_updates(db: &Connection) -> StoreResult<Vec<(i64, String)
         let updated = if let Some(observation) = observation {
             db.query_row(
                 "SELECT json_set(?1,'$.studioUsage',json(?2))",
-                rusqlite::params![raw, serde_json::to_string(&observation)?],
+                rusqlite::params![raw, studio_json::to_string(&observation)?],
                 |row| row.get(0),
             )?
         } else {
@@ -465,7 +465,7 @@ fn analytics_needs_migration(db: &Connection) -> StoreResult<bool> {
 mod tests {
     #[test]
     fn transfer_preflight_rejects_wrong_provider_identity() {
-        let transfer = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","targetProvider":"unknown","status":"pending","created":1,"members":{}});
+        let transfer = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","targetProvider":"unknown","status":"pending","created":1,"members":{}});
         assert!(
             super::patches(
                 "runtime_account_transfers",
@@ -477,7 +477,7 @@ mod tests {
         );
     }
     use crate::{RuntimeStore, StoreError};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     fn legacy_table(tx: &crate::Transaction<'_>) -> Result<(), StoreError> {
         let triggers = tx
@@ -546,7 +546,7 @@ mod tests {
             .expect("dated provider tag conversion");
         let reader = store.test_reader().expect("reader");
         for (id, signature, raw) in before {
-            let mut expected: Value = serde_json::from_str(&raw).expect("original effect");
+            let mut expected: Value = studio_json::from_str(&raw).expect("original effect");
             if matches!(id.as_str(), "absent-effect" | "null-effect") {
                 expected[super::TITLE_FINGERPRINT_PROVIDER_2026_10_26] = Value::Null;
             }
@@ -559,7 +559,7 @@ mod tests {
                 .expect("migrated effect");
             assert_eq!(actual_signature, signature);
             assert_eq!(
-                serde_json::from_str::<Value>(&actual).expect("migrated JSON"),
+                studio_json::from_str::<Value>(&actual).expect("migrated JSON"),
                 expected,
                 "{id}"
             );

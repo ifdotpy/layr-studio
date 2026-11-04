@@ -41,7 +41,7 @@ async fn callback_studio_ids_are_v7_and_distinct_from_rpc_labels() {
     )
     .unwrap()
     .unwrap();
-    let reply: ResultEnvelope<ToolResultRecord> = serde_json::from_str(&saved.result).unwrap();
+    let reply: ResultEnvelope<ToolResultRecord> = studio_json::from_str(&saved.result).unwrap();
     assert!(reply.reply.success().unwrap());
     let callback_id: String = store
         .test_reader()
@@ -95,7 +95,7 @@ async fn seeded_token_settles_one_exact_typed_result_without_inline_copy() {
     )
     .unwrap()
     .unwrap();
-    let typed: ResultEnvelope<ToolResultRecord> = serde_json::from_str(&stored.result).unwrap();
+    let typed: ResultEnvelope<ToolResultRecord> = studio_json::from_str(&stored.result).unwrap();
     assert_eq!(typed.reply.into_value(), original);
     let actor = context.agent;
     let recovered = store

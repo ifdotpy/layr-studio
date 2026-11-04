@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Mutex, PoisonError};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use sysinfo::{
     CpuRefreshKind, MemoryRefreshKind, Pid, Process, ProcessRefreshKind, ProcessesToUpdate, System,
 };
@@ -190,7 +190,7 @@ fn build_process_tree(root_pid: u32, rows: &BTreeMap<u32, ProcessSnapshot>) -> O
                 }),
             )
         })
-        .collect::<serde_json::Map<String, Value>>();
+        .collect::<studio_json::Map<String, Value>>();
     Some(json!({
         "rootPid": root_pid,
         "processes": processes,

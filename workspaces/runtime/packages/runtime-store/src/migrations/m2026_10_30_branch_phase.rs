@@ -7,7 +7,7 @@ pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_workspace_operations")? {
         return Ok(());
     }
-    let blocked = serde_json::to_string(&OperationPhase::LocalMutation)?;
+    let blocked = studio_json::to_string(&OperationPhase::LocalMutation)?;
     tx.execute("UPDATE runtime_workspace_operations SET record=json_object('phase',json(?1),'legacyRecord',json(record)) WHERE id LIKE 'branch:%' AND json_valid(record) AND json_type(record)!='object'", [&blocked])?;
     tx.execute("UPDATE runtime_workspace_operations SET record=json_object('phase',json(?1),'legacyRecord',record) WHERE id LIKE 'branch:%' AND NOT json_valid(record)", [&blocked])?;
     let mut query = tx.prepare("SELECT id,json_type(record,'$.phase'),json_extract(record,'$.phase'),json_type(record,'$.legacyPhase'),json_type(record,'$.legacyPhaseCollision') FROM runtime_workspace_operations WHERE id LIKE 'branch:%' AND json_valid(record) AND json_type(record)='object'")?;

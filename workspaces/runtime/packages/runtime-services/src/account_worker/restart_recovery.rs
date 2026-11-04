@@ -16,8 +16,8 @@ use crate::{
     task_recovery_store::TaskCompletionWriter,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_schema::{
     provider_lifecycle::{CodexTurnStatus, TerminalTurnStatus},
     studio_errors::{Cause, Context, Diagnostics, Kind, RecoveryPhase, StudioError, Target},

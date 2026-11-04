@@ -156,10 +156,10 @@ mod tests {
     use super::*;
     #[test]
     fn cli_lines_ignore_nonobjects_and_keep_first_main() {
-        let lines: Lines = serde_json::from_str(r#"[["main","wrong","wrong"],null,{"name":"other"},{"name":"main","id":false,"head":"saved"},{"name":"main","id":"later"}]"#).unwrap();
+        let lines: Lines = studio_json::from_str(r#"[["main","wrong","wrong"],null,{"name":"other"},{"name":"main","id":false,"head":"saved"},{"name":"main","id":"later"}]"#).unwrap();
         assert_eq!(lines.main_id(), None);
         assert_eq!(lines.main_head(), Some("saved"));
-        let other: Lines = serde_json::from_str("{}").unwrap();
+        let other: Lines = studio_json::from_str("{}").unwrap();
         assert_eq!(other.main_head(), None);
     }
     #[test]
@@ -171,7 +171,7 @@ mod tests {
             (r#"{"id":"x","layers":{"target":false}}"#, true),
             (r#"["x","auto","main",1]"#, false),
         ] {
-            let state: StateEntry = serde_json::from_str(json).unwrap();
+            let state: StateEntry = studio_json::from_str(json).unwrap();
             assert_eq!(state.has_caches(), expected, "{json}");
         }
     }

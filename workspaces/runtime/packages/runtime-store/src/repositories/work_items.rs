@@ -1,7 +1,7 @@
 //! Read and write persisted work-item, plan, and queue state.
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::records::{
     AgentId, AgentRecord, EventMetadataRecord, JsonRecord, PlanRecord, QueueEventId, Table, TaskId,
@@ -108,7 +108,7 @@ impl WorkItemsRepository {
             )
             .optional()?;
         let raw = raw.ok_or_else(invalid)?;
-        let value: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
+        let value: Value = studio_json::from_str(&raw).map_err(|_| invalid())?;
         let studio_runtime_schema::json_object::JsonObject(run): studio_runtime_schema::json_object::JsonObject<super::execution_history::ExecutionRun<Value, studio_runtime_schema::AgentCounter>> =
             serde::Deserialize::deserialize(&value).map_err(|_| {
                 // The older record owner reports malformed JSON or a missing ID at
@@ -214,11 +214,12 @@ impl WorkItemsRepository {
         for (id, raw) in rows {
             // Release historically repairs fields such as a negative version before
             // the checked write, so this mutation boundary must retain raw input.
-            let mut record: Value =
-                serde_json::from_str(&raw).map_err(|_| crate::StoreError::InvalidStoredObject {
+            let mut record: Value = studio_json::from_str(&raw).map_err(|_| {
+                crate::StoreError::InvalidStoredObject {
                     table: "runtime_work",
                     id: id.clone(),
-                })?;
+                }
+            })?;
             if record.get("id").and_then(Value::as_str) != Some(id.as_str())
                 || record.get("owner").and_then(Value::as_str) != Some(owner_id)
             {
@@ -262,7 +263,7 @@ impl WorkItemsRepository {
                 .or_insert_with(|| Value::Array(Vec::new()))
                 .as_array_mut()
                 .expect("validated release history")
-                .push(serde_json::json!({
+                .push(studio_json::json!({
                     "agent": owner_id,
                     "reason": reason,
                     "created": now,
@@ -421,7 +422,7 @@ mod tests {
     use super::{REQUIREMENTS, WorkItemsRepository};
     use crate::{AgentRecord, StoreError};
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn validation_only_checks_once_without_encoding() {
@@ -567,7 +568,7 @@ mod tests {
             WorkItemsRepository::release_failed_work(&connection, "worker", "lost", 4.0).unwrap();
         assert_eq!(released.len(), 1);
         assert_eq!(released[0]["version"], 0);
-        assert_eq!(released[0]["owner"], serde_json::Value::Null);
+        assert_eq!(released[0]["owner"], studio_json::Value::Null);
         assert_eq!(released[0]["future"], value["future"]);
         assert_eq!(
             WorkItemsRepository::work_record(&connection, "task")
@@ -739,7 +740,7 @@ mod tests {
         assert_eq!(by_id["running-work"]["status"], "ready");
         assert_eq!(by_id["blocked-work"]["status"], "blocked");
         for record in by_id.values() {
-            assert_eq!(record["owner"], serde_json::Value::Null);
+            assert_eq!(record["owner"], studio_json::Value::Null);
             assert_eq!(record["version"], 4);
             assert_eq!(record["updated"], 12.5);
             assert_eq!(record["releases"][0]["reason"], "x".repeat(500));
@@ -757,9 +758,9 @@ mod tests {
         connection
             .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);")
             .expect("work family creates");
-        let first = serde_json::json!({"id":"work-1","status":"ready","title":"original"});
+        let first = studio_json::json!({"id":"work-1","status":"ready","title":"original"});
         let replacement =
-            serde_json::json!({"id":"work-1","status":"blocked","title":"replacement"});
+            studio_json::json!({"id":"work-1","status":"blocked","title":"replacement"});
         assert!(
             WorkItemsRepository::put_work(&connection, "work-1", &first)
                 .expect("new work item inserts")
@@ -787,7 +788,7 @@ inventory::submit! {
 #[cfg(test)]
 mod receipt_domain_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn submission_identity_never_selects_history_without_current_owner() {

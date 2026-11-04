@@ -1,11 +1,11 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     io::Read,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
+use studio_json::{Value, json};
 
 const MAX_ARCHIVE: u64 = 256 * 1024 * 1024;
 // Maximum profile chunk file size in bytes; shared with the web importer.
@@ -110,7 +110,7 @@ fn read_archive(path: &Path) -> Result<Archive, String> {
         return Err("The profile archive exceeds 256 MiB.".into());
     }
     let field: Field<Object<Archive>> =
-        serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        studio_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     Ok(match field {
         Field::Valid(Object(archive)) => archive,
         Field::Invalid(_) | Field::Missing => Archive::default(),
@@ -279,7 +279,7 @@ fn read_chunk(archive: &Archive, path: &Path, owner: &str, digest: &str) -> Resu
         return Err("The profile chunk checksum changed.".into());
     }
     let records: Vec<serde::de::IgnoredAny> =
-        serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        studio_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if Some(records.len() as u64) != reference.records.get().copied() {
         return Err("The profile chunk record count changed.".into());
     }
@@ -387,7 +387,7 @@ mod tests {
         }
         std::fs::write(&path, "{").unwrap();
         assert!(read_archive(&path).is_err());
-        std::fs::write(&path, serde_json::to_vec(&archive).unwrap()).unwrap();
+        std::fs::write(&path, studio_json::to_vec(&archive).unwrap()).unwrap();
         let parsed = super::read_archive(&path).unwrap();
         assert_eq!(
             super::select(&parsed, "root").unwrap()["snapshot"],
@@ -395,7 +395,7 @@ mod tests {
         );
         assert!(super::read_chunk(&parsed, &path, "root", &hash).is_ok());
         assert_eq!(
-            serde_json::from_str::<Value>(
+            studio_json::from_str::<Value>(
                 read_chunk(&archive, &path, "root", &hash)
                     .unwrap()
                     .as_str()

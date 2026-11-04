@@ -1,9 +1,9 @@
 //! Read-only bounded monitor observation. A wait never renews a command lease.
 use crate::monitor_policy::{MonitorError, MonitorStatus};
 use rusqlite::OptionalExtension;
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_store::{RuntimeStore, StoreError};
 
 #[derive(serde::Serialize)]
@@ -66,7 +66,7 @@ fn read_in(
         .optional()
         .map_err(StoreError::from)?;
     let record: studio_runtime_store::MonitorRecord =
-        serde_json::from_str(&raw.ok_or(MonitorError::Refused("Unknown command watch"))?)
+        studio_json::from_str(&raw.ok_or(MonitorError::Refused("Unknown command watch"))?)
             .map_err(StoreError::from)?;
     if record.agent() != owner || record.epoch.get() != epoch {
         return Err(MonitorError::Refused(
@@ -81,7 +81,7 @@ fn read_in(
         )
         .optional()
         .map_err(StoreError::from)?;
-    let agent: Value = serde_json::from_str(&raw.ok_or(MonitorError::Refused("Unknown agent"))?)
+    let agent: Value = studio_json::from_str(&raw.ok_or(MonitorError::Refused("Unknown agent"))?)
         .map_err(StoreError::from)?;
     if studio_runtime_store::truthy(agent.get("deletedAt"))
         || agent["epoch"].as_i64() != Some(epoch)
@@ -129,7 +129,7 @@ fn read_in(
             .optional()
             .map_err(StoreError::from)?;
         if let Some((status, text)) = event {
-            let payload = serde_json::from_str(&text).map_err(StoreError::from)?;
+            let payload = studio_json::from_str(&text).map_err(StoreError::from)?;
             events.push(ObservedOutputEvent {
                 payload,
                 id: id.clone(),

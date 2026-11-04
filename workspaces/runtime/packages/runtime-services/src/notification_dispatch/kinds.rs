@@ -7,7 +7,7 @@ use super::{
 };
 use super::{items, notices, questions};
 use rusqlite::{OptionalExtension, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
     AgentId, NotificationDispatchRepository, PlanRecord, StoreError, Table, TaskId, TaskRecord,
@@ -59,7 +59,7 @@ pub(super) fn apply(
                         StoreError::SchemaMismatch("missing idle compaction agent".into())
                     })?;
             Some(
-                serde_json::from_str::<StoredEpisode>(&raw)
+                studio_json::from_str::<StoredEpisode>(&raw)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
                     .idle_compaction_episode,
             )
@@ -426,7 +426,7 @@ pub(super) fn put_task(
     tx: &Transaction<'_>,
     task: &Value,
 ) -> Result<(), NotificationDispatchError> {
-    let task_record: TaskRecord = serde_json::from_str(&task.to_string())
+    let task_record: TaskRecord = studio_json::from_str(&task.to_string())
         .map_err(|_| super::stored("runtime_tasks", task["id"].as_str().unwrap_or("<missing>")))?;
     put_checked_task(tx, &task_record)
 }
@@ -453,7 +453,7 @@ pub(super) fn put_checked_task(
             .map_err(StoreError::from)?;
         previous_raw
             .map(|raw| {
-                let record: TaskRecord = serde_json::from_str(&raw)
+                let record: TaskRecord = studio_json::from_str(&raw)
                     .map_err(|_| super::stored("runtime_tasks", task_id))?;
                 if record.id().as_ref() != task_id {
                     return Err(super::stored("runtime_tasks", task_id));
@@ -538,7 +538,7 @@ pub(super) fn flush_command(
         }
         return Ok(());
     }
-    let saved = serde_json::from_str::<Value>(record["text"].as_str().unwrap_or_default())
+    let saved = studio_json::from_str::<Value>(record["text"].as_str().unwrap_or_default())
         .ok()
         .filter(Value::is_object);
     // The stored item holds the flushed output unless item/started replaced
@@ -605,7 +605,7 @@ pub(super) fn preserve_command_base(
     let id = format!("{agent}:{}", key.item);
     let saved = NotificationDispatchRepository::notification_item(tx, agent, &id)?
         .and_then(|(record, _)| {
-            serde_json::from_str::<Value>(record["text"].as_str().unwrap_or_default()).ok()
+            studio_json::from_str::<Value>(record["text"].as_str().unwrap_or_default()).ok()
         })
         .filter(Value::is_object);
     let task = if saved.is_none() {
@@ -639,7 +639,7 @@ pub(super) fn write_historical_item(
     else {
         return Ok(());
     };
-    let saved = serde_json::from_str::<Value>(record["text"].as_str().unwrap_or_default()).ok();
+    let saved = studio_json::from_str::<Value>(record["text"].as_str().unwrap_or_default()).ok();
     let historical_tool = task.kind() == studio_runtime_schema::task_record::TaskKind::Tool;
     let item = if historical_tool {
         if record["turnId"].as_str() != Some(task.turn_id())

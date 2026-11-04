@@ -4,7 +4,7 @@ use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequir
 use crate::{JsonRecord, RecordKeyMode, RecordQueryShape, StoreResult, Table};
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],
@@ -47,11 +47,11 @@ impl AgentMoveRepository {
     pub fn get(db: &Connection, id: &str) -> StoreResult<Option<Value>> {
         Table::<MoveRecord>::new(db)
             .get(&id.to_owned())?
-            .map(|row| serde_json::to_value(row).map_err(Into::into))
+            .map(|row| studio_json::to_value(row).map_err(Into::into))
             .transpose()
     }
     pub fn save(tx: &Transaction<'_>, row: &Value) -> StoreResult<()> {
-        let row: MoveRecord = serde_json::from_value(row.clone())?;
+        let row: MoveRecord = studio_json::from_value(row.clone())?;
         Table::<MoveRecord>::new(tx).put(&row)
     }
     /// A retained move can own an agent before its redirect fields are written.
@@ -72,7 +72,7 @@ impl AgentMoveRepository {
              WHERE (json_extract(record,'$.phase') IS NOT 'failed' OR json_type(record,'$.uncertainPhase') IS NOT NULL) \
              AND COALESCE(json_extract(record,'$.agent'),json_extract(record,'$.descriptor.agent.id')) \
              IN (SELECT value FROM json_each(?1)))",
-            [serde_json::to_string(agents)?], |row| row.get(0),
+            [studio_json::to_string(agents)?], |row| row.get(0),
         )?)
     }
 }

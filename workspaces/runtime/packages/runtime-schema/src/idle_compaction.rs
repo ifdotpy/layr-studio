@@ -109,7 +109,7 @@ mod tests {
         settings.min_tokens = IDLE_COMPACTION_MIN_TOKENS;
         assert!(settings.valid());
         assert_eq!(
-            serde_json::from_str::<Mode>("\"compact_on_return\"").unwrap(),
+            studio_json::from_str::<Mode>("\"compact_on_return\"").unwrap(),
             Mode::CompactOnReturn
         );
     }

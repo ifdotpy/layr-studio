@@ -95,7 +95,7 @@ impl Links {
             .ok()
             .and_then(|names| names.get(&connection.remote_id()).cloned());
         if let Some(name) = name {
-            (self.on_connected)(&serde_json::json!({"connected": name}).to_string());
+            (self.on_connected)(&studio_json::json!({"connected": name}).to_string());
         }
     }
 
@@ -228,7 +228,7 @@ async fn run() -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ok_or("The configuration is missing")?;
     let config: Config =
-        serde_json::from_str(&first).map_err(|_| "The configuration is invalid".to_owned())?;
+        studio_json::from_str(&first).map_err(|_| "The configuration is invalid".to_owned())?;
     if !listen_allowed(config.listen.ip()) || !valid_host(&config.forwarded_host) {
         return Err(
             "Listen on all interfaces, a Tailscale address or loopback, and use the Serve host"
@@ -273,12 +273,12 @@ async fn run() -> Result<(), String> {
         link_token: config.link_token,
     });
     // The ready line comes first: a `connected` line may follow it, never precede it.
-    print_line(&serde_json::json!({"ready": true, "port": port}).to_string());
+    print_line(&studio_json::json!({"ready": true, "port": port}).to_string());
     tokio::spawn(inbound::serve(endpoint.clone(), inbound, links.clone()));
     tokio::spawn(outbound::listen(listener, links.clone()));
     while let Some(line) = lines.next_line().await.map_err(|error| error.to_string())? {
         let update: Update =
-            serde_json::from_str(&line).map_err(|_| "The key update is invalid".to_owned())?;
+            studio_json::from_str(&line).map_err(|_| "The key update is invalid".to_owned())?;
         links
             .replace_keys(paired_keys(&update.peers)?, peer_names(&update.peers)?)
             .await;

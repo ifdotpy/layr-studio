@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -60,7 +60,7 @@ fn opaque_object(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"type":"object", "additionalProperties":{"$ref": "#/components/schemas/JsonValue"}})
 }
 
-pub(crate) fn schemas() -> serde_json::Map<String, Value> {
+pub(crate) fn schemas() -> studio_json::Map<String, Value> {
     let mut generator = schemars::generate::SchemaSettings::draft2020_12()
         .for_serialize()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
@@ -70,7 +70,7 @@ pub(crate) fn schemas() -> serde_json::Map<String, Value> {
 }
 
 pub(crate) fn answer_body_decision() -> Value {
-    let mut decisions = vec![serde_json::json!("answer")];
+    let mut decisions = vec![studio_json::json!("answer")];
     let schema = schemars::schema_for!(QuestionDecision).to_value();
     // The decision owner is a fieldless enum, so Schemars always emits its tags.
     decisions.extend(
@@ -80,7 +80,7 @@ pub(crate) fn answer_body_decision() -> Value {
             .iter()
             .cloned(),
     );
-    serde_json::json!({"anyOf":[{"type":"string","enum":decisions},{"type":"null"}],"default":null,"title":"Decision"})
+    studio_json::json!({"anyOf":[{"type":"string","enum":decisions},{"type":"null"}],"default":null,"title":"Decision"})
 }
 
 pub(crate) fn check_schema_parity(openapi: &Value) -> Result<(), String> {

@@ -1,6 +1,6 @@
 //! Analytics reads return the text of a compressed `analytics_items.record`.
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AnalyticsRepository, RuntimeStore, analytics, stored_text};
 
 #[tokio::test]
@@ -37,8 +37,8 @@ async fn analytics_reads_decode_compressed_item_records() {
         )
         .expect("open record reads");
     assert_eq!(
-        serde_json::from_str::<Value>(&decoded).expect("decoded JSON"),
-        serde_json::from_str::<Value>(&record).expect("record JSON")
+        studio_json::from_str::<Value>(&decoded).expect("decoded JSON"),
+        studio_json::from_str::<Value>(&record).expect("record JSON")
     );
     drop(store);
 }

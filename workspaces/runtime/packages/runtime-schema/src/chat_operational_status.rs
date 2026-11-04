@@ -19,7 +19,7 @@ pub struct ChatOperationalStatus {
     pub label: String,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 2] {
+pub(crate) fn schemas() -> [(&'static str, studio_json::Value); 2] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();

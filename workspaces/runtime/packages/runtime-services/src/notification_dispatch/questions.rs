@@ -3,7 +3,7 @@ use super::notices::ordered_text;
 use super::snapshot::checked;
 use super::{NotificationDispatchError, stored};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::complaint_record::{
     ComplaintRecipient, ComplaintSource, ComplaintStatus,
 };
@@ -246,7 +246,7 @@ pub(crate) fn agent_complaint_action(
             let raw = studio_runtime_store::QuestionsWriteRepository::complaint(tx, id)?
                 .ok_or(NotificationDispatchError::invalid())?;
             let mut complaint: ComplaintRecord =
-                serde_json::from_str(&raw).map_err(|_| stored("runtime_complaints", id))?;
+                studio_json::from_str(&raw).map_err(|_| stored("runtime_complaints", id))?;
             if complaint.id() != id {
                 return Err(stored("runtime_complaints", id));
             }
@@ -362,7 +362,7 @@ fn reconcile_complaint_notifications(
             .map_err(studio_runtime_store::StoreError::from)?
     };
     for (event_id, text) in pending {
-        let Ok(payload) = serde_json::from_str::<Value>(&text) else {
+        let Ok(payload) = studio_json::from_str::<Value>(&text) else {
             continue;
         };
         let Some(entries) = payload.get("complaints").and_then(Value::as_array) else {
@@ -383,7 +383,7 @@ fn reconcile_complaint_notifications(
             )
             .map_err(studio_runtime_store::StoreError::from)?;
         let mut rows = statement
-            .query([serde_json::to_string(&ids)?])
+            .query([studio_json::to_string(&ids)?])
             .map_err(studio_runtime_store::StoreError::from)?;
         while let Some(row) = rows
             .next()
@@ -399,7 +399,7 @@ fn reconcile_complaint_notifications(
                 all_answered = false;
                 break;
             };
-            let Ok(complaint) = serde_json::from_str::<ComplaintRecord>(&raw) else {
+            let Ok(complaint) = studio_json::from_str::<ComplaintRecord>(&raw) else {
                 all_answered = false;
                 break;
             };

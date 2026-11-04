@@ -1,18 +1,18 @@
 use super::*;
-use serde_json::json;
+use studio_json::json;
 
 fn stored_path<T: serde::de::DeserializeOwned>(path: &str) -> T {
-    serde_json::from_value(json!(path)).expect("stored path fixture")
+    studio_json::from_value(json!(path)).expect("stored path fixture")
 }
 
 fn input() -> (Value, WorkspaceActor, ProvisionIdentity) {
     let record = json!({"id":"worker","epoch":7,"cwd":"/repo/project","autoWake":true,"worktree":true,"worktreeReady":false});
-    let actor = serde_json::from_value(record.clone()).expect("actor");
+    let actor = studio_json::from_value(record.clone()).expect("actor");
     let plan = ProvisionIdentity {
         id: "provision:worker:7".into(),
         agent: "worker".into(),
         source: workspace_generation(&record),
-        thread_id: serde_json::Value::Null,
+        thread_id: studio_json::Value::Null,
         repository: stored_path("/repo"),
         common_dir: stored_path("/repo/.git"),
         destination: stored_path("/repo/.worktrees/worker"),
@@ -26,7 +26,7 @@ fn complete(plan: &ProvisionIdentity) -> GitObservation {
     GitObservation {
         destination_exists: true,
         directory: Some(
-            serde_json::from_value(json!(plan.destination)).expect("stored destination"),
+            studio_json::from_value(json!(plan.destination)).expect("stored destination"),
         ),
         registered: true,
         branch_exists: true,
@@ -165,7 +165,7 @@ fn unsupported_modes_are_refused_for_new_existing_and_stopped_records() {
             record[field] = value;
             record["worktreeReady"] = json!(ready);
             record["autoWake"] = json!(false);
-            let actor: WorkspaceActor = serde_json::from_value(record.clone()).expect("actor");
+            let actor: WorkspaceActor = studio_json::from_value(record.clone()).expect("actor");
             assert_eq!(
                 decide_workspace(
                     &actor,
@@ -190,7 +190,7 @@ fn an_image_fallback_prepares_its_worktree_like_any_worktree_agent() {
     record["imageWorkspace"] = json!(false);
     record["imageWorkspacePhase"] = json!("fallback");
     record["workspaceMode"] = json!("worktree");
-    let actor: WorkspaceActor = serde_json::from_value(record.clone()).expect("actor");
+    let actor: WorkspaceActor = studio_json::from_value(record.clone()).expect("actor");
     assert!(!actor.image_bound());
     assert_eq!(unsupported(&actor), None);
 }
@@ -201,7 +201,7 @@ fn ready_boolean_requires_identity_but_preserves_dirty_advanced_worktree() {
     record["worktreeReady"] = json!(true);
     record["cwd"] = json!(plan.cwd);
     record["branch"] = json!(plan.branch);
-    let actor: WorkspaceActor = serde_json::from_value(record.clone()).expect("actor");
+    let actor: WorkspaceActor = studio_json::from_value(record.clone()).expect("actor");
     let mut observed = complete(&plan);
     observed.clean = false;
     observed.head = Some("b".repeat(40));
@@ -367,7 +367,7 @@ fn another_agents_provision_does_not_block_unrelated_workers_or_the_lead() {
     ));
     // The lead works in the repository root that contains the destination.
     let lead_record = json!({"id":"lead","epoch":1,"cwd":"/repo","autoWake":true});
-    let lead: WorkspaceActor = serde_json::from_value(lead_record.clone()).expect("lead");
+    let lead: WorkspaceActor = studio_json::from_value(lead_record.clone()).expect("lead");
     assert!(matches!(
         decide_workspace(
             &lead,
@@ -402,7 +402,7 @@ fn provision_conflicts_only_on_same_destination_or_inside_it() {
     // An actor inside another agent's destination waits while it runs and is refused when it needs recovery.
     let inside =
         json!({"id":"w2","epoch":1,"cwd":"/repo/.worktrees/other/project","autoWake":true});
-    let w2: WorkspaceActor = serde_json::from_value(inside.clone()).expect("w2");
+    let w2: WorkspaceActor = studio_json::from_value(inside.clone()).expect("w2");
     for (phase, defers) in [("local_mutation", true), ("recovery_required", false)] {
         let result = decide_workspace(
             &w2,
@@ -423,7 +423,7 @@ fn shared_workspace_ignores_worktree_preference_and_stopped_or_deleted_actor_def
     let (mut record, _, _) = input();
     record["worktree"] = json!(false);
     record["workspaceMode"] = json!("worktree");
-    let actor: WorkspaceActor = serde_json::from_value(record.clone()).expect("actor");
+    let actor: WorkspaceActor = studio_json::from_value(record.clone()).expect("actor");
     assert!(!requires_worktree(&actor));
     assert!(matches!(
         decide_workspace(
@@ -452,7 +452,7 @@ fn shared_workspace_ignores_worktree_preference_and_stopped_or_deleted_actor_def
     for (key, value) in [("deletedAt", json!(4)), ("autoWake", json!(false))] {
         let mut stopped = record.clone();
         stopped[key] = value;
-        let actor: WorkspaceActor = serde_json::from_value(stopped.clone()).expect("actor");
+        let actor: WorkspaceActor = studio_json::from_value(stopped.clone()).expect("actor");
         assert!(matches!(
             decide_workspace(
                 &actor,

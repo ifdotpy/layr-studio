@@ -1,7 +1,7 @@
 use super::*;
 
 fn snapshot() -> PreparationSnapshot {
-    serde_json::from_value(json!({
+    studio_json::from_value(json!({
         "actor":{"id":"lead","root_id":"lead","epoch":["thread",0],"is_lead":true,
             "forked_from":null,"prepared_context":null,"delivered_mode":null},
         "root":{"concurrency":32,"mode_revision":0},"delivered_manifests":[],"plan":null,

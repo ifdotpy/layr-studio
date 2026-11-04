@@ -5,7 +5,7 @@ use crate::queue_command::Field;
 use crate::{bounded_text::BoundedText, continuation_snapshot::BoundedVec};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 /// Task title length, in Unicode code points.
 pub const MAX_TITLE_CODEPOINTS: usize = 160;
@@ -54,7 +54,7 @@ impl Version {
 }
 impl<'de> Deserialize<'de> for Version {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let number = serde_json::Number::deserialize(deserializer)?;
+        let number = studio_json::Number::deserialize(deserializer)?;
         let value = number
             .as_i64()
             .or_else(|| {
@@ -386,7 +386,7 @@ fn tool_non_null(schema: &mut schemars::Schema) {
     schema.insert(TOOL_NON_NULL_EXTENSION.into(), json!(true));
 }
 
-fn command_properties(variants: &[Value]) -> serde_json::Map<String, Value> {
+fn command_properties(variants: &[Value]) -> studio_json::Map<String, Value> {
     let mut fields = std::collections::BTreeMap::<String, Vec<Value>>::new();
     for variant in variants {
         for (field, schema) in variant["properties"]
@@ -456,7 +456,7 @@ pub fn check_api_contract(document: &Value) -> Result<(), String> {
 /// The SDK requires a flat object advertisement. Field schemas come from this
 /// owner; action-specific requirements remain enforced by `TaskCommand::parse`.
 /// Read actions retain the existing tool catalog's filters and pagination.
-pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value>) {
+pub fn apply_tool_contract(name: &str, input: &mut studio_json::Map<String, Value>) {
     if name != "orchestration_task" {
         return;
     }
@@ -530,7 +530,8 @@ mod tests {
     #[test]
     fn task_command_schema_matches_owner_and_transport_variants() {
         let document: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
         check_api_contract(&document).expect("generated request owner");
         let mut tool = json!({"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}).as_object().expect("object").clone();
         apply_tool_contract("orchestration_task", &mut tool);

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use super::{ROUTE_SAMPLE_LIMIT, Ring, SITE_LIMIT, quantiles, try_with_state};
 

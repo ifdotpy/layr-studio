@@ -113,7 +113,7 @@ impl OrchestrationSettingsRepository {
             .optional()?
             .flatten();
         let settings: studio_runtime_schema::shell_policy::Settings = raw
-            .map(|raw| serde_json::from_str(&raw))
+            .map(|raw| studio_json::from_str(&raw))
             .transpose()
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
             .unwrap_or_default();
@@ -136,7 +136,7 @@ impl OrchestrationSettingsRepository {
         }
         connection.execute(
             &format!("INSERT INTO {TABLE}(id,record) VALUES(?1,json_object('shellPolicy',json(?2))) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.shellPolicy',json(?2))"),
-            params![ROW, serde_json::to_string(settings).map_err(|error| StoreError::SchemaMismatch(error.to_string()))?]
+            params![ROW, studio_json::to_string(settings).map_err(|error| StoreError::SchemaMismatch(error.to_string()))?]
         )?;
         Ok(())
     }
@@ -164,7 +164,7 @@ impl OrchestrationSettingsRepository {
             ))
         };
         let JsonObject(record): JsonObject<StoredSettings> =
-            serde_json::from_str(&raw).map_err(|_| invalid())?;
+            studio_json::from_str(&raw).map_err(|_| invalid())?;
         let value = match setting.field {
             field if field == CHILD_RESULT_COALESCE_SETTING.field => {
                 record.child_result_coalesce_seconds
@@ -214,7 +214,7 @@ impl OrchestrationSettingsRepository {
             .optional()?
             .flatten();
         let settings: studio_runtime_schema::idle_compaction::Settings = raw
-            .map(|raw| serde_json::from_str(&raw))
+            .map(|raw| studio_json::from_str(&raw))
             .transpose()
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
             .unwrap_or_default();
@@ -229,7 +229,7 @@ impl OrchestrationSettingsRepository {
     /// The setting with the default mode resolved for a lead or a worker chat.
     pub fn idle_compaction_for(
         connection: &Connection,
-        agent: &serde_json::Value,
+        agent: &studio_json::Value,
     ) -> StoreResult<studio_runtime_schema::idle_compaction::Settings> {
         Ok(Self::idle_compaction(connection)?.resolved(agent["isLead"] == true))
     }
@@ -245,7 +245,7 @@ impl OrchestrationSettingsRepository {
         }
         connection.execute(
             &format!("INSERT INTO {TABLE}(id,record) VALUES(?1,json_object('idleCompaction',json(?2))) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.idleCompaction',json(?2))"),
-            params![ROW, serde_json::to_string(settings).map_err(|error| StoreError::SchemaMismatch(error.to_string()))?],
+            params![ROW, studio_json::to_string(settings).map_err(|error| StoreError::SchemaMismatch(error.to_string()))?],
         )?;
         Ok(())
     }

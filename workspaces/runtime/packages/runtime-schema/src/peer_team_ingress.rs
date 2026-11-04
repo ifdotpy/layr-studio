@@ -316,12 +316,12 @@ mod tests {
 
     #[test]
     fn send_rounds_are_bounded_and_non_nullable() {
-        let base = serde_json::json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hi"});
+        let base = studio_json::json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hi"});
         assert!(PeerTeamRequest::deserialize(base.clone()).is_ok());
         for rounds in [
-            serde_json::json!(null),
-            serde_json::json!(0),
-            serde_json::json!(3),
+            studio_json::json!(null),
+            studio_json::json!(0),
+            studio_json::json!(3),
         ] {
             let mut bad = base.clone();
             bad["rounds"] = rounds;

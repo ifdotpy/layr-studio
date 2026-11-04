@@ -38,14 +38,14 @@ pub struct PreparedTurn(pipeline::RequestPreparation);
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedNativeAction {
     pub thread_id: String,
-    pub settings: serde_json::Value,
+    pub settings: studio_json::Value,
 }
 
 /// Complete native `thread/start` parameters from the shared preparation
 /// pipeline, including developer context, tool definitions, and permissions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedNativeThread {
-    pub params: serde_json::Value,
+    pub params: studio_json::Value,
 }
 
 /// The planned fresh thread of a native review child, kept until its reply is
@@ -57,8 +57,8 @@ impl PreparedReviewThread {
     pub(crate) fn cwd(&self) -> &str {
         &self.attempt.snapshot.actor.cwd
     }
-    pub(crate) fn params(&self) -> serde_json::Value {
-        serde_json::Value::Object(self.attempt.params.clone())
+    pub(crate) fn params(&self) -> studio_json::Value {
+        studio_json::Value::Object(self.attempt.params.clone())
     }
     pub(crate) fn request_digest(&self) -> &str {
         &self.attempt.request_digest
@@ -75,7 +75,7 @@ pub(crate) use pipeline::{accept_review_thread, prepare_review_thread, review_th
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedMonitorCommand {
     pub thread_id: String,
-    pub settings: serde_json::Value,
+    pub settings: studio_json::Value,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,15 +86,15 @@ pub struct SafetyRetryPreparation {
     pub source_thread_id: String,
     pub turn_id: String,
     pub model: String,
-    pub input: serde_json::Value,
+    pub input: studio_json::Value,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedSafetyRetry {
     pub attempt_id: String,
     pub thread_id: String,
-    pub fork_params: serde_json::Value,
-    pub turn_params: serde_json::Value,
+    pub fork_params: studio_json::Value,
+    pub turn_params: studio_json::Value,
 }
 impl PreparedSafetyRetry {
     /// Bind the provider's acknowledged fork identity into the complete turn map.
@@ -106,7 +106,7 @@ impl PreparedSafetyRetry {
             .turn_params
             .as_object_mut()
             .ok_or_else(|| refusal("safety-retry/turn-params-invalid".into()))?;
-        params.insert("threadId".into(), serde_json::json!(thread_id));
+        params.insert("threadId".into(), studio_json::json!(thread_id));
         self.thread_id = thread_id.into();
         Ok(())
     }
@@ -252,7 +252,7 @@ impl PreparedTurn {
 #[cfg(test)]
 mod safety_retry_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn safety_retry_binds_fork_receipt_to_complete_turn_params() {

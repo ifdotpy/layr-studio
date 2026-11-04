@@ -9,8 +9,8 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::time::{Duration, Instant as StdInstant};
+use studio_json::{Value, json};
 use studio_runtime_services::catalog_reads::{
     CapabilityAgentSnapshot, ProviderRequest, append_capability_error, apply_capability_result,
     capabilities_base, host_finder_view, skills_for_cwd,
@@ -331,7 +331,7 @@ async fn native_command(
         })
         .await?;
     if let Some(reply) = replay {
-        return serde_json::from_str(&reply.response_json)
+        return studio_json::from_str(&reply.response_json)
             .map(Json)
             .map_err(ApiError::json);
     }
@@ -407,7 +407,7 @@ async fn native_command(
                 .await
                 .map_err(|_| ApiError::internal())?;
             state.event_wake_handle().notify_one();
-            serde_json::from_str::<crate::generated::NativeCommandResponse>(posted.get())
+            studio_json::from_str::<crate::generated::NativeCommandResponse>(posted.as_str())
                 .map(Json)
                 .map_err(ApiError::json)
         }
@@ -684,10 +684,8 @@ impl studio_runtime_services::native_actions::CommandAdmission for NativeCommand
         _agent: &Value,
         key: &str,
         instruction: &str,
-    ) -> Result<
-        Box<serde_json::value::RawValue>,
-        studio_runtime_services::native_actions::NativeError,
-    > {
+    ) -> Result<studio_json::OwnedRawJson, studio_runtime_services::native_actions::NativeError>
+    {
         let result = studio_runtime_services::coordination::post_message_with_admission(
             tx,
             studio_runtime_services::coordination::PostManagedMessage {
@@ -704,7 +702,7 @@ impl studio_runtime_services::native_actions::CommandAdmission for NativeCommand
                 "workspace-policy/message-admission",
             )
         })?;
-        serde_json::value::to_raw_value(&result.receipt).map_err(|error| {
+        studio_json::to_raw_value(&result.receipt).map_err(|error| {
             studio_runtime_services::native_actions::NativeError::Store(error.into())
         })
     }
@@ -1022,9 +1020,9 @@ mod native_command_tests {
     fn native_command_requires_the_origin_request_identity_for_both_actions() {
         for action in ["input", "cancel"] {
             let missing = json!({"id":"task","action":action,"text":"input"});
-            assert!(serde_json::from_value::<NativeCommandRequest>(missing).is_err());
+            assert!(studio_json::from_value::<NativeCommandRequest>(missing).is_err());
             let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-            let parsed: NativeCommandRequest = serde_json::from_str(&format!(
+            let parsed: NativeCommandRequest = studio_json::from_str(&format!(
                 r#"{{"id":"task","action":"{action}","text":"input","request_id":"{root}"}}"#
             ))
             .expect("caller identity");
@@ -1128,7 +1126,7 @@ mod native_command_tests {
             if expected == 200 {
                 let bytes = to_bytes(response.into_body(), 4096).await.expect("body");
                 let reply: crate::generated::NativeCommandResponse =
-                    serde_json::from_slice(&bytes).expect("typed original reply");
+                    studio_json::from_slice(&bytes).expect("typed original reply");
                 if action == "input" {
                     assert_eq!(reply.id.flatten().as_deref(), Some("original-input"));
                 } else {

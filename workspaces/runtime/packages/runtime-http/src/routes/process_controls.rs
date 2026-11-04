@@ -5,8 +5,8 @@ use super::{
 };
 use crate::{error::ApiError, router::HttpState};
 use axum::{Extension, Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
     ProcessActionResult, ProcessActionStatus, ProcessControlRequest, ProcessOutcome,
@@ -580,7 +580,7 @@ async fn stop_process(
             return Err(invalid("Invalid native process list"));
         }
         let page: studio_runtime_services::provider_pagination::Page<Value> =
-            serde_json::from_value(result).map_err(|_| invalid("Invalid native process list"))?;
+            studio_json::from_value(result).map_err(|_| invalid("Invalid native process list"))?;
         if page.data.len() > NATIVE_TERMINAL_ITEMS_PER_PAGE {
             return Err(invalid("Invalid native terminal list"));
         }
@@ -833,9 +833,11 @@ mod typed_query_tests {
 
     #[test]
     fn provider_rejects_malformed_agent_fields() {
-        use serde_json::json;
+        use studio_json::json;
         let valid = json!({"compactions":0,"provider":"codex","id":"owner","rootId":"owner","epoch":1,"status":"idle","accountKey":"default"});
-        assert!(serde_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok());
+        assert!(
+            studio_json::from_value::<studio_runtime_store::AgentRecord>(valid.clone()).is_ok()
+        );
         assert!(
             <studio_runtime_store::AgentRecord as serde::Deserialize>::deserialize(&valid).is_ok()
         );
@@ -848,7 +850,7 @@ mod typed_query_tests {
             let mut malformed = valid.clone();
             malformed[field] = value;
             assert!(
-                serde_json::from_value::<studio_runtime_store::AgentRecord>(malformed.clone())
+                studio_json::from_value::<studio_runtime_store::AgentRecord>(malformed.clone())
                     .is_err(),
                 "owned {field}"
             );

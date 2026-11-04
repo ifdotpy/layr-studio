@@ -68,10 +68,10 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("body");
-        let body: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+        let body: studio_json::Value = studio_json::from_slice(&body).expect("JSON");
         assert_eq!(
             body,
-            serde_json::json!({"workspaceId":"workspace", "syncProtocol":studio_runtime_schema::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION})
+            studio_json::json!({"workspaceId":"workspace", "syncProtocol":studio_runtime_schema::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION})
         );
     }
 }

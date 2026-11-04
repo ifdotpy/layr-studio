@@ -409,7 +409,7 @@ async fn live_permissions_claude_rejection_keeps_confirmed_rollback_evidence() {
                 scope,
                 ControlInvocation::Settings {
                     thread_id: "fake-thread-0".into(),
-                    settings: serde_json::from_value(json!({"permissionMode":"plan"})).unwrap(),
+                    settings: studio_json::from_value(json!({"permissionMode":"plan"})).unwrap(),
                     request_id,
                 },
             )

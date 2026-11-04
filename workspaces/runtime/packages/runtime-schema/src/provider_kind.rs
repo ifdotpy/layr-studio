@@ -6,9 +6,9 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::fmt;
 use std::str::FromStr;
+use studio_json::Value;
 
 /// The provider that owns an account and every agent on it.
 #[derive(
@@ -211,7 +211,7 @@ impl fmt::Display for ProviderKind {
 #[cfg(test)]
 mod tests {
     use super::{ProviderCapability, ProviderKind, UnknownProvider};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn capability_lists_are_declared_per_provider() {
@@ -245,7 +245,7 @@ mod tests {
     fn capability_keys_match_serde() {
         for capability in ProviderCapability::ALL {
             assert_eq!(
-                serde_json::to_value(capability).expect("serialize"),
+                studio_json::to_value(capability).expect("serialize"),
                 json!(capability.key())
             );
         }
@@ -286,9 +286,9 @@ mod tests {
             json!({}),
         ] {
             assert!(ProviderKind::of_field(Some(&field)).is_err(), "{field}");
-            assert!(serde_json::from_value::<ProviderKind>(field).is_err());
+            assert!(studio_json::from_value::<ProviderKind>(field).is_err());
         }
-        assert!(serde_json::from_value::<ProviderKind>(json!(null)).is_err());
+        assert!(studio_json::from_value::<ProviderKind>(json!(null)).is_err());
     }
 
     #[test]
@@ -306,7 +306,7 @@ mod tests {
         for kind in ProviderKind::ALL {
             assert_eq!(kind.key().parse::<ProviderKind>(), Ok(kind));
             assert_eq!(
-                serde_json::to_value(kind).expect("serialize"),
+                studio_json::to_value(kind).expect("serialize"),
                 json!(kind.key())
             );
             assert_eq!(

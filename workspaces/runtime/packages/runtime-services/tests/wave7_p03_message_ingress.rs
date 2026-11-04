@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::coordination::{self, PostManagedMessage};
 use studio_runtime_services::message_admission::PreparedAdmission;
 use studio_runtime_store::RuntimeStore;
@@ -119,11 +119,11 @@ impl Fixture {
     }
     fn expected(&self, name: &str) -> Expected {
         let workspace =
-            serde_json::to_string(&self.root.path().join("workspace")).expect("workspace JSON");
+            studio_json::to_string(&self.root.path().join("workspace")).expect("workspace JSON");
         let source = include_str!("wave7_p03_message_ingress/expected.json")
             .replace(WORKSPACE_MARKER, &workspace[1..workspace.len() - 1]);
         let mut cases: BTreeMap<String, Expected> =
-            serde_json::from_str(&source).expect("frozen ingress expectations");
+            studio_json::from_str(&source).expect("frozen ingress expectations");
         cases.remove(name).expect("named ingress expectation")
     }
     async fn configure(&self, store: &RuntimeStore, case: &str) {
@@ -154,7 +154,7 @@ impl Fixture {
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
             };
             for (id, raw) in projections {
-                let mut payload: Value = serde_json::from_str(&raw)?;
+                let mut payload: Value = studio_json::from_str(&raw)?;
                 crate::agent_view_fixtures::normalize_legacy_agent(payload.get_mut("value").expect("agent projection"));
                 let raw = payload.to_string();
                 tx.execute("UPDATE sync_entities SET payload=?1,hash=sync_entity_hash(?1) WHERE collection='agent' AND id=?2", (&raw, &id))?;
@@ -194,7 +194,7 @@ async fn send(
                 studio_runtime_store::AgentRepository::put(tx, &agent)?;
                 studio_runtime_services::agents_create::publish_agent(
                     tx,
-                    &serde_json::to_value(agent)?,
+                    &studio_json::to_value(agent)?,
                 )?;
                 Ok(())
             })
@@ -245,7 +245,7 @@ async fn python_send_and_receipt_corpus() {
     let seed = fixture.seed("migrated-template");
     let template = crate::state_template::StateTemplate::migrate(&seed).await;
     let cases: Vec<Value> =
-        serde_json::from_str(include_str!("wave7_p03_message_ingress/cases.json")).expect("cases");
+        studio_json::from_str(include_str!("wave7_p03_message_ingress/cases.json")).expect("cases");
     for mut case in cases {
         // This corpus starts after HTTP request validation. Exercise its
         // largest valid attachment list; the shared request-schema and public
@@ -288,8 +288,8 @@ async fn python_send_and_receipt_corpus() {
                     .expect("advance event");
             } else {
                 results.push(match send(&store, step, &request_id).await {
-                    Ok(posted) => serde_json::from_slice(
-                        &serde_json::to_vec(&posted.receipt).expect("receipt bytes"),
+                    Ok(posted) => studio_json::from_slice(
+                        &studio_json::to_vec(&posted.receipt).expect("receipt bytes"),
                     )
                     .expect("receipt JSON"),
                     Err(coordination::CoordinationError::RequestResult(
@@ -361,10 +361,10 @@ async fn python_send_and_receipt_corpus() {
         if let Some((signature, raw)) = saved {
             let typed: studio_runtime_store::request_results::ResultEnvelope<
                 coordination::ManagedMessageReply,
-            > = serde_json::from_str(&raw).expect("stored managed reply decodes");
-            let original: Value = serde_json::from_str(&raw).expect("stored envelope");
+            > = studio_json::from_str(&raw).expect("stored managed reply decodes");
+            let original: Value = studio_json::from_str(&raw).expect("stored envelope");
             let rewritten: Value =
-                serde_json::from_slice(&serde_json::to_vec(&typed).expect("typed bytes"))
+                studio_json::from_slice(&studio_json::to_vec(&typed).expect("typed bytes"))
                     .expect("typed JSON");
             assert_eq!(rewritten, original, "{name}: stored reply round trip");
             assert_eq!(
@@ -373,7 +373,7 @@ async fn python_send_and_receipt_corpus() {
                 "{name}: exact signature"
             );
             let mut reply: Value =
-                serde_json::from_str::<Value>(&raw).expect("saved envelope")["reply"].clone();
+                studio_json::from_str::<Value>(&raw).expect("saved envelope")["reply"].clone();
             normalize_id(&mut reply, &request_id);
             assert_eq!(reply, old[0]["result"], "{name}: saved reply");
         }
@@ -410,7 +410,7 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
             .expect("logical state query")
             .query_map([], |row| row.get::<_, String>(0))
             .expect("logical state rows")
-            .map(|row| serde_json::from_str(&row.expect("JSON row")).expect("logical JSON"))
+            .map(|row| studio_json::from_str(&row.expect("JSON row")).expect("logical JSON"))
             .collect()
     };
     let pairs = |sql: &str| -> BTreeMap<String, Value> {
@@ -422,7 +422,7 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
             .expect("logical keyed rows")
             .map(|row| {
                 let (id, raw) = row.expect("keyed row");
-                (id, serde_json::from_str(&raw).expect("keyed JSON"))
+                (id, studio_json::from_str(&raw).expect("keyed JSON"))
             })
             .collect()
     };
@@ -1030,7 +1030,7 @@ async fn voice_delivery_prepares_workspace_admission() {
         .await
         .expect("accepted voice delivery");
         let receipt: Value =
-            serde_json::from_slice(&serde_json::to_vec(&receipt).expect("receipt bytes"))
+            studio_json::from_slice(&studio_json::to_vec(&receipt).expect("receipt bytes"))
                 .expect("receipt JSON");
         assert_eq!(receipt["status"], "queued", "{operation}");
         assert_eq!(
@@ -1163,7 +1163,7 @@ async fn late_operation_paths_use_the_prepared_canonical_relation() {
         } else {
             let receipt = result.expect("known relation permits admission").receipt;
             let receipt: Value =
-                serde_json::from_slice(&serde_json::to_vec(&receipt).expect("receipt bytes"))
+                studio_json::from_slice(&studio_json::to_vec(&receipt).expect("receipt bytes"))
                     .expect("receipt JSON");
             assert_eq!(receipt["status"], "queued");
             if scenario == "known_alias" {

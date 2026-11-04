@@ -6,8 +6,8 @@ use axum::{
     http::Request,
 };
 use futures_util::StreamExt;
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
 use tower::ServiceExt;
@@ -35,7 +35,7 @@ async fn call(app: &axum::Router, method: &str, body: Option<Value>) -> (u16, Va
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 
 async fn write(app: &axum::Router, body: Value) -> Value {
@@ -183,7 +183,7 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
                 let page = studio_runtime_services::entity_scope::resume(
                     tx,
                     None,
-                    Some(&serde_json::json!([collection]).to_string()),
+                    Some(&studio_json::json!([collection]).to_string()),
                     None,
                     None,
                     true,
@@ -197,7 +197,7 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
                     .ok_or(studio_runtime_store::StoreError::RecordContract(
                         "no work document",
                     ))?;
-                Ok(serde_json::from_str::<Value>(&raw)?["value"].clone())
+                Ok(studio_json::from_str::<Value>(&raw)?["value"].clone())
             })
             .unwrap();
     }
@@ -208,7 +208,7 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
                 [collection, id],
                 |row| row.get(0),
             )?;
-            Ok(serde_json::from_str::<Value>(&raw)?["value"].clone())
+            Ok(studio_json::from_str::<Value>(&raw)?["value"].clone())
         })
         .unwrap()
 }
@@ -283,7 +283,7 @@ async fn archive_http_skipped_first_reply_matches_replay_bytes() {
         assert_eq!(status, 200, "{}", String::from_utf8_lossy(&replay));
         assert_eq!(first, replay, "owner={owner:?}");
         assert_eq!(
-            serde_json::from_slice::<Value>(&first).unwrap()["archive"]["status"],
+            studio_json::from_slice::<Value>(&first).unwrap()["archive"]["status"],
             "skipped"
         );
     }
@@ -295,7 +295,7 @@ async fn archive_http_unknown_preserves_admission_and_pending_reply() {
     let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
     let (status, first) = accept_bytes(&app, &id).await;
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&first));
-    let first: Value = serde_json::from_slice(&first).unwrap();
+    let first: Value = studio_json::from_slice(&first).unwrap();
     assert!(
         first["archive"]["reason"]
             .as_str()
@@ -317,7 +317,7 @@ async fn archive_http_unknown_preserves_admission_and_pending_reply() {
     let (status, replay) = accept_bytes(&app, &id).await;
     assert_eq!(status, 400, "{}", String::from_utf8_lossy(&replay));
     assert_eq!(
-        serde_json::from_slice::<Value>(&replay).unwrap()["error"],
+        studio_json::from_slice::<Value>(&replay).unwrap()["error"],
         "The accepted archive outcome is pending"
     );
     let after = store

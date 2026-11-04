@@ -350,7 +350,7 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
         Orchestration(studio_runtime_store::multi_server_delivery::RemoteReply),
         Invite(studio_runtime_schema::multi_server_access::InvitationResponse),
         Access(studio_runtime_services::multi_server_pairing::AccessReply),
-        Other(serde_json::Value),
+        Other(studio_json::Value),
     }
     let effect = async move {
         if is_orchestration {
@@ -806,7 +806,7 @@ fn validate_response(
     method: &str,
     is_name: bool,
     is_management_invite: bool,
-    value: serde_json::Value,
+    value: studio_json::Value,
 ) -> Result<IncomingMultiServerResponse, crate::error::ApiError> {
     if is_management_invite {
         super::generated_json::<crate::generated::InvitationResponse>(value)
@@ -826,7 +826,7 @@ pub(super) fn failure(error: AccessError) -> Response {
     match error {
         AccessError::Refused { message, code, .. } => (
             status,
-            Json(serde_json::json!({"error":message,"code":code})),
+            Json(studio_json::json!({"error":message,"code":code})),
         )
             .into_response(),
         AccessError::Stored { .. } | AccessError::Store(_) | AccessError::Sqlite(_) => {
@@ -879,7 +879,7 @@ mod tests {
     }
 
     use super::{IncomingMultiServerResponse, validate_response};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn signed_name_post_validates_identity_response() {

@@ -25,7 +25,7 @@ pub(crate) struct ServiceLayout {
 }
 
 pub(crate) fn service_layout() -> Result<ServiceLayout> {
-    Ok(serde_json::from_str(include_str!(
+    Ok(studio_json::from_str(include_str!(
         "../service-layout.json"
     ))?)
 }

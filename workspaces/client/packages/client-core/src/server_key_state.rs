@@ -1,6 +1,6 @@
 //! Permissive persisted vault: malformed legacy values are checked when accessed.
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(untagged)]
@@ -306,7 +306,7 @@ impl VaultState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn serde_vault_preserves_partial_invalid_and_opaque_fields() {
@@ -319,8 +319,8 @@ mod tests {
             json!({"drafts":null,"servers":{"a":null,"b":42,"c":{"origin":null,"serverId":17,"clientId":"","receipt":null,"rejected":false,"future":[1,{"n":1.0}] }},"imports":null,"future":{"v":true}}),
             json!({"drafts":{"x":{"body":"exact body","privateKey":null}},"servers":false,"imports":[]}),
         ] {
-            let owner: VaultState = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(&owner).unwrap(), value);
+            let owner: VaultState = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(&owner).unwrap(), value);
             assert_eq!(owner.into_value(), value);
         }
     }

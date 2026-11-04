@@ -1,5 +1,5 @@
 //! Account transfer snapshot, replay and decision behavior.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::account_transfer::{Action, Command as Transition, Snapshot, Ticket};
 
 fn before_start(value: &Value) -> Result<(), String> {
@@ -9,8 +9,8 @@ fn before_start(value: &Value) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn payload(value: &Value) -> Box<serde_json::value::RawValue> {
-    serde_json::value::to_raw_value(value).expect("provider payload")
+fn payload(value: &Value) -> studio_json::OwnedRawJson {
+    studio_json::to_raw_value(value).expect("provider payload")
 }
 
 fn fixture() -> (Value, Value, Ticket) {
@@ -34,7 +34,7 @@ fn snapshot_record(
     agent: &Value,
 ) -> Snapshot {
     Snapshot::read(
-        &serde_json::to_string(op).expect("operation"),
+        &studio_json::to_string(op).expect("operation"),
         [("a".into(), agent.to_string())],
     )
     .expect("snapshot")
@@ -97,7 +97,7 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
         .get_mut("a")
         .expect("valid fixture")
         .submitted_at = studio_runtime_schema::queue_command::Field::Value(
-        serde_json::Number::from_f64(10.0).expect("valid fixture"),
+        studio_json::Number::from_f64(10.0).expect("valid fixture"),
     );
     let restarted = snapshot_record(&submitted.operation, &agent)
         .decide(Transition::Restart)
@@ -363,14 +363,14 @@ fn retry_only_resets_blocked_members() {
         assert_eq!(
             serde::Serialize::serialize(
                 &(result.operation.members.get("a").expect("valid fixture")),
-                serde_json::value::Serializer
+                studio_json::value::Serializer
             )
             .expect("valid fixture"),
             ready
         );
         let blocked = result.operation.members.get("b").expect("valid fixture");
         assert_eq!(
-            serde::Serialize::serialize(&(blocked.phase), serde_json::value::Serializer)
+            serde::Serialize::serialize(&(blocked.phase), studio_json::value::Serializer)
                 .expect("valid fixture"),
             phase
         );

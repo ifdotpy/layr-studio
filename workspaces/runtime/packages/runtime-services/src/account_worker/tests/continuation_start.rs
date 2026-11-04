@@ -77,7 +77,7 @@ async fn child_results(state: &State) -> Vec<(String, Value)> {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(id, text)| (id, serde_json::from_str(&text).expect("payload")))
+                .map(|(id, text)| (id, studio_json::from_str(&text).expect("payload")))
                 .collect())
         })
         .await
@@ -577,7 +577,7 @@ async fn limit_failure_refresh_publishes_account_entity_after_recording_failure_
         struct View {
             observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
         }
-        let entity: Entity = serde_json::from_str(&raw).unwrap();
+        let entity: Entity = studio_json::from_str(&raw).unwrap();
         assert_eq!(
             entity
                 .value

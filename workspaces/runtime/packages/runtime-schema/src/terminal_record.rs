@@ -1,8 +1,8 @@
 //! Typed persisted terminal record and its schema owner.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 use crate::stored_record::StoredJsonInteger;
 
@@ -27,8 +27,8 @@ pub struct TerminalRecord {
 }
 
 impl TerminalRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        serde_json::from_value(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        studio_json::from_value(value)
     }
     pub fn id(&self) -> &String {
         &self.id
@@ -51,12 +51,12 @@ impl TerminalRecord {
     }
     pub fn value(&self) -> Value {
         // Every member is already JSON data and the typed scalars are serializable.
-        serde_json::to_value(self).expect("terminal fields are JSON serializable")
+        studio_json::to_value(self).expect("terminal fields are JSON serializable")
     }
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.extra.get(key)
     }
-    pub fn set(&mut self, key: impl Into<String>, value: Value) -> Result<(), serde_json::Error> {
+    pub fn set(&mut self, key: impl Into<String>, value: Value) -> Result<(), studio_json::Error> {
         let key = key.into();
         if ["id", "agent", "status", "exitCode"].contains(&key.as_str()) {
             return Err(serde::de::Error::custom(
@@ -73,7 +73,7 @@ impl TerminalRecord {
 
 pub(crate) fn check_schema_parity() -> Result<(), String> {
     let generated = schema();
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-terminal-record.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -93,7 +93,7 @@ pub(crate) fn schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn generated_schema_and_serde_agree_on_terminal_shapes() {
@@ -113,7 +113,7 @@ mod tests {
             (json!({}), false),
         ] {
             assert_eq!(
-                serde_json::from_value::<TerminalRecord>(value.clone()).is_ok(),
+                studio_json::from_value::<TerminalRecord>(value.clone()).is_ok(),
                 valid,
                 "{value}"
             );

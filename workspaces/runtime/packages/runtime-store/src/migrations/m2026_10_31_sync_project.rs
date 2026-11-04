@@ -1,6 +1,6 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::project_record::ProjectRecord;
 
 pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -12,16 +12,16 @@ pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        if serde_json::from_str::<ProjectRecord>(&raw).is_ok() {
+        if studio_json::from_str::<ProjectRecord>(&raw).is_ok() {
             continue;
         }
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        let Ok(value) = studio_json::from_str::<Value>(&raw) else {
             continue;
         };
         if value.get("id").and_then(Value::as_str) != Some(id.as_str()) {
             continue;
         }
-        let normalized = serde_json::to_string(&value)?;
+        let normalized = studio_json::to_string(&value)?;
         if normalized != raw {
             tx.execute(
                 "UPDATE runtime_projects SET record=?2 WHERE id=?1",
@@ -51,7 +51,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let ProjectRecord::Live(project) = serde_json::from_str(&raw).unwrap() else {
+        let ProjectRecord::Live(project) = studio_json::from_str(&raw).unwrap() else {
             panic!("live project")
         };
         assert_eq!(project.path, "/new");
@@ -102,7 +102,7 @@ mod tests {
         for row in rows {
             let (id, raw) = row.unwrap();
             total += 1;
-            let valid = match serde_json::from_str::<ProjectRecord>(&raw) {
+            let valid = match studio_json::from_str::<ProjectRecord>(&raw) {
                 Ok(ProjectRecord::Live(project)) => project.id == id,
                 Ok(ProjectRecord::Removal(project)) => project.id == id,
                 Err(_) => false,

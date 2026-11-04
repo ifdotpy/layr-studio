@@ -1,4 +1,4 @@
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_services::account_driver::{
     AccountDriver, AuthMetadata, AuthProfile, AuthStatus, ProviderAuthReader,
 };
@@ -24,7 +24,7 @@ fn metadata(email: &str) -> AuthMetadata {
 fn register_refresh_and_conflict_without_credential_access() {
     let dir = tempfile::tempdir().expect("valid fixture");
     let path = dir.path().join("registry.json");
-    std::fs::write(&path,serde_json::to_vec(&json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"logins":{},"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/fixture/codex","label":"Codex","source":"Local profile","status":"signedOut"}}})).expect("valid fixture")).expect("valid fixture");
+    std::fs::write(&path,studio_json::to_vec(&json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"logins":{},"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/fixture/codex","label":"Codex","source":"Local profile","status":"signedOut"}}})).expect("valid fixture")).expect("valid fixture");
     let driver = AccountDriver::open_with_reader(&path, NoProbe).expect("valid fixture");
     let options = json!({"binaryPath":"/fixture/scripted-claude","configDir":"/fixture/config"})
         .as_object()
@@ -75,7 +75,7 @@ fn register_refresh_and_conflict_without_credential_access() {
 
 fn organization_metadata(org: &str, account: Option<&str>) -> AuthMetadata {
     studio_runtime_services::account_driver::claude::auth_metadata_from_output(
-        &serde_json::to_vec(&json!({"loggedIn":true,"authMethod":"claude.ai",
+        &studio_json::to_vec(&json!({"loggedIn":true,"authMethod":"claude.ai",
             "email":"fixture@example.test","subscriptionType":"max",
             "orgId":org,"orgName":"Fixture organization","accountUuid":account}))
         .expect("Claude status serializes"),
@@ -102,7 +102,7 @@ fn same_email_two_organizations_have_different_credential_identities() {
 fn fixture() -> (
     tempfile::TempDir,
     AccountDriver<NoProbe>,
-    serde_json::Map<String, serde_json::Value>,
+    studio_json::Map<String, studio_json::Value>,
 ) {
     let dir = tempfile::tempdir().expect("temporary account directory creates");
     let path = dir.path().join("registry.json");
@@ -277,7 +277,7 @@ fn public_organization_metadata_keeps_pins_and_excludes_private_identity() {
         json!(&account.organization_mismatch)["observed"],
         json!({"name":"Observed organization","idSuffix":"87654321"})
     );
-    let public = serde_json::to_string(account).expect("public account serializes");
+    let public = studio_json::to_string(account).expect("public account serializes");
     for secret in [
         "_credentialIdentity",
         "_organizationName",
@@ -302,15 +302,15 @@ fn public_organization_metadata_keeps_pins_and_excludes_private_identity() {
 #[test]
 fn public_ui_contracts_match_persisted_validators() {
     // OpenAPI owns these public shapes. Check each persisted validator copy.
-    let public: serde_json::Value =
-        serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+    let public: studio_json::Value =
+        studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
             .expect("OpenAPI schema parses");
-    let accounts: serde_json::Value = serde_json::from_str(
+    let accounts: studio_json::Value = studio_json::from_str(
         &include_str!("../../runtime-schema/src/schemas/account-registry.schema.json")
             .replace("#/$defs/", "#/components/schemas/"),
     )
     .expect("account validator parses");
-    let limits: serde_json::Value = serde_json::from_str(
+    let limits: studio_json::Value = studio_json::from_str(
         &include_str!("../../runtime-schema/src/schemas/workspace-usage-limits.schema.json")
             .replace("#/$defs/", "#/components/schemas/"),
     )

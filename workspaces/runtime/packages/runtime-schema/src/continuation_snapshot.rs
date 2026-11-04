@@ -5,8 +5,8 @@ use crate::{
     shared_values::MAX_SAFE_INTEGER,
 };
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
-use serde_json::{Number, Value};
 use std::{borrow::Cow, collections::BTreeMap};
+use studio_json::{Number, Value};
 
 /// A JSON string limited in Unicode code points.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -408,7 +408,7 @@ pub(crate) fn capacity_schema() -> Value {
     schemars::schema_for!(CapacityContinuation).to_value()
 }
 pub(crate) fn check_capacity_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-capacity-continuation.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -421,7 +421,7 @@ pub(crate) fn check_capacity_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn continuation_record_owners_preserve_numbers_and_refuse_capacity_extensions() {
@@ -441,14 +441,14 @@ mod tests {
         let text = include_str!("schemas/persisted-continuation-snapshot.schema.json");
         assert_eq!(
             capacity_schema(),
-            serde_json::from_str::<Value>(include_str!(
+            studio_json::from_str::<Value>(include_str!(
                 "schemas/persisted-capacity-continuation.schema.json"
             ))
             .expect("capacity schema")
         );
-        let openapi: Value = serde_json::from_slice(crate::OPENAPI).expect("openapi");
+        let openapi: Value = studio_json::from_slice(crate::OPENAPI).expect("openapi");
         let registry = crate::registry_for_document(&openapi).expect("schema registry");
-        let schema: Value = serde_json::from_str(text).expect("schema");
+        let schema: Value = studio_json::from_str(text).expect("schema");
         let samples = [
             json!(null),
             json!(true),
@@ -473,22 +473,22 @@ mod tests {
             (
                 "ROOT",
                 json!({"agent":{"id":"x","rootId":"x","epoch":0,"status":"x","provider":"codex"}}),
-                |v| serde_json::from_value::<ContinuationSnapshotRecord>(v).is_ok(),
+                |v| studio_json::from_value::<ContinuationSnapshotRecord>(v).is_ok(),
             ),
             (
                 "CapacityContinuation",
                 json!({"id":"x","accountKey":"x","threadId":"x","epoch":0,"turnId":"x","status":"scheduled","cause":"serverOverloaded","cwd":"","settings":{},"attempt":0,"maxAttempts":0}),
-                |v| serde_json::from_value::<CapacityContinuation>(v).is_ok(),
+                |v| studio_json::from_value::<CapacityContinuation>(v).is_ok(),
             ),
             (
                 "ContinuationAgent",
                 json!({"id":"x","rootId":"x","epoch":0,"status":"x","provider":"codex"}),
-                |v| serde_json::from_value::<ContinuationAgent>(v).is_ok(),
+                |v| studio_json::from_value::<ContinuationAgent>(v).is_ok(),
             ),
             (
                 "UsageContinuation",
                 json!({"id":"x","accountKey":"x","threadId":"x","epoch":0,"turnId":"x","status":"scheduled","failedAt":0}),
-                |v| serde_json::from_value::<UsageContinuation>(v).is_ok(),
+                |v| studio_json::from_value::<UsageContinuation>(v).is_ok(),
             ),
         ];
         let mut enum_objects_accepted = Vec::new();

@@ -56,9 +56,9 @@ export function collector() {
     }
     let rule = code.slice(8);
     if (rule === "disallowed_methods") {
-      if (diagnostic.message.includes("serde_json::from_value"))
+      if (diagnostic.message.includes("studio_json::from_value"))
         rule = "from_value";
-      else if (diagnostic.message.includes("serde_json::to_value"))
+      else if (diagnostic.message.includes("studio_json::to_value"))
         rule = "to_value";
       else {
         const span = diagnostic.spans.find(
@@ -110,7 +110,8 @@ export function collector() {
     const match = {
       rule,
       file,
-      text: `${rule} ${text}`,
+      // Preserve existing ratchet fingerprints across the facade path migration.
+      text: `${rule} ${text.replaceAll("studio_json::", "serde_json::")}`,
       message: diagnostic.message,
       start,
       end,

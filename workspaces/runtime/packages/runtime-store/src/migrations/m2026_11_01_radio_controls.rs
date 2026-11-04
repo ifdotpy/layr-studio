@@ -1,7 +1,7 @@
 //! Upgrade the controls of existing projected radio rooms.
 use crate::{StoreResult, SyncDocumentsRepository};
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::{radio_controls::RadioControls, room_record::Status};
 
 #[allow(clippy::disallowed_methods)] // Preserve the stored envelope while adding the typed projection.
@@ -13,12 +13,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (id, payload) in rows {
-        let envelope: Value = serde_json::from_str(&payload)?;
+        let envelope: Value = studio_json::from_str(&payload)?;
         let mut room = envelope["value"].clone();
         let radio = &mut room["radio"];
-        let status: Status = serde_json::from_value(radio["status"].clone())?;
+        let status: Status = studio_json::from_value(radio["status"].clone())?;
         radio["controls"] =
-            serde_json::to_value(RadioControls::derive(status, radio["active"].is_object()))?;
+            studio_json::to_value(RadioControls::derive(status, radio["active"].is_object()))?;
         SyncDocumentsRepository::put_entity(tx, "room", &id, room, false)?;
     }
     Ok(())

@@ -38,7 +38,7 @@ pub struct DiscoveryIdentity {
 struct AccessProtocol;
 impl<'de> serde::Deserialize<'de> for AccessProtocol {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let number = <serde_json::Number as serde::Deserialize>::deserialize(deserializer)?;
+        let number = <studio_json::Number as serde::Deserialize>::deserialize(deserializer)?;
         if number.as_f64() == Some(ACCESS_PROTOCOL_VERSION as f64) {
             Ok(Self)
         } else {
@@ -133,7 +133,7 @@ impl InviteStatus {
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(transparent)]
-pub struct NonNegativeNumber(serde_json::Number);
+pub struct NonNegativeNumber(studio_json::Number);
 impl schemars::JsonSchema for NonNegativeNumber {
     fn inline_schema() -> bool {
         true
@@ -150,9 +150,9 @@ impl NonNegativeNumber {
         self.0.as_f64()
     }
 }
-impl TryFrom<serde_json::Number> for NonNegativeNumber {
+impl TryFrom<studio_json::Number> for NonNegativeNumber {
     type Error = &'static str;
-    fn try_from(value: serde_json::Number) -> Result<Self, Self::Error> {
+    fn try_from(value: studio_json::Number) -> Result<Self, Self::Error> {
         if value.as_f64().is_some_and(|number| number >= 0.0) {
             Ok(Self(value))
         } else {
@@ -163,7 +163,7 @@ impl TryFrom<serde_json::Number> for NonNegativeNumber {
 
 impl<'de> serde::Deserialize<'de> for NonNegativeNumber {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = <serde_json::Number as serde::Deserialize>::deserialize(deserializer)?;
+        let value = <studio_json::Number as serde::Deserialize>::deserialize(deserializer)?;
         Self::try_from(value).map_err(serde::de::Error::custom)
     }
 }
@@ -183,7 +183,7 @@ impl schemars::JsonSchema for InviteTokenHash {
     }
 }
 
-pub(crate) fn invite_schema() -> serde_json::Value {
+pub(crate) fn invite_schema() -> studio_json::Value {
     schemars::schema_for!(PersistedAccessInvite).to_value()
 }
 impl TryFrom<String> for InviteTokenHash {
@@ -230,35 +230,35 @@ impl PersistedAccessInvite {
 }
 
 /// The signed transport mutation root is distinct from the deterministic message ID.
-pub(crate) fn refresh_openapi(openapi: &mut serde_json::Value) {
+pub(crate) fn refresh_openapi(openapi: &mut studio_json::Value) {
     for name in ["FederationAck", "FederationAckResult"] {
         let ack = &mut openapi["components"]["schemas"][name];
-        ack["properties"]["requestId"] = serde_json::json!({"type":"string","format":"uuid"});
+        ack["properties"]["requestId"] = studio_json::json!({"type":"string","format":"uuid"});
         if let Some(required) = ack["required"].as_array_mut()
             && !required.iter().any(|field| field == "requestId")
         {
-            required.push(serde_json::json!("requestId"));
+            required.push(studio_json::json!("requestId"));
         }
     }
     let schema = &mut openapi["components"]["schemas"]["SignedEnvelope"];
-    schema["properties"]["requestId"] = serde_json::json!({"type":"string","format":"uuid","description":"UUIDv7 mutation root, issued once and retained across delivery retries."});
+    schema["properties"]["requestId"] = studio_json::json!({"type":"string","format":"uuid","description":"UUIDv7 mutation root, issued once and retained across delivery retries."});
     if let Some(required) = schema["required"].as_array_mut()
         && !required.iter().any(|field| field == "requestId")
     {
-        required.push(serde_json::json!("requestId"));
+        required.push(studio_json::json!("requestId"));
     }
     let operation = &mut openapi["components"]["schemas"]["ServerOperationRequest"];
-    operation["properties"]["operation"] = serde_json::json!({"type":"array","items":{"type":"string"},"description":"Scoped suboperation tuple; empty for a single-step request."});
+    operation["properties"]["operation"] = studio_json::json!({"type":"array","items":{"type":"string"},"description":"Scoped suboperation tuple; empty for a single-step request."});
     if let Some(required) = operation["required"].as_array_mut()
         && !required.iter().any(|field| field == "operation")
     {
-        required.push(serde_json::json!("operation"));
+        required.push(studio_json::json!("operation"));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn signing_domain_names_the_protocol_version() {
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn discovery_view_tracks_schema_fields_and_valid_formats() {
-        let document: Value = serde_json::from_slice(crate::OPENAPI).unwrap();
+        let document: Value = studio_json::from_slice(crate::OPENAPI).unwrap();
         let schema = &document["components"]["schemas"]["DiscoveryIdentity"];
         let expected = [
             "autoPair",
@@ -344,7 +344,7 @@ mod tests {
                 "{field}"
             );
             assert!(
-                serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
+                studio_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
                     bad
                 )
                 .is_err(),
@@ -357,7 +357,7 @@ mod tests {
                 "missing {field}"
             );
             assert!(
-                serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
+                studio_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
                     missing
                 )
                 .is_err(),
@@ -368,14 +368,14 @@ mod tests {
             let mut input = valid.clone();
             input["protocol"] = protocol;
             assert!(crate::validate("DiscoveryIdentity", &input).unwrap());
-            assert!(serde_json::from_value::<super::DiscoveryIdentity>(input).is_ok());
+            assert!(studio_json::from_value::<super::DiscoveryIdentity>(input).is_ok());
         }
         assert!(!crate::validate("DiscoveryIdentity", &json!([])).unwrap());
         let mut bad_proof = valid.clone();
         bad_proof["proof"] = json!(null);
         assert!(!crate::validate("DiscoveryIdentity", &bad_proof).unwrap());
         assert!(
-            serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
+            studio_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
                 bad_proof
             )
             .is_err()
@@ -384,7 +384,7 @@ mod tests {
         extra["unexpected"] = json!(true);
         assert!(!crate::validate("DiscoveryIdentity", &extra).unwrap());
         assert!(
-            serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(extra)
+            studio_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(extra)
                 .is_err()
         );
     }
@@ -395,11 +395,11 @@ mod tests {
         assert!(crate::validate("PersistedAccessInvite", &valid).unwrap());
         let mut invite: super::PersistedAccessInvite =
             serde::Deserialize::deserialize(&valid).unwrap();
-        assert_eq!(serde_json::to_value(&invite).unwrap(), valid);
+        assert_eq!(studio_json::to_value(&invite).unwrap(), valid);
         invite.mark_used();
         let mut expected = valid;
         expected["status"] = json!("used");
-        assert_eq!(serde_json::to_value(invite).unwrap(), expected);
+        assert_eq!(studio_json::to_value(invite).unwrap(), expected);
         for (field, invalid) in [
             ("status", json!("unknown")),
             ("expires", json!(-1)),

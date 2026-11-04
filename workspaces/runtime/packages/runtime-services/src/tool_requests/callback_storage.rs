@@ -26,7 +26,7 @@ pub fn get_callback<T: DeserializeOwned>(
         )
         .optional()?;
     raw.map(|raw| {
-        serde_json::from_str(&raw)
+        studio_json::from_str(&raw)
             .map_err(studio_runtime_store::StoreError::from)
             .map_err(Into::into)
     })
@@ -43,7 +43,7 @@ pub fn put_callback<T: Serialize>(
         task: &'a CallbackTask<T>,
         kind: ToolRequestKind,
     }
-    let record = serde_json::to_string(&StoredCallback {
+    let record = studio_json::to_string(&StoredCallback {
         task,
         kind: ToolRequestKind::ProviderCallback,
     })

@@ -72,19 +72,19 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     })?;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
-            serde_json::from_str(&raw)?;
+        let mut record: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+            studio_json::from_str(&raw)?;
         for field in OPTIONAL_FIELDS {
             if record
                 .get(*field)
-                .is_some_and(|value| value.get() == "null")
+                .is_some_and(|value| value.as_str() == "null")
             {
                 record.remove(*field);
             }
         }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![studio_json::to_string(&record)?, id],
         )?;
     }
     Ok(())
@@ -159,7 +159,7 @@ mod tests {
         let record: String = tx
             .query_row("SELECT record FROM runtime_agents", [], |r| r.get(0))
             .unwrap();
-        let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+        let record: studio_json::Value = studio_json::from_str(&record).unwrap();
         for field in ["name", "deletedAt", "turnEpoch"] {
             assert!(record.get(field).is_none(), "{field}");
         }
@@ -192,8 +192,8 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        let nulls: serde_json::Value = serde_json::from_str(&nulls).unwrap();
-        let values: serde_json::Value = serde_json::from_str(&values).unwrap();
+        let nulls: studio_json::Value = studio_json::from_str(&nulls).unwrap();
+        let values: studio_json::Value = studio_json::from_str(&values).unwrap();
         assert!(
             nulls["lazyAccountTransfer"]["sourceState"]
                 .get("model")

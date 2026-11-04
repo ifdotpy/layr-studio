@@ -1,9 +1,9 @@
 //! Read-only projections of startup-loaded account and usage state.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
+use studio_json::{Map, Value};
 use studio_runtime_providers::ProviderKind;
 use thiserror::Error;
 
@@ -20,7 +20,7 @@ fn limits_violation(value: &Value) -> Result<Option<(String, String)>, ()> {
             .to_owned(),
         value.clone(),
     );
-    let wrapped = serde_json::json!({"rateLimitsByAccount": snapshots});
+    let wrapped = studio_json::json!({"rateLimitsByAccount": snapshots});
     studio_runtime_schema::first_error(
         "workspace-usage-limits/UsageLimitsWorkspaceEnvelope",
         &wrapped,
@@ -222,7 +222,7 @@ pub struct PublicThrottleFields {
 pub enum PublicNumber {
     #[default]
     Missing,
-    Number(serde_json::Number),
+    Number(studio_json::Number),
     Other(Value),
 }
 impl PublicNumber {
@@ -529,11 +529,11 @@ impl AccountPolicyState {
         self.limits
             .get(account_key)
             .map(|value| {
-                serde::Serialize::serialize(&(value), serde_json::value::Serializer)
+                serde::Serialize::serialize(&(value), studio_json::value::Serializer)
                     .expect("typed limits serialize")
             })
             .unwrap_or_else(
-                || serde_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
+                || studio_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
             )
     }
 
@@ -767,7 +767,7 @@ fn registry_error(pointer: &str, reason: &'static str) -> AccountPolicyError {
 #[cfg(test)]
 mod tests {
     use super::{AccountPolicyError, AccountPolicyState};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     const REGISTRY: &[u8] = br#"{"version":2,"defaultAccountKey":"default","accounts":{"z":{"id":"z","provider":"codex","home":"/z","label":"Z","source":"Codex CLI","status":"ready"},"default":{"id":"default","provider":"codex","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{"login-r":{"requestId":"login-r","accountKey":"z","status":"ready","createdAt":1.0}}}"#;
 
@@ -784,7 +784,7 @@ mod tests {
                 .created_at
                 .as_ref()
                 .and_then(Option::as_ref)
-                .and_then(serde_json::Number::as_f64),
+                .and_then(studio_json::Number::as_f64),
             Some(1.0)
         );
         assert!(state.has_account("default"));
