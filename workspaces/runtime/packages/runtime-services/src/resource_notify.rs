@@ -224,7 +224,7 @@ fn merge_live_events(events: &mut VecDeque<LiveEvent>) {
                     {
                         Some(queued)
                     }
-                    _ => None,
+                    LiveEvent::Delta(_) | LiveEvent::Progress(_) => None,
                 });
                 if let Some(earlier) = earlier
                     && continues(earlier, next)
