@@ -188,8 +188,12 @@ async fn transfer(
             .as_secs_f64();
         // An idle Claude chat moves between Claude accounts of this server by a
         // file copy and one transaction; other chats use the transfer flow.
-        let catalog = state.model_catalog.clone();
-        let home = move |account: &str| catalog.account_profile(account).map(|(home, _)| home);
+        let homes: std::collections::BTreeMap<String, String> = accounts
+            .accounts
+            .iter()
+            .filter_map(|row| Some((row.id.as_str()?.to_owned(), row.home.as_str()?.to_owned())))
+            .collect();
+        let home = move |account: &str| homes.get(account).cloned();
         let simple = if target_provider == ProviderKind::Claude.key() {
             studio_runtime_services::simple_move::move_claude_chat(
                 &store,
