@@ -241,6 +241,7 @@ import {
   verifyToolProof,
   studioToolCatalog,
   exactTurnTools,
+  moveExportBlocked,
 } from "./move.ts";
 
 import {
@@ -3249,10 +3250,8 @@ async function handle(
     case "claude/moveExport": {
       const { method, params: p } = request;
       const s = await session(p.threadId);
-      if (queries.get(s.id)?.turn || queries.get(s.id)?.tasks.size)
-        throw new Error(
-          "Finish the Claude turn and background tasks before a move",
-        );
+      if (moveExportBlocked(queries.get(s.id)))
+        throw new Error("Finish the Claude turn before a move");
       const proof = await proofOptions(
         s,
         await savedPromptProof(
