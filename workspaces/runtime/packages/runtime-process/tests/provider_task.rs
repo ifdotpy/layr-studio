@@ -1,7 +1,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 use crate::process_support as support;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 use studio_runtime_process::{provider_seam::*, provider_task::SupervisorProviderTaskFactory, *};
 use studio_runtime_providers::{DecodedJournalPayload, Frame, RequestId, decode_journal_entry};
@@ -38,7 +38,7 @@ impl Peer {
             }
             Err(error) => panic!("provider peer read failed: {error}"),
         };
-        (count != 0).then(|| serde_json::from_str(&line).unwrap())
+        (count != 0).then(|| studio_json::from_str(&line).unwrap())
     }
     async fn read(&mut self) -> Option<Value> {
         Self::read_from(&mut self.commands).await
@@ -143,7 +143,7 @@ impl Peer {
         let handshake: Value = {
             let mut line = String::new();
             events.read_line(&mut line).await.unwrap();
-            serde_json::from_str(&line).unwrap()
+            studio_json::from_str(&line).unwrap()
         };
         assert_eq!(handshake["protocol"], 3);
         assert_eq!(

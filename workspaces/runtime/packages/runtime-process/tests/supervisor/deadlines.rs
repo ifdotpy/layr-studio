@@ -16,7 +16,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, Arc<Supervisor>) {
         children: Mutex::new(BTreeMap::new()),
         active_children: AtomicUsize::new(0),
         ownership: Mutex::new(Ownership::default()),
-        recovery: Mutex::new(serde_json::from_str(r#"{"blocked":null}"#).unwrap()),
+        recovery: Mutex::new(studio_json::from_str(r#"{"blocked":null}"#).unwrap()),
         connections: AtomicUsize::new(1),
     });
     (root, supervisor)
@@ -187,7 +187,7 @@ fn handshake_rejects_duplicate_fields_before_admission() {
     let (_root, supervisor) = fixture();
     let (mut peer, server) = UnixStream::pair().unwrap();
     peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let root = serde_json::to_string(&supervisor.root).unwrap();
+    let root = studio_json::to_string(&supervisor.root).unwrap();
     writeln!(
         peer,
         "{{\"protocol\":{SUPERVISOR_PROTOCOL_VERSION},\"protocol\":{SUPERVISOR_PROTOCOL_VERSION},\"stateDir\":{root},\"backendId\":\"fixture\"}}"
@@ -198,7 +198,7 @@ fn handshake_rejects_duplicate_fields_before_admission() {
     BufReader::new(&mut peer).read_line(&mut line).unwrap();
     drop(peer);
     worker.join().unwrap();
-    let response: Value = serde_json::from_str(&line).unwrap();
+    let response: Value = studio_json::from_str(&line).unwrap();
     assert_eq!(response["error"], "Invalid supervisor request");
 }
 
@@ -232,7 +232,7 @@ fn stalled_handshake_releases_connection_slot() {
     let mut reader = BufReader::new(peer);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
-    let error: Value = serde_json::from_str(&line).unwrap();
+    let error: Value = studio_json::from_str(&line).unwrap();
     assert_eq!(
         error["error"],
         "Supervisor handshake or frame deadline exceeded"
@@ -345,7 +345,7 @@ fn v2_wait_disconnect_preserves_child_and_shared_backend_owner() {
         let mut reader = std::io::BufReader::new(&mut client);
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
-        let response: Value = serde_json::from_str(&line).unwrap();
+        let response: Value = studio_json::from_str(&line).unwrap();
         drop(reader);
         (client, worker, done_rx, response)
     }
@@ -430,7 +430,7 @@ fn v2_wait_disconnect_preserves_child_and_shared_backend_owner() {
     std::io::BufReader::new(&mut control)
         .read_line(&mut line)
         .unwrap();
-    let status: Value = serde_json::from_str(&line).unwrap();
+    let status: Value = studio_json::from_str(&line).unwrap();
     assert_eq!(status["requestId"], 2);
     assert!(status["result"]["returnCode"].is_null());
 
@@ -618,7 +618,7 @@ fn empty_batch_queried_before_exit_commit_is_not_terminal_after_commit() {
 
 #[test]
 fn frame_trimming_cannot_hide_terminal_exit_or_succeed_with_oversized_first_event() {
-    use serde_json::value::RawValue;
+    use studio_json::OwnedRawJson as RawValue;
 
     let event = |sequence, kind, payload| crate::SupervisorEventV2 {
         sequence: crate::EventCursor(sequence),
@@ -648,7 +648,7 @@ fn frame_trimming_cannot_hide_terminal_exit_or_succeed_with_oversized_first_even
         ..result
     };
     let bytes = batch_response_with_limit(Some(1), 0, Some(2), result, frame_limit).unwrap();
-    let response: Value = serde_json::from_slice(&bytes).unwrap();
+    let response: Value = studio_json::from_slice(&bytes).unwrap();
     assert_eq!(response["result"]["events"].as_array().unwrap().len(), 1);
     assert_eq!(response["result"]["events"][0]["sequence"], 1);
     assert!(response["result"]["returnCode"].is_null());

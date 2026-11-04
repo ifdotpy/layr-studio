@@ -3,7 +3,7 @@
 use super::*;
 use crate::provider_shared::{request_frame, response_value};
 use crate::transport::{MAX_FRAME_BYTES, read_frame, write_frame};
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
@@ -25,8 +25,8 @@ fn journal_v2_protocol_embeds_raw_json_without_numeric_conversion() {
     drop(db);
     let events = journal.events_v2("raw", 0, generation, 1, 4096).unwrap();
     let event = SupervisorEventV2::from(events.into_iter().next().unwrap());
-    assert_eq!(event.payload.get(), raw);
-    let frame = serde_json::to_string(&event).unwrap();
+    assert_eq!(event.payload.as_str(), raw);
+    let frame = studio_json::to_string(&event).unwrap();
     assert!(frame.contains(raw));
 }
 
@@ -54,16 +54,16 @@ fn supervisor_action_display_preserves_wire_names() {
 
 #[test]
 fn frame_codec_round_trips_compact_json_and_preserves_extensions() {
-    let value = serde_json::json!({"action":"status","handle":"h","future":42});
+    let value = studio_json::json!({"action":"status","handle":"h","future":42});
     let mut encoded = Vec::new();
     write_frame(&mut encoded, &value).unwrap();
     let mut reader = Cursor::new(encoded);
-    let decoded: Value = serde_json::from_str(&read_frame(&mut reader).unwrap().unwrap()).unwrap();
+    let decoded: Value = studio_json::from_str(&read_frame(&mut reader).unwrap().unwrap()).unwrap();
     assert_eq!(decoded, value);
     let result: DetachedResult =
-        serde_json::from_value(serde_json::json!({"detached":true,"newField":7})).unwrap();
+        studio_json::from_value(studio_json::json!({"detached":true,"newField":7})).unwrap();
     assert_eq!(result.extra.get("newField"), Some(&Value::from(7)));
-    let encoded_again = serde_json::to_value(result).unwrap();
+    let encoded_again = studio_json::to_value(result).unwrap();
     assert_eq!(encoded_again["newField"], 7);
 }
 
@@ -80,13 +80,13 @@ fn typed_request_serialization_preserves_extensions_and_reserved_field_precedenc
             handle: SupervisorHandle("handle".to_owned()),
             operation_id: OperationId("operation".to_owned()),
             native_id: None,
-            message: serde_json::json!({"method":"initialize"}),
+            message: studio_json::json!({"method":"initialize"}),
             extra,
         },
     )
     .unwrap();
 
-    let request: Value = serde_json::from_slice(&frame[..frame.len() - 1]).unwrap();
+    let request: Value = studio_json::from_slice(&frame[..frame.len() - 1]).unwrap();
     assert_eq!(request["action"], "write");
     assert_eq!(request["requestId"], 17);
     assert_eq!(request["handle"], "handle");
@@ -139,7 +139,7 @@ fn malformed_or_conflicting_supervisor_error_is_unknown() {
 fn supervisor_response_preserves_raw_batch_payload() {
     let frame = r#"{"requestId":17,"result":{"events":[{"sequence":1,"generation":2,"kind":"stdout","payload":{"n":1}}],"returnCode":null,"backpressure":false,"stdoutReaderAlive":true,"stderrReaderAlive":true}}"#;
     let result = response_value::<NextBatchResult>(SupervisorAction::NextBatch, 17, frame).unwrap();
-    assert_eq!(result.events[0].payload.get(), "{\"n\":1}");
+    assert_eq!(result.events[0].payload.as_str(), "{\"n\":1}");
 }
 
 #[test]
@@ -180,12 +180,12 @@ fn contradictory_write_and_status_receipts_are_unknown() {
 
 #[test]
 fn event_payload_and_unknown_kind_round_trip() {
-    let event: SupervisorEvent = serde_json::from_value(serde_json::json!({
+    let event: SupervisorEvent = studio_json::from_value(studio_json::json!({
         "sequence": 2, "kind": "future-event", "payload": "{\"x\":1}", "generation": 4, "extension": true
     })).unwrap();
     assert_eq!(event.kind, EventKind::Unknown("future-event".into()));
     assert_eq!(event.payload["x"], 1);
-    let value = serde_json::to_value(event).unwrap();
+    let value = studio_json::to_value(event).unwrap();
     assert_eq!(value["kind"], "future-event");
     assert_eq!(value["extension"], true);
 }

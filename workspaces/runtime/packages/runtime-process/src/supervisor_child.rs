@@ -2,7 +2,7 @@
 use super::supervisor_daemon::{Error, Result, lock, now};
 use super::supervisor_identity::{RETRY, free_space, start_time};
 use process_wrap::std::{CommandWrap, ProcessGroup};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
@@ -275,7 +275,7 @@ impl OwnedChild {
         lock(&self.append_lock)
     }
     pub fn write(&self, message: &Value) -> Result<()> {
-        let mut bytes = serde_json::to_vec(message)?;
+        let mut bytes = studio_json::to_vec(message)?;
         bytes.push(b'\n');
         let (sender, receiver) = mpsc::sync_channel(1);
         self.writer.try_send((bytes, sender)).map_err(|_| {
@@ -301,7 +301,7 @@ impl OwnedChild {
                     "Child stdout frame exceeds journal capacity",
                 ));
             }
-            let mut value = serde_json::from_slice::<Value>(&bytes)
+            let mut value = studio_json::from_slice::<Value>(&bytes)
                 .unwrap_or_else(|_| json!({"supervisorRaw":String::from_utf8_lossy(&bytes)}));
             if value.get("method").is_some_and(Value::is_string) {
                 value["_studioSupervisorReceivedAt"] = json!(now()?);

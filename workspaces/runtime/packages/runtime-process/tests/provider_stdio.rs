@@ -510,7 +510,7 @@ async fn stalled_stdin_is_interrupted_by_the_exchange_deadline() {
         id: RequestId::Number(1),
         method: Method::ModelList,
         params: Some(
-            serde_json::json!({"padding":"x".repeat(capacity + BLOCKED_WRITE_OVERFLOW_BYTES)}),
+            studio_json::json!({"padding":"x".repeat(capacity + BLOCKED_WRITE_OVERFLOW_BYTES)}),
         ),
         fields: Default::default(),
     });
@@ -621,7 +621,7 @@ async fn cancellation_stops_the_entire_owned_process_group() {
                 descendant: u32,
             }
             let ready: GroupReady =
-                serde_json::from_value(serde_json::to_value(frame.fields).expect("ready fields"))
+                studio_json::from_value(studio_json::to_value(frame.fields).expect("ready fields"))
                     .expect("group ready frame");
             assert_eq!(ready.pid, parent);
             assert_eq!(ready.group, parent);

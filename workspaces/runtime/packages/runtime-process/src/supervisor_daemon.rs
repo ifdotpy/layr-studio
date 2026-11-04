@@ -9,7 +9,7 @@ use crate::{
     SUPERVISOR_PROTOCOL_VERSION, SupervisorEventV2, SupervisorHandshakeV2,
 };
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs::{self, OpenOptions},
@@ -51,7 +51,7 @@ pub enum Error {
     #[error(transparent)]
     Journal(#[from] JournalError),
     #[error("Invalid supervisor request")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     Protocol(#[from] studio_runtime_providers::supervisor_protocol::Refusal),
     #[error(
@@ -533,7 +533,7 @@ impl Supervisor {
                 if operation_id.starts_with("monitor:") {
                     Ok(self.journal.operation_status(&handle, &operation_id)?)
                 } else {
-                    Ok(serde_json::to_value(
+                    Ok(studio_json::to_value(
                         self.journal
                             .provider_operation_status(&handle, &operation_id)?,
                     )?)
@@ -696,12 +696,12 @@ fn read_frame(
         bytes.extend_from_slice(&chunk[..count]);
         reader.consume(count);
         if end.is_some() {
-            return Ok(Some(serde_json::from_slice(&bytes)?));
+            return Ok(Some(studio_json::from_slice(&bytes)?));
         }
     }
 }
 fn write_frame(writer: &mut impl Write, value: &impl serde::Serialize) -> Result<()> {
-    serde_json::to_writer(&mut *writer, value)?;
+    studio_json::to_writer(&mut *writer, value)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
     Ok(())
@@ -753,7 +753,7 @@ async fn read_v2_frame(
         bytes.extend_from_slice(&available[..count]);
         reader.consume(count);
         if end.is_some() {
-            return Ok(Some(serde_json::from_slice(&bytes)?));
+            return Ok(Some(studio_json::from_slice(&bytes)?));
         }
     }
 }
@@ -807,7 +807,7 @@ fn batch_response_with_limit(
         result.return_code = exit_delivered(request_cursor, last_event_cursor, exit_sequence)
             .then_some(child_return_code)
             .flatten();
-        let bytes = serde_json::to_vec(&NextBatchResponse {
+        let bytes = studio_json::to_vec(&NextBatchResponse {
             request_id,
             result: &result,
         })?;
@@ -838,7 +838,7 @@ async fn v2_connection_loop(
                 .authorize_journal()
                 .map_err(Error::from)
                 .and_then(|()| {
-                    serde_json::from_value::<NextBatchRequestEnvelope>(raw).map_err(Error::from)
+                    studio_json::from_value::<NextBatchRequestEnvelope>(raw).map_err(Error::from)
                 }) {
                 Ok(envelope) if envelope.action == crate::SupervisorAction::NextBatch => {
                     match supervisor.child_slot(&envelope.request.handle.0, false) {
@@ -882,37 +882,37 @@ async fn v2_connection_loop(
                                         result,
                                     ) {
                                         Ok(bytes) => bytes,
-                                        Err(error) => serde_json::to_vec(
+                                        Err(error) => studio_json::to_vec(
                                             &json!({"requestId":request_id,"error":error.to_string()}),
                                         )?,
                                     }
                                 }
                                 Ok(None) => return Ok(()),
-                                Err(error) => serde_json::to_vec(
+                                Err(error) => studio_json::to_vec(
                                     &json!({"requestId":request_id,"error":error.to_string()}),
                                 )?,
                             }
                         }
-                        Ok(None) => serde_json::to_vec(
+                        Ok(None) => studio_json::to_vec(
                             &json!({"requestId":request_id,"error":"Unknown supervisor handle"}),
                         )?,
-                        Err(error) => serde_json::to_vec(
+                        Err(error) => studio_json::to_vec(
                             &json!({"requestId":request_id,"error":error.to_string()}),
                         )?,
                     }
                 }
-                Ok(_) => serde_json::to_vec(
+                Ok(_) => studio_json::to_vec(
                     &json!({"requestId":request_id,"error":"Invalid supervisor action"}),
                 )?,
                 Err(error) => {
-                    serde_json::to_vec(&json!({"requestId":request_id,"error":error.to_string()}))?
+                    studio_json::to_vec(&json!({"requestId":request_id,"error":error.to_string()}))?
                 }
             }
         } else {
             let worker = supervisor.clone();
             let command_capabilities = capabilities.clone();
             let result = crate::blocking_pool::spawn_blocking("supervisor/command", move || {
-                serde_json::from_value::<Request>(raw)
+                studio_json::from_value::<Request>(raw)
                     .map_err(Error::from)
                     .and_then(|request| worker.handle(request.command, &command_capabilities))
             })
@@ -924,7 +924,7 @@ async fn v2_connection_loop(
                     json!({"requestId":request_id,"error":error.to_string().chars().take(500).collect::<String>()})
                 }
             };
-            serde_json::to_vec(&response)?
+            studio_json::to_vec(&response)?
         };
         if bytes.len() + 1 > crate::transport::MAX_FRAME_BYTES {
             return Err(Error::Refused(
@@ -1034,7 +1034,7 @@ pub fn serve(root: &Path, wait_for_lease: bool) -> Result<()> {
                     Read::by_ref(&mut lease)
                         .take(4096)
                         .read_to_string(&mut text)?;
-                    let identity: SupervisorLease = serde_json::from_str(&text)?;
+                    let identity: SupervisorLease = studio_json::from_str(&text)?;
                     eprintln!("supervisor waiting for owner {}", identity.pid);
                     announced = true;
                 }
@@ -1048,7 +1048,7 @@ pub fn serve(root: &Path, wait_for_lease: bool) -> Result<()> {
         .take(4096)
         .read_to_string(&mut previous)?;
     if !previous.trim().is_empty() {
-        let identity: SupervisorLease = serde_json::from_str(&previous).map_err(|error| {
+        let identity: SupervisorLease = studio_json::from_str(&previous).map_err(|error| {
             if error.is_data() {
                 Error::Refused("The previous supervisor lease identity is invalid")
             } else {
@@ -1173,7 +1173,7 @@ mod lease_tests {
             pid: std::process::id(),
             start_time,
         };
-        std::fs::write(&lease_path, serde_json::to_vec(&lease).unwrap()).unwrap();
+        std::fs::write(&lease_path, studio_json::to_vec(&lease).unwrap()).unwrap();
         assert!(matches!(
             serve(root.path(), false),
             Err(Error::Refused(
@@ -1191,10 +1191,10 @@ mod lease_tests {
         };
         let mut encoded = Vec::new();
         write_frame(&mut encoded, &identity).unwrap();
-        let decoded: SupervisorLease = serde_json::from_slice(&encoded).unwrap();
+        let decoded: SupervisorLease = studio_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, identity);
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&encoded).unwrap(),
+            studio_json::from_slice::<studio_json::Value>(&encoded).unwrap(),
             json!({"pid":42,"startTime":"linux:boot:123"})
         );
         for value in [
@@ -1202,7 +1202,7 @@ mod lease_tests {
             json!({"pid":42,"startTime":null}),
             json!({"pid":42}),
         ] {
-            assert!(serde_json::from_value::<SupervisorLease>(value).is_err());
+            assert!(studio_json::from_value::<SupervisorLease>(value).is_err());
         }
     }
 }
@@ -1221,7 +1221,7 @@ mod recovery_tests {
             json!({"degraded":false,"fallbackReady":false,"blocked":null})
         );
         *lock(&supervisor.recovery).unwrap() =
-            serde_json::from_str(r#"{"degraded":true,"blocked":false,"extra":1}"#).unwrap();
+            studio_json::from_str(r#"{"degraded":true,"blocked":false,"extra":1}"#).unwrap();
         assert!(matches!(
             supervisor.handle(Command::FinishFallback, &capabilities),
             Err(Error::Refused(_))

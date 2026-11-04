@@ -247,3 +247,15 @@ impl Error {
         }
     }
 }
+
+impl Error {
+    #[inline]
+    pub fn is_io(&self) -> bool {
+        self.classify() == error::Category::Io
+    }
+
+    #[inline]
+    pub fn is_data(&self) -> bool {
+        self.classify() == error::Category::Data
+    }
+}

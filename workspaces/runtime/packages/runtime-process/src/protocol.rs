@@ -3,7 +3,7 @@ use std::io;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, value::RawValue};
+use studio_json::{Value, OwnedRawJson as RawValue};
 use strum::Display;
 pub use studio_runtime_providers::supervisor_protocol::NativeId;
 
@@ -112,7 +112,7 @@ pub enum SupervisorError {
     #[error("supervisor transport: {0}")]
     Io(#[from] io::Error),
     #[error("supervisor JSON: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("supervisor protocol mismatch: expected {expected}, received {received:?}: {detail}")]
     ProtocolMismatch {
         expected: u64,
@@ -289,7 +289,7 @@ pub struct SupervisorEventV2 {
     pub sequence: EventCursor,
     pub generation: Generation,
     pub kind: EventKind,
-    pub payload: Box<RawValue>,
+    pub payload: RawValue,
 }
 impl From<studio_runtime_store::supervisor_journal::StoredEvent> for SupervisorEventV2 {
     fn from(event: studio_runtime_store::supervisor_journal::StoredEvent) -> Self {
@@ -321,7 +321,7 @@ fn decode_event_payload<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Value, D::Error> {
     let encoded = String::deserialize(deserializer)?;
-    serde_json::from_str(&encoded).map_err(serde::de::Error::custom)
+    studio_json::from_str(&encoded).map_err(serde::de::Error::custom)
 }
 
 fn encode_event_payload<S: serde::Serializer>(
