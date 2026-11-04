@@ -6,6 +6,7 @@
 use studio_runtime_services::principal::CommandClass::{
     self, ChatControl, Federation, Host, OwnerOnly, Read, Spawn,
 };
+use studio_runtime_services::principal::Scope;
 
 /// `(method, OpenAPI path template, class)` of every non-safe operation.
 const ROUTES: &[(&str, &str, CommandClass)] = &[
@@ -108,6 +109,26 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/web-push/subscriptions", ChatControl),
     ("POST", "/api/work", ChatControl),
 ];
+
+/// Routes that settle a scoped answer of the permission table themselves. The edge
+/// refuses a scoped answer on any other route: without a row check, the handler would
+/// act for the caller on any target.
+const SETTLES: &[(&str, &str, Scope)] = &[
+    // `commands::authorize` checks the target rows.
+    ("POST", "/api/commands", Scope::Descendant),
+    ("POST", "/api/commands", Scope::LinkWorker),
+    ("POST", "/api/commands", Scope::PairedLead),
+    // The edge checks the `parent` of the request against the peer's links
+    // (`middleware::own_link_refusal`).
+    ("POST", "/api/agents", Scope::OwnLink),
+];
+
+/// True when the route `method template` settles `scope` itself.
+pub(crate) fn settles(method: &str, template: &str, scope: Scope) -> bool {
+    SETTLES
+        .iter()
+        .any(|(m, t, s)| *m == method && *t == template && *s == scope)
+}
 
 /// The class of an operation, given its method and OpenAPI path template. A write
 /// without a row has no class; the caller treats it as owner only.
