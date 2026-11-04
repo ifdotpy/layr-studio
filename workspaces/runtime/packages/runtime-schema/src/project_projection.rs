@@ -63,7 +63,7 @@ pub struct ProjectVault {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub disk: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub last_push: Field<serde_json::Number>,
+    pub last_push: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub prefix: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]

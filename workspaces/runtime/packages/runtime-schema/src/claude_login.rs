@@ -1,6 +1,6 @@
 //! Persisted Claude login wire records, including forward-compatible extensions.
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Number, Value};
+use studio_json::{Map, Number, Value};
 
 #[derive(Clone, Deserialize)]
 pub struct ClaudeLoginRecord {
@@ -150,15 +150,15 @@ fn optional_hash<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use sha2::{Digest, Sha256};
 
     #[test]
     fn login_schema_constraints_are_tracked() {
         let schema: Value =
-            serde_json::from_str(include_str!("schemas/persisted-claude-login.schema.json"))
+            studio_json::from_str(include_str!("schemas/persisted-claude-login.schema.json"))
                 .unwrap();
-        let digest = Sha256::digest(serde_json::to_vec(&schema).unwrap())
+        let digest = Sha256::digest(studio_json::to_vec(&schema).unwrap())
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect::<String>();
@@ -294,7 +294,7 @@ mod tests {
         values.push(v);
         for v in values {
             assert_eq!(
-                serde_json::from_value::<ClaudeLoginRecord>(v.clone()).is_ok(),
+                studio_json::from_value::<ClaudeLoginRecord>(v.clone()).is_ok(),
                 crate::validate("PersistedClaudeLoginRecord", &v).unwrap(),
                 "{v}"
             );

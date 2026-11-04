@@ -6,7 +6,7 @@ pub use persisted::parse_analytics_usage_row;
 use crate::provider_kind::ProviderKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 /// Disjoint billable token categories; reasoning is already included in output.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, JsonSchema)]
@@ -230,8 +230,13 @@ impl std::fmt::Display for UsageParseError {
     }
 }
 impl std::error::Error for UsageParseError {}
-impl From<serde_json::Error> for UsageParseError {
-    fn from(value: serde_json::Error) -> Self {
+impl From<studio_json::error::Error> for UsageParseError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self(value.to_string())
+    }
+}
+impl From<studio_json::Error> for UsageParseError {
+    fn from(value: studio_json::Error) -> Self {
         Self(value.to_string())
     }
 }
@@ -244,7 +249,7 @@ pub const CODEX_USAGE_SCHEMA: &str =
 /// New breakdown properties may be billable categories and require an accounting update.
 /// The vendored Codex schema above owns consumed property types and requiredness.
 pub fn codex_usage_schema_compatible(candidate: &Value) -> bool {
-    let Ok(owner) = serde_json::from_str::<Value>(CODEX_USAGE_SCHEMA) else {
+    let Ok(owner) = studio_json::from_str::<Value>(CODEX_USAGE_SCHEMA) else {
         return false;
     };
     for pointer in [
@@ -577,7 +582,7 @@ pub fn legacy_notice_identity(
     params: &Value,
 ) -> Option<Value> {
     let usage = params.get("tokenUsage")?.as_object()?;
-    Some(serde_json::json!([
+    Some(studio_json::json!([
         agent_id,
         account_key,
         "notice",
@@ -599,11 +604,11 @@ pub fn legacy_notice_response_association(params: &Value) -> Option<&str> {
 }
 
 /// OpenAPI fragments rendered from the accounting owner, including named leaf types.
-pub fn schemas() -> serde_json::Map<String, Value> {
+pub fn schemas() -> studio_json::Map<String, Value> {
     schemas_with_definitions_path("/components/schemas")
 }
 
-pub(crate) fn schemas_with_definitions_path(path: &'static str) -> serde_json::Map<String, Value> {
+pub(crate) fn schemas_with_definitions_path(path: &'static str) -> studio_json::Map<String, Value> {
     let mut generator = schemars::generate::SchemaSettings::draft2020_12()
         .for_serialize()
         .with(|s| s.definitions_path = path.into())
@@ -617,7 +622,7 @@ pub(crate) fn schemas_with_definitions_path(path: &'static str) -> serde_json::M
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     fn breakdown() -> Value {
         json!({"inputTokens":100,"cachedInputTokens":20,"cacheWriteInputTokens":5,"outputTokens":10,"reasoningOutputTokens":3,"totalTokens":110})
     }
@@ -724,7 +729,7 @@ mod tests {
     #[test]
     fn cache_write_1h_contract_validates_subset_and_reset() {
         let value = json!({"uncachedInput":1,"cacheReadInput":2,"cacheWriteInput":10,"cacheWriteInput1h":8,"output":3});
-        let tokens: UsageTokens = serde_json::from_value(value.clone()).expect("one-hour subset");
+        let tokens: UsageTokens = studio_json::from_value(value.clone()).expect("one-hour subset");
         assert_eq!(tokens.total(), Some(16));
         assert_eq!(
             UsageTokens::new(1, 2, 10, Some(8), 3, None).expect("checked tokens"),
@@ -733,12 +738,12 @@ mod tests {
         assert!(UsageTokens::new(1, 2, 10, Some(11), 3, None).is_err());
         let mut decreased = value.clone();
         decreased["cacheWriteInput1h"] = json!(7);
-        let decreased: UsageTokens = serde_json::from_value(decreased).expect("decreased split");
+        let decreased: UsageTokens = studio_json::from_value(decreased).expect("decreased split");
         assert!(decreased.decreased_from(&tokens));
         for invalid in [json!(11), json!(-1), json!(0.5)] {
             let mut value = value.clone();
             value["cacheWriteInput1h"] = invalid;
-            assert!(serde_json::from_value::<UsageTokens>(value).is_err());
+            assert!(studio_json::from_value::<UsageTokens>(value).is_err());
         }
     }
     #[test]
@@ -773,7 +778,7 @@ mod tests {
             .expect("typed finality gap");
             assert!(matches!(observation, UsageObservation::Gap { .. }));
             assert_eq!(
-                serde_json::to_value(observation).expect("gap wire")["reason"],
+                studio_json::to_value(observation).expect("gap wire")["reason"],
                 reason
             );
         }
@@ -806,12 +811,12 @@ mod tests {
             .into_generator()
             .into_root_schema_for::<CodexThreadTokenUsageUpdatedNotification>()
             .to_value();
-        let text = serde_json::to_string(&generated)
+        let text = studio_json::to_string(&generated)
             .expect("schema")
             .replace("CodexThreadTokenUsage", "ThreadTokenUsage")
             .replace("CodexTokenUsageBreakdown", "TokenUsageBreakdown");
-        generated = serde_json::from_str(&text).expect("renamed schema");
-        let mut vendor: Value = serde_json::from_str(CODEX_USAGE_SCHEMA).expect("vendor schema");
+        generated = studio_json::from_str(&text).expect("renamed schema");
+        let mut vendor: Value = studio_json::from_str(CODEX_USAGE_SCHEMA).expect("vendor schema");
         normalize(&mut generated);
         normalize(&mut vendor);
         assert_eq!(
@@ -824,7 +829,7 @@ mod tests {
 #[cfg(test)]
 mod legacy_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn old_claude_totals_do_not_invent_categories_or_accept_invalid_typed_usage() {
         let params = json!({"tokenUsage":{"total":{"totalTokens":25},"last":{"totalTokens":5},"modelContextWindow":1000}});

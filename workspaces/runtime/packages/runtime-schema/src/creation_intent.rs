@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 mod review_state_tests {
     #[test]
     fn reviewer_spawn_retains_review_state() {
-        let value = serde_json::json!({"role":"reviewer","review_state":"01a1a137-e462-7190-8be9-3f0f87ff4513"});
+        let value = studio_json::json!({"role":"reviewer","review_state":"01a1a137-e462-7190-8be9-3f0f87ff4513"});
         let intent: super::CreationIntent =
-            serde_json::from_value(value.clone()).expect("review target is accepted");
-        assert_eq!(serde_json::to_value(intent).unwrap(), value);
+            studio_json::from_value(value.clone()).expect("review target is accepted");
+        assert_eq!(studio_json::to_value(intent).unwrap(), value);
     }
 }
 
@@ -226,8 +226,8 @@ pub struct CreationIntent {
 }
 
 /// Advertise the reviewer target from the creation intent's field owner.
-pub fn review_state_tool_schema() -> serde_json::Value {
-    serde_json::json!({"type":"string", "description":"Exact native Layr state ID for a reviewer."})
+pub fn review_state_tool_schema() -> studio_json::Value {
+    studio_json::json!({"type":"string", "description":"Exact native Layr state ID for a reviewer."})
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -276,21 +276,21 @@ mod tests {
             r#"{"account_key":"default","daybreak_enabled":null,"effort":null,"fast_mode":null,"review_defaults":null,"worker_defaults":null}"#,
             r#"{"account_key":"default","effort":"high"}"#,
         ] {
-            let stored: CreationIntent = serde_json::from_str(raw).unwrap();
-            let encoded = serde_json::to_string(&stored).unwrap();
+            let stored: CreationIntent = studio_json::from_str(raw).unwrap();
+            let encoded = studio_json::to_string(&stored).unwrap();
             assert_eq!(encoded, raw);
-            let replay: CreationIntent = serde_json::from_str(&encoded).unwrap();
+            let replay: CreationIntent = studio_json::from_str(&encoded).unwrap();
             assert_eq!(stored, replay);
         }
-        let absent: CreationIntent = serde_json::from_str("{}").unwrap();
-        let cleared: CreationIntent = serde_json::from_str(r#"{"effort":null}"#).unwrap();
+        let absent: CreationIntent = studio_json::from_str("{}").unwrap();
+        let cleared: CreationIntent = studio_json::from_str(r#"{"effort":null}"#).unwrap();
         assert_ne!(absent, cleared);
     }
 
     #[test]
     fn agent_role_matches_openapi_and_its_wire_names() {
-        let openapi: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let openapi: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let roles = [
             AgentRole::Orchestrator,
             AgentRole::Implementer,
@@ -299,11 +299,11 @@ mod tests {
         let names: Vec<&str> = roles.iter().map(|role| role.as_str()).collect();
         assert_eq!(
             openapi["components"]["schemas"]["AgentRole-Input"]["enum"],
-            serde_json::json!(names)
+            studio_json::json!(names)
         );
         for role in roles {
             assert_eq!(
-                serde_json::to_string(&role).unwrap(),
+                studio_json::to_string(&role).unwrap(),
                 format!("\"{}\"", role.as_str())
             );
         }

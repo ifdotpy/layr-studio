@@ -34,46 +34,46 @@ pub struct ReviewDefaultsDto {
 }
 
 fn object(
-    value: &mut serde_json::Value,
-) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
+    value: &mut studio_json::Value,
+) -> Result<&mut studio_json::Map<String, studio_json::Value>, String> {
     value
         .as_object_mut()
         .ok_or_else(|| "remote agent schema must be an object".into())
 }
 
-fn title(schema: &mut serde_json::Value, value: &str) -> Result<(), String> {
+fn title(schema: &mut studio_json::Value, value: &str) -> Result<(), String> {
     object(schema)?.insert("title".into(), value.into());
     Ok(())
 }
 
 fn property<'a>(
-    schema: &'a mut serde_json::Value,
+    schema: &'a mut studio_json::Value,
     name: &str,
-) -> Result<&'a mut serde_json::Value, String> {
+) -> Result<&'a mut studio_json::Value, String> {
     object(schema)?
         .get_mut("properties")
-        .and_then(serde_json::Value::as_object_mut)
+        .and_then(studio_json::Value::as_object_mut)
         .and_then(|properties| properties.get_mut(name))
         .ok_or_else(|| format!("missing remote agent property {name}"))
 }
 
-fn normalize_nullable(value: &mut serde_json::Value, label: &str) -> Result<(), String> {
+fn normalize_nullable(value: &mut studio_json::Value, label: &str) -> Result<(), String> {
     let mut inner = value.clone();
     let obj = object(&mut inner)?;
     let types = obj
         .get("type")
-        .and_then(serde_json::Value::as_array)
+        .and_then(studio_json::Value::as_array)
         .ok_or("nullable property must have a type array")?;
     if types.len() != 2 || types[1] != "null" || !types[0].is_string() {
         return Err("nullable property must have one type and null".into());
     }
     let kind = types[0].clone();
     obj.insert("type".into(), kind);
-    *value = serde_json::json!({"anyOf":[{"type":"null"},inner],"title":label});
+    *value = studio_json::json!({"anyOf":[{"type":"null"},inner],"title":label});
     Ok(())
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 3], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -100,7 +100,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn review_defaults_preserves_model_and_optional_settings() {
@@ -108,27 +108,27 @@ mod tests {
             json!({"model":null}),
             json!({"model":"m","effort":"e","fastMode":false}),
         ] {
-            let dto: ReviewDefaultsDto = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(dto).unwrap(), value);
+            let dto: ReviewDefaultsDto = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(dto).unwrap(), value);
         }
         let null_fast: ReviewDefaultsDto =
-            serde_json::from_str(r#"{"model":null,"effort":null,"fastMode":null}"#).unwrap();
+            studio_json::from_str(r#"{"model":null,"effort":null,"fastMode":null}"#).unwrap();
         assert_eq!(
-            serde_json::to_value(null_fast).unwrap(),
+            studio_json::to_value(null_fast).unwrap(),
             json!({"model":null})
         );
         for value in [
             json!({"effort":null}),
             json!({"model":null,"effort":null,"extra":true}),
         ] {
-            assert!(serde_json::from_value::<ReviewDefaultsDto>(value).is_err());
+            assert!(studio_json::from_value::<ReviewDefaultsDto>(value).is_err());
         }
     }
 
     #[test]
     fn published_components_match_owners() {
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }

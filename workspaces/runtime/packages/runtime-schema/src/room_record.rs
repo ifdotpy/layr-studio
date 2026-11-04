@@ -78,7 +78,7 @@ pub struct RoomLastMessage {
     pub seq: ChatSequence,
     pub text: String,
     pub sender: String,
-    pub created: serde_json::Number,
+    pub created: studio_json::Number,
 }
 
 /// Sequence of a persisted chat message; the first message has sequence 1.
@@ -129,7 +129,7 @@ pub struct Active {
     #[schemars(with = "InterruptState")]
     pub interrupt_state: Option<InterruptState>,
     #[serde(flatten)]
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    #[schemars(with = "BTreeMap<String, studio_json::Value>")]
     pub extra: BTreeMap<String, Opaque>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
@@ -143,15 +143,15 @@ pub enum InterruptState {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(transparent)]
-pub struct Opaque(Box<serde_json::value::RawValue>);
+pub struct Opaque(studio_json::OwnedRawJson);
 impl PartialEq for Opaque {
     fn eq(&self, other: &Self) -> bool {
-        self.0.get() == other.0.get()
+        self.0.as_str() == other.0.as_str()
     }
 }
 impl<'de> Deserialize<'de> for Opaque {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Box::<serde_json::value::RawValue>::deserialize(d).map(Self)
+        studio_json::OwnedRawJson::deserialize(d).map(Self)
     }
 }
 type Fields = BTreeMap<String, Opaque>;
@@ -185,7 +185,7 @@ fn required<T: serde::de::DeserializeOwned, E: serde::de::Error>(
     key: &'static str,
 ) -> Result<T, E> {
     let raw = fields.remove(key).ok_or_else(|| E::missing_field(key))?;
-    serde_json::from_str(raw.0.get()).map_err(E::custom)
+    studio_json::from_str(raw.0.as_str()).map_err(E::custom)
 }
 fn optional<T: serde::de::DeserializeOwned, E: serde::de::Error>(
     fields: &mut Fields,
@@ -193,7 +193,7 @@ fn optional<T: serde::de::DeserializeOwned, E: serde::de::Error>(
 ) -> Result<Option<T>, E> {
     fields
         .remove(key)
-        .map(|raw| serde_json::from_str(raw.0.get()).map_err(E::custom))
+        .map(|raw| studio_json::from_str(raw.0.as_str()).map_err(E::custom))
         .transpose()
 }
 fn required_safe<E: serde::de::Error>(fields: &mut Fields, key: &'static str) -> Result<u64, E> {
@@ -240,7 +240,7 @@ pub struct Radio {
     pub error: Option<String>,
     pub seen: BTreeMap<String, RoomRadioSeen>,
     #[serde(flatten)]
-    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    #[schemars(with = "BTreeMap<String, studio_json::Value>")]
     pub extra: Fields,
 }
 impl<'de> Deserialize<'de> for Radio {
@@ -313,15 +313,15 @@ pub struct RoomRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<serde_json::Number>,
+    pub created: Option<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
-    pub updated: Field<serde_json::Number>,
+    #[schemars(with = "Option<studio_json::Number>")]
+    pub updated: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<bool>")]
     pub user_hidden: Field<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_deleted_at: Option<serde_json::Number>,
+    pub project_deleted_at: Option<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<Radio>")]
     pub radio: Field<Radio>,
@@ -336,24 +336,24 @@ pub struct RoomRecord {
     pub status: Option<RoomStatus>,
 }
 
-pub(crate) fn schema() -> serde_json::Value {
+pub(crate) fn schema() -> studio_json::Value {
     let mut schema = schemars::schema_for!(RoomRecord).to_value();
     for name in ["speaker", "active", "error"] {
         let field = &mut schema["$defs"]["Radio"]["properties"][name];
-        *field = serde_json::json!({"anyOf":[field.clone(),{"type":"null"}]});
+        *field = studio_json::json!({"anyOf":[field.clone(),{"type":"null"}]});
     }
     // Active's generated object always contains the non-optional fields above.
     let required = schema["$defs"]["Radio"]["properties"]["active"]["anyOf"][0]["required"]
         .as_array_mut()
         .expect("generated active schema has required fields");
     required.retain(|field| field != "interruptState");
-    required.push(serde_json::json!("threadId"));
+    required.push(studio_json::json!("threadId"));
     schema
 }
 
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: serde_json::Value =
-        serde_json::from_slice(include_bytes!("schemas/persisted-room-record.schema.json"))
+    let stored: studio_json::Value =
+        studio_json::from_slice(include_bytes!("schemas/persisted-room-record.schema.json"))
             .map_err(|error| error.to_string())?;
     if stored != schema() {
         return Err("persisted room schema must be generated from room_record::RoomRecord".into());
@@ -401,16 +401,16 @@ mod tests {
     #[test]
     fn room_record_rejects_unknown_fields_and_preserves_radio() {
         let raw = r#"{"id":"radio:a","kind":"private","members":["a"],"radio":{"teamId":"a","revision":0,"status":"idle","speaker":null,"next":[],"direct":true,"active":null,"error":null,"seen":{},"future":{"x":1}}}"#;
-        let room: RoomRecord = serde_json::from_str(raw).unwrap();
-        let encoded = serde_json::to_string(&room).unwrap();
+        let room: RoomRecord = studio_json::from_str(raw).unwrap();
+        let encoded = studio_json::to_string(&room).unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
-            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+            studio_json::from_str::<studio_json::Value>(&encoded).unwrap(),
+            studio_json::from_str::<studio_json::Value>(raw).unwrap()
         );
         assert!(
-            serde_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"private","extra":1}"#).is_err()
+            studio_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"private","extra":1}"#).is_err()
         );
-        assert!(serde_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"other"}"#).is_err());
+        assert!(studio_json::from_str::<RoomRecord>(r#"{"id":"r","kind":"other"}"#).is_err());
     }
 
     #[test]
@@ -428,8 +428,8 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(properties, fields);
         check_schema_parity().unwrap();
-        let chat_schema: serde_json::Value =
-            serde_json::from_str(include_str!("schemas/persisted-chat-message.schema.json"))
+        let chat_schema: studio_json::Value =
+            studio_json::from_str(include_str!("schemas/persisted-chat-message.schema.json"))
                 .unwrap();
         assert_eq!(
             chat_schema["properties"]["seq"]["minimum"],

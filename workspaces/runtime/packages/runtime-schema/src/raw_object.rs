@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, fmt, marker::PhantomData};
 
 use serde::de::{Error, MapAccess, Visitor};
-use serde_json::value::RawValue;
+use studio_json::OwnedRawJson as RawValue;
 
 /// Builder for named fields; return false without consuming an unknown value.
 pub trait RawObjectFields<'de>: Default {
@@ -10,7 +10,7 @@ pub trait RawObjectFields<'de>: Default {
     fn field<M: MapAccess<'de>>(&mut self, name: &str, map: &mut M) -> Result<bool, M::Error>;
     fn finish<E: Error>(
         self,
-        extensions: BTreeMap<String, Box<RawValue>>,
+        extensions: BTreeMap<String, RawValue>,
     ) -> Result<Self::Output, E>;
 }
 
@@ -31,7 +31,7 @@ where
             let mut extensions = BTreeMap::new();
             while let Some(name) = map.next_key::<String>()? {
                 if !fields.field(&name, &mut map)? {
-                    let value = map.next_value::<Box<RawValue>>()?;
+                    let value = map.next_value::<RawValue>()?;
                     if extensions.insert(name, value).is_some() {
                         return Err(M::Error::custom("duplicate extension field"));
                     }
@@ -50,7 +50,7 @@ mod tests {
 
     struct Object {
         id: String,
-        extensions: BTreeMap<String, Box<RawValue>>,
+        extensions: BTreeMap<String, RawValue>,
     }
     #[derive(Default)]
     struct Fields {
@@ -70,7 +70,7 @@ mod tests {
         }
         fn finish<E: Error>(
             self,
-            extensions: BTreeMap<String, Box<RawValue>>,
+            extensions: BTreeMap<String, RawValue>,
         ) -> Result<Object, E> {
             Ok(Object {
                 id: self.id.ok_or_else(|| E::missing_field("id"))?,
@@ -86,10 +86,10 @@ mod tests {
     #[test]
     fn decodes_known_fields_and_preserves_extension_bytes() {
         let object: Object =
-            serde_json::from_str(r#"{"id":"i","provider":{"z":  1,"a":2}}"#).unwrap();
+            studio_json::from_str(r#"{"id":"i","provider":{"z":  1,"a":2}}"#).unwrap();
         assert_eq!(object.id, "i");
-        assert_eq!(object.extensions["provider"].get(), r#"{"z":  1,"a":2}"#);
-        assert!(serde_json::from_str::<Object>(r#"{"id":"i","id":"j"}"#).is_err());
-        assert!(serde_json::from_str::<Object>(r#"{"id":"i","x":1,"x":2}"#).is_err());
+        assert_eq!(object.extensions["provider"].as_str(), r#"{"z":  1,"a":2}"#);
+        assert!(studio_json::from_str::<Object>(r#"{"id":"i","id":"j"}"#).is_err());
+        assert!(studio_json::from_str::<Object>(r#"{"id":"i","x":1,"x":2}"#).is_err());
     }
 }

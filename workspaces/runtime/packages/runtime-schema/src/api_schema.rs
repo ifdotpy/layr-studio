@@ -2,7 +2,7 @@
 //! the canonical hash of the committed `openapi.json`. This file is the owner;
 //! the web copies in `apiSchema.ts` are rendered by `studio-contracts`.
 
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 /// Request and response header that carries an API schema hash.
@@ -108,7 +108,7 @@ fn strip_documentation(value: &Value) -> Value {
                     && let Value::Array(members) = &mut child
                 {
                     members.sort_by_cached_key(|member| {
-                        serde_json::to_string(member).expect("JSON value serializes")
+                        studio_json::to_string(member).expect("JSON value serializes")
                     });
                 }
                 canonical.insert(key.clone(), child);
@@ -122,7 +122,7 @@ fn strip_documentation(value: &Value) -> Value {
 /// Canonicalizer-v3 bytes of an OpenAPI document: documentation removed,
 /// `anyOf`/`oneOf` members sorted, compact JSON with sorted keys.
 pub fn canonical_bytes(document: &Value) -> Vec<u8> {
-    serde_json::to_vec(&strip_documentation(document)).expect("canonical JSON serializes")
+    studio_json::to_vec(&strip_documentation(document)).expect("canonical JSON serializes")
 }
 
 /// Lowercase hex SHA-256 of `canonical_bytes`: the API schema hash that

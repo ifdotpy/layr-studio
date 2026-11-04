@@ -111,7 +111,7 @@ pub enum Request {
     },
     Elicitation {
         /// JSON schema chosen by the provider; shown as is.
-        schema: serde_json::Value,
+        schema: studio_json::Value,
     },
     Question {
         questions: Vec<Question>,
@@ -119,7 +119,7 @@ pub enum Request {
     /// Claude tool permission.
     ToolUse {
         tool: String,
-        input: serde_json::Value,
+        input: studio_json::Value,
     },
     /// Today `agent/asyncQuestion`.
     AgentQuestion {
@@ -271,7 +271,7 @@ pub enum Answer {
     },
     Elicitation {
         action: ElicitationAction,
-        content: Option<serde_json::Value>,
+        content: Option<studio_json::Value>,
     },
 }
 
@@ -347,7 +347,7 @@ pub struct Delivery {
 /// provider boundary). Typed request fields are removed from `params`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
-pub struct ProviderObject(pub serde_json::Map<String, serde_json::Value>);
+pub struct ProviderObject(pub studio_json::Map<String, studio_json::Value>);
 
 /// Display content and provider fields that no logic reads by name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -400,7 +400,7 @@ pub struct Approval {
 
 /// Definitions of `Approval` and every type it names, for the OpenAPI document.
 /// The sync entities `request` and `questionHistory` carry this shape.
-pub fn schemas() -> Vec<(String, serde_json::Value)> {
+pub fn schemas() -> Vec<(String, studio_json::Value)> {
     let mut generator = schemars::generate::SchemaSettings::draft2020_12()
         .for_serialize()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
@@ -410,7 +410,7 @@ pub fn schemas() -> Vec<(String, serde_json::Value)> {
 }
 
 /// The committed OpenAPI document holds the Rust definitions, not a copy by hand.
-pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn check_schema_parity(openapi: &studio_json::Value) -> Result<(), String> {
     for (name, schema) in schemas() {
         if openapi.pointer(&format!("/components/schemas/{name}")) != Some(&schema) {
             return Err(format!("{name} must match runtime-schema/src/approvals.rs"));
@@ -423,7 +423,7 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
         let value = openapi.pointer(&format!(
             "/components/schemas/{payload}/properties/value/$ref"
         ));
-        if value != Some(&serde_json::json!("#/components/schemas/Approval")) {
+        if value != Some(&studio_json::json!("#/components/schemas/Approval")) {
             return Err(format!("{payload} must carry the Approval schema"));
         }
     }

@@ -47,12 +47,12 @@ impl<'de> Deserialize<'de> for ResourceList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn request_bounds_match_openapi_and_reject_invalid_shapes() {
         let doc: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let properties = &doc["components"]["schemas"]["ResourceNotifyRequest"]["properties"];
         assert_eq!(
             properties["requestId"]["maxLength"],
@@ -64,7 +64,7 @@ mod tests {
             json!({"requestId":"r", "resources":[]}),
             json!({"requestId":"r", "resources":[{"kind":"state"}], "extra":true}),
         ] {
-            assert!(serde_json::from_value::<ResourceNotifyRequest>(value).is_err());
+            assert!(studio_json::from_value::<ResourceNotifyRequest>(value).is_err());
         }
     }
 }

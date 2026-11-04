@@ -1,7 +1,7 @@
 //! Typed known fields of provider request parameters and preview.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
+use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -22,9 +22,9 @@ macro_rules! fields {
     };
 }
 
-pub type Object = BTreeMap<String, Box<RawValue>>;
+pub type Object = BTreeMap<String, RawValue>;
 fields!(RequestParams {
-    changes: Box<RawValue>, client_id: String, command: Command, cwd: String,
+    changes: RawValue, client_id: String, command: Command, cwd: String,
     expires_at: f64, host: String, linux_user: String, message: String,
     paste: Object, permissions: Object, phase: String, questions: Vec<Question>,
     reason: String, redirect: Object, requested_schema: RequestSchema, scope: String,
@@ -32,7 +32,7 @@ fields!(RequestParams {
     waiting: Object,
 });
 fields!(RequestPreview {
-    changes: Box<RawValue>, command: Command, cwd: String, permissions: Object, url: String,
+    changes: RawValue, command: Command, cwd: String, permissions: Object, url: String,
 });
 #[derive(Clone, Serialize)]
 pub struct QuestionOption {
@@ -41,7 +41,7 @@ pub struct QuestionOption {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub label: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub value: Field<Box<RawValue>>,
+    pub value: Field<RawValue>,
     #[serde(flatten)]
     pub extra: Object,
 }
@@ -162,7 +162,7 @@ pub struct RequestSchema {
 #[serde(rename_all = "camelCase")]
 pub struct RequestSchemaProperty {
     #[serde(rename = "enum", default, skip_serializing_if = "Field::is_missing")]
-    pub variants: Field<Vec<Box<RawValue>>>,
+    pub variants: Field<Vec<RawValue>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub format: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]

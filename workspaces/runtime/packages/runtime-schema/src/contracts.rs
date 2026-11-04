@@ -11,7 +11,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use serde_json::Value;
+use studio_json::Value;
 use strum::VariantNames;
 
 use crate::{
@@ -37,7 +37,7 @@ pub struct Rendered {
 /// store's fast owner parity witness checks its derived serde field contract;
 /// generation cannot import the store without introducing a dependency cycle.
 pub fn admitted_request_schema() -> Value {
-    serde_json::json!({"title":"AdmittedRequest","type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"signature":{"type":"string"},"created":{"type":"integer","format":"int64"}},"required":["id","signature","created"]})
+    studio_json::json!({"title":"AdmittedRequest","type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"signature":{"type":"string"},"created":{"type":"integer","format":"int64"}},"required":["id","signature","created"]})
 }
 
 fn persistence_ts(root: &Path) -> Result<String, String> {
@@ -76,7 +76,7 @@ fn persistence_ts(root: &Path) -> Result<String, String> {
 }
 
 fn json_string(value: &str) -> String {
-    serde_json::to_string(value).expect("a string serializes")
+    studio_json::to_string(value).expect("a string serializes")
 }
 
 fn ts_constants(lines: &mut String, constants: &[(&str, String)]) {
@@ -571,7 +571,7 @@ fn linux_vm_swift() -> String {
 fn read_json(root: &Path, path: &str) -> Result<Value, String> {
     let text =
         std::fs::read_to_string(root.join(path)).map_err(|error| format!("{path}: {error}"))?;
-    serde_json::from_str(&text).map_err(|error| format!("{path}: {error}"))
+    studio_json::from_str(&text).map_err(|error| format!("{path}: {error}"))
 }
 
 fn expect_number(document: &Value, pointer: &str, expected: i64) -> Result<(), String> {
@@ -642,7 +642,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     crate::usage_resume_record::check_schema_parity()?;
     for (schema, provider) in PROVIDER_NATIVE_DISCRIMINATORS {
         let path = format!("/components/schemas/{schema}/properties/provider/const");
-        if openapi.pointer(&path) != Some(&serde_json::json!(provider)) {
+        if openapi.pointer(&path) != Some(&studio_json::json!(provider)) {
             return Err(format!(
                 "{path} must match ProviderKind in runtime-schema/src/provider_kind.rs"
             ));
@@ -725,7 +725,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     }
     if openapi.pointer(
         "/components/schemas/BackgroundShellPolicySettings/properties/pressureCleanup/default",
-    ) != Some(&serde_json::json!(
+    ) != Some(&studio_json::json!(
         crate::shell_policy::Settings::default().pressure_cleanup
     )) {
         return Err(
@@ -755,7 +755,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
             return Err(format!("{consumer}.capacity must reference AgentCapacity"));
         }
     }
-    let modes = serde_json::json!(crate::claude_permissions::PERMISSION_MODES);
+    let modes = studio_json::json!(crate::claude_permissions::PERMISSION_MODES);
     for path in [
         "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
         "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
@@ -800,7 +800,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
         "/components/schemas/ClaudeRepairReport/properties/skippedRows/maximum",
         values::MAX_SAFE_INTEGER,
     )?;
-    let modes = serde_json::to_value([
+    let modes = studio_json::to_value([
         crate::idle_compaction::Mode::Default,
         crate::idle_compaction::Mode::Off,
         crate::idle_compaction::Mode::Log,
@@ -932,8 +932,8 @@ fn check_delivery_parity(openapi: &Value) -> Result<(), String> {
         .chain(delivery::LEGACY_DELIVERY_MOMENTS.map(|(name, _)| name))
         .collect();
     for (name, expected) in [
-        ("DeliveryMoment", serde_json::json!(canonical)),
-        ("DeliveryMomentInput", serde_json::json!(input)),
+        ("DeliveryMoment", studio_json::json!(canonical)),
+        ("DeliveryMomentInput", studio_json::json!(input)),
     ] {
         let path = format!("/components/schemas/{name}/enum");
         if openapi.pointer(&path) != Some(&expected) {
@@ -1030,11 +1030,11 @@ fn api_types(root: &Path, document: &Value, argument: &str) -> Result<String, St
 
 fn task_tool_schema_ts(
     root: &Path,
-    schema: &serde_json::Map<String, Value>,
+    schema: &studio_json::Map<String, Value>,
 ) -> Result<String, String> {
     let text = format!(
         "// {HEADER}\nimport type {{ core }} from \"zod\";\nexport const TASK_COMMAND_TOOL_SCHEMA = {} satisfies core.JSONSchema.JSONSchema;\n",
-        serde_json::to_string_pretty(schema).map_err(|error| error.to_string())?
+        studio_json::to_string_pretty(schema).map_err(|error| error.to_string())?
     );
     run_node(
         root,
@@ -1188,10 +1188,10 @@ fn materialize_safe_integers(schema: &mut Value) {
     match schema {
         Value::Object(object) => {
             if object.remove("x-safe-integer") == Some(Value::String("unsigned".into())) {
-                object.insert("minimum".into(), serde_json::json!(0));
+                object.insert("minimum".into(), studio_json::json!(0));
                 object.insert(
                     "maximum".into(),
-                    serde_json::json!(values::MAX_SAFE_INTEGER),
+                    studio_json::json!(values::MAX_SAFE_INTEGER),
                 );
             }
             for child in object.values_mut() {
@@ -1223,11 +1223,11 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["ChatWorkspaceMode"] =
         schemars::schema_for!(crate::workspace_modes::ChatWorkspaceMode).to_value();
     openapi["components"]["schemas"]["UiSummaryResponse"]["properties"]["defaultWorkspaceMode"] =
-        serde_json::json!({"$ref":"#/components/schemas/ChatWorkspaceMode"});
+        studio_json::json!({"$ref":"#/components/schemas/ChatWorkspaceMode"});
     openapi["components"]["schemas"]["UiSummaryResponse"]["properties"]["nativeLayrMessage"] =
-        serde_json::json!({"type":"string"});
+        studio_json::json!({"type":"string"});
     // The checked limits ingress schema also owns HTTP, SSE and bridge leaves.
-    let mut limits: Value = serde_json::from_str(
+    let mut limits: Value = studio_json::from_str(
         &include_str!("schemas/workspace-usage-limits.schema.json")
             .replace("#/$defs/", "#/components/schemas/"),
     )
@@ -1247,7 +1247,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         ("RateLimitWindowDto", "RateLimitWindow"),
     ] {
         openapi["components"]["schemas"][alias] =
-            serde_json::json!({"$ref":format!("#/components/schemas/{owner}")});
+            studio_json::json!({"$ref":format!("#/components/schemas/{owner}")});
     }
     // The rate-limit entity wraps the original observation and its typed view.
     let mut runway_generator = schemars::generate::SchemaSettings::draft2020_12()
@@ -1259,14 +1259,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name] = schema;
     }
     openapi["components"]["schemas"]["SyncRateLimitEntityPayload"]["properties"]["value"] =
-        serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+        studio_json::json!({"$ref":"#/components/schemas/RateLimitView"});
     if let Some(variants) = openapi["components"]["schemas"]["SyncEntity"]["oneOf"].as_array_mut() {
         for variant in variants {
             if variant["properties"]["collection"]["const"] == "rateLimit"
                 && variant["properties"]["op"]["const"] == "upsert"
             {
                 variant["properties"]["value"] =
-                    serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+                    studio_json::json!({"$ref":"#/components/schemas/RateLimitView"});
             }
         }
     }
@@ -1277,16 +1277,16 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]
-        ["not"] = serde_json::json!({"minimum":1,"maximum":crate::shell_policy::QUIET_MIN_MS - 1});
+        ["not"] = studio_json::json!({"minimum":1,"maximum":crate::shell_policy::QUIET_MIN_MS - 1});
     let native_command = &mut openapi["components"]["schemas"]["NativeCommandRequest"];
-    native_command["properties"]["request_id"] = serde_json::json!({
+    native_command["properties"]["request_id"] = studio_json::json!({
         "type":"string", "format":"uuid",
         "description":"UUIDv7 mutation root, retained across command retries."
     });
     if let Some(required) = native_command["required"].as_array_mut()
         && !required.iter().any(|field| field == "request_id")
     {
-        required.push(serde_json::json!("request_id"));
+        required.push(studio_json::json!("request_id"));
     }
     let mut delivery_generator = schemars::generate::SchemaSettings::draft2020_12()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
@@ -1296,13 +1296,13 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     for (name, schema) in delivery_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }
-    openapi["components"]["schemas"]["FrontendLocality"] = serde_json::json!({
+    openapi["components"]["schemas"]["FrontendLocality"] = studio_json::json!({
         "type": "string", "enum": <crate::sync_protocol::FrontendLocality as strum::VariantNames>::VARIANTS
     });
-    openapi["components"]["schemas"]["CommandErrorCode"] = serde_json::json!({
+    openapi["components"]["schemas"]["CommandErrorCode"] = studio_json::json!({
         "type": "string", "enum": <crate::command::CommandErrorCode as strum::VariantNames>::VARIANTS
     });
-    openapi["components"]["schemas"]["MessageSendStatus"] = serde_json::json!({
+    openapi["components"]["schemas"]["MessageSendStatus"] = studio_json::json!({
         "type": "string", "enum": <crate::delivery::MessageSendStatus as strum::VariantNames>::VARIANTS
     });
     for name in [
@@ -1310,18 +1310,18 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         "studio_api__work__models__MessageReceipt",
     ] {
         openapi["components"]["schemas"][name]["properties"]["status"] =
-            serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
+            studio_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
     }
     openapi["components"]["schemas"]["QueueItem"]["properties"]["status"] =
-        serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
-    openapi["components"]["schemas"]["MessageRecord"]["properties"]["status"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
+        studio_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
+    openapi["components"]["schemas"]["MessageRecord"]["properties"]["status"] = studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
     for schema in openapi["components"]["schemas"]
         .as_object_mut()
         .ok_or("missing schemas")?
         .values_mut()
     {
         if let Some(status) = schema.pointer_mut("/properties/deliveryStatus") {
-            *status = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
+            *status = studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
         }
     }
     for path in [
@@ -1332,14 +1332,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         *openapi
             .pointer_mut(path)
             .ok_or_else(|| format!("missing recipient delivery map {path}"))? =
-            serde_json::json!({"$ref":"#/components/schemas/MessageRecipientDelivery"});
+            studio_json::json!({"$ref":"#/components/schemas/MessageRecipientDelivery"});
     }
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
     openapi["components"]["schemas"]["CommandSendBody"]["properties"]["text"]["maxLength"] =
         studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS.into();
     openapi["components"]["schemas"]["CommandSendBody"]["properties"]["asTextFile"] =
-        serde_json::json!({"type":"boolean","default":false});
-    openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
+        studio_json::json!({"type":"boolean","default":false});
+    openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = studio_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
     crate::task_command::apply_api_contract(&mut openapi);
     crate::task_gate::apply_api_contract(&mut openapi);
     for (name, schema) in crate::agent_progress::account_change_schemas() {
@@ -1352,10 +1352,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         "AgentDetailEntityDto",
     ] {
         openapi["components"]["schemas"][name]["properties"]["accountChange"] =
-            serde_json::json!({"$ref":"#/components/schemas/AccountChange"});
+            studio_json::json!({"$ref":"#/components/schemas/AccountChange"});
         openapi["components"]["schemas"][name]["properties"]["accountTransferProgress"] =
-            serde_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
-        openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
+            studio_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
+        openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = studio_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
     }
     // AgentResponse is closed. Give it every agent view field, so a projected field cannot fail a committed write.
     let view_fields = openapi["components"]["schemas"]["AgentEntityDto"]["properties"].clone();
@@ -1367,12 +1367,12 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .entry(name.clone())
             .or_insert_with(|| schema.clone());
     }
-    openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
+    openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
-        serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
+        studio_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
     for name in ["RoomEntityDto", "RoomDetailDto"] {
         openapi["components"]["schemas"][name]["properties"]["leadIds"] =
-            serde_json::json!({"type":"array","items":{"type":"string"}});
+            studio_json::json!({"type":"array","items":{"type":"string"}});
     }
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
@@ -1380,8 +1380,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["ComplaintResponseStatus"] = crate::complaints::schema();
     openapi["components"]["schemas"]["ComplaintBody"]["properties"]["status"] =
         crate::complaints::status_property();
-    openapi["components"]["schemas"]["StartWaitReason"] = serde_json::Value::Null;
-    openapi["components"]["schemas"]["TeamCounts"] = serde_json::json!({});
+    openapi["components"]["schemas"]["StartWaitReason"] = studio_json::Value::Null;
+    openapi["components"]["schemas"]["TeamCounts"] = studio_json::json!({});
     for (name, schema) in crate::agent_progress::schemas()
         .into_iter()
         .chain(crate::agent_entity_nested::schemas()?)
@@ -1402,12 +1402,12 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     }
     openapi["components"]["schemas"]["RadioControls"] = crate::radio_controls::schema();
     openapi["components"]["schemas"]["RoomRadio"]["properties"]["controls"] =
-        serde_json::json!({"$ref":"#/components/schemas/RadioControls"});
+        studio_json::json!({"$ref":"#/components/schemas/RadioControls"});
     let required = openapi["components"]["schemas"]["RoomRadio"]["required"]
         .as_array_mut()
         .ok_or("RoomRadio required fields missing")?;
     if !required.iter().any(|value| value == "controls") {
-        required.push(serde_json::json!("controls"));
+        required.push(studio_json::json!("controls"));
     }
     for (name, schema) in crate::process_controls::schemas() {
         openapi["components"]["schemas"][name] = schema;
@@ -1432,21 +1432,21 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         *openapi
             .pointer_mut(pointer)
             .ok_or_else(|| format!("missing provider schema {pointer}"))? =
-            serde_json::json!({"$ref":"#/components/schemas/ProviderKind"});
+            studio_json::json!({"$ref":"#/components/schemas/ProviderKind"});
     }
     openapi["components"]["schemas"]["DesktopResponse"]["properties"]["backendKind"] =
-        serde_json::json!({"type":"string", "const":crate::desktop::BACKEND_KIND});
+        studio_json::json!({"type":"string", "const":crate::desktop::BACKEND_KIND});
     openapi["components"]["schemas"]["AnalyticsUsageRecord"]["properties"]["studioUsage"] =
-        serde_json::json!({"$ref":"#/components/schemas/UsageObservation"});
+        studio_json::json!({"$ref":"#/components/schemas/UsageObservation"});
     openapi["components"]["schemas"]["SyncIdentityResponse"]["properties"]["syncProtocol"]["const"] =
-        serde_json::json!(crate::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION);
+        studio_json::json!(crate::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION);
     let identity_version =
         openapi["components"]["schemas"]["SyncIdentityResponse"]["properties"]["syncProtocol"]
             .as_object_mut()
             .ok_or("SyncIdentityResponse.syncProtocol must be a schema object")?;
     identity_version.remove("minimum");
     identity_version.remove("maximum");
-    openapi["components"]["schemas"]["UsageReconciliationResponse"]["properties"]["replayConflicts"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/UsageReplayConflict"}});
+    openapi["components"]["schemas"]["UsageReconciliationResponse"]["properties"]["replayConflicts"] = studio_json::json!({"type":"array","items":{"$ref":"#/components/schemas/UsageReplayConflict"}});
     openapi["components"]["schemas"]["ClaudeFailure"] = crate::claude_failure::schema();
     openapi["components"]["schemas"]["NativeProviderError"] =
         crate::provider_errors::native_provider_error_schema();
@@ -1466,7 +1466,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             format!("workspaces/runtime/packages/runtime-schema/src/schemas/{name}.schema.json");
         let schema = read_json(root, &path)?;
         for field in fields {
-            let expected = serde_json::json!({"anyOf":[
+            let expected = studio_json::json!({"anyOf":[
                 {"$ref":format!("{}#/components/schemas/DeliveryMomentInput", crate::OPENAPI_URI)},
                 {"type":"null"}
             ]});
@@ -1498,59 +1498,59 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     let mut rendered = vec![
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/runtime-event-metadata.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/runtime-event-metadata.schema.json", &serde_json::to_string_pretty(&crate::event_metadata::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/runtime-event-metadata.schema.json", &studio_json::to_string_pretty(&crate::event_metadata::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-rule-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-rule-record.schema.json", &serde_json::to_string_pretty(&crate::rule_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-rule-record.schema.json", &studio_json::to_string_pretty(&crate::rule_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: crate::studio_errors::MONITOR_RECORD_SCHEMA_PATH.into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-monitor-record.schema.json", &serde_json::to_string_pretty(&crate::monitor_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-monitor-record.schema.json", &studio_json::to_string_pretty(&crate::monitor_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/runtime-transcript-asset.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/runtime-transcript-asset.schema.json", &serde_json::to_string_pretty(&crate::transcript_asset::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/runtime-transcript-asset.schema.json", &studio_json::to_string_pretty(&crate::transcript_asset::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-task-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-task-record.schema.json", &serde_json::to_string_pretty(&crate::task_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-task-record.schema.json", &studio_json::to_string_pretty(&crate::task_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-transcript-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-transcript-record.schema.json", &serde_json::to_string_pretty(&crate::transcript_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-transcript-record.schema.json", &studio_json::to_string_pretty(&crate::transcript_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-project-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-project-record.schema.json", &serde_json::to_string_pretty(&crate::project_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-project-record.schema.json", &studio_json::to_string_pretty(&crate::project_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-capacity-continuation.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-capacity-continuation.schema.json", &serde_json::to_string_pretty(&crate::continuation_snapshot::capacity_schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-capacity-continuation.schema.json", &studio_json::to_string_pretty(&crate::continuation_snapshot::capacity_schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-work-item-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-work-item-record.schema.json", &serde_json::to_string_pretty(&crate::work_item_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-work-item-record.schema.json", &studio_json::to_string_pretty(&crate::work_item_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-complaint-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-complaint-record.schema.json", &serde_json::to_string_pretty(&crate::complaint_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-complaint-record.schema.json", &studio_json::to_string_pretty(&crate::complaint_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-checkpoint-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-checkpoint-record.schema.json", &serde_json::to_string_pretty(&crate::checkpoint_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-checkpoint-record.schema.json", &studio_json::to_string_pretty(&crate::checkpoint_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-plan-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-plan-record.schema.json", &serde_json::to_string_pretty(&crate::plan_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-plan-record.schema.json", &studio_json::to_string_pretty(&crate::plan_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json", &serde_json::to_string_pretty(&crate::annotation_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json", &studio_json::to_string_pretty(&crate::annotation_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json", &serde_json::to_string_pretty(&crate::multi_server_protocol::invite_schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json", &studio_json::to_string_pretty(&crate::multi_server_protocol::invite_schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-terminal-record.schema.json".into(),
@@ -1558,24 +1558,24 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 root,
                 "node_modules/oxfmt/bin/oxfmt",
                 "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-terminal-record.schema.json",
-                &serde_json::to_string_pretty(&crate::terminal_record::schema()).map_err(|error| error.to_string())?,
+                &studio_json::to_string_pretty(&crate::terminal_record::schema()).map_err(|error| error.to_string())?,
             )?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-workspace-operation-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-workspace-operation-record.schema.json", &serde_json::to_string_pretty(&crate::workspace_operation::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-workspace-operation-record.schema.json", &studio_json::to_string_pretty(&crate::workspace_operation::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-usage-resume-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-usage-resume-record.schema.json", &serde_json::to_string_pretty(&crate::usage_resume_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-usage-resume-record.schema.json", &studio_json::to_string_pretty(&crate::usage_resume_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json", &serde_json::to_string_pretty(&crate::request_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json", &studio_json::to_string_pretty(&crate::request_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json".into(),
-            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json", &serde_json::to_string_pretty(&crate::room_record::schema()).map_err(|error| error.to_string())?)?,
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json", &studio_json::to_string_pretty(&crate::room_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: web("persistence.ts"),
@@ -1589,7 +1589,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             path: "workspaces/providers/apps/claude-bridge/claude-failure.generated.ts".into(),
             text: format!(
                 "// {HEADER}\nexport const claudeFailureSchema = {} as const;\n",
-                serde_json::to_string(&crate::claude_failure::schema()).expect("failure schema"),
+                studio_json::to_string(&crate::claude_failure::schema()).expect("failure schema"),
             ),
         },
         Rendered {
@@ -1668,7 +1668,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         },
         Rendered {
             path: OPENAPI_PATH.into(),
-            text: serde_json::to_string_pretty(&openapi).map_err(|error| error.to_string())? + "\n",
+            text: studio_json::to_string_pretty(&openapi).map_err(|error| error.to_string())? + "\n",
         },
         Rendered {
             path: web("deliveryMoment.ts"),
@@ -1719,7 +1719,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     }
     rendered.push(Rendered {
         path: usage_limits_path.into(),
-        text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/workspace-usage-limits.schema.json", &serde_json::to_string_pretty(&usage_limits_schema).map_err(|error| error.to_string())?)?,
+        text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/workspace-usage-limits.schema.json", &studio_json::to_string_pretty(&usage_limits_schema).map_err(|error| error.to_string())?)?,
     });
     for (file, field, variants) in [
         (
@@ -1743,16 +1743,16 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         // A document can have several enum leaves owned by this module.
         let prior = rendered.iter().position(|rendered| rendered.path == path);
         let mut schema = if let Some(index) = prior {
-            serde_json::from_str(&rendered[index].text).map_err(|error| error.to_string())?
+            studio_json::from_str(&rendered[index].text).map_err(|error| error.to_string())?
         } else {
             read_json(root, &path)?
         };
-        schema["properties"][field]["enum"] = serde_json::json!(variants);
+        schema["properties"][field]["enum"] = studio_json::json!(variants);
         let text = run_node(
             root,
             "node_modules/oxfmt/bin/oxfmt",
             &format!("--stdin-filepath={path}"),
-            &serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
+            &studio_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
         )?;
         if let Some(index) = prior {
             rendered[index].text = text;
@@ -1771,53 +1771,53 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         if let Some(required) = schema["required"].as_array_mut() {
             required.retain(|field| field != "receipt");
         }
-        schema["properties"]["requestId"] = serde_json::json!({"type":"string","format":"uuid"});
+        schema["properties"]["requestId"] = studio_json::json!({"type":"string","format":"uuid"});
         if let Some(required) = schema["required"].as_array_mut()
             && !required.iter().any(|field| field == "requestId")
         {
-            required.push(serde_json::json!("requestId"));
+            required.push(studio_json::json!("requestId"));
         }
         if file == "persisted-federation-outbox" {
             schema["properties"]["kind"]["enum"] =
-                serde_json::json!(crate::persistence::FederationMessageKind::VARIANTS);
+                studio_json::json!(crate::persistence::FederationMessageKind::VARIANTS);
             schema["properties"]["status"]["enum"] =
-                serde_json::json!(crate::persistence::FederationDeliveryState::VARIANTS);
+                studio_json::json!(crate::persistence::FederationDeliveryState::VARIANTS);
             schema["properties"]["requestId"] =
-                serde_json::json!({"type":"string","format":"uuid"});
-            schema["properties"]["admission"] = serde_json::json!({"$ref":format!("{}#/components/schemas/AdmittedRequest",crate::OPENAPI_URI)});
+                studio_json::json!({"type":"string","format":"uuid"});
+            schema["properties"]["admission"] = studio_json::json!({"$ref":format!("{}#/components/schemas/AdmittedRequest",crate::OPENAPI_URI)});
             for field in ["requestId", "admission"] {
                 let required = schema["required"]
                     .as_array_mut()
                     .ok_or("federation required fields")?;
                 if !required.iter().any(|value| value == field) {
-                    required.push(serde_json::json!(field));
+                    required.push(studio_json::json!(field));
                 }
             }
         } else {
             schema["properties"]["kind"]["anyOf"][0]["enum"] =
-                serde_json::json!(crate::persistence::FederationMessageKind::VARIANTS);
+                studio_json::json!(crate::persistence::FederationMessageKind::VARIANTS);
             schema["properties"]["ack"]["enum"] =
-                serde_json::json!(crate::persistence::FederationAckState::VARIANTS);
+                studio_json::json!(crate::persistence::FederationAckState::VARIANTS);
         }
         let text = run_node(
             root,
             "node_modules/oxfmt/bin/oxfmt",
             &format!("--stdin-filepath={path}"),
-            &serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
+            &studio_json::to_string_pretty(&schema).map_err(|error| error.to_string())?,
         )?;
         rendered.push(Rendered { path, text });
     }
     let path =
         "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-chat-message.schema.json";
     let mut messages = read_json(root, path)?;
-    messages["properties"]["deliveries"]["additionalProperties"] = serde_json::json!({"$ref":format!("{}#/components/schemas/RecipientDelivery",crate::OPENAPI_URI)});
+    messages["properties"]["deliveries"]["additionalProperties"] = studio_json::json!({"$ref":format!("{}#/components/schemas/RecipientDelivery",crate::OPENAPI_URI)});
     rendered.push(Rendered {
         path: path.into(),
         text: run_node(
             root,
             "node_modules/oxfmt/bin/oxfmt",
             &format!("--stdin-filepath={path}"),
-            &serde_json::to_string_pretty(&messages).map_err(|error| error.to_string())?,
+            &studio_json::to_string_pretty(&messages).map_err(|error| error.to_string())?,
         )?,
     });
     for (name, pointer) in PROVIDER_PERSISTED_RECORDS {
@@ -1827,21 +1827,21 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         let record = schema
             .pointer_mut(pointer)
             .ok_or_else(|| format!("{path}: missing provider record {pointer}"))?;
-        record["properties"]["provider"] = serde_json::json!({"$ref":"#/$defs/ProviderKind"});
+        record["properties"]["provider"] = studio_json::json!({"$ref":"#/$defs/ProviderKind"});
         let required = record["required"]
             .as_array_mut()
             .ok_or_else(|| format!("{path}: missing required record fields {pointer}"))?;
         if !required.iter().any(|field| field == "provider") {
-            required.push(serde_json::json!("provider"));
+            required.push(studio_json::json!("provider"));
         }
         schema["$defs"]["ProviderKind"] = provider_kind_schema();
         if *name == "account-registry" {
             schema["properties"]["version"]["const"] =
-                serde_json::json!(values::ACCOUNT_REGISTRY_FORMAT_VERSION);
+                studio_json::json!(values::ACCOUNT_REGISTRY_FORMAT_VERSION);
         }
         rendered.push(Rendered {
             path,
-            text: serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())? + "\n",
+            text: studio_json::to_string_pretty(&schema).map_err(|error| error.to_string())? + "\n",
         });
     }
     // Analytics embeds the same accounting owner with local schema references.
@@ -1861,22 +1861,22 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         }
         rendered.push(Rendered {
             path,
-            text: serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())? + "\n",
+            text: studio_json::to_string_pretty(&schema).map_err(|error| error.to_string())? + "\n",
         });
     }
     let draft_schema = studio_client_domain::drafts::schema().to_value();
     rendered.push(Rendered {
         path: "workspaces/runtime/packages/runtime-http/draft-payload.schema.json".into(),
-        text: serde_json::to_string_pretty(&draft_schema).map_err(|error| error.to_string())?
+        text: studio_json::to_string_pretty(&draft_schema).map_err(|error| error.to_string())?
             + "\n",
     });
     rendered.push(Rendered {
         path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-budget-state.schema.json".into(),
-        text: serde_json::to_string_pretty(&crate::usage::ledger::budget_state_schema()).map_err(|error| error.to_string())? + "\n",
+        text: studio_json::to_string_pretty(&crate::usage::ledger::budget_state_schema()).map_err(|error| error.to_string())? + "\n",
     });
     rendered.push(Rendered {
         path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-budget-state-write.schema.json".into(),
-        text: serde_json::to_string_pretty(&crate::usage::ledger::budget_state_write_schema())
+        text: studio_json::to_string_pretty(&crate::usage::ledger::budget_state_write_schema())
             .map_err(|error| error.to_string())? + "\n",
     });
     let usage_schema = schemars::schema_for!(crate::usage::UsageObservation).to_value();
@@ -1884,7 +1884,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         path:
             "workspaces/runtime/packages/runtime-schema/src/schemas/usage-observation.schema.json"
                 .into(),
-        text: serde_json::to_string_pretty(&usage_schema).map_err(|error| error.to_string())?
+        text: studio_json::to_string_pretty(&usage_schema).map_err(|error| error.to_string())?
             + "\n",
     });
     if with_api_types {
@@ -1924,7 +1924,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         ] {
             schemas.insert(name.into(), openapi["components"]["schemas"][name].clone());
         }
-        let document = serde_json::json!({
+        let document = studio_json::json!({
             "openapi":"3.1.0", "info":{"title":"Bridge runtime contracts","version":"1"},
             "paths":{}, "components":{"schemas":schemas}
         });
@@ -1939,7 +1939,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .with(|settings| settings.definitions_path = "/components/schemas".into())
             .into_generator();
         generator.subschema_for::<crate::pricing::PricingArtifact>();
-        let document = serde_json::json!({
+        let document = studio_json::json!({
             "openapi":"3.1.0", "info":{"title":"Pricing artifact","version":"1"},
             "paths":{}, "components":{"schemas":generator.take_definitions(true)}
         });
@@ -1950,7 +1950,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     }
     if with_api_types {
         let schemas = crate::provider_errors::schemas()?;
-        let document = serde_json::json!({
+        let document = studio_json::json!({
             "openapi":"3.1.0", "info":{"title":"Vendor error leaf and known classification","version":"1"},
             "paths":{}, "components":{"schemas":schemas}
         });
@@ -1974,7 +1974,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .with(|settings| settings.definitions_path = "/components/schemas".into())
             .into_generator();
         usage_generator.subschema_for::<crate::usage::UsageObservation>();
-        let usage_document = serde_json::json!({
+        let usage_document = studio_json::json!({
             "openapi":"3.1.0", "info":{"title":"Usage contract","version":"1"},
             "paths":{}, "components":{"schemas":usage_generator.take_definitions(true)}
         });
@@ -2005,7 +2005,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "SupervisorHandshakeV2Result".into(),
             supervisor_handshake_schema(),
         );
-        let document = serde_json::json!({
+        let document = studio_json::json!({
             "openapi":"3.1.0", "info":{"title":"Rust-owned contracts","version":"1"},
             "paths":{}, "components":{"schemas":schemas}
         });
@@ -2052,24 +2052,24 @@ mod tests {
     fn account_limit_consumers_share_checked_fields_and_open_vendor_windows() {
         let document = read_json(&repository_root(), OPENAPI_PATH).expect("OpenAPI source");
         for name in ["UsageLimitsData", "RateLimitsDataDto"] {
-            let schema = serde_json::json!({
+            let schema = studio_json::json!({
                 "$ref":format!("#/components/schemas/{name}"),
                 "components":document["components"]
             });
             let validator = jsonschema::validator_for(&schema).expect("limits schema");
             assert!(
-                !validator.is_valid(&serde_json::json!({
+                !validator.is_valid(&studio_json::json!({
                     "rateLimits":{"spendControlReached":"false"}
                 })),
                 "{name} must reject malformed consumed spend control"
             );
             assert!(
-                !validator.is_valid(&serde_json::json!({
+                !validator.is_valid(&studio_json::json!({
                     "rateLimitResetCredits":{"credits":[{"id":"credit"}]}
                 })),
                 "{name} must require credit identity, status and reset type"
             );
-            assert!(validator.is_valid(&serde_json::json!({
+            assert!(validator.is_valid(&studio_json::json!({
                 "vendorData":{"opaque":null},
                 "rateLimits":{"planType":"plus","primary":{"usedPercent":42,"vendorWindow":{"opaque":true}}}
             })), "{name} must preserve vendor extensions");
@@ -2079,17 +2079,17 @@ mod tests {
     #[test]
     fn transfer_notices_use_the_provider_identity_contract() {
         let document = read_json(&repository_root(), OPENAPI_PATH).expect("OpenAPI source");
-        let schema = serde_json::json!({
+        let schema = studio_json::json!({
             "$ref":"#/components/schemas/TransferMemberNotice",
             "components":document["components"]
         });
         let validator = jsonschema::validator_for(&schema).expect("transfer notice schema");
         for provider in crate::ProviderKind::ALL {
-            assert!(validator.is_valid(&serde_json::json!({"id":"agent", "provider":provider})));
+            assert!(validator.is_valid(&studio_json::json!({"id":"agent", "provider":provider})));
         }
-        assert!(validator.is_valid(&serde_json::json!({"id":"agent", "provider":null})));
-        assert!(validator.is_valid(&serde_json::json!({"id":"agent"})));
-        assert!(!validator.is_valid(&serde_json::json!({"id":"agent", "provider":"unknown"})));
+        assert!(validator.is_valid(&studio_json::json!({"id":"agent", "provider":null})));
+        assert!(validator.is_valid(&studio_json::json!({"id":"agent"})));
+        assert!(!validator.is_valid(&studio_json::json!({"id":"agent", "provider":"unknown"})));
     }
 
     #[test]
@@ -2102,27 +2102,27 @@ mod tests {
             );
             let schema = read_json(&repository_root(), &path).expect("persisted schema");
             let record = schema.pointer(pointer).expect("persisted record schema");
-            let contract = serde_json::json!({"$defs":schema["$defs"],"allOf":[record]});
+            let contract = studio_json::json!({"$defs":schema["$defs"],"allOf":[record]});
             let validator = jsonschema::options()
                 .with_registry(&registry)
                 .build(&contract)
                 .expect("record schema compiles");
             let mut record = if *name == "account-registry" {
-                serde_json::json!({"id":"account","home":"/account","label":"Account","source":"fixture","status":"ready"})
+                studio_json::json!({"id":"account","home":"/account","label":"Account","source":"fixture","status":"ready"})
             } else {
-                serde_json::json!({"id":"agent","rootId":"agent","epoch":0,"status":"idle"})
+                studio_json::json!({"id":"agent","rootId":"agent","epoch":0,"status":"idle"})
             };
             assert!(
                 !validator.is_valid(&record),
                 "{name} must reject missing provider"
             );
             for provider in crate::provider_kind::ProviderKind::ALL {
-                record["provider"] = serde_json::json!(provider);
+                record["provider"] = studio_json::json!(provider);
                 assert!(validator.is_valid(&record), "{name}: {provider}");
             }
             for invalid in [
-                serde_json::Value::Null,
-                serde_json::json!("future-provider"),
+                studio_json::Value::Null,
+                studio_json::json!("future-provider"),
             ] {
                 record["provider"] = invalid;
                 assert!(
@@ -2143,30 +2143,30 @@ mod tests {
         let session = generator.subschema_for::<ClaudeBridgeSessionWire>();
         let model = generator.subschema_for::<ClaudeBridgeTurnWire>();
         let definitions = generator.take_definitions(true);
-        let schema = |value| serde_json::json!({"$defs":definitions,"allOf":[value]});
+        let schema = |value| studio_json::json!({"$defs":definitions,"allOf":[value]});
         let session_schema = schema(session);
         let model_schema = schema(model);
         let session = jsonschema::validator_for(&session_schema).expect("session schema");
         let model = jsonschema::validator_for(&model_schema).expect("model schema");
         for value in [
-            serde_json::json!(ClaudeBridgeSessionWire { user_mcp: None }),
-            serde_json::json!(ClaudeBridgeSessionWire {
+            studio_json::json!(ClaudeBridgeSessionWire { user_mcp: None }),
+            studio_json::json!(ClaudeBridgeSessionWire {
                 user_mcp: Some(false)
             }),
         ] {
             assert!(session.is_valid(&value), "{value}");
         }
-        assert!(!session.is_valid(&serde_json::json!({"userMcp":null})));
+        assert!(!session.is_valid(&studio_json::json!({"userMcp":null})));
         for value in [
-            serde_json::json!(ClaudeBridgeTurnWire { model: None }),
-            serde_json::json!(ClaudeBridgeTurnWire { model: Some(None) }),
-            serde_json::json!(ClaudeBridgeTurnWire {
+            studio_json::json!(ClaudeBridgeTurnWire { model: None }),
+            studio_json::json!(ClaudeBridgeTurnWire { model: Some(None) }),
+            studio_json::json!(ClaudeBridgeTurnWire {
                 model: Some(Some("model".into()))
             }),
         ] {
             assert!(model.is_valid(&value), "{value}");
         }
-        assert!(!model.is_valid(&serde_json::json!({"model":false})));
+        assert!(!model.is_valid(&studio_json::json!({"model":false})));
     }
 
     #[test]
@@ -2197,18 +2197,18 @@ mod tests {
         let schema = supervisor_handshake_schema();
         let validator = jsonschema::validator_for(&schema).expect("handshake schema compiles");
         for value in [
-            serde_json::json!({"ok":true,"protocol":2}),
-            serde_json::json!({"error":"Supervisor protocol mismatch"}),
+            studio_json::json!({"ok":true,"protocol":2}),
+            studio_json::json!({"error":"Supervisor protocol mismatch"}),
         ] {
             let decoded: crate::supervisor_contract::SupervisorHandshakeV2Result =
-                serde_json::from_value(value.clone()).expect("wire reply deserializes");
+                studio_json::from_value(value.clone()).expect("wire reply deserializes");
             assert_eq!(decoded.ok, value["ok"].as_bool().unwrap_or_default());
             assert!(
                 validator.is_valid(&value),
                 "schema must accept wire reply {value}"
             );
         }
-        assert!(!validator.is_valid(&serde_json::json!({"ok":"true"})));
+        assert!(!validator.is_valid(&studio_json::json!({"ok":"true"})));
     }
 
     #[test]
@@ -2217,7 +2217,7 @@ mod tests {
         let version = &document["components"]["schemas"]["SyncIdentityResponse"]["properties"]["syncProtocol"];
         assert_eq!(
             version["const"],
-            serde_json::json!(crate::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION)
+            studio_json::json!(crate::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION)
         );
         assert!(version.get("minimum").is_none());
         assert!(version.get("maximum").is_none());
@@ -2228,12 +2228,12 @@ mod tests {
         let document = read_json(&repository_root(), OPENAPI_PATH).expect("OpenAPI source");
         assert_eq!(
             document.pointer("/components/schemas/DesktopResponse/properties/backendKind/const"),
-            Some(&serde_json::json!(crate::desktop::BACKEND_KIND))
+            Some(&studio_json::json!(crate::desktop::BACKEND_KIND))
         );
         assert_eq!(
             document
                 .pointer("/components/schemas/AnalyticsUsageRecord/properties/studioUsage/$ref"),
-            Some(&serde_json::json!("#/components/schemas/UsageObservation"))
+            Some(&studio_json::json!("#/components/schemas/UsageObservation"))
         );
     }
 
@@ -2248,13 +2248,13 @@ mod tests {
                 document.pointer(&format!(
                     "/components/schemas/StartAttemptRecordResponse/properties/{field}/type"
                 )),
-                Some(&serde_json::json!(kind))
+                Some(&studio_json::json!(kind))
             );
             assert_eq!(
                 document.pointer(&format!(
                     "/components/schemas/ExecutionAttempt/properties/{field}/anyOf/0/$ref"
                 )),
-                Some(&serde_json::json!(format!(
+                Some(&studio_json::json!(format!(
                     "#/components/schemas/StartAttemptRecordResponse/properties/{field}"
                 )))
             );
@@ -2278,14 +2278,14 @@ mod tests {
             let response = studio_client_domain::markdown::dispatch(&Request {
                 id: "markdown-contract".into(),
                 method: "markdown.parse".into(),
-                params: serde_json::json!({"text":text,"streaming":false}),
+                params: studio_json::json!({"text":text,"streaming":false}),
             });
             assert!(response.error.is_none());
             assert!(validator.is_valid(&response.result.expect("serialized native output")));
         }
-        assert!(!validator.is_valid(&serde_json::json!([{"kind":"script","source":"run()"}])));
+        assert!(!validator.is_valid(&studio_json::json!([{"kind":"script","source":"run()"}])));
         assert!(!validator.is_valid(
-            &serde_json::json!([{"nodes":[{"sentences":[{"text":"x","index":"bad"}]}],"length":1}])
+            &studio_json::json!([{"nodes":[{"sentences":[{"text":"x","index":"bad"}]}],"length":1}])
         ));
     }
 
@@ -2302,11 +2302,11 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             .chain(["turn/interrupt", "unknown/method"])
         {
             for params in [
-                serde_json::json!({}),
-                serde_json::json!({"includeTurns":false}),
-                serde_json::json!({"includeTurns":true}),
-                serde_json::json!({"includeTurns":"true"}),
-                serde_json::json!({"includeTurns":null}),
+                studio_json::json!({}),
+                studio_json::json!({"includeTurns":false}),
+                studio_json::json!({"includeTurns":true}),
+                studio_json::json!({"includeTurns":"true"}),
+                studio_json::json!({"includeTurns":null}),
             ] {
                 cases.push((method, params));
             }
@@ -2329,11 +2329,11 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             .stdin
             .take()
             .expect("input pipe")
-            .write_all(&serde_json::to_vec(&cases).expect("cases serialize"))
+            .write_all(&studio_json::to_vec(&cases).expect("cases serialize"))
             .expect("write policy cases");
         let output = child.wait_with_output().expect("policy witness exits");
         assert!(output.status.success());
-        let actual: Vec<bool> = serde_json::from_slice(&output.stdout).expect("policy results");
+        let actual: Vec<bool> = studio_json::from_slice(&output.stdout).expect("policy results");
         assert_eq!(actual, expected);
     }
 
@@ -2368,7 +2368,7 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
         check_schema_parity(&openapi, &account_transfer).expect("committed schemas agree");
         *openapi
             .pointer_mut("/components/schemas/CreateAgentRequest/properties/maxAgents/maximum")
-            .expect("team limit is present") = serde_json::json!(1);
+            .expect("team limit is present") = studio_json::json!(1);
         let error = check_schema_parity(&openapi, &account_transfer)
             .expect_err("a changed team limit is rejected");
         assert!(error.contains("maxAgents/maximum"), "{error}");
@@ -2384,7 +2384,7 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
         for (schema, _) in PROVIDER_NATIVE_DISCRIMINATORS {
             let path = format!("/components/schemas/{schema}/properties/provider/const");
             let mut drifted = openapi.clone();
-            *drifted.pointer_mut(&path).expect("native discriminator") = serde_json::json!("drift");
+            *drifted.pointer_mut(&path).expect("native discriminator") = studio_json::json!("drift");
             let error = check_schema_parity(&drifted, &transfer).expect_err("discriminator drift");
             assert!(
                 error.contains(&path) && error.contains("provider_kind.rs"),
@@ -2419,7 +2419,7 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             "/components/schemas/ClaudeSessionSettings/properties/permissionMode/anyOf/0/enum",
         ] {
             let mut drifted = openapi.clone();
-            *drifted.pointer_mut(path).expect("permission modes") = serde_json::json!(["unknown"]);
+            *drifted.pointer_mut(path).expect("permission modes") = studio_json::json!(["unknown"]);
             let error =
                 check_schema_parity(&drifted, &account_transfer).expect_err("drift must fail");
             assert!(error.contains(path), "{error}");
@@ -2443,7 +2443,7 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             "/components/schemas/ManagedMessageBody/properties/delivery/default",
         ] {
             let mut drifted = openapi.clone();
-            *drifted.pointer_mut(path).expect("contract field") = serde_json::json!("drift");
+            *drifted.pointer_mut(path).expect("contract field") = studio_json::json!("drift");
             let error = check_delivery_parity(&drifted).expect_err("drift must fail");
             assert!(
                 error.contains("delivery.rs") || error.contains("DeliveryMoment::default"),

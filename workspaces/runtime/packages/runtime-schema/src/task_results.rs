@@ -1,6 +1,6 @@
 //! Owner of the task result contract and its resource limits.
 use crate::{Draft, Validator};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 /// Maximum serialized UTF-8 bytes in a task's result schema.
 pub const MAX_RESULT_SCHEMA_BYTES: usize = 32_768;
@@ -109,7 +109,7 @@ pub fn validate_result(schema: &Value, input: &Value) -> Result<Value, Vec<Value
     let value = if validator.is_valid(input) {
         input.clone()
     } else if let Some(text) = input.as_str() {
-        serde_json::from_str(text).map_err(|e| error(format!("result must be valid JSON: {e}")))?
+        studio_json::from_str(text).map_err(|e| error(format!("result must be valid JSON: {e}")))?
     } else {
         input.clone()
     };
@@ -130,7 +130,7 @@ pub fn schema_input() -> Value {
 }
 
 /// Apply the same contract to native and legacy provider tool definitions.
-pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value>) {
+pub fn apply_tool_contract(name: &str, input: &mut studio_json::Map<String, Value>) {
     if name == "orchestration_task" {
         input["properties"]["result_schema"] = schema_input();
         input["properties"]["result"] = json!({"description":"For submit with result_schema, supply a JSON value or JSON text that validates. Without a schema, supply text. For accept/reject, supply the review decision as text."});
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn task_result_schema_openapi_copies_match_owner() {
         let document: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
         check_schema_parity(&document).expect("task contract parity");
     }
 

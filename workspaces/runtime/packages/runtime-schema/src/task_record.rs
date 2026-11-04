@@ -1,7 +1,7 @@
 //! Closed persisted task record, retaining opaque recovery evidence.
 pub use crate::stored_record::NonnegativeNumber;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
@@ -93,10 +93,10 @@ pub enum RecoveryHoldOutcome {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
-struct Opaque(Box<serde_json::value::RawValue>);
+struct Opaque(studio_json::OwnedRawJson);
 impl PartialEq for Opaque {
     fn eq(&self, other: &Self) -> bool {
-        self.0.get() == other.0.get()
+        self.0.as_str() == other.0.as_str()
     }
 }
 impl TaskType {
@@ -134,12 +134,12 @@ pub struct TaskRecord {
     id: TaskId,
     agent: String,
     #[serde(rename = "completedAtMs", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Number>", range(min = 0))]
+    #[schemars(with = "Option<studio_json::Number>", range(min = 0))]
     pub completed_at_ms: Option<NonnegativeNumber>,
-    #[schemars(with = "serde_json::Number", range(min = 0))]
+    #[schemars(with = "studio_json::Number", range(min = 0))]
     created: NonnegativeNumber,
     #[serde(rename = "durationMs", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Number>", range(min = 0))]
+    #[schemars(with = "Option<studio_json::Number>", range(min = 0))]
     pub duration_ms: Option<NonnegativeNumber>,
     #[serde(rename = "itemId")]
     item_id: String,
@@ -147,7 +147,7 @@ pub struct TaskRecord {
     #[serde(rename = "outputTruncated", skip_serializing_if = "Option::is_none")]
     pub output_truncated: Option<bool>,
     #[serde(rename = "startedAtMs", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Number>", range(min = 0))]
+    #[schemars(with = "Option<studio_json::Number>", range(min = 0))]
     pub started_at_ms: Option<NonnegativeNumber>,
     status: TaskStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -389,7 +389,7 @@ pub(crate) fn schema() -> Value {
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
     let stored: Value =
-        serde_json::from_slice(include_bytes!("schemas/persisted-task-record.schema.json"))
+        studio_json::from_slice(include_bytes!("schemas/persisted-task-record.schema.json"))
             .map_err(|e| e.to_string())?;
     if stored != schema() {
         return Err("persisted task schema must be generated from task_record::TaskRecord".into());
@@ -402,23 +402,23 @@ mod tests {
     #[test]
     fn stored_task_requires_its_identity_and_lifecycle_fields() {
         let incomplete = r#"{"id":"task","agent":"agent","kind":"command","status":"running"}"#;
-        assert!(serde_json::from_str::<super::TaskRecord>(incomplete).is_err());
+        assert!(studio_json::from_str::<super::TaskRecord>(incomplete).is_err());
     }
 
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn task_schema_matches_closed_shape() {
         check_schema_parity().unwrap();
         let value = json!({"id":"t","agent":"a","created":1,"itemId":"i","turnId":"u","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"});
-        let parsed: TaskRecord = serde_json::from_str(&value.to_string()).unwrap();
+        let parsed: TaskRecord = studio_json::from_str(&value.to_string()).unwrap();
         assert_eq!(
-            parsed.serialize(serde_json::value::Serializer).unwrap(),
+            parsed.serialize(studio_json::value::Serializer).unwrap(),
             value
         );
         assert!(
-            serde_json::from_str::<TaskRecord>(
+            studio_json::from_str::<TaskRecord>(
                 &value
                     .to_string()
                     .replace("\"status\":\"running\"", "\"status\":\"future\"")
@@ -426,7 +426,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            serde_json::from_str::<TaskRecord>(
+            studio_json::from_str::<TaskRecord>(
                 &value
                     .to_string()
                     .replace("\"id\":\"t\"", "\"unknown\":true,\"id\":\"t\"")

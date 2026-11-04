@@ -419,12 +419,12 @@ pub struct RateLimitView {
 
 impl RateLimitView {
     pub fn read(
-        observation: &serde_json::value::RawValue,
+        observation: &studio_json::OwnedRawJson,
         account: &str,
         now: f64,
-    ) -> Result<Self, serde_json::Error> {
+    ) -> Result<Self, studio_json::Error> {
         let JsonObject(value): JsonObject<UsageLimitsResponse> =
-            serde_json::from_str(observation.get())?;
+            studio_json::from_str(observation.as_str())?;
         if value.account_key != account {
             return Err(serde::de::Error::custom(
                 "rate-limit account identity mismatch",
@@ -1004,7 +1004,7 @@ fn present_eligibility<'de, D: Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn bucket_color_boundaries_are_server_owned() {
@@ -1018,7 +1018,7 @@ mod tests {
 
     #[test]
     fn bucket_projection_orders_rows_and_expires_the_aggregate() {
-        let observation: UsageLimitsResponse = serde_json::from_str(
+        let observation: UsageLimitsResponse = studio_json::from_str(
             r#"{
           "accountKey":"a", "at":100,
           "data":{"rateLimitsByLimitId":{
@@ -1047,7 +1047,7 @@ mod tests {
 
     #[test]
     fn reset_projection_preserves_credit_identity_and_disables_unspendable_credits() {
-        let observation: UsageLimitsResponse = serde_json::from_str(r#"{
+        let observation: UsageLimitsResponse = studio_json::from_str(r#"{
             "accountKey":"a", "data":{"accountId":"native-a", "rateLimitResetCredits":{"availableCount":2,"credits":[
               {"id":"spendable","resetType":"codexRateLimits","status":"available","expiresAt":110},
               {"id":"other","resetType":"other","status":"available"},
@@ -1073,7 +1073,7 @@ mod tests {
                 r#"{{"accountKey":"a","at":{now},"data":{{"rateLimits":{{"secondary":{{"usedPercent":{},"resetsAt":{reset},"windowDurationMins":10080}}}}}}}}"#,
                 used.map_or_else(|| "null".to_owned(), |used| used.to_string())
             );
-            let observation: UsageLimitsResponse = serde_json::from_str(&input).unwrap();
+            let observation: UsageLimitsResponse = studio_json::from_str(&input).unwrap();
             weekly_runway(&observation, now)
         }
         assert_eq!(view(Some(10.0), 1.0).current.color, RunwayColor::Green);
@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn runway_orders_buckets_and_preserves_unknowns_without_guessing_resets() {
-        let observation: UsageLimitsResponse = serde_json::from_str(r#"{
+        let observation: UsageLimitsResponse = studio_json::from_str(r#"{
           "accountKey":"a", "at":100,
           "data":{"rateLimitsByLimitId":{
             "z":{"limitName":"Zed","primary":{"usedPercent":80,"resetsAt":90,"windowDurationMins":10080}},
@@ -1116,7 +1116,7 @@ mod tests {
 
     #[test]
     fn exhausted_window_is_zero_even_without_a_reset_time() {
-        let observation: UsageLimitsResponse = serde_json::from_str(r#"{"accountKey":"a","data":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":10080}}}}"#).unwrap();
+        let observation: UsageLimitsResponse = studio_json::from_str(r#"{"accountKey":"a","data":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":10080}}}}"#).unwrap();
         let view = weekly_runway(&observation, 100.0);
         assert_eq!(view.current.color, RunwayColor::Red);
         assert_eq!(view.current.days, Some(0.0));
@@ -1126,19 +1126,19 @@ mod tests {
     #[test]
     fn eligibility_contract_is_owned_by_rust_schema() {
         let schema = schemars::schema_for!(UsageEligibility);
-        let schema = serde_json::to_value(schema).unwrap();
+        let schema = studio_json::to_value(schema).unwrap();
         assert!(schema["properties"]["state"].is_object());
     }
 
     #[test]
     fn eligibility_cannot_claim_runnable_and_stale() {
         let contradictory = json!({"accountKey":"a","agentId":"b","allowed":true,"canRun":true,"fresh":false,"buckets":[],"checkedAt":1,"model":"m","provider":"codex","overage":"unavailable","resetAt":null,"validUntil":null});
-        assert!(serde_json::from_value::<UsageEligibility>(contradictory).is_err());
+        assert!(studio_json::from_value::<UsageEligibility>(contradictory).is_err());
     }
 
     #[test]
     fn rate_limit_view_rejects_another_account_and_normalizes_observation() {
-        let raw = serde_json::value::RawValue::from_string(
+        let raw = studio_json::OwnedRawJson::from_string(
             r#"{"accountKey":"a","data":{"source":null,"rateLimits":{"secondary":null},"vendor":{"unknown":[1,true]}}}"#.to_owned(),
         )
         .unwrap();
@@ -1153,11 +1153,11 @@ mod tests {
     #[test]
     fn optional_nulls_normalize_to_absence_at_provider_boundary() {
         let input = json!({"accountKey":"a","data":{"ordinaryUsageAllowed":null,"claudeRateLimit":{"status":"allowed","rateLimitType":null,"overageStatus":null,"resetsAt":null}}});
-        let response: UsageLimitsResponse = serde_json::from_value(input).unwrap();
+        let response: UsageLimitsResponse = studio_json::from_value(input).unwrap();
         let data = response.data.unwrap().0;
         assert!(data.ordinary_usage_allowed.is_none());
         assert!(
-            serde_json::to_value(&data)
+            studio_json::to_value(&data)
                 .unwrap()
                 .get("ordinaryUsageAllowed")
                 .is_none()
@@ -1171,7 +1171,7 @@ mod tests {
     #[test]
     fn claude_rate_info_matches_bridge_owned_schema() {
         let owner: Value =
-            serde_json::from_str(include_str!("schemas/claude-rate-limit.schema.json")).unwrap();
+            studio_json::from_str(include_str!("schemas/claude-rate-limit.schema.json")).unwrap();
         let rust = schemars::schema_for!(ClaudeRateInfo).to_value();
         assert_eq!(
             owner["properties"]
@@ -1215,7 +1215,7 @@ mod tests {
                     record.as_object_mut().unwrap().remove(name);
                 }
                 assert_eq!(
-                    serde_json::from_value::<ClaudeRateInfo>(record.clone()).is_ok(),
+                    studio_json::from_value::<ClaudeRateInfo>(record.clone()).is_ok(),
                     validator.is_valid(&record),
                     "bridge schema field {name}: {record}"
                 );
@@ -1225,7 +1225,7 @@ mod tests {
 
     #[test]
     fn runway_keeps_passed_resets_unknown_until_a_new_observation() {
-        let observation: UsageLimitsResponse = serde_json::from_str(
+        let observation: UsageLimitsResponse = studio_json::from_str(
             r#"{"accountKey":"a","at":100,"data":{"rateLimits":{"primary":{"usedPercent":80,"resetsAt":110,"windowDurationMins":10080}}}}"#,
         ).unwrap();
         let view = weekly_runway(&observation, 100.0);
@@ -1237,7 +1237,7 @@ mod tests {
     #[test]
     fn known_fields_track_schema_owner() {
         let schema: Value =
-            serde_json::from_str(include_str!("schemas/workspace-usage-limits.schema.json"))
+            studio_json::from_str(include_str!("schemas/workspace-usage-limits.schema.json"))
                 .expect("schema");
         for (name, fields) in [
             (
@@ -1390,7 +1390,7 @@ mod tests {
                     .expect("schema exists")
                     .is_none();
             let typed_valid =
-                serde_json::from_value::<JsonObject<UsageLimitsResponse>>(candidate.clone())
+                studio_json::from_value::<JsonObject<UsageLimitsResponse>>(candidate.clone())
                     .is_ok();
             assert_eq!(typed_valid, schema_valid, "{candidate}");
         }

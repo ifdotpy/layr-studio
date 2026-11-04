@@ -2,7 +2,7 @@
 //! callers apply their own stricter contracts to these historical records.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use studio_json::{Number, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -32,7 +32,7 @@ pub(crate) fn schema() -> Value {
 }
 
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-usage-resume-record.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -45,7 +45,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn persisted_schema_keeps_permissive_evidence_and_presence() {

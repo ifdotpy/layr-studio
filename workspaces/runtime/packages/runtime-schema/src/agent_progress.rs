@@ -82,7 +82,7 @@ pub enum AccountTransferProgress {
     },
 }
 
-pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 7] {
+pub(crate) fn account_change_schemas() -> [(&'static str, studio_json::Value); 7] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -240,14 +240,14 @@ pub struct AgentStall {
 }
 
 /// Derive the closed reason set from the tagged wait owner.
-fn reason_schema(generator: &mut schemars::SchemaGenerator) -> serde_json::Value {
+fn reason_schema(generator: &mut schemars::SchemaGenerator) -> studio_json::Value {
     let wait = AgentStartWait::json_schema(generator).to_value();
     let values: Vec<_> = wait["oneOf"]
         .as_array()
         .expect("tagged wait variants")
         .iter()
         .map(|variant| {
-            serde_json::Value::String(
+            studio_json::Value::String(
                 variant["properties"]["reason"]["const"]
                     .as_str()
                     .expect("tagged reason is a string")
@@ -255,7 +255,7 @@ fn reason_schema(generator: &mut schemars::SchemaGenerator) -> serde_json::Value
             )
         })
         .collect();
-    serde_json::json!({"type": "string", "enum": values})
+    studio_json::json!({"type": "string", "enum": values})
 }
 
 /// Counts of live descendant workers. Working uses the team progress status definition.
@@ -268,7 +268,7 @@ pub struct TeamCounts {
 }
 
 /// Schemas consumed by OpenAPI and its generated renderer contract.
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 6] {
+pub(crate) fn schemas() -> [(&'static str, studio_json::Value); 6] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -297,7 +297,7 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 6] {
     ]
 }
 
-pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn check_schema_parity(openapi: &studio_json::Value) -> Result<(), String> {
     for (name, schema) in schemas() {
         if openapi.pointer(&format!("/components/schemas/{name}")) != Some(&schema) {
             return Err(format!(
@@ -313,7 +313,7 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
     ] {
         if openapi.pointer(&format!(
             "/components/schemas/{consumer}/properties/teamCounts"
-        )) != Some(&serde_json::json!({"$ref":"#/components/schemas/TeamCounts"}))
+        )) != Some(&studio_json::json!({"$ref":"#/components/schemas/TeamCounts"}))
         {
             return Err(format!("{consumer}.teamCounts must reference TeamCounts"));
         }
@@ -321,11 +321,11 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
     for (field, schema) in [
         (
             "commandProgress",
-            serde_json::json!({"type":"array","title":"Commandprogress","default":[],"items":{"$ref":"#/components/schemas/AgentCommandProgress"}}),
+            studio_json::json!({"type":"array","title":"Commandprogress","default":[],"items":{"$ref":"#/components/schemas/AgentCommandProgress"}}),
         ),
         (
             "stall",
-            serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AgentStall"},{"type":"null"}],"default":null}),
+            studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/AgentStall"},{"type":"null"}],"default":null}),
         ),
     ] {
         for consumer in ["AgentEntityDto", "AgentResponse", "BranchResponse"] {
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn transfer_progress_rejects_invalid_account_key() {
         let json = r#"{"kind":"completed","id":"t","targetAccountKey":""}"#;
-        assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+        assert!(studio_json::from_str::<AccountTransferProgress>(json).is_err());
     }
     #[test]
     fn transfer_actions_reject_duplicates_and_invalid_moving_cancel() {
@@ -368,14 +368,14 @@ mod tests {
             r#"{"kind":"moving","id":"t","targetAccountKey":"a","actions":"cancel"}"#,
             r#"{"kind":"waiting","id":"t","targetAccountKey":"a","reason":"hold","actions":"retry"}"#,
         ] {
-            assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+            assert!(studio_json::from_str::<AccountTransferProgress>(json).is_err());
         }
         let valid = r#"{"kind":"blocked","id":"t","targetAccountKey":"a","reason":"hold","actions":"retry_cancel"}"#;
-        assert!(serde_json::from_str::<AccountTransferProgress>(valid).is_ok());
+        assert!(studio_json::from_str::<AccountTransferProgress>(valid).is_ok());
     }
     #[test]
     fn agent_progress_openapi_fragments_derive_from_serde_owners() {
-        fn fragment<T: schemars::JsonSchema>() -> serde_json::Value {
+        fn fragment<T: schemars::JsonSchema>() -> studio_json::Value {
             T::json_schema(
                 &mut schemars::generate::SchemaSettings::openapi3()
                     .for_serialize()
@@ -383,8 +383,8 @@ mod tests {
             )
             .to_value()
         }
-        let openapi: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+        let openapi: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
                 .expect("OpenAPI source parses");
         for (name, schema) in [
             ("AgentCommandProgress", fragment::<AgentCommandProgress>()),
@@ -400,11 +400,11 @@ mod tests {
     #[test]
     fn provider_retry_deadline_survives_legacy_and_fresh_projection() {
         for value in [
-            serde_json::json!({"reason":"provider_session","epoch":3}),
-            serde_json::json!({"reason":"provider_session","epoch":3,"until":123.5}),
+            studio_json::json!({"reason":"provider_session","epoch":3}),
+            studio_json::json!({"reason":"provider_session","epoch":3,"until":123.5}),
         ] {
-            let fresh: AgentStartWait = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(fresh).unwrap(), value);
+            let fresh: AgentStartWait = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(fresh).unwrap(), value);
         }
     }
 
@@ -417,7 +417,7 @@ mod tests {
             r#"{"reason":"pause","epoch":3,"until":null}"#,
             r#"{"reason":"provider_session","epoch":3,"until":null}"#,
         ] {
-            assert!(serde_json::from_str::<AgentStartWait>(value).is_err());
+            assert!(studio_json::from_str::<AgentStartWait>(value).is_err());
         }
     }
 
@@ -438,33 +438,33 @@ mod tests {
     #[test]
     fn legacy_reason_and_wire_schemas_match_the_wait_owner() {
         let schemas = schemas();
-        let check = |schema: serde_json::Value, value: serde_json::Value| {
-            let root = serde_json::json!({"$ref":"#/components/schemas/Test", "components":{"schemas":{"Test":schema,"JsonValue":{}}}});
+        let check = |schema: studio_json::Value, value: studio_json::Value| {
+            let root = studio_json::json!({"$ref":"#/components/schemas/Test", "components":{"schemas":{"Test":schema,"JsonValue":{}}}});
             jsonschema::validator_for(&root)
                 .expect("schema")
                 .is_valid(&value)
         };
         for value in [
-            serde_json::json!({"reason":"slot", "epoch":1}),
-            serde_json::json!({"reason":"pause", "epoch":1, "until":null, "extension":{"kept":true}}),
+            studio_json::json!({"reason":"slot", "epoch":1}),
+            studio_json::json!({"reason":"pause", "epoch":1, "until":null, "extension":{"kept":true}}),
         ] {
             assert!(!check(schemas[1].1.clone(), value.clone()));
             assert!(!check(schemas[0].1.clone(), value));
         }
         for invalid in [
-            serde_json::json!({"reason":"slot", "epoch":-1}),
-            serde_json::json!({"reason":"slot", "epoch":1, "runningTurns":-1}),
-            serde_json::json!({"reason":"slot", "epoch":1, "maxRunningTurns":9007199254740992_u64}),
+            studio_json::json!({"reason":"slot", "epoch":-1}),
+            studio_json::json!({"reason":"slot", "epoch":1, "runningTurns":-1}),
+            studio_json::json!({"reason":"slot", "epoch":1, "maxRunningTurns":9007199254740992_u64}),
         ] {
             assert!(!check(schemas[1].1.clone(), invalid));
         }
         assert!(check(
             schemas[0].1.clone(),
-            serde_json::json!({"reason":"slot", "epoch":1, "runningTurns":2, "maxRunningTurns":3})
+            studio_json::json!({"reason":"slot", "epoch":1, "runningTurns":2, "maxRunningTurns":3})
         ));
         assert!(!check(
             schemas[0].1.clone(),
-            serde_json::json!({"reason":"slot", "epoch":1, "runningTurns":2, "maxRunningTurns":3, "extension":true})
+            studio_json::json!({"reason":"slot", "epoch":1, "runningTurns":2, "maxRunningTurns":3, "extension":true})
         ));
     }
 
@@ -482,29 +482,29 @@ mod tests {
             },
             AgentStartWait::Disk { epoch: 3 },
         ] {
-            let value = serde_json::to_value(&wait).expect("typed wait");
+            let value = studio_json::to_value(&wait).expect("typed wait");
             assert_eq!(
-                serde_json::from_value::<AgentStartWait>(value).expect("wait round trip"),
+                studio_json::from_value::<AgentStartWait>(value).expect("wait round trip"),
                 wait
             );
         }
         assert!(
-            serde_json::from_str::<AgentStartWait>(r#"{"reason":"unknown","epoch":3}"#).is_err()
+            studio_json::from_str::<AgentStartWait>(r#"{"reason":"unknown","epoch":3}"#).is_err()
         );
         assert!(
-            serde_json::from_str::<AgentStartWait>(r#"{"reason":"disk","epoch":3,"guess":true}"#)
+            studio_json::from_str::<AgentStartWait>(r#"{"reason":"disk","epoch":3,"guess":true}"#)
                 .is_err()
         );
 
         let examples = [
-            serde_json::to_value(AgentCommandProgress {
+            studio_json::to_value(AgentCommandProgress {
                 monitor_id: "m".into(),
                 stage: "test".into(),
                 started_at: 1.0,
                 last_output_line: "pass".into(),
             })
             .expect("test fixture value"),
-            serde_json::to_value(AgentStall {
+            studio_json::to_value(AgentStall {
                 task_id: "t".into(),
                 since: 2.0,
             })
@@ -522,7 +522,7 @@ mod tests {
             );
         }
         assert!(
-            serde_json::from_str::<AgentStall>(r#"{"taskId":"t","since":1,"extra":true}"#).is_err()
+            studio_json::from_str::<AgentStall>(r#"{"taskId":"t","since":1,"extra":true}"#).is_err()
         );
     }
 }

@@ -1,6 +1,6 @@
 //! Serialized models.dev pricing artifact and the catalog fields read by Studio.
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use std::collections::BTreeMap;
 
 /// The artifact envelope; the catalog stays a document because its signature is the hash

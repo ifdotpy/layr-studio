@@ -111,7 +111,7 @@ use std::sync::OnceLock;
 pub use jsonschema::{
     Draft, Registry as JsonSchemaRegistry, ValidationError, Validator, error::ValidationErrorKind,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 pub mod sync_entity_payload;
 pub mod sync_protocol;
@@ -480,7 +480,7 @@ pub fn registry_for_document(document: &Value) -> SchemaResult<JsonSchemaRegistr
         )
         .map_err(|error| error.to_string())?;
     for (uri, bytes) in PERSISTED_SCHEMAS {
-        let schema: Value = serde_json::from_slice(bytes)
+        let schema: Value = studio_json::from_slice(bytes)
             .map_err(|error| format!("cannot parse persisted schema {uri}: {error}"))?;
         registry = registry
             .add(*uri, jsonschema::Resource::from_contents(schema))
@@ -662,11 +662,11 @@ pub fn validate_sync_entity_payload_strict(
         return Ok(object
             .get("value")
             .and_then(Value::as_object)
-            .is_some_and(serde_json::Map::is_empty));
+            .is_some_and(studio_json::Map::is_empty));
     }
     if matches!(collection, "edge" | "chat" | "workRelease") {
         return Ok(
-            serde_json::from_value::<sync_entity_payload::SyncEntityPayload>(payload.clone())
+            studio_json::from_value::<sync_entity_payload::SyncEntityPayload>(payload.clone())
                 .is_ok(),
         );
     }
@@ -809,11 +809,11 @@ fn compiled_schemas() -> SchemaResult<&'static CompiledSchemas> {
 }
 
 fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
-    let openapi: Value = serde_json::from_slice(OPENAPI)
+    let openapi: Value = studio_json::from_slice(OPENAPI)
         .map_err(|error| format!("cannot parse OpenAPI schema document: {error}"))?;
-    let account_registry: Value = serde_json::from_slice(ACCOUNT_REGISTRY)
+    let account_registry: Value = studio_json::from_slice(ACCOUNT_REGISTRY)
         .map_err(|error| format!("cannot parse account-registry schema: {error}"))?;
-    let usage_limits: Value = serde_json::from_slice(USAGE_LIMITS)
+    let usage_limits: Value = studio_json::from_slice(USAGE_LIMITS)
         .map_err(|error| format!("cannot parse workspace-usage-limits schema: {error}"))?;
     let registry = registry_for_document(&openapi)?;
     let mut validators = BTreeMap::new();
@@ -1053,10 +1053,10 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         &usage_limits,
         &mut validators,
     )?;
-    let relocation: Value = serde_json::from_slice(RELOCATION).map_err(|e| e.to_string())?;
+    let relocation: Value = studio_json::from_slice(RELOCATION).map_err(|e| e.to_string())?;
     register_definitions(RELOCATION_URI, "relocation", &relocation, &mut validators)?;
     let continuation: Value =
-        serde_json::from_slice(CONTINUATION).map_err(|error| error.to_string())?;
+        studio_json::from_slice(CONTINUATION).map_err(|error| error.to_string())?;
     register_definitions(
         CONTINUATION_URI,
         "continuation",
@@ -1109,7 +1109,7 @@ pub use studio_client_domain::drafts;
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use studio_json::json;
 
     use super::{
         first_error, initialize, normalize_sync_entity_payload, registry_for_document,
@@ -1119,7 +1119,7 @@ mod tests {
     #[test]
     fn entity_v4_collection_wire_contracts_match_payload_owner() {
         use std::collections::BTreeMap;
-        let openapi: serde_json::Value = serde_json::from_slice(super::OPENAPI).expect("OpenAPI");
+        let openapi: studio_json::Value = studio_json::from_slice(super::OPENAPI).expect("OpenAPI");
         let schemas = &openapi["components"]["schemas"];
         // SyncEntityPayload's discriminator owns the collection set and value DTOs.
         let owner: BTreeMap<_, _> = schemas["SyncEntityPayload"]["discriminator"]["mapping"]
@@ -1201,7 +1201,7 @@ mod tests {
         assert!(
             validate(
                 "PersistedServerDelivery",
-                &serde_json::json!({
+                &studio_json::json!({
                     "id": id.id(), "state": "queued"
                 })
             )
@@ -1211,7 +1211,7 @@ mod tests {
 
     #[test]
     fn view_scopes_cover_every_collection_and_keep_detail_out_of_global() {
-        let openapi: serde_json::Value = serde_json::from_slice(super::OPENAPI).expect("OpenAPI");
+        let openapi: studio_json::Value = studio_json::from_slice(super::OPENAPI).expect("OpenAPI");
         let scopes = super::sync_protocol::subscription_entity_scopes();
         let global = &scopes["state"].collections;
         assert!(global.iter().any(|value| value == "agentSummary"));

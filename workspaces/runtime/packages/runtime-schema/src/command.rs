@@ -250,7 +250,7 @@ pub struct ResolveBody {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct AnswerCommandBody(
-    #[schemars(schema_with = "answer_fields")] pub serde_json::Map<String, serde_json::Value>,
+    #[schemars(schema_with = "answer_fields")] pub studio_json::Map<String, studio_json::Value>,
 );
 
 fn answer_fields(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -369,7 +369,7 @@ pub struct CommandRow {
     pub collection: String,
     pub id: String,
     pub seq: i64,
-    pub payload: serde_json::Value,
+    pub payload: studio_json::Value,
 }
 
 #[cfg(test)]
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn request_is_flat_and_tagged_by_kind() {
-        let wire = serde_json::json!({
+        let wire = studio_json::json!({
             "id": "0192f3a0-0000-7000-8000-000000000001",
             "client": "web-1",
             "number": 3,
@@ -386,25 +386,25 @@ mod tests {
             "target": "chat",
             "body": {"message": "m"}
         });
-        let request: CommandRequest = serde_json::from_value(wire.clone()).expect("parse");
+        let request: CommandRequest = studio_json::from_value(wire.clone()).expect("parse");
         assert_eq!(request.command.name(), "withdraw");
         assert_eq!(request.command.target(), "chat");
-        assert_eq!(serde_json::to_value(&request).expect("encode"), wire);
+        assert_eq!(studio_json::to_value(&request).expect("encode"), wire);
     }
 
     #[test]
     fn unknown_kind_and_unknown_body_field_are_refused() {
-        let base = serde_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"target":"t"});
+        let base = studio_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"target":"t"});
         let mut unknown_kind = base.clone();
         unknown_kind["kind"] = "delete_everything".into();
-        unknown_kind["body"] = serde_json::json!({});
-        assert!(serde_json::from_value::<CommandRequest>(unknown_kind).is_err());
+        unknown_kind["body"] = studio_json::json!({});
+        assert!(studio_json::from_value::<CommandRequest>(unknown_kind).is_err());
         let mut extra = base;
         extra["kind"] = "stop".into();
-        extra["body"] = serde_json::json!({"extra": true});
-        assert!(serde_json::from_value::<CommandRequest>(extra).is_err());
-        let extra = serde_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"stop","target":"t","body":{},"extra":true});
-        assert!(serde_json::from_value::<CommandRequest>(extra).is_err());
+        extra["body"] = studio_json::json!({"extra": true});
+        assert!(studio_json::from_value::<CommandRequest>(extra).is_err());
+        let extra = studio_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"stop","target":"t","body":{},"extra":true});
+        assert!(studio_json::from_value::<CommandRequest>(extra).is_err());
     }
 
     #[test]
@@ -413,18 +413,18 @@ mod tests {
             let wire = format!(
                 r#"{{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"resolve","target":"entry","body":{{"action":"{action}"}}}}"#
             );
-            let request: CommandRequest = serde_json::from_str(&wire).expect("parse");
+            let request: CommandRequest = studio_json::from_str(&wire).expect("parse");
             assert_eq!(request.command.name(), "resolve");
             assert_eq!(request.command.target(), "entry");
         }
         let unknown = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"resolve","target":"entry","body":{"action":"cancel"}}"#;
-        assert!(serde_json::from_str::<CommandRequest>(unknown).is_err());
+        assert!(studio_json::from_str::<CommandRequest>(unknown).is_err());
     }
 
     #[test]
     fn pause_and_answer_are_tagged_commands_and_delete_is_not() {
         let id = "0192f3a0-0000-7000-8000-000000000001";
-        let pause: CommandRequest = serde_json::from_str(&format!(
+        let pause: CommandRequest = studio_json::from_str(&format!(
             r#"{{"id":"{id}","client":"c","number":1,"kind":"pause","target":"chat","body":{{}}}}"#
         ))
         .expect("pause");
@@ -436,7 +436,7 @@ mod tests {
                 body: StopBody { descendants: true }
             }
         );
-        let answer: CommandRequest = serde_json::from_str(&format!(
+        let answer: CommandRequest = studio_json::from_str(&format!(
             r#"{{"id":"{id}","client":"c","number":1,"kind":"answer","target":"approval","body":{{"decision":"accept"}}}}"#
         ))
         .expect("answer");
@@ -445,23 +445,23 @@ mod tests {
         let delete = format!(
             r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{}}}}"#
         );
-        assert!(serde_json::from_str::<CommandRequest>(&delete).is_err());
+        assert!(studio_json::from_str::<CommandRequest>(&delete).is_err());
     }
 
     #[test]
     fn lead_message_is_a_tagged_command_with_the_grant_as_target() {
         let wire = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"lead_message","target":"grant-1","body":{"text":"hi"}}"#;
-        let request: CommandRequest = serde_json::from_str(wire).expect("parse");
+        let request: CommandRequest = studio_json::from_str(wire).expect("parse");
         assert_eq!(request.command.name(), "lead_message");
         assert_eq!(request.command.target(), "grant-1");
-        assert_eq!(serde_json::to_string(&request).expect("encode"), wire);
+        assert_eq!(studio_json::to_string(&request).expect("encode"), wire);
         let extra = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"lead_message","target":"grant-1","body":{"text":"hi","assets":[]}}"#;
-        assert!(serde_json::from_str::<CommandRequest>(extra).is_err());
+        assert!(studio_json::from_str::<CommandRequest>(extra).is_err());
     }
 
     #[test]
     fn stop_descendants_default_to_true() {
-        let request: CommandRequest = serde_json::from_str(
+        let request: CommandRequest = studio_json::from_str(
             r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"stop","target":"t","body":{}}"#,
         )
         .expect("parse");

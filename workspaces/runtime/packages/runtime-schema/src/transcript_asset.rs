@@ -3,8 +3,8 @@ use crate::raw_object::{self, RawObjectFields};
 use crate::stored_record::StoredJsonInteger;
 use serde::de::{Error, MapAccess};
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
-use serde_json::{Number, Value};
+use studio_json::OwnedRawJson as RawValue;
+use studio_json::{Number, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -40,7 +40,7 @@ pub struct TranscriptAssetRecord {
     created: Number,
     #[serde(flatten)]
     #[schemars(with = "BTreeMap<String, Value>")]
-    extra: BTreeMap<String, Box<RawValue>>,
+    extra: BTreeMap<String, RawValue>,
 }
 
 #[derive(Default)]
@@ -76,7 +76,7 @@ impl<'de> RawObjectFields<'de> for AssetFields {
             "path" => path, "mime" => mime, "image" => image, "size" => size,
             "hash" => hash, "created" => created)
     }
-    fn finish<E: Error>(self, extra: BTreeMap<String, Box<RawValue>>) -> Result<Self::Output, E> {
+    fn finish<E: Error>(self, extra: BTreeMap<String, RawValue>) -> Result<Self::Output, E> {
         Ok(TranscriptAssetRecord {
             id: self.id.ok_or_else(|| E::missing_field("id"))?,
             agent: self.agent.ok_or_else(|| E::missing_field("agent"))?,
@@ -117,7 +117,7 @@ pub struct TranscriptAssetView {
     #[serde(skip_serializing_if = "Option::is_none")]
     created: Option<Number>,
     #[serde(flatten)]
-    extra: BTreeMap<String, Box<RawValue>>,
+    extra: BTreeMap<String, RawValue>,
 }
 
 impl PartialEq for TranscriptAssetView {
@@ -134,7 +134,7 @@ impl PartialEq for TranscriptAssetView {
             && self
                 .extra
                 .iter()
-                .all(|(key, value)| other.extra.get(key).is_some_and(|v| v.get() == value.get()))
+                .all(|(key, value)| other.extra.get(key).is_some_and(|v| v.as_str() == value.as_str()))
     }
 }
 
@@ -176,7 +176,7 @@ impl<'de> RawObjectFields<'de> for ViewFields {
         }
         Ok(true)
     }
-    fn finish<E: Error>(self, extra: BTreeMap<String, Box<RawValue>>) -> Result<Self::Output, E> {
+    fn finish<E: Error>(self, extra: BTreeMap<String, RawValue>) -> Result<Self::Output, E> {
         Ok(TranscriptAssetView {
             id: self.id.ok_or_else(|| E::missing_field("id"))?,
             agent: self.agent,
@@ -206,8 +206,8 @@ fn size_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"type":"integer","x-safe-integer":"unsigned"})
 }
 impl TranscriptAssetRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        serde_json::from_value(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        studio_json::from_value(value)
     }
     pub fn id(&self) -> &TranscriptAssetId {
         &self.id
@@ -255,14 +255,14 @@ impl TranscriptAssetRecord {
     }
     pub fn into_value(self) -> Value {
         // Every field is already JSON data or a serializable scalar.
-        serde_json::to_value(self).expect("asset fields are JSON serializable")
+        studio_json::to_value(self).expect("asset fields are JSON serializable")
     }
 }
 pub(crate) fn schema() -> Value {
     schemars::schema_for!(TranscriptAssetRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/runtime-transcript-asset.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -275,12 +275,12 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn asset_rejects_duplicate_opaque_fields() {
         let raw = r#"{"id":"a","agent":"owner","name":"n","path":"p","mime":"m","image":false,"size":1,"hash":"h","created":2,"future":1,"future":2}"#;
-        assert!(serde_json::from_str::<TranscriptAssetRecord>(raw).is_err());
+        assert!(studio_json::from_str::<TranscriptAssetRecord>(raw).is_err());
     }
 
     #[test]
@@ -289,17 +289,17 @@ mod tests {
             r#"{"id":"a","future":{"z":  1}}"#,
             r#"{"id":"a","agent":"owner","name":"n","mime":"m","image":false,"size":1,"hash":"h","created":2}"#,
         ] {
-            let view: TranscriptAssetView = serde_json::from_str(raw).unwrap();
-            assert_eq!(serde_json::to_string(&view).unwrap(), raw);
+            let view: TranscriptAssetView = studio_json::from_str(raw).unwrap();
+            assert_eq!(studio_json::to_string(&view).unwrap(), raw);
         }
-        assert!(serde_json::from_str::<TranscriptAssetView>(r#"{"id":"a","name":null}"#).is_err());
+        assert!(studio_json::from_str::<TranscriptAssetView>(r#"{"id":"a","name":null}"#).is_err());
     }
 
     #[test]
     fn asset_view_excludes_path_and_keeps_opaque_bytes() {
         let raw = r#"{"id":"a","agent":"owner","name":"n","path":"private","mime":"m","image":false,"size":1,"hash":"h","created":2,"future":{"x":  1}}"#;
-        let record: TranscriptAssetRecord = serde_json::from_str(raw).unwrap();
-        let view = serde_json::to_string(&record.into_view()).unwrap();
+        let record: TranscriptAssetRecord = studio_json::from_str(raw).unwrap();
+        let view = studio_json::to_string(&record.into_view()).unwrap();
         assert!(!view.contains("private"));
         assert!(view.contains(r#""future":{"x":  1}"#));
     }
@@ -330,7 +330,7 @@ mod tests {
         }
         cases.push((json!(["a"]), false));
         for (value, valid) in cases {
-            let record = serde_json::from_value::<TranscriptAssetRecord>(value.clone());
+            let record = studio_json::from_value::<TranscriptAssetRecord>(value.clone());
             assert_eq!(record.is_ok(), valid, "{value}");
             assert_eq!(
                 crate::validate("PersistedTranscriptAsset", &value).unwrap(),

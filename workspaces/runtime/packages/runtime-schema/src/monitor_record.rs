@@ -1,7 +1,7 @@
 //! Typed persisted monitor rows and their open transport evidence.
 use crate::studio_errors::MonitorStatus;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use std::{borrow::Cow, collections::BTreeMap};
 
 pub use crate::bounded_integer::BoundedInteger as MonitorInteger;
@@ -580,7 +580,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(MonitorRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-monitor-record.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -596,25 +596,25 @@ mod tests {
     #[test]
     fn input_attempt_decodes_operation_and_method_once() {
         let raw = r#"{"id":"attempt","agent":"a","epoch":1,"accountKey":"account","connectionId":"connection","rootRequestId":"root","method":"command/exec/write","params":{"processId":"m","deltaBase64":"YQ==","closeStdin":false},"status":"submitted","created":1,"response":{"ok":true}}"#;
-        let input: MonitorInputAttempt = serde_json::from_str(raw).unwrap();
+        let input: MonitorInputAttempt = studio_json::from_str(raw).unwrap();
         assert!(matches!(input.method, MonitorInputMethod::Write(_)));
         assert_eq!(input.operation.agent.as_str(), "a");
         assert_eq!(
             input.operation.evidence.root_request_id.as_deref(),
             Some("root")
         );
-        assert_eq!(input.response.unwrap().0.get(), r#"{"ok":true}"#);
+        assert_eq!(input.response.unwrap().0.as_str(), r#"{"ok":true}"#);
     }
     #[test]
     fn running_reattach_requires_start_time() {
         assert!(
-            serde_json::from_str::<ReattachRecovery>(
+            studio_json::from_str::<ReattachRecovery>(
                 r#"{"accountKey":"a","epoch":1,"status":"running"}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<ReattachRecovery>(
+            studio_json::from_str::<ReattachRecovery>(
                 r#"{"accountKey":"a","epoch":1,"status":"running","startedAt":1}"#
             )
             .is_ok()
@@ -629,20 +629,20 @@ mod tests {
         }
         let complete = r#"{"stallProbeGeneration":1,"stallProbeStarted":2}"#;
         assert!(
-            serde_json::from_str::<Record>(complete)
+            studio_json::from_str::<Record>(complete)
                 .unwrap()
                 .probe
                 .0
                 .is_some()
         );
-        assert!(serde_json::from_str::<Record>(r#"{"stallProbeGeneration":1}"#).is_err());
+        assert!(studio_json::from_str::<Record>(r#"{"stallProbeGeneration":1}"#).is_err());
     }
     #[test]
     fn strict_monitor_requires_owner_status_and_discards_extensions() {
-        assert!(serde_json::from_str::<MonitorRecord>(r#"{"id":"m"}"#).is_err());
+        assert!(studio_json::from_str::<MonitorRecord>(r#"{"id":"m"}"#).is_err());
         let raw = r#"{"id":"m","agent":"a","epoch":1,"status":"running","requestId":"request","activityAt":1,"activityGeneration":0,"bytes":0,"command":"echo","created":1,"cwd":"fixture","interactive":false,"livenessCommand":"","log":"fixture-log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","unknown":true}"#;
-        let record: MonitorRecord = serde_json::from_str(raw).unwrap();
-        assert!(!serde_json::to_string(&record).unwrap().contains("unknown"));
+        let record: MonitorRecord = studio_json::from_str(raw).unwrap();
+        assert!(!studio_json::to_string(&record).unwrap().contains("unknown"));
     }
     #[test]
     fn stored_monitor_schema_matches_type() {
@@ -651,13 +651,13 @@ mod tests {
     #[test]
     fn operation_identity_is_bounded() {
         assert!(
-            serde_json::from_str::<MonitorOperationRecord>(
+            studio_json::from_str::<MonitorOperationRecord>(
                 r#"{"agent":"","epoch":1,"accountKey":"a","connectionId":"c"}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<MonitorOperationRecord>(
+            studio_json::from_str::<MonitorOperationRecord>(
                 r#"{"agent":"a","epoch":-1,"accountKey":"a","connectionId":"c"}"#
             )
             .is_err()

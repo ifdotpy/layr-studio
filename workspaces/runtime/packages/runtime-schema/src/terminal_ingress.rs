@@ -92,12 +92,12 @@ impl TerminalAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn action_limits_match_openapi() {
         let doc: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let schemas = &doc["components"]["schemas"];
         for schema in [
             "TerminalInput",
@@ -145,20 +145,20 @@ mod tests {
     #[test]
     fn terminal_actions_enforce_shape_and_bounds() {
         assert!(
-            serde_json::from_value::<TerminalInput>(
+            studio_json::from_value::<TerminalInput>(
                 json!({"id":"i", "text":"x", "request_id":"r"})
             )
             .is_ok()
         );
-        assert!(serde_json::from_value::<TerminalResize>(json!({"id":"i"})).is_ok());
+        assert!(studio_json::from_value::<TerminalResize>(json!({"id":"i"})).is_ok());
         assert!(
-            serde_json::from_value::<TerminalRename>(json!({"id":"i", "title":"name"})).is_ok()
+            studio_json::from_value::<TerminalRename>(json!({"id":"i", "title":"name"})).is_ok()
         );
-        assert!(serde_json::from_value::<TerminalClose>(json!({"id":"i"})).is_ok());
-        assert!(serde_json::from_value::<TerminalResize>(json!({"id":"i", "cols":null})).is_err());
-        assert!(serde_json::from_value::<TerminalClose>(json!({"id":"i", "extra":true})).is_err());
+        assert!(studio_json::from_value::<TerminalClose>(json!({"id":"i"})).is_ok());
+        assert!(studio_json::from_value::<TerminalResize>(json!({"id":"i", "cols":null})).is_err());
+        assert!(studio_json::from_value::<TerminalClose>(json!({"id":"i", "extra":true})).is_err());
         assert!(
-            serde_json::from_value::<TerminalInput>(json!({"id":"i", "text":"x", "request_id":""}))
+            studio_json::from_value::<TerminalInput>(json!({"id":"i", "text":"x", "request_id":""}))
                 .is_err()
         );
     }

@@ -86,7 +86,7 @@ pub struct AccountTransferSummaryDto {
 }
 
 fn nullable_ref(
-    schema: &mut serde_json::Value,
+    schema: &mut studio_json::Value,
     name: &str,
     from: &str,
     to: &str,
@@ -95,30 +95,30 @@ fn nullable_ref(
     let prop = property(schema, name)?;
     let variants = object(prop)?
         .get_mut("anyOf")
-        .and_then(serde_json::Value::as_array_mut)
+        .and_then(studio_json::Value::as_array_mut)
         .ok_or_else(|| format!("{name} must be nullable"))?;
     if variants.len() != 2
         || variants
             .first()
             .and_then(|v| v.get("$ref"))
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             != Some(from)
-        || variants.get(1) != Some(&serde_json::json!({"type":"null"}))
+        || variants.get(1) != Some(&studio_json::json!({"type":"null"}))
     {
         return Err(format!("{name} must reference its owner and null"));
     }
     let reference = variants
         .first_mut()
-        .and_then(serde_json::Value::as_object_mut)
+        .and_then(studio_json::Value::as_object_mut)
         .and_then(|v| v.get_mut("$ref"))
         .ok_or_else(|| format!("{name} is missing its reference"))?;
     *reference = to.into();
-    object(prop)?.insert("default".into(), serde_json::Value::Null);
+    object(prop)?.insert("default".into(), studio_json::Value::Null);
     Ok(())
 }
 
 fn nullable_list(
-    schema: &mut serde_json::Value,
+    schema: &mut studio_json::Value,
     name: &str,
     label: &str,
     from: &str,
@@ -127,11 +127,11 @@ fn nullable_list(
     use crate::agent_entity_nested::{object, property, title};
     let prop = property(schema, name)?;
     let mut item = prop.clone();
-    if item.get("type") != Some(&serde_json::json!(["array", "null"]))
+    if item.get("type") != Some(&studio_json::json!(["array", "null"]))
         || item
             .get("items")
             .and_then(|v| v.get("$ref"))
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             != Some(from)
     {
         return Err(format!("{name} must contain its owner and null"));
@@ -142,18 +142,18 @@ fn nullable_list(
         .ok_or_else(|| format!("{name} has no type"))? = "array".into();
     *item_object
         .get_mut("items")
-        .and_then(serde_json::Value::as_object_mut)
+        .and_then(studio_json::Value::as_object_mut)
         .and_then(|items| items.get_mut("$ref"))
         .ok_or_else(|| format!("{name} has no item reference"))? = to.into();
-    *prop = serde_json::json!({"anyOf":[item,{"type":"null"}]});
-    object(prop)?.insert("default".into(), serde_json::Value::Null);
+    *prop = studio_json::json!({"anyOf":[item,{"type":"null"}]});
+    object(prop)?.insert("default".into(), studio_json::Value::Null);
     title(prop, label)
 }
 
 fn notice_schema<T: JsonSchema>(
     generator: &mut schemars::SchemaGenerator,
     name: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<studio_json::Value, String> {
     use crate::agent_entity_nested::{nullable, property, title};
     let mut value = T::json_schema(generator).to_value();
     title(&mut value, name)?;
@@ -163,7 +163,7 @@ fn notice_schema<T: JsonSchema>(
     Ok(value)
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 6], String> {
     use crate::agent_entity_nested::{nullable, object, title};
     let mut g = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
@@ -269,11 +269,11 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn schemas_match_published_components() {
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }
@@ -309,14 +309,14 @@ mod tests {
     fn summary_preserves_missing_null_and_rejects_invalid_counters() {
         let value =
             json!({"id":null,"blocked":[{"id":"a","name":null}],"status":"pending","total":2});
-        let summary: AccountTransferSummaryDto = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(summary).unwrap(), value);
+        let summary: AccountTransferSummaryDto = studio_json::from_value(value.clone()).unwrap();
+        assert_eq!(studio_json::to_value(summary).unwrap(), value);
         for bad in [
             json!({"total":-1}),
             json!({"status":"unknown"}),
             json!({"blocked":[{"id":"a","provider":"codex"}]}),
         ] {
-            assert!(serde_json::from_value::<AccountTransferSummaryDto>(bad).is_err());
+            assert!(studio_json::from_value::<AccountTransferSummaryDto>(bad).is_err());
         }
     }
 }

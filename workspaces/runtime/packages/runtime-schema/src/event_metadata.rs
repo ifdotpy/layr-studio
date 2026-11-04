@@ -1,7 +1,7 @@
 //! Persisted queue metadata. Unknown fields remain open for future producers.
 use crate::{delivery::DeliveryMoment, queue_command::Field, raw_json::RawJson};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use std::collections::BTreeMap;
 
 /// Retains the accepted historical spelling while using the delivery owner for policy.
@@ -94,7 +94,7 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for MetadataFields {
     }
     fn finish<E: serde::de::Error>(
         self,
-        extensions: BTreeMap<String, Box<serde_json::value::RawValue>>,
+        extensions: BTreeMap<String, studio_json::OwnedRawJson>,
     ) -> Result<Self::Output, E> {
         Ok(EventMetadataRecord(EventMetadataFields {
             assets: self.assets,
@@ -129,10 +129,10 @@ impl std::ops::DerefMut for EventMetadataRecord {
     }
 }
 impl EventMetadataRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
         let encoded = value.to_string();
         drop(value);
-        serde_json::from_str(&encoded)
+        studio_json::from_str(&encoded)
     }
     pub fn into_value(self) -> Value {
         let EventMetadataFields {
@@ -166,7 +166,7 @@ impl EventMetadataRecord {
         fields.extend(extensions.into_iter().map(|(key, value)| {
             // RawJson contains valid JSON from the shared object decoder.
             let value = value
-                .serialize(serde_json::value::Serializer)
+                .serialize(studio_json::value::Serializer)
                 .expect("raw JSON serializes");
             (key, value)
         }));
@@ -194,7 +194,7 @@ pub(crate) fn schema() -> Value {
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
     let stored: Value =
-        serde_json::from_slice(include_bytes!("schemas/runtime-event-metadata.schema.json"))
+        studio_json::from_slice(include_bytes!("schemas/runtime-event-metadata.schema.json"))
             .map_err(|e| e.to_string())?;
     if schema() != stored {
         return Err("runtime event metadata schema must be generated from event_metadata::EventMetadataRecord".into());
@@ -205,14 +205,14 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn metadata_rejects_duplicate_extensions_and_preserves_raw_bytes() {
         let raw = r#"{"future":{"z":  1,"a":2}}"#;
-        let record: EventMetadataRecord = serde_json::from_str(raw).unwrap();
-        assert_eq!(serde_json::to_string(&record).unwrap(), raw);
-        assert!(serde_json::from_str::<EventMetadataRecord>(r#"{"future":1,"future":2}"#).is_err());
+        let record: EventMetadataRecord = studio_json::from_str(raw).unwrap();
+        assert_eq!(studio_json::to_string(&record).unwrap(), raw);
+        assert!(studio_json::from_str::<EventMetadataRecord>(r#"{"future":1,"future":2}"#).is_err());
     }
 
     #[test]

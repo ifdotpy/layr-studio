@@ -1,7 +1,7 @@
 //! Persisted request envelope; method-specific payloads remain open JSON.
 use crate::{persistence::RequestCardStatus, provider_input::RequestId};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, value::RawValue};
+use studio_json::{Value, OwnedRawJson as RawValue};
 
 /// Named envelope fields, also used to reject unknown legacy migration keys.
 pub const FIELDS: &[&str] = &[
@@ -107,7 +107,7 @@ pub struct RequestRecord {
     pub created_at: f64,
     #[serde(deserialize_with = "request_params")]
     #[schemars(with = "std::collections::BTreeMap<String, Value>")]
-    pub params: Box<RawValue>,
+    pub params: RawValue,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -126,7 +126,7 @@ pub struct RequestRecord {
         skip_serializing_if = "Option::is_none"
     )]
     #[schemars(with = "Option<Value>")]
-    pub preview: Option<Box<RawValue>>,
+    pub preview: Option<RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer_decision: Option<RequestDecision>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,24 +170,24 @@ pub struct RequestAnswer {
     pub question: String,
     pub is_secret: bool,
     #[schemars(with = "Value")]
-    pub answer: Box<RawValue>,
+    pub answer: RawValue,
 }
 
 fn request_params<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Box<RawValue>, D::Error> {
-    let raw = Box::<RawValue>::deserialize(deserializer)?;
-    serde_json::from_str::<crate::request_projection::RequestParams>(raw.get())
+) -> Result<RawValue, D::Error> {
+    let raw = RawValue::deserialize(deserializer)?;
+    studio_json::from_str::<crate::request_projection::RequestParams>(raw.as_str())
         .map_err(serde::de::Error::custom)?;
     Ok(raw)
 }
 
 fn request_preview<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<Box<RawValue>>, D::Error> {
-    let raw = Option::<Box<RawValue>>::deserialize(deserializer)?;
+) -> Result<Option<RawValue>, D::Error> {
+    let raw = Option::<RawValue>::deserialize(deserializer)?;
     if let Some(value) = &raw {
-        serde_json::from_str::<crate::request_projection::RequestPreview>(value.get())
+        studio_json::from_str::<crate::request_projection::RequestPreview>(value.as_str())
             .map_err(serde::de::Error::custom)?;
     }
     Ok(raw)
@@ -203,7 +203,7 @@ impl RequestRecord {
         method: RequestMethod,
         status: RequestCardStatus,
         created_at: f64,
-        params: Box<RawValue>,
+        params: RawValue,
     ) -> Self {
         Self {
             id,
@@ -241,7 +241,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(RequestRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-request-record.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -259,28 +259,28 @@ mod tests {
 
     #[test]
     fn canonical_request_rejects_sparse_rows_and_unknown_fields() {
-        assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r"}"#).is_err());
-        assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"unknown":1}"#).is_err());
-        assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":false}"#).is_err());
-        assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"decision":"future"}"#).is_err());
+        assert!(studio_json::from_str::<RequestRecord>(r#"{"id":"r"}"#).is_err());
+        assert!(studio_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"unknown":1}"#).is_err());
+        assert!(studio_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":false}"#).is_err());
+        assert!(studio_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"decision":"future"}"#).is_err());
     }
 
     #[test]
     fn known_request_fields_are_checked_at_decode() {
         let invalid = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{"command":42}}"#;
-        assert!(serde_json::from_str::<RequestRecord>(invalid).is_err());
+        assert!(studio_json::from_str::<RequestRecord>(invalid).is_err());
         let valid = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{"command":["git","status"],"providerExtra":{"opaque":true}}}"#;
-        assert!(serde_json::from_str::<RequestRecord>(valid).is_ok());
+        assert!(studio_json::from_str::<RequestRecord>(valid).is_ok());
         let duplicate = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{"questions":[{"id":"q","id":"other","question":"Continue?"}]}}"#;
-        assert!(serde_json::from_str::<RequestRecord>(duplicate).is_err());
+        assert!(studio_json::from_str::<RequestRecord>(duplicate).is_err());
     }
 
     #[test]
     fn request_preserves_opaque_payload_bytes() {
         let raw = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{ "x": [1, 2] }}"#;
-        let record: RequestRecord = serde_json::from_str(raw).unwrap();
+        let record: RequestRecord = studio_json::from_str(raw).unwrap();
         assert!(
-            serde_json::to_string(&record)
+            studio_json::to_string(&record)
                 .unwrap()
                 .contains(r#"{ "x": [1, 2] }"#)
         );

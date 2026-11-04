@@ -1,7 +1,7 @@
 //! Typed persisted rules, including open extension fields.
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use studio_json::{Number, Value};
 use std::borrow::Cow;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -262,7 +262,7 @@ pub(crate) fn schema() -> Value {
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
     let stored: Value =
-        serde_json::from_slice(include_bytes!("schemas/persisted-rule-record.schema.json"))
+        studio_json::from_slice(include_bytes!("schemas/persisted-rule-record.schema.json"))
             .map_err(|e| e.to_string())?;
     if stored != schema() {
         return Err("persisted rule schema must match rule_record::RuleRecord".into());
@@ -276,16 +276,16 @@ mod tests {
 
     #[test]
     fn rule_kind_requires_its_specific_fields() {
-        assert!(serde_json::from_str::<RuleKind>(r#"{"kind":"file"}"#).is_err());
+        assert!(studio_json::from_str::<RuleKind>(r#"{"kind":"file"}"#).is_err());
         assert!(
-            serde_json::from_str::<RuleKind>(r#"{"kind":"low_workers","minimumWorkers":1}"#)
+            studio_json::from_str::<RuleKind>(r#"{"kind":"low_workers","minimumWorkers":1}"#)
                 .is_err()
         );
         assert!(
-            serde_json::from_str::<RuleKind>(r#"{"kind":"file","path":"fixture-file"}"#).is_ok()
+            studio_json::from_str::<RuleKind>(r#"{"kind":"file","path":"fixture-file"}"#).is_ok()
         );
         assert!(
-            serde_json::from_str::<RuleKind>(
+            studio_json::from_str::<RuleKind>(
                 r#"{"kind":"low_workers","minimumWorkers":1,"durationMinutes":5}"#
             )
             .is_ok()
@@ -293,12 +293,12 @@ mod tests {
     }
     #[test]
     fn strict_rule_requires_owner_and_discards_extensions() {
-        assert!(serde_json::from_str::<RuleRecord>(r#"{"id":"r"}"#).is_err());
+        assert!(studio_json::from_str::<RuleRecord>(r#"{"id":"r"}"#).is_err());
         let raw = r#"{"id":"r","agent":"a","epoch":1,"name":"n","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":"","unknown":true}"#;
-        let record = serde_json::from_str::<RuleRecord>(raw).expect("rule with extension");
-        assert!(!serde_json::to_string(&record).unwrap().contains("unknown"));
+        let record = studio_json::from_str::<RuleRecord>(raw).expect("rule with extension");
+        assert!(!studio_json::to_string(&record).unwrap().contains("unknown"));
         let valid = r#"{"id":"r","agent":"a","epoch":1,"name":"n","kind":"file","path":"fixture-file","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}"#;
-        serde_json::from_str::<RuleRecord>(valid).expect("valid file rule");
+        studio_json::from_str::<RuleRecord>(valid).expect("valid file rule");
     }
     #[test]
     fn stored_rule_schema_matches_type() {
@@ -307,10 +307,10 @@ mod tests {
     #[test]
     fn launch_intent_requires_nullable_identity_fields() {
         let raw = r#"{"ruleId":"r","checkNumber":1,"agentId":"a","epoch":2,"accountKey":null,"threadId":null,"monitorId":"m","command":"run","timeoutMs":1000,"liveness":false}"#;
-        let intent: LaunchIntent = serde_json::from_str(raw).unwrap();
+        let intent: LaunchIntent = studio_json::from_str(raw).unwrap();
         assert_eq!((intent.account_key, intent.thread_id), (None, None));
         assert!(
-            serde_json::from_str::<LaunchIntent>(&raw.replace(",\"threadId\":null", "")).is_err()
+            studio_json::from_str::<LaunchIntent>(&raw.replace(",\"threadId\":null", "")).is_err()
         );
     }
 }

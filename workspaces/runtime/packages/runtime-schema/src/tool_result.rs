@@ -1,7 +1,7 @@
 //! Structured persisted tool results. Receipt payloads outside this contract stay opaque.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use studio_json::{Number, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -41,8 +41,8 @@ pub struct ToolResultRecord {
 }
 
 impl ToolResultRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        Self::deserialize(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        Ok(Self::deserialize(value)?)
     }
     pub fn text(success: bool, text: String) -> Self {
         Self {
@@ -102,26 +102,26 @@ impl ToolContent {
 // Both supported schema encodings describe the same nullable JSON types.
 fn normalize_schema(value: &Value) -> Value {
     match value {
-        Value::Bool(true) => serde_json::json!({}),
+        Value::Bool(true) => studio_json::json!({}),
         Value::Array(items) => Value::Array(items.iter().map(normalize_schema).collect()),
         Value::Object(fields) => {
             if fields.len() == 1
                 && fields.get("$ref").and_then(Value::as_str) == Some("#/$defs/JsonValue")
             {
-                return serde_json::json!({});
+                return studio_json::json!({});
             }
-            let mut out: serde_json::Map<String, Value> = fields
+            let mut out: studio_json::Map<String, Value> = fields
                 .iter()
                 .filter(|(key, _)| *key != "title")
                 .map(|(key, value)| (key.clone(), normalize_schema(value)))
                 .collect();
             if let Some(Value::Array(variants)) = out.get("anyOf")
                 && variants.len() == 2
-                && variants[1] == serde_json::json!({"type":"null"})
+                && variants[1] == studio_json::json!({"type":"null"})
                 && let Some(mut first) = variants[0].as_object().cloned()
                 && let Some(kind) = first.remove("type")
             {
-                first.insert("type".into(), serde_json::json!([kind, "null"]));
+                first.insert("type".into(), studio_json::json!([kind, "null"]));
                 out.remove("anyOf");
                 out.extend(first);
             }
@@ -134,9 +134,9 @@ fn normalize_schema(value: &Value) -> Value {
 /// Compare both schema consumers with the field contract owned by this type.
 pub(crate) fn check_schema_parity() -> Result<(), String> {
     let stored: Value =
-        serde_json::from_slice(include_bytes!("schemas/persisted-tool-result.schema.json"))
+        studio_json::from_slice(include_bytes!("schemas/persisted-tool-result.schema.json"))
             .map_err(|e| e.to_string())?;
-    let request: Value = serde_json::from_slice(include_bytes!(
+    let request: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-tool-request-record.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -196,7 +196,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 }
 
 fn move_field<T>(
-    fields: &mut serde_json::Map<String, Value>,
+    fields: &mut studio_json::Map<String, Value>,
     key: &str,
     field: Field<T>,
     convert: impl FnOnce(T) -> Value,
@@ -216,14 +216,14 @@ fn move_field<T>(
 mod tests {
     #[test]
     fn consuming_projection_preserves_owned_allocations() {
-        let record = ToolResultRecord::deserialize(serde_json::json!({"contentItems":[{"text":"owned-text"}],"opaque":["owned-extension"]})).unwrap();
+        let record = ToolResultRecord::deserialize(studio_json::json!({"contentItems":[{"text":"owned-text"}],"opaque":["owned-extension"]})).unwrap();
         let text = record.content_items.value().unwrap()[0]
             .text
             .value()
             .unwrap()
             .as_ptr();
         let extension = record.extra["opaque"].as_array().unwrap().as_ptr();
-        let expected = serde_json::json!(&record);
+        let expected = studio_json::json!(&record);
         let value = record.into_value();
         assert_eq!(value, expected);
         assert_eq!(
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(value["opaque"].as_array().unwrap().as_ptr(), extension);
     }
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn shell_matches_schema_and_preserves_presence_and_extensions() {
         check_schema_parity().unwrap();

@@ -1,14 +1,14 @@
 //! Opaque JSON evidence carried without interpreting its contents.
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
+use studio_json::OwnedRawJson as RawValue;
 use std::borrow::Cow;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct RawJson(pub Box<RawValue>);
+pub struct RawJson(pub RawValue);
 impl PartialEq for RawJson {
     fn eq(&self, other: &Self) -> bool {
-        self.0.get() == other.0.get()
+        self.0.as_str() == other.0.as_str()
     }
 }
 impl schemars::JsonSchema for RawJson {

@@ -1,8 +1,8 @@
 //! Checked persisted transcript shells; provider extension fields stay opaque.
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use serde_json::value::RawValue;
+use studio_json::Value;
+use studio_json::OwnedRawJson as RawValue;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -97,10 +97,10 @@ pub struct TranscriptInput {
     truncated: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<f64>")]
-    at: Field<serde_json::Number>,
+    at: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<Vec<Value>>")]
-    assets: Field<Vec<Box<RawValue>>>,
+    assets: Field<Vec<RawValue>>,
     #[serde(rename = "turnId", default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
     turn_id: Field<String>,
@@ -113,7 +113,7 @@ pub struct TranscriptInput {
     client_message_id: Field<String>,
     #[serde(flatten)]
     #[schemars(with = "BTreeMap<String, Value>")]
-    extra: BTreeMap<String, Box<RawValue>>,
+    extra: BTreeMap<String, RawValue>,
 }
 #[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
 #[schemars(
@@ -130,8 +130,8 @@ pub struct TranscriptItemRecord {
     #[schemars(with = "Option<Vec<TranscriptInput>>")]
     inputs: Field<Vec<TranscriptInput>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
-    at: Field<serde_json::Number>,
+    #[schemars(with = "Option<studio_json::Number>")]
+    at: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
     title: Field<String>,
@@ -160,7 +160,7 @@ pub struct TranscriptItemRecord {
     client_message_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<Vec<Value>>")]
-    assets: Field<Vec<Box<RawValue>>>,
+    assets: Field<Vec<RawValue>>,
     #[serde(
         rename = "nativeError",
         default,
@@ -177,7 +177,7 @@ pub struct TranscriptItemRecord {
     turn_error: Field<crate::provider_errors::AgentError>,
     #[serde(flatten)]
     #[schemars(with = "BTreeMap<String, Value>")]
-    extra: BTreeMap<String, Box<RawValue>>,
+    extra: BTreeMap<String, RawValue>,
 }
 
 macro_rules! read_field {
@@ -198,14 +198,14 @@ struct ItemFields {
     role: Option<TranscriptRole>,
     text: Option<TranscriptText>,
     inputs: Option<Field<Vec<TranscriptInput>>>,
-    at: Option<Field<serde_json::Number>>,
+    at: Option<Field<studio_json::Number>>,
     title: Option<Field<String>>,
     after_restore: Option<Field<String>>,
     truncated: Option<Field<bool>>,
     streaming: Option<Field<bool>>,
     turn_id: Option<Field<String>>,
     client_message_id: Option<Field<String>>,
-    assets: Option<Field<Vec<Box<RawValue>>>>,
+    assets: Option<Field<Vec<RawValue>>>,
     native_error: Option<Field<crate::provider_errors::AgentError>>,
     turn_error: Option<Field<crate::provider_errors::AgentError>>,
 }
@@ -234,7 +234,7 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for ItemFields {
     }
     fn finish<E: serde::de::Error>(
         self,
-        extra: BTreeMap<String, Box<RawValue>>,
+        extra: BTreeMap<String, RawValue>,
     ) -> Result<Self::Output, E> {
         Ok(TranscriptItemRecord {
             id: self.id.ok_or_else(|| E::missing_field("id"))?,
@@ -267,8 +267,8 @@ struct InputFields {
     kind: Option<Field<crate::persistence::EventKind>>,
     text: Option<Field<String>>,
     truncated: Option<Field<bool>>,
-    at: Option<Field<serde_json::Number>>,
-    assets: Option<Field<Vec<Box<RawValue>>>>,
+    at: Option<Field<studio_json::Number>>,
+    assets: Option<Field<Vec<RawValue>>>,
     turn_id: Option<Field<String>>,
     client_message_id: Option<Field<String>>,
 }
@@ -291,7 +291,7 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for InputFields {
     }
     fn finish<E: serde::de::Error>(
         self,
-        extra: BTreeMap<String, Box<RawValue>>,
+        extra: BTreeMap<String, RawValue>,
     ) -> Result<Self::Output, E> {
         Ok(TranscriptInput {
             id: self.id.unwrap_or_default(),
@@ -351,7 +351,7 @@ impl TranscriptItemRecord {
     pub fn after_restore_field(&self) -> &Field<String> {
         &self.after_restore
     }
-    pub fn at(&self) -> &Field<serde_json::Number> {
+    pub fn at(&self) -> &Field<studio_json::Number> {
         &self.at
     }
     pub fn set_after_restore(&mut self, value: String) {
@@ -366,7 +366,7 @@ impl TranscriptItemRecord {
     pub fn streaming(&self) -> &Field<bool> {
         &self.streaming
     }
-    pub fn assets(&self) -> &Field<Vec<Box<RawValue>>> {
+    pub fn assets(&self) -> &Field<Vec<RawValue>> {
         &self.assets
     }
     pub fn turn_id(&self) -> &Field<String> {
@@ -379,7 +379,7 @@ impl TranscriptItemRecord {
         self.value()
     }
     pub fn value(&self) -> Value {
-        self.serialize(serde_json::value::Serializer)
+        self.serialize(studio_json::value::Serializer)
             .expect("transcript fields serialize")
     }
 }
@@ -422,19 +422,19 @@ impl TranscriptInput {
         matches!(self.truncated, Field::Value(true))
     }
     pub fn at(&self) -> Option<f64> {
-        self.at.value().and_then(serde_json::Number::as_f64)
+        self.at.value().and_then(studio_json::Number::as_f64)
     }
     /// Historical inputs may store their timestamp under `created`.
-    pub fn created_or_at(&self) -> Result<Option<serde_json::Number>, serde_json::Error> {
+    pub fn created_or_at(&self) -> Result<Option<studio_json::Number>, studio_json::Error> {
         let created = self
             .extra
             .get("created")
-            .map(|raw| serde_json::from_str::<Option<serde_json::Number>>(raw.get()))
+            .map(|raw| studio_json::from_str::<Option<studio_json::Number>>(raw.as_str()))
             .transpose()?
             .flatten();
         Ok(created.or_else(|| self.at.value().cloned()))
     }
-    pub fn assets(&self) -> &Field<Vec<Box<RawValue>>> {
+    pub fn assets(&self) -> &Field<Vec<RawValue>> {
         &self.assets
     }
     pub fn turn_id(&self) -> &Field<String> {
@@ -444,7 +444,7 @@ impl TranscriptInput {
         &self.client_message_id
     }
     pub fn value(&self) -> Value {
-        self.serialize(serde_json::value::Serializer)
+        self.serialize(studio_json::value::Serializer)
             .expect("transcript input fields serialize")
     }
 }
@@ -452,7 +452,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(TranscriptItemRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-transcript-record.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -465,13 +465,13 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn transcript_current_record_requires_role_and_keeps_raw_extensions() {
-        assert!(serde_json::from_str::<TranscriptItemRecord>(r#"{"id":"i","text":"x"}"#).is_err());
+        assert!(studio_json::from_str::<TranscriptItemRecord>(r#"{"id":"i","text":"x"}"#).is_err());
         let raw = r#"{"id":"i","role":"user","text":"x","provider":{"z":  1, "a":2}}"#;
-        let record: TranscriptItemRecord = serde_json::from_str(raw).expect("record");
-        let encoded = serde_json::to_string(&record).expect("record serialization");
+        let record: TranscriptItemRecord = studio_json::from_str(raw).expect("record");
+        let encoded = studio_json::to_string(&record).expect("record serialization");
         assert!(encoded.contains(r#"{"z":  1, "a":2}"#), "{encoded}");
     }
     #[test]
@@ -481,8 +481,8 @@ mod tests {
             r#"{"id":"i","role":"assistant","text":null}"#,
             r#"{"id":"i","role":"assistant"}"#,
         ] {
-            let original: Value = serde_json::from_str(raw).unwrap();
-            let record: TranscriptItemRecord = serde_json::from_str(raw).unwrap();
+            let original: Value = studio_json::from_str(raw).unwrap();
+            let record: TranscriptItemRecord = studio_json::from_str(raw).unwrap();
             assert_eq!(record.value().to_string(), original.to_string());
         }
     }
@@ -510,7 +510,7 @@ mod tests {
                         value[*field] = candidate;
                     }
                     let parsed: Result<TranscriptItemRecord, _> =
-                        serde_json::from_str(&value.to_string());
+                        studio_json::from_str(&value.to_string());
                     assert_eq!(
                         parsed.is_ok(),
                         crate::validate("PersistedTranscriptRecord", &value).unwrap(),
@@ -533,7 +533,7 @@ mod tests {
             json!({"id":"i","inputs":[{"id":1}]}),
             json!({"id":"i","inputs":[{"truncated":"yes"}]}),
         ] {
-            let parsed: Result<TranscriptItemRecord, _> = serde_json::from_str(&value.to_string());
+            let parsed: Result<TranscriptItemRecord, _> = studio_json::from_str(&value.to_string());
             assert_eq!(
                 parsed.is_ok(),
                 crate::validate("PersistedTranscriptRecord", &value).unwrap(),
@@ -552,7 +552,7 @@ mod tests {
             item.as_object_mut()
                 .unwrap()
                 .insert(field.to_owned(), raw.clone());
-            let parsed: TranscriptItemRecord = serde_json::from_value(item).unwrap();
+            let parsed: TranscriptItemRecord = studio_json::from_value(item).unwrap();
             let value = parsed.into_value();
             let error = value.get(field).unwrap();
             assert_eq!(error.get("code"), Some(&json!("bio_policy")));

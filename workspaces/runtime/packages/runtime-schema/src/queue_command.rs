@@ -3,7 +3,7 @@
 use crate::monitor_record::MonitorText;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 /// A nullable wire field whose omission must survive request signature serialization.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -295,7 +295,7 @@ mod tests {
             json!({"action":"reorder","expected_revision":"r","ordered_ids":[42]}),
         ] {
             assert!(
-                serde_json::from_value::<QueueCommand>(wire.clone()).is_err(),
+                studio_json::from_value::<QueueCommand>(wire.clone()).is_err(),
                 "{wire}"
             );
         }
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn queue_command_schema_matches_committed_openapi() {
         let openapi =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
         check_schema_parity(&openapi).expect("queue schemas match their owner");
     }
 
@@ -348,7 +348,7 @@ mod tests {
                 "{wire}"
             );
             assert_eq!(
-                serde_json::from_value::<QueueCommand>(wire.clone()).is_ok(),
+                studio_json::from_value::<QueueCommand>(wire.clone()).is_ok(),
                 accepted,
                 "{wire}"
             );
