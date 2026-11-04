@@ -168,16 +168,19 @@ pub fn ui_summary(
     if !records::exists(connection, "sync_entities")? {
         return Ok(result);
     }
-    let mut statement=connection.prepare_cached("SELECT collection,id,payload FROM sync_entities WHERE deleted=0 AND collection IN ('agent','project','room','request','complaint') ORDER BY collection,id")?;
+    // Requests are built from the approvals table at read time, so every collection
+    // is read through the one entity reader, not from sync_entities.
+    let mut documents = crate::entity_scope::live_documents(
+        connection,
+        r#"["agent","project","room","request","complaint"]"#,
+    )?;
+    documents.sort_by(|a, b| (&a.collection, &a.id).cmp(&(&b.collection, &b.id)));
     let mut values = std::collections::BTreeMap::<String, Vec<Value>>::new();
-    for row in statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })? {
-        let (collection, id, raw) = row?;
+    for row in documents {
+        let Some(raw) = row.payload.filter(|_| !row.deleted) else {
+            continue;
+        };
+        let (collection, id) = (row.collection, row.id);
         let value = records::decode("sync_entities", &id, &raw)?;
         values
             .entry(collection)
@@ -411,13 +414,9 @@ mod tests {
 
     #[test]
     fn summary_shows_pending_approval_questions_and_excludes_deferred_and_answering() {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch(
-            "CREATE TABLE sync_entities(collection TEXT,id TEXT,payload TEXT,deleted INTEGER)",
-        )
-        .unwrap();
+        let mut db = studio_runtime_store::test_canvas();
         let agent = json!({"id":"a","name":"Lead"});
-        let base = json!({"id":"q","agent":"a","turn":null,"created":1.0,"epoch":null,
+        let base = json!({"id":"q","agent":"a","turn":"t1","created":1.0,"epoch":null,
             "request":{"kind":"agent_question","questions":[{"id":"1","question":"Continue?","header":null,"options":[],"is_secret":false,"multi_select":null,"is_other":null}]},
             "delivery":null,"detail":{"params":{},"preview":null,"answer_error":null,"host_close_reason":null},
             "state":{"kind":"pending"},"deferral":null,"fire_at":null,"hidden":null});
@@ -431,20 +430,15 @@ mod tests {
         answering["id"] = json!("x");
         answering["state"] =
             json!({"kind":"answering","answer":{"kind":"answers","answers":[]},"command":"cmd"});
-        for (collection, id, value) in [
-            ("agent", "a", agent),
-            ("request", "q", base),
-            ("request", "p", permission),
-            ("request", "d", deferred),
-            ("request", "x", answering),
-        ] {
-            db.execute(
-                "INSERT INTO sync_entities VALUES(?1,?2,?3,0)",
-                (collection, id, json!({"value":value}).to_string()),
-            )
-            .unwrap();
-        }
         let tx = db.transaction().unwrap();
+        studio_runtime_store::SyncDocumentsRepository::put_entity(&tx, "agent", "a", agent, false)
+            .unwrap();
+        // Requests come from approval rows, as in production.
+        for value in [base, permission, deferred, answering] {
+            let row: studio_runtime_schema::approvals::Approval =
+                serde_json::from_value(value).unwrap();
+            studio_runtime_store::approvals::put(&tx, &row).unwrap();
+        }
         let summary = ui_summary(&tx, None).unwrap();
         let alerts = summary["alerts"].as_array().unwrap();
         assert_eq!(alerts.len(), 2);
