@@ -26,6 +26,12 @@ test.each([
 });
 
 test("new chat accepts explicit reviewer Fast mode and rejects malformed review fields", () => {
+  expect(
+    isNewChatSettings({
+      workspaceMode: "worktree",
+      review_defaults: { model: null, effort: null, account_key: "reviewer" },
+    }),
+  ).toBe(true);
   for (const fast_mode of [true, false]) {
     expect(
       isNewChatSettings({
@@ -38,6 +44,7 @@ test("new chat accepts explicit reviewer Fast mode and rejects malformed review 
     { fast_mode: "false" },
     { fast_mode: null },
     { unknown: false },
+    { account_key: 42 },
   ]) {
     expect(
       isNewChatSettings({
@@ -46,6 +53,17 @@ test("new chat accepts explicit reviewer Fast mode and rejects malformed review 
       }),
     ).toBe(false);
   }
+});
+
+test("switching the lead account preserves an explicitly selected review account", () => {
+  const review_defaults = {
+    model: "gpt-6-astra",
+    effort: null,
+    account_key: "reviewer",
+  };
+  expect(
+    settingsForNewChatAccount({ review_defaults }, "other").review_defaults,
+  ).toEqual(review_defaults);
 });
 
 test("accepts the actual selector values and rejects receipt overrides", () => {

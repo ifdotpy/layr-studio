@@ -276,33 +276,10 @@ pub(crate) struct WorkerSettingsRequest<'a> {
     pub account_load: &'a std::collections::HashMap<String, i64>,
 }
 
-pub(crate) async fn resolve_worker_settings(
+async fn account_scope(
     store: &RuntimeStore,
-    environment: &dyn ManagedCreationEnvironment,
-    request: WorkerSettingsRequest<'_>,
-) -> Result<ResolvedWorkerSettings, WorkerSettingsError> {
-    let WorkerSettingsRequest {
-        parent,
-        root,
-        spec,
-        profile,
-        role,
-        requested_account_key,
-        account_load,
-    } = request;
-    let defaults = &root["workerDefaults"];
-    let profile_model = profile.map(|profile| profile.model.as_str());
-    let review = (role == "reviewer")
-        .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort));
-    let requested_model = spec
-        .model
-        .value()
-        .map(String::as_str)
-        .or(profile_model)
-        .or_else(|| review.as_ref().and_then(|(model, _, _)| model.as_deref()))
-        .or_else(|| defaults.get("model").and_then(Value::as_str))
-        .or_else(|| root.get("model").and_then(Value::as_str))
-        .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL);
+    root: &Value,
+) -> Result<(Vec<String>, Option<Vec<String>>, Option<Vec<String>>), StoreError> {
     let excluded = root
         .get("excludedAccountKeys")
         .and_then(Value::as_array)
@@ -345,14 +322,63 @@ pub(crate) async fn resolve_worker_settings(
                 .collect::<Vec<_>>()
         })
     });
+    Ok((excluded, keys, groups))
+}
+
+pub(crate) async fn resolve_worker_settings(
+    store: &RuntimeStore,
+    environment: &dyn ManagedCreationEnvironment,
+    request: WorkerSettingsRequest<'_>,
+) -> Result<ResolvedWorkerSettings, WorkerSettingsError> {
+    let WorkerSettingsRequest {
+        parent,
+        root,
+        spec,
+        profile,
+        role,
+        requested_account_key,
+        account_load,
+    } = request;
+    let defaults = &root["workerDefaults"];
+    let profile_model = profile.map(|profile| profile.model.as_str());
+    let review = (role == "reviewer")
+        .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort));
+    let requested_model = spec
+        .model
+        .value()
+        .map(String::as_str)
+        .or(profile_model)
+        .or_else(|| review.as_ref().and_then(|(model, _, _)| model.as_deref()))
+        .or_else(|| defaults.get("model").and_then(Value::as_str))
+        .or_else(|| root.get("model").and_then(Value::as_str))
+        .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL);
+    let (excluded, keys, groups) = account_scope(store, root).await?;
     let (account_key, account) =
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key: parent
                 .get("accountKey")
                 .and_then(Value::as_str)
                 .unwrap_or("default"),
-            requested_account_key,
-            default_account_key: defaults.get("accountKey").and_then(Value::as_str),
+            requested_account_key: if role == "reviewer" {
+                requested_account_key.or_else(|| {
+                    root["reviewDefaults"]
+                        .get("accountKey")
+                        .and_then(Value::as_str)
+                })
+            } else {
+                requested_account_key
+            },
+            default_account_key: if role == "reviewer"
+                && (requested_account_key.is_some()
+                    || root["reviewDefaults"]
+                        .get("accountKey")
+                        .and_then(Value::as_str)
+                        .is_some())
+            {
+                None
+            } else {
+                defaults.get("accountKey").and_then(Value::as_str)
+            },
             model: requested_model,
             excluded_account_keys: &excluded,
             project_account_keys: keys.as_deref(),
@@ -1517,7 +1543,7 @@ pub(crate) async fn request_review(
             crate::managed_host_tools::OperationResult::reply(&value),
         ));
     }
-    let account_key = parent_value
+    let parent_account_key = parent_value
         .get("accountKey")
         .and_then(Value::as_str)
         .unwrap_or("default");
@@ -1529,15 +1555,23 @@ pub(crate) async fn request_review(
             .ok_or(crate::managed_host_tools::Error::Invalid(
                 "Invalid native review model",
             ))?;
+    let review_account = root_value["reviewDefaults"]
+        .get("accountKey")
+        .and_then(Value::as_str);
+    let (excluded, keys, groups) = if review_account.is_some() {
+        account_scope(store, &root_value).await?
+    } else {
+        (Vec::new(), None, None)
+    };
     let (account_key, account) =
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
-            parent_account_key: account_key,
-            requested_account_key: Some(account_key),
+            parent_account_key,
+            requested_account_key: review_account.or(Some(parent_account_key)),
             default_account_key: None,
             model,
-            excluded_account_keys: &[],
-            project_account_keys: None,
-            project_account_groups: None,
+            excluded_account_keys: &excluded,
+            project_account_keys: keys.as_deref(),
+            project_account_groups: groups.as_deref(),
             active_agents: &std::collections::HashMap::new(),
         })?;
     // Review is read-only in the parent's managed workspace. Its requested
@@ -1572,7 +1606,7 @@ pub(crate) async fn request_review(
         actor_record.epoch,
         parent_cwd,
         parent_cwd,
-        &account_key,
+        parent_account_key,
         parent_value.get("projectId"),
         parent_value.get("projectServerId"),
         project.as_ref(),
