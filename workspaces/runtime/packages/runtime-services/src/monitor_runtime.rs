@@ -312,7 +312,7 @@ pub fn snapshot(
         .ok_or(MonitorError::Refused("Unknown agent"))?;
     let actor_value =
         serde_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
-    let snapshot = MonitorSnapshot::checked_stored(&row, actor_value)?;
+    let snapshot = MonitorSnapshot::checked_owned(row, actor_value)?;
     Ok((snapshot, actor))
 }
 
