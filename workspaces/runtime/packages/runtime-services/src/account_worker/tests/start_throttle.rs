@@ -127,6 +127,92 @@ async fn open(state: &State, bridge: StoreBridge, account: &Account) -> (Peer, A
     (peer, worker)
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn legacy_disk_wait_fails_before_waiting_for_a_full_account_slot() {
+    let mut state = State::new().await;
+    state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
+        state.root.clone(),
+        Arc::new(|_| Some(10 * 1024 * 1024 * 1024)),
+    )));
+    let agents = agents(&state, ProviderKind::Codex, 1).await;
+    let account = Account::new(&state, ProviderKind::Codex);
+    account
+        .driver
+        .set_start_throttle("default", throttle(8, 0, 1))
+        .unwrap();
+    let (mut peer, mut worker) = open(&state, state.bridge.clone(), &account).await;
+    wake_agent(&state, &worker, &agents[0]).await;
+    let (started, _) = serve_start(&mut peer, &agents).await;
+    assert_eq!(started, agents[0]);
+    let legacy = agents[1].clone();
+    state
+        .bridge
+        .store
+        .transaction_with_error(move |tx| {
+            let mut agent = AgentRepository::get(tx, &AgentId::from(legacy.as_str()))?.unwrap();
+            agent.start_wait = Some(
+                studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: agent.epoch },
+            );
+            AgentRepository::put(tx, &agent)
+        })
+        .await
+        .unwrap();
+    let mut changes = state.bridge.agent_changes();
+    wake_agent(&state, &worker, &agents[1]).await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if record_of(&state, &agents[1]).await["status"] == "failed" {
+                break;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("legacy disk wait becomes a failure before account admission");
+    assert_eq!(state.event_status(&agents[1]).await, "failed");
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn held_queued_agent_does_not_consume_a_start_burst() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    let held_agent = agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            scheduler::lifecycle_transaction_with(&store, move |tx| {
+                let mut row =
+                    AgentRepository::get(tx, &AgentId::from(held_agent.as_str()))?.unwrap();
+                row.set_native_failure_hold(true);
+                AgentRepository::put(tx, &row)?;
+                Ok(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let account = Account::new(&state, ProviderKind::Codex);
+    account
+        .driver
+        .set_start_throttle("default", throttle(1, LONG_PAUSE_SECONDS, 8))
+        .unwrap();
+    let (mut peer, mut worker) = open(&state, state.bridge.clone(), &account).await;
+    wake_agent(&state, &worker, &agent).await;
+    worker_barrier(&worker).await;
+    assert!(peer.writes.try_recv().is_err());
+    let diagnostics = state.bridge.start_gates.gate("default").diagnostics();
+    assert_eq!(
+        diagnostics["recentAdmits"].as_array().unwrap().len(),
+        0,
+        "{diagnostics}"
+    );
+    worker.shutdown().await.unwrap();
+}
+
 /// A burst starts at once and the rest waits for the pause; a cap on running
 /// turns holds until a turn settles; settings changes apply to waiting starts
 /// at once; and each input starts exactly once.

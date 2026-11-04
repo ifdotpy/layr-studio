@@ -50,6 +50,7 @@ describe("project locations", () => {
         source: AgentSource.managed,
         isLead: true,
         cwd: "/lead-only",
+        projectPath: "/lead-only",
       },
     ]);
     const groups = logicalProjects({

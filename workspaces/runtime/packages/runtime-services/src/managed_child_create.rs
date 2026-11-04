@@ -634,6 +634,36 @@ pub(crate) async fn spawn_agents(
             .workspace
             .map(|mode| mode.as_str())
             .unwrap_or_else(|| default_workspace(role, vm_actor, &parent_value));
+        if let Some(state) = &spec.review_state {
+            if role != "reviewer" || workspace != "layr-native" || alternate_directory.is_some() {
+                return Err(crate::managed_host_tools::Error::Invalid(
+                    "review_state requires a native Layr reviewer in the parent's project",
+                )
+                .into());
+            }
+            if uuid::Uuid::parse_str(state).is_err() {
+                return Err(crate::managed_host_tools::Error::Invalid(
+                    "review_state must be a full state ID in this project",
+                )
+                .into());
+            }
+            let resolved = crate::layr_native::run(
+                store.state_dir(),
+                Path::new(parent_cwd),
+                &["rev-parse", state],
+            )
+            .map_err(|_| {
+                crate::managed_host_tools::Error::Invalid(
+                    "review_state must be a full state ID in this project",
+                )
+            })?;
+            if state != &resolved {
+                return Err(crate::managed_host_tools::Error::Invalid(
+                    "review_state must be a full state ID in this project",
+                )
+                .into());
+            }
+        }
         validate_vm_parent_workspace(workspace, vm_actor)?;
         if workspace == "layr-native" && !crate::layr_native::is_native(&parent_value) {
             return Err(crate::managed_host_tools::Error::Invalid(
@@ -909,6 +939,9 @@ pub(crate) async fn spawn_agents(
             }
             crate::child_permissions::inherit_claude_permissions(&mut draft.record, &current_parent, &current_root, draft.intent.permission_mode).map_err(crate::managed_host_tools::Error::Invalid)?;
             let mut text = draft.prompt.clone();
+            if let Some(state) = &draft.intent.review_state {
+                text.push_str(&format!("\n\n[Studio review state] {state}. Read files with layr_read args [\"show\", \"{state}:<path>\"] and compare with [\"diff\", \"<base>\", \"{state}\"]."));
+            }
             if draft.worktree {
                 text.push_str(&format!("\n\n[Studio worker base] Commit {} from ref {}.", draft.record.worker_base_commit.as_deref().unwrap_or_default(), draft.record.worker_base_ref.as_deref().unwrap_or("HEAD")));
                 if let Some(behind) = draft.worker_base_behind_main.filter(|behind| *behind != 0) {

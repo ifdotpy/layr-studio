@@ -65,6 +65,37 @@ fn trace_agent_rows(event: rusqlite::trace::TraceEvent<'_>) {
 }
 
 #[tokio::test]
+async fn message_resolves_queued_worker_name() {
+    let (_directory, store, oracle) = frozen::state().await;
+    let lead = oracle["agents"][0].clone();
+    let worker = oracle["agents"][1]["id"].as_str().unwrap().to_owned();
+    let context = CallbackContext {
+        stream_id: "default".into(),
+        agent: lead["id"].as_str().unwrap().into(),
+        account: "default".into(),
+        connection: "connection".into(),
+        generation: 7,
+        epoch: lead["epoch"].as_u64().unwrap(),
+        thread: lead["threadId"].as_str().unwrap().into(),
+        turn: lead["turnId"].as_str().unwrap().into(),
+    };
+    store.transaction_with(move |tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.name','queued-reviewer','$.status','queued') WHERE id=?1", [&worker])?;
+        let snapshot = super::super::super::storage::snapshot(tx, &context)?;
+        assert_eq!(messages::resolve_target(tx, &snapshot, "queued-reviewer")?, worker);
+        let sent = messages::send(tx, &snapshot, &json!({"target":"queued-reviewer","text":"hello"}), &RequestIdentity::issue_root(), request_time())?;
+        let sent: Value = serde_json::from_str(sent.get())?;
+        assert!(sent["deliveries"].as_object().unwrap().contains_key(&worker));
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.name','queued-reviewer') WHERE id=?1", [&context.agent])?;
+        for error in [messages::resolve_target(tx, &snapshot, "queued-reviewer").unwrap_err(), messages::send(tx, &snapshot, &json!({"target":"queued-reviewer","text":"hello"}), &RequestIdentity::issue_root(), request_time()).unwrap_err()] {
+            let message = error.to_string();
+            assert!(message.contains(&worker) && message.contains(&context.agent), "{message}");
+        }
+        Ok::<_, CallbackError>(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn message_ignores_unrelated_invalid_agent() {
     message_with_unrelated_invalid("runtime_agents", json!({"compactions":0,"id":"unrelated-invalid","rootId":"unrelated-invalid", "provider":"codex", "epoch":"invalid", "status":"idle"})).await;
 }
@@ -768,6 +799,76 @@ async fn monitor_cancel_release_notifies_only_the_monitor_dispatcher() {
     assert!(futures_util::FutureExt::now_or_never(event_notified.as_mut()).is_none());
     futures_util::FutureExt::now_or_never(monitor_notified.as_mut())
         .expect("monitor cancellation wakes the dedicated dispatcher");
+}
+
+#[tokio::test]
+async fn complaint_read_projects_a_page_with_one_agent_scan() {
+    let (_directory, store, oracle) = frozen::state().await;
+    let lead = oracle["agents"][0].clone();
+    let worker = oracle["agents"][1].clone();
+    let lead_id = lead["id"].as_str().unwrap();
+    let worker_id = worker["id"].as_str().unwrap();
+    let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
+    let tx = db.transaction().unwrap();
+    for index in 0..100 {
+        let complaint = studio_runtime_store::ComplaintRecord {
+            id: format!("complaint-{index}"),
+            lead_id: Some(lead_id.to_owned()),
+            author: Some(worker_id.to_owned()),
+            text: Some(format!("Question {index}")),
+            recipient: studio_runtime_schema::complaint_record::ComplaintRecipient::Lead,
+            status: studio_runtime_schema::complaint_record::ComplaintStatus::Open,
+            created: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(
+                index as f64,
+            ),
+            updated: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(
+                index as f64,
+            ),
+            read_at: None,
+            version: Some(1),
+            responses: Vec::new(),
+            source_type: None,
+            title: None,
+        };
+        studio_runtime_store::Table::<studio_runtime_store::ComplaintRecord>::new(&tx)
+            .put(&complaint)
+            .unwrap();
+    }
+    tx.commit().unwrap();
+    AGENT_SCANS.set(0);
+    db.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(trace_agent_scans),
+    );
+    let tx = db.transaction().unwrap();
+    let read = crate::notification_dispatch::agent_complaint_action(
+        &tx,
+        &lead,
+        &json!({"action":"read"}),
+        "read-page",
+        200.0,
+    )
+    .unwrap();
+    assert_eq!(read["complaints"].as_array().unwrap().len(), 50);
+    assert_eq!(read["remaining"], 50);
+    assert!(
+        read["complaints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["readAt"] == 200.0)
+    );
+    let projected: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='complaint' AND deleted=0 AND json_extract(payload,'$.value.readAt')=200", [], |row| row.get(0)).unwrap();
+    assert_eq!(projected, 50);
+    let first = &read["complaints"][0];
+    let projected: String = tx.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='complaint' AND id=?1 AND deleted=0",
+        [first["id"].as_str().unwrap()], |row| row.get(0),
+    ).unwrap();
+    let projected: Value = serde_json::from_str(&projected).unwrap();
+    assert_eq!(projected["value"]["authorName"], worker["name"]);
+    assert_eq!(projected["value"]["leadName"], lead["name"]);
+    assert_eq!(AGENT_SCANS.get(), 1, "one agent scan for the whole page");
 }
 
 #[tokio::test]

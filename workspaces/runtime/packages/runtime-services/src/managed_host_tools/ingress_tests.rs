@@ -2787,7 +2787,7 @@ async fn managed_spawn_native_layr_lead_uses_project_binding() {
     let binary = directory.path().join("fake-layr");
     std::fs::write(
         &binary,
-        "#!/bin/sh\nif [ \"$4\" = missing ]; then exit 1; fi\nprintf 'resolved-state-id\\n'\n",
+        "#!/bin/sh\nif [ \"$4\" = missing ]; then exit 1; fi\nif [ \"$4\" = 01a1a137-e462-7190-8be9-3f0f87ff4514 ]; then\n  case \"$2\" in */project-b) printf '%s\\n' \"$4\";; *) exit 1;; esac\nelse\n  printf '01a1a137-e462-7190-8be9-3f0f87ff4513\\n'\nfi\n",
     )
     .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -2821,13 +2821,56 @@ async fn managed_spawn_native_layr_lead_uses_project_binding() {
                 .unwrap()
                 .unwrap()
                 .value();
-            assert_eq!(child["layrBaseState"], "resolved-state-id");
+            assert_eq!(
+                child["layrBaseState"],
+                "01a1a137-e462-7190-8be9-3f0f87ff4513"
+            );
         }
     }
     let refused = crate::managed_child_create::spawn_agents(&store, &actor,
         &json!({"agents":[{"name":"Missing","prompt":"Work","workspace":"layr-native","base_ref":"missing"}]}),
         "native-missing-base", 20.0, &CreationEnvironment).await;
     assert!(refused.is_err());
+    let spawned = crate::managed_child_create::spawn_agents(&store, &actor,
+        &json!({"agents":[{"name":"Reviewer","prompt":"Review","role":"reviewer","review_state":"01a1a137-e462-7190-8be9-3f0f87ff4513"}]}),
+        "native-review-state", 20.0, &CreationEnvironment).await.unwrap();
+    let result = spawned.result().test_value();
+    let id = result["agents"][0]["id"].as_str().unwrap();
+    let reader = store.test_reader().unwrap();
+    let initial: String = reader
+        .query_row(
+            "SELECT text FROM runtime_events WHERE id=?1",
+            [format!("{id}:initial")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(initial.contains("01a1a137-e462-7190-8be9-3f0f87ff4513"));
+    assert!(initial.contains("layr_read"));
+    let other_project = directory.path().join("project-b");
+    std::fs::create_dir(&other_project).unwrap();
+    let foreign = "01a1a137-e462-7190-8be9-3f0f87ff4514";
+    assert_eq!(
+        crate::layr_native::run(store.state_dir(), &other_project, &["rev-parse", foreign])
+            .unwrap(),
+        foreign
+    );
+    let refused = crate::managed_child_create::spawn_agents(&store, &actor,
+        &json!({"agents":[{"name":"Reviewer","prompt":"Review","role":"reviewer","review_state":foreign}]}),
+        "native-review-foreign-project", 20.0, &CreationEnvironment).await;
+    assert!(
+        refused.is_err(),
+        "a state belonging to project B is refused in project A"
+    );
+    for state in [
+        "missing",
+        "01a1a137-e462-7190-8be9-3f0f87ff4514",
+        "origin/main",
+    ] {
+        let refused = crate::managed_child_create::spawn_agents(&store, &actor,
+            &json!({"agents":[{"name":"Reviewer","prompt":"Review","role":"reviewer","review_state":state}]}),
+            &format!("native-review-{state}"), 20.0, &CreationEnvironment).await;
+        assert!(refused.is_err(), "{state}");
+    }
 }
 
 #[tokio::test]

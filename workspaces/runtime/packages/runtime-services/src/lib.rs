@@ -158,6 +158,7 @@ pub mod principal;
 pub mod process_controls;
 pub mod project_deletion;
 pub mod project_locations;
+mod project_path;
 pub mod project_peer;
 pub mod project_projection;
 pub mod project_secrets;

@@ -967,7 +967,7 @@ async fn closing_worker_does_not_invent_a_transfer_deadline_expiry() {
             receipt.not_sent_reason(),
             Some(NotSentReason::WorkerNotSent)
         );
-        assert!(matches!(receipt.outcome, SessionOutcome::NotHandedOff));
+        assert!(matches!(receipt.outcome, SessionOutcome::NotHandedOff(_)));
     }
     drop(pending);
     // close_worker_for_test already joined the only worker.

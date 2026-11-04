@@ -125,6 +125,7 @@ impl ClaudeSessionPort for AccountPort {
                 | studio_runtime_providers::Method::BrowserWait
                 | studio_runtime_providers::Method::ClaudeCommands
                 | studio_runtime_providers::Method::ClaudeMoveExport
+                | studio_runtime_providers::Method::ClaudeMoveImport
                 | studio_runtime_providers::Method::ClaudeMoveIdentity
                 | studio_runtime_providers::Method::ClaudeMovePreflight
                 | studio_runtime_providers::Method::ClaudeMoveProof

@@ -1429,7 +1429,9 @@ async fn switch_workspace_mode(
     let result = switch_chat(store, &body.id)
         .await
         .map_err(|error| match error {
-            NativeLayrError::Refused(_) => ApiError::new(StatusCode::CONFLICT, error.to_string()),
+            NativeLayrError::Refused(_) | NativeLayrError::Conflict(_) => {
+                ApiError::new(StatusCode::CONFLICT, error.to_string())
+            }
             error @ (NativeLayrError::Unknown(_)
             | NativeLayrError::Io(_)
             | NativeLayrError::Store(_)

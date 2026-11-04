@@ -514,7 +514,7 @@ enum LateProviderReply<'a> {
 }
 
 fn continued_thread_call(
-    tx: &studio_runtime_store::Transaction<'_>,
+    tx: &rusqlite::Connection,
     context: &Pending,
 ) -> Result<bool, WorkerError> {
     let agent = stored_agent(tx, &context.intent.agent_id)?;
@@ -529,6 +529,41 @@ fn continued_thread_call(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND epoch=?2 AND status='pending' AND kind IN (?3,?4) AND created>?5)",
         params![context.intent.agent_id, agent.epoch, studio_runtime_schema::persistence::EventKind::User, studio_runtime_schema::persistence::EventKind::Followup, begun], |row| row.get(0),
     )?)
+}
+
+/// Whether every outstanding thread call is superseded by an explicit later message.
+/// A held call whose outbox row is gone has no receipt left to wait for, so it
+/// does not block; a live or not-yet-restarted row does.
+pub(super) fn thread_calls_can_continue(
+    db: &rusqlite::Connection,
+    agent_id: &str,
+) -> Result<bool, WorkerError> {
+    let rows = Outbox::for_owner_tagged::<ProviderCall>(
+        db,
+        OwnerKind::Agent,
+        agent_id,
+        OutboxKind::ProviderCall,
+        PROVIDER_CALL_TAG,
+    )
+    .map_err(outbox_error)?;
+    for row in rows {
+        let ProviderCall::Account(call) = &row.payload else {
+            continue;
+        };
+        if !matches!(
+            call.context.method,
+            Method::ThreadStart | Method::ThreadResume
+        ) {
+            continue;
+        }
+        if row.status != OutboxStatus::Unknown
+            || !call.restarted
+            || !continued_thread_call(db, &call.context)?
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// A later user message explicitly supersedes a restarted, uncertain thread call.
@@ -573,7 +608,7 @@ fn supersede_thread_calls(
 }
 /// The stored agent `id`; a row that vanished inside the transaction is invalid.
 fn stored_agent(
-    tx: &studio_runtime_store::Transaction<'_>,
+    tx: &rusqlite::Connection,
     id: &str,
 ) -> Result<studio_runtime_store::AgentRecord, StoreError> {
     AgentRepository::get(tx, &AgentId::from(id))?.ok_or_else(|| StoreError::InvalidSyncObject {
@@ -749,6 +784,74 @@ pub(super) fn recover_vm_actor_requests(
     Ok(recovered)
 }
 
+/// An unsubmitted preparation whose reserved batch can be resumed.
+pub(super) fn reusable_preparation_attempt(
+    attempt: &studio_runtime_store::StartAttemptView,
+) -> bool {
+    attempt.submitted == Some(false)
+        && matches!(
+            attempt.prepare_error.as_deref(),
+            Some("workspace-readiness/pending" | "model-catalog/refresh-pending")
+        )
+}
+
+/// Settle an expired, still-unsubmitted preparation without sending its input.
+pub(super) async fn expire_preparation(
+    store: &RuntimeStore,
+    agent_id: String,
+    account: String,
+    epoch: i64,
+    at: f64,
+    expected: Option<(String, super::PreparationDeadline)>,
+) -> Result<bool, WorkerError> {
+    scheduler::lifecycle_transaction_with(store, move |tx| {
+        let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))? else {
+            return Ok(false);
+        };
+        let Some(attempt) = agent.start_attempt.as_ref() else {
+            return Ok(false);
+        };
+        let Some(created) = attempt.created else {
+            return Ok(false);
+        };
+        if expected.as_ref().is_some_and(|(id, deadline)| {
+            attempt.id.as_deref() != Some(id.as_str())
+                || super::PreparationDeadline::from_created(created).0 != deadline.0
+        }) {
+            return Ok(false);
+        }
+        if agent.epoch != epoch
+            || agent.account_key != account
+            || agent.status != studio_runtime_store::AgentStatus::Starting
+            || attempt.submitted != Some(false)
+            || attempt.prepare_error.is_none()
+            || super::PreparationDeadline::from_created(created).remaining(at)
+                != std::time::Duration::ZERO
+        {
+            return Ok(false);
+        }
+        let identity = studio_runtime_store::TurnAttemptIdentity {
+            agent_id: agent_id.clone(),
+            epoch,
+            attempt_id: attempt.id.clone().ok_or_else(|| invalid(&agent_id))?,
+        };
+        SchedulerRepository::settle_start_outcome(
+            tx,
+            &identity,
+            "failed",
+            Some("Start preparation timed out. Send a message to retry."),
+        )?;
+        if let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
+            && agent.status == studio_runtime_store::AgentStatus::Failed
+        {
+            agent.start_wait = None;
+            AgentRepository::put(tx, &agent)?;
+        }
+        Ok::<_, WorkerError>(true)
+    })
+    .await
+}
+
 pub(super) async fn claim(
     store: Arc<RuntimeStore>,
     account: &str,
@@ -840,15 +943,7 @@ pub(super) async fn claim(
                 let pending = record
                     .as_ref()
                     .and_then(|a| a.start_attempt.as_ref())
-                    .filter(|a| {
-                        a.submitted == Some(false)
-                            && matches!(
-                                a.prepare_error.as_deref(),
-                                Some(
-                                    "workspace-readiness/pending" | "model-catalog/refresh-pending"
-                                )
-                            )
-                    });
+                    .filter(|a| reusable_preparation_attempt(a));
                 let attempt = if guarding {
                     &attempt
                 } else {
@@ -908,7 +1003,19 @@ pub(super) async fn claim(
                 }
                 match scheduler::claim_preparation_in_transaction(tx, &agent, epoch, attempt, now())
                 {
-                    Ok(intent) => Ok(intent),
+                    Ok(intent) => {
+                        // The fresh preparation replaces a receipt-pending hold that
+                        // `thread_calls_can_continue` let through.
+                        if intent.is_some()
+                            && let Some(mut current) =
+                                AgentRepository::get(tx, &AgentId::from(agent.as_str()))?
+                            && current.start_outcome_hold.is_some()
+                        {
+                            current.start_outcome_hold = None;
+                            AgentRepository::put(tx, &current)?;
+                        }
+                        Ok(intent)
+                    }
                     Err(scheduler::SchedulerError::PolicyRefused(reason)) => {
                         hold_before_claim(tx, &agent, &reason)?;
                         Ok(None)
@@ -1130,6 +1237,7 @@ pub(super) async fn submitted(
                 | Method::AccountRead
                 | Method::AccountRateLimitsRead
                 | Method::ThreadStart
+                | Method::ClaudeMoveImport
                 | Method::ThreadRealtimeStart
                 | Method::ThreadRealtimeStop
                 | Method::ThreadRealtimeAppendSpeech
@@ -1806,6 +1914,7 @@ fn settle_outcome(
                 | Method::BrowserWait
                 | Method::ClaudeCommands
                 | Method::ClaudeMoveExport
+                | Method::ClaudeMoveImport
                 | Method::ClaudeMoveIdentity
                 | Method::ClaudeMovePreflight
                 | Method::ClaudeMoveProof
@@ -2077,6 +2186,73 @@ fn uncertain(
     }
     Ok(false)
 }
+/// Resolution of a completion whose start reply can no longer bind it.
+enum UnboundCompletion {
+    Bound,
+    Error,
+}
+
+fn resolve_unbound_completion(
+    tx: &studio_runtime_store::Transaction<'_>,
+    identity: &studio_runtime_store::TurnAttemptIdentity,
+    turn: Option<&str>,
+) -> Result<UnboundCompletion, WorkerError> {
+    let mut agent = AgentRepository::get(tx, &AgentId::from(identity.agent_id.as_str()))?
+        .ok_or_else(|| invalid(&identity.agent_id))?;
+    let attempt = agent
+        .start_attempt
+        .as_ref()
+        .ok_or_else(|| invalid(&identity.agent_id))?;
+    if attempt.id.as_deref() != Some(identity.attempt_id.as_str())
+        || attempt.epoch != Some(identity.epoch)
+    {
+        return Err(invalid(&identity.agent_id));
+    }
+    let saved =
+        studio_runtime_store::ExecutionHistoryRepository::attempt(tx, &identity.attempt_id)?;
+    if turn.is_some_and(|turn| {
+        saved.as_ref().is_some_and(|saved| {
+            saved.submission
+                == Some(studio_runtime_schema::persistence::AttemptSubmission::Accepted)
+                && saved.start.turn_id.as_deref() == Some(turn)
+                && saved.start.epoch == attempt.epoch
+                && saved.start.account_key == attempt.account_key
+                && saved.start.thread_id == attempt.thread_id
+                && saved.start.connection_generation == attempt.connection_generation
+                && saved.start.request_ticket == attempt.request_ticket
+        })
+    }) {
+        agent
+            .set_start_attempt_turn_id(turn)
+            .map_err(|_| invalid(&identity.agent_id))?;
+        AgentRepository::put(tx, &agent)?;
+        return Ok(UnboundCompletion::Bound);
+    }
+    let events = serde_json::to_string(
+        attempt
+            .events
+            .as_ref()
+            .ok_or_else(|| invalid(&identity.agent_id))?,
+    )
+    .map_err(StoreError::from)?;
+    let reason = "The provider completion could not be matched to this start. Input delivery is unknown; send a new message to continue.";
+    tx.execute(
+        "UPDATE runtime_events SET status='uncertain',error=?1 WHERE agent=?2 AND epoch=?3 AND id IN (SELECT value FROM json_each(?4)) AND status IN ('reserved','dispatching')",
+        rusqlite::params![reason, identity.agent_id, identity.epoch, events],
+    )?;
+    agent.status = studio_runtime_store::AgentStatus::Failed;
+    agent.in_flight = Some(false);
+    agent.auto_wake = Some(false);
+    agent.turn_id = None;
+    agent.start_outcome_hold = None;
+    agent.clear_native_failure_hold();
+    agent.error = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::provider_errors::AgentError::Message(reason.into()),
+    );
+    AgentRepository::put(tx, &agent)?;
+    Ok(UnboundCompletion::Error)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn journal_batch(
     store: Arc<RuntimeStore>,
@@ -2211,10 +2387,8 @@ pub(super) async fn journal_batch(
                             limits_observation.as_ref(),
                             &mut outbox,
                             JournalPolicy {
-                                server_id,
                                 park_unbound,
                                 subject,
-                                faults: &mut faults,
                             },
                         )
                     },
@@ -2348,6 +2522,12 @@ fn journal_stage(entry: &JournalEntry) -> &'static str {
     }
 }
 
+/// Whether a provider notification says that its thread is no longer loaded.
+fn unloads_thread(method: &str, params: &Value) -> bool {
+    method == "thread/closed"
+        || (method == "thread/status/changed" && params["status"]["type"] == "notLoaded")
+}
+
 /// Consume only manual release closure, including a completed worker with no
 /// current turn attempt. Other notifications retain their attempt fence.
 fn record_manual_release_closure(
@@ -2358,9 +2538,7 @@ fn record_manual_release_closure(
     method: &str,
     params: &Value,
 ) -> Result<bool, WorkerError> {
-    if method != "thread/closed"
-        && !(method == "thread/status/changed" && params["status"]["type"] == "notLoaded")
-    {
+    if !unloads_thread(method, params) {
         return Ok(false);
     }
     let Some(thread) = params["threadId"]
@@ -2614,31 +2792,14 @@ fn journal_one(
             };
             if let Some((identity, bound)) = attempt {
                 *policy.subject = Some(identity.agent_id.clone());
+                let resolution = if method == "turn/completed" && !bound && policy.park_unbound {
+                    Some(resolve_unbound_completion(tx, &identity, turn)?)
+                } else {
+                    None
+                };
+                let bound = bound || matches!(resolution, Some(UnboundCompletion::Bound));
                 match method {
-                    "turn/completed" if !bound && policy.park_unbound => {
-                        // No outstanding request can bind this completion any
-                        // more. Settle it and hold the agent, whose turn would
-                        // otherwise stay open forever.
-                        let detail = format!(
-                            "the completion of turn {} on thread {thread} has no bound attempt {}",
-                            turn.unwrap_or("(none)"),
-                            identity.attempt_id
-                        );
-                        let hold = agent_fault::hold_agent(
-                            tx,
-                            policy.server_id,
-                            &identity.agent_id,
-                            agent_fault::FaultStage::JournalFrame,
-                            &detail,
-                        )?;
-                        policy.faults.push(agent_fault::AgentFault {
-                            agent_id: identity.agent_id.clone(),
-                            stage: agent_fault::FaultStage::JournalFrame,
-                            method: Some(method.to_owned()),
-                            detail,
-                            hold,
-                        });
-                    }
+                    "turn/completed" if matches!(resolution, Some(UnboundCompletion::Error)) => {}
                     "turn/started" => {
                         if let Some(turn) = turn
                             && let Some(interrupt) =
@@ -2797,6 +2958,16 @@ fn journal_one(
                                 },
                             );
                         }
+                    }
+                    _ if unloads_thread(method, params) => {
+                        // The unloaded thread's start answer is lost: settle it as
+                        // unknown. The input stays pending and is not sent again.
+                        SchedulerRepository::settle_start_outcome(
+                            tx,
+                            &identity,
+                            "uncertain",
+                            None,
+                        )?;
                     }
                     _ => {
                         let dispatched = dispatch_notification_with_effects(
@@ -3496,12 +3667,10 @@ pub(super) struct JournalBatch {
 }
 /// How one journal entry treats data it cannot apply.
 pub(super) struct JournalPolicy<'a> {
-    server_id: Option<&'a str>,
     /// Settle an unbound turn completion instead of deferring it.
     park_unbound: bool,
     /// The agent the entry applies to, once known.
     subject: &'a mut Option<String>,
-    faults: &'a mut Vec<agent_fault::AgentFault>,
 }
 /// Digest of one journal entry's payload; a replay must match it.
 pub(super) fn journal_digest(entry: &JournalEntry, operation: &str) -> Result<String, WorkerError> {
@@ -4087,7 +4256,7 @@ fn restore_stream_lane(
     )
     .map_err(outbox_error)?
     {
-        saved.metadata.restore_pending(row.payload)?;
+        saved.metadata.restore_pending(&row.payload)?;
     }
     Ok(saved)
 }
@@ -4410,6 +4579,7 @@ pub(super) enum PreparationStep<T> {
 pub(super) struct PendingWait {
     pub reason: crate::account_worker::PreparationWaitReason,
     pub rows: super::agent_wakes::WakeRows,
+    pub deadline: super::PreparationDeadline,
 }
 
 impl<T> PreparationStep<T> {
@@ -4452,7 +4622,7 @@ pub(super) async fn preparation_step<T: Send + 'static>(
     let attempt_id = intent.attempt_id.clone();
     let epoch = intent.epoch;
     let blocker = reason.clone();
-    let (row_id, needs_record) = store
+    let (row_id, needs_record, created) = store
         .read_async("runtime-services/account_worker_pending_read", move |db| {
             let row_id = db
                 .query_row(
@@ -4465,7 +4635,15 @@ pub(super) async fn preparation_step<T: Send + 'static>(
                 .ok_or_else(|| invalid(&agent_id))?;
             Ok::<_, WorkerError>((
                 row_id,
-                pending_needs_record(&row, &blocker, owner, &attempt_id, epoch),
+                pending_needs_record(&row, &blocker, owner, &attempt_id, epoch)
+                    || row
+                        .start_attempt
+                        .as_ref()
+                        .is_some_and(|attempt| attempt.created.is_none()),
+                row.start_attempt
+                    .as_ref()
+                    .and_then(|attempt| attempt.created)
+                    .unwrap_or_else(now),
             ))
         })
         .await?;
@@ -4479,6 +4657,7 @@ pub(super) async fn preparation_step<T: Send + 'static>(
     Ok(PreparationStep::Pending(PendingWait {
         reason: owner,
         rows,
+        deadline: super::PreparationDeadline::from_created(created),
     }))
 }
 
@@ -4526,9 +4705,14 @@ async fn record_pending(
     scheduler::lifecycle_transaction_with(store, move |tx| {
         let mut row = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
             .ok_or_else(|| invalid(&agent_id))?;
-        if pending_needs_record(&row, &reason, owner, &attempt_id, epoch)
+        if (pending_needs_record(&row, &reason, owner, &attempt_id, epoch)
+            || row
+                .start_attempt
+                .as_ref()
+                .is_some_and(|attempt| attempt.created.is_none()))
             && let Some(attempt) = row.start_attempt.as_mut()
         {
+            attempt.created.get_or_insert_with(now);
             attempt.prepare_error = Some(reason.clone());
             row.start_wait = Some(owner.wait(epoch));
             if reason == preparation::WORKSPACE_PENDING_REASON {

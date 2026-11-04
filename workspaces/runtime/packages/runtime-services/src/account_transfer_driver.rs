@@ -1105,7 +1105,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
             ));
         }
     }
-    let uncertain: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status IN ('reserved','dispatching','uncertain'))",[agent],|r| r.get(0)).map_err(studio_runtime_store::StoreError::from)?;
+    let uncertain: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status IN ('reserved','dispatching'))",[agent],|r| r.get(0)).map_err(studio_runtime_store::StoreError::from)?;
     if uncertain {
         return Err(TransferError::Refused(
             "Waiting for confirmed message delivery",
@@ -1133,12 +1133,14 @@ impl TransferPreparation {
 pub enum TransferMethod {
     Start,
     Fork,
+    ClaudeImport,
 }
 impl TransferMethod {
     pub(crate) fn wire(self) -> &'static str {
         match self {
             Self::Start => "thread/start",
             Self::Fork => "thread/fork",
+            Self::ClaudeImport => "claude/moveImport",
         }
     }
 }
@@ -1221,9 +1223,10 @@ pub async fn execute_member(
         }
         Err(error) => Err(error),
     };
-    if result.is_err() {
+    if let Err(error) = &result {
         let operation_id = operation.to_owned();
         let failed_agent = agent_id.clone();
+        let reason = crate::account_transfer::public_preparation_reason(error);
         store
             .transaction_with_error(move |tx| {
                 let snapshot = load(tx, &operation_id)?;
@@ -1231,6 +1234,7 @@ pub async fn execute_member(
                     tx,
                     snapshot.typed_preparation_failed(
                         &failed_agent,
+                        &reason,
                         input
                             .operation
                             .members
@@ -1768,6 +1772,65 @@ mod request_tests {
     }
 
     #[test]
+    fn preparation_refusal_is_visible_and_can_be_cancelled() {
+        struct Refusing(std::sync::atomic::AtomicUsize);
+        impl TransferTransport for Refusing {
+            fn send<'a>(
+                &'a self,
+                _: &'a Ticket,
+                _: &'a crate::account_session_runtime::ConnectionScope,
+                _: &'a str,
+                _: &'a Value,
+            ) -> TransferFuture<'a, Result<TransferDispatch, TransferError>> {
+                Box::pin(async { panic!("no native request should be sent") })
+            }
+        }
+        impl TransferExecutor for Refusing {
+            fn available(&self) -> Result<(), TransferError> {
+                Ok(())
+            }
+            fn prepare<'a>(
+                &'a self,
+                _: &'a TransferPreparation,
+            ) -> TransferFuture<'a, Result<PreparedTransfer, TransferError>> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async {
+                    Err(
+                        crate::account_session_runtime::AccountSessionError::Refused(
+                            "Finish the Claude turn and background tasks before a move",
+                        )
+                        .into(),
+                    )
+                })
+            }
+        }
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4a002";
+        let executor = Refusing(std::sync::atomic::AtomicUsize::new(0));
+        request(&store, id, "lead", "target", "team", "codex", 1.0).unwrap();
+        run_async(execute_member(&store, &executor, id, "lead", 2.0)).unwrap_err();
+        let operation = Repository::get(&store.test_reader().unwrap(), id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation["members"]["lead"]["phase"], "blocked");
+        assert_eq!(
+            operation["members"]["lead"]["error"],
+            "Finish the Claude turn and background tasks before a move"
+        );
+        let retried = run_async(action(&store, id, Action::Retry, 3.0)).unwrap();
+        assert_eq!(retried["members"]["lead"]["phase"], "lazy");
+        run_async(execute_member(&store, &executor, id, "lead", 4.0)).unwrap_err();
+        assert_eq!(executor.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let cancelled = run_async(action(&store, id, Action::Cancel, 5.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let lead = stored(&store, "lead");
+        assert_eq!(lead["accountKey"], "source");
+        assert!(lead.get("accountTransferId").is_none_or(Value::is_null));
+        let lead = AgentRecord::from_value(lead).unwrap();
+        crate::account_transfer::before_start(&lead).expect("cancel releases admission");
+    }
+
+    #[test]
     fn new_request_adopts_lazy_members_and_exact_replay_is_read_only() {
         let (_root, store) = store_with_agents();
         let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226d";
@@ -2151,5 +2214,55 @@ mod provider_admission_tests {
                 .value()
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod durable_blocker_tests {
+    use super::*;
+
+    fn run_async<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime builds")
+            .block_on(future)
+    }
+
+    fn insert_event(store: &RuntimeStore, id: &str, status: &str) {
+        let (id, status) = (id.to_owned(), status.to_owned());
+        run_async(store.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO runtime_events(id,agent,epoch,kind,text,status,created,turn_id,error) VALUES (?1,'lead',2,'child_result','result',?2,1.0,NULL,NULL)",
+                rusqlite::params![id, status],
+            )?;
+            Ok(())
+        }))
+        .expect("insert event");
+    }
+
+    fn blocked(store: &RuntimeStore) -> Result<(), TransferError> {
+        run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+    }
+
+    #[test]
+    fn uncertain_old_delivery_does_not_hold_a_transfer() {
+        let root = tempfile::tempdir().expect("test root");
+        let store = run_async(RuntimeStore::open(Some(root.path()))).expect("test store opens");
+        insert_event(&store, "old-child-result", "uncertain");
+        assert!(blocked(&store).is_ok());
+    }
+
+    #[test]
+    fn dispatching_delivery_still_holds_a_transfer() {
+        let root = tempfile::tempdir().expect("test root");
+        let store = run_async(RuntimeStore::open(Some(root.path()))).expect("test store opens");
+        insert_event(&store, "live-child-result", "dispatching");
+        assert!(matches!(
+            blocked(&store),
+            Err(TransferError::Refused(
+                "Waiting for confirmed message delivery"
+            ))
+        ));
     }
 }

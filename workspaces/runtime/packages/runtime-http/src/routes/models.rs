@@ -144,6 +144,10 @@ async fn account_catalog_read(
         ensure_session(session, &account.key)
             .await
             .map_err(|error| {
+                studio_runtime_services::diagnostics::log_stderr(format_args!(
+                    "model catalog for {} failed before its read: {error}",
+                    account.key
+                ));
                 if account.provider == ProviderKind::Claude
                     && matches!(
                     &error,

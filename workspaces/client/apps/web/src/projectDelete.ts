@@ -59,7 +59,7 @@ export function projectReaderScope(
       bound
         ? agent.projectId === project.id &&
           agent.projectServerId === project.homeServerId
-        : paths.has(agent.hostProjectPath || agent.cwd)
+        : !!agent.projectPath && paths.has(agent.projectPath)
     ) {
       scope.add(agent.id);
     }

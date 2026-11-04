@@ -1,6 +1,5 @@
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
-import type { Snapshot } from "../../src/types.ts";
-import type { AgentEntityDto } from "../../src/generated/api.ts";
+import type { Agent, Snapshot } from "../../src/types.ts";
 import type { SidebarSource } from "../../src/servers/mergedSidebar.ts";
 declare global {
   interface Window {
@@ -19,12 +18,13 @@ import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
 import "../../src/appearance.css";
 const noop = () => {};
-const threads: AgentEntityDto[] = Array.from({ length: 30 }, (_, index) => ({
+const threads: Agent[] = Array.from({ length: 30 }, (_, index) => ({
   id: "chat-" + index,
   name: "Chat " + index + " with a long title reaching the actions",
   source: "managed",
   isLead: true,
   cwd: "/project",
+  projectPath: "/project",
   created: 1,
   updated: 1,
 }));
@@ -55,10 +55,11 @@ const groupChat = (
   id: string,
   cwd: string,
   archived = false,
-): AgentEntityDto => ({
+): Agent => ({
   id,
   name: id,
   cwd,
+  projectPath: cwd,
   archived,
   source: "managed",
   isLead: true,

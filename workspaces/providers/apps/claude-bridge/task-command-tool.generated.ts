@@ -141,6 +141,7 @@ export const TASK_COMMAND_TOOL_SCHEMA = {
           maxLength: 12000,
         },
       ],
+      description: "For submit, text is limited to 12000 characters.",
     },
     result_schema: {
       additionalProperties: true,

@@ -250,6 +250,7 @@ impl AccountSessionPort for CompletingSession {
                 | method @ Method::BrowserWait
                 | method @ Method::ClaudeCommands
                 | method @ Method::ClaudeMoveExport
+                | method @ Method::ClaudeMoveImport
                 | method @ Method::ClaudeMoveIdentity
                 | method @ Method::ClaudeMovePreflight
                 | method @ Method::ClaudeMoveProof
@@ -370,6 +371,22 @@ async fn lazy_history_receipt_is_adopted_before_ordinary_preparation_returns() {
         .await
         .expect("Codex source");
     request(&store).await;
+    let refusing = Arc::new(RefusingSession::default());
+    assert!(
+        preparation::prepare_native_thread(
+            store.clone(),
+            &resources(root.path(), refusing),
+            "lead",
+            "first-refusal",
+            1,
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(operation(&store)["members"]["lead"]["phase"], "blocked");
+    driver::action(&store, OP, Action::Retry, 11.0)
+        .await
+        .expect("retry");
     let session = Arc::new(CompletingSession {
         store: store.clone(),
         native_path,

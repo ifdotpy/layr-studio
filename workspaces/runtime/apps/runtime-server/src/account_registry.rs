@@ -721,9 +721,9 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                     Ok(receipt)
                 }
                 Ok(_) => Err(AccountSessionError::Unknown),
-                Err(studio_runtime_services::account_worker::retained::PortError::NotSent) => {
-                    Ok(not_sent(ReceiptOutcome::NotHandedOff))
-                }
+                Err(studio_runtime_services::account_worker::retained::PortError::NotSent(
+                    cause,
+                )) => Ok(not_sent(ReceiptOutcome::NotHandedOff(cause))),
                 Err(studio_runtime_services::account_worker::retained::PortError::Identity)
                 | Err(
                     studio_runtime_services::account_worker::retained::PortError::ScopeMismatch,
@@ -774,7 +774,7 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                     | studio_runtime_services::account_worker::retained::PortError::ScopeMismatch => {
                         studio_runtime_services::account_session_runtime::AccountSessionError::Refused("Provider session scope changed")
                     }
-                    studio_runtime_services::account_worker::retained::PortError::Invalid | studio_runtime_services::account_worker::retained::PortError::NotSent | studio_runtime_services::account_worker::retained::PortError::Deadline | studio_runtime_services::account_worker::retained::PortError::Capacity => studio_runtime_services::account_session_runtime::AccountSessionError::Refused("Callback barrier was not completed"),
+                    studio_runtime_services::account_worker::retained::PortError::Invalid | studio_runtime_services::account_worker::retained::PortError::NotSent(_) | studio_runtime_services::account_worker::retained::PortError::Deadline | studio_runtime_services::account_worker::retained::PortError::Capacity => studio_runtime_services::account_session_runtime::AccountSessionError::Refused("Callback barrier was not completed"),
                 })
         })
     }
@@ -805,7 +805,7 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                 studio_runtime_services::account_worker::retained::PortError::Identity => {
                     studio_runtime_services::account_session_runtime::AccountSessionError::Refused("Provider session scope changed")
                 }
-                studio_runtime_services::account_worker::retained::PortError::ScopeMismatch | studio_runtime_services::account_worker::retained::PortError::Invalid | studio_runtime_services::account_worker::retained::PortError::NotSent | studio_runtime_services::account_worker::retained::PortError::Deadline | studio_runtime_services::account_worker::retained::PortError::Capacity => studio_runtime_services::account_session_runtime::AccountSessionError::Refused("Connection recovery could not be started"),
+                studio_runtime_services::account_worker::retained::PortError::ScopeMismatch | studio_runtime_services::account_worker::retained::PortError::Invalid | studio_runtime_services::account_worker::retained::PortError::NotSent(_) | studio_runtime_services::account_worker::retained::PortError::Deadline | studio_runtime_services::account_worker::retained::PortError::Capacity => studio_runtime_services::account_session_runtime::AccountSessionError::Refused("Connection recovery could not be started"),
             })
         })
     }
@@ -887,10 +887,10 @@ async fn dispatch_request(
     };
     let receipt = match port.request(retained_request).await {
         Ok(receipt) => receipt,
-        Err(studio_runtime_services::account_worker::retained::PortError::NotSent) => {
+        Err(studio_runtime_services::account_worker::retained::PortError::NotSent(cause)) => {
             return Ok(not_sent_receipt(
                 fallback_request,
-                ReceiptOutcome::NotHandedOff,
+                ReceiptOutcome::NotHandedOff(cause),
             ));
         }
         Err(studio_runtime_services::account_worker::retained::PortError::Deadline) => {
@@ -920,7 +920,7 @@ async fn dispatch_request(
                 }
                 studio_runtime_services::account_worker::retained::PortError::ScopeMismatch
                 | studio_runtime_services::account_worker::retained::PortError::Invalid
-                | studio_runtime_services::account_worker::retained::PortError::NotSent
+                | studio_runtime_services::account_worker::retained::PortError::NotSent(_)
                 | studio_runtime_services::account_worker::retained::PortError::Deadline
                 | studio_runtime_services::account_worker::retained::PortError::Capacity => {
                     studio_runtime_services::account_session_runtime::AccountSessionError::Refused(

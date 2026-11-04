@@ -110,20 +110,20 @@ export function ChatSettingsDialog(p: Props) {
         </Stack>
       </div>
       <Group justify="flex-end" gap="xs" className="execution-dialog-actions">
-        {p.agent?.cwd && (
+        {root?.projectPath && (
           <Button
             size="xs"
             variant="default"
             disabled={p.creating}
             onClick={() => {
               p.setSettingsOpen(false);
-              void p.newChat(p.agent?.cwd || undefined);
+              void p.newChat(root?.projectPath || undefined);
             }}
           >
             New chat in this project
           </Button>
         )}
-        {p.agent?.cwd && (
+        {root?.projectPath && (
           <Button
             size="xs"
             variant="subtle"

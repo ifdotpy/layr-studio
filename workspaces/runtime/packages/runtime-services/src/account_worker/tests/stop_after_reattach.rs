@@ -68,7 +68,7 @@ impl RetainedAccountSession for WorkerSession {
                     PortError::Identity
                     | PortError::ScopeMismatch
                     | PortError::Invalid
-                    | PortError::NotSent
+                    | PortError::NotSent(_)
                     | PortError::Deadline
                     | PortError::Capacity => {
                         AccountSessionError::Refused("Provider request was refused")

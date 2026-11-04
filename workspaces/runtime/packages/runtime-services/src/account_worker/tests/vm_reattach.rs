@@ -802,7 +802,7 @@ async fn vm_reattach_read_waits_for_handshake_and_rechecks_authority() {
             let result = pending.await;
             release.notify_one();
             let shutdown = worker.shutdown().await;
-            assert_eq!(result.unwrap_err(), PortError::NotSent);
+            assert!(matches!(result.unwrap_err(), PortError::NotSent(_)));
             shutdown.unwrap();
             assert!(guest.inner.state.lock().unwrap().writes.is_empty());
             continue;
@@ -813,7 +813,7 @@ async fn vm_reattach_read_waits_for_handshake_and_rechecks_authority() {
         release.notify_one();
         let result = pending.await;
         if change_authority {
-            assert_eq!(result.unwrap_err(), PortError::NotSent);
+            assert!(matches!(result.unwrap_err(), PortError::NotSent(_)));
             assert!(guest.inner.state.lock().unwrap().writes.is_empty());
         } else {
             assert!(matches!(result.unwrap().result, RequestResult::Reply(_)));

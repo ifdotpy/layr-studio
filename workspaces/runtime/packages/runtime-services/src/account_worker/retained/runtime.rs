@@ -38,7 +38,12 @@ impl Worker {
         if reply.is_closed()
             || tokio::time::Instant::from_std(request.deadline) <= tokio::time::Instant::now()
         {
-            let _ignored = reply.send(Err(PortError::NotSent));
+            let cause = if reply.is_closed() {
+                "reply-closed"
+            } else {
+                "deadline"
+            };
+            let _ignored = reply.send(Err(PortError::NotSent(cause.into())));
             return Ok(());
         }
         if let Err(error) = validate(&request) {
@@ -182,7 +187,7 @@ impl Worker {
                 Err(error) => return Err(error),
             };
             if !ready {
-                let _ignored = reply.send(Err(PortError::NotSent));
+                let _ignored = reply.send(Err(PortError::NotSent("vm-not-ready".into())));
                 return Ok(());
             }
         }
@@ -193,7 +198,7 @@ impl Worker {
                 .vm_session_matches_actor(actor, &call.scope.account, actor_identity.epoch)
                 .await?
         {
-            let _ignored = reply.send(Err(PortError::NotSent));
+            let _ignored = reply.send(Err(PortError::NotSent("vm-session-mismatch".into())));
             return Ok(());
         }
         let control = if is_vm_actor {
@@ -202,7 +207,7 @@ impl Worker {
                 .and_then(|actor| self.vm_sessions.get(actor))
                 .map(|session| session.control.clone())
             else {
-                let _ignored = reply.send(Err(PortError::NotSent));
+                let _ignored = reply.send(Err(PortError::NotSent("vm-session-missing".into())));
                 return Ok(());
             };
             control
@@ -225,17 +230,32 @@ impl Worker {
             ),
             timeout_ms: remaining.as_millis().try_into().unwrap_or(u64::MAX),
         });
+        let mut expired = false;
         let prepared = self
             .drive(async {
-                tokio::time::timeout_at(deadline, prepare)
-                    .await
-                    .unwrap_or(Err(SessionTaskError::Closed))
+                match tokio::time::timeout_at(deadline, prepare).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        expired = true;
+                        Err(SessionTaskError::Closed)
+                    }
+                }
             })
             .await;
         let prepared = match prepared {
             Ok(prepared) => prepared,
-            Err(_) => {
-                let _ignored = reply.send(Err(PortError::NotSent));
+            Err(error) => {
+                let cause = if expired {
+                    "deadline".to_owned()
+                } else {
+                    format!("prepare-error:{error:?}")
+                };
+                let (barrier_set, held_entries) = control.journal_gate();
+                crate::diagnostics::log_stderr(format_args!(
+                    "provider prepare not handed off: cause={cause} barrier_set={barrier_set} held_entries={held_entries} max_unsettled={}",
+                    crate::provider_session_task::MAX_UNSETTLED
+                ));
+                let _ignored = reply.send(Err(PortError::NotSent(cause)));
                 return Ok(());
             }
         };
@@ -243,7 +263,14 @@ impl Worker {
             || reply.is_closed()
             || tokio::time::Instant::from_std(request.deadline) <= tokio::time::Instant::now()
         {
-            let _ignored = reply.send(Err(PortError::NotSent));
+            let cause = if self.closing {
+                "closing"
+            } else if reply.is_closed() {
+                "reply-closed"
+            } else {
+                "deadline"
+            };
+            let _ignored = reply.send(Err(PortError::NotSent(cause.into())));
             return Ok(());
         }
         let recovery = prepared.recovery_record();

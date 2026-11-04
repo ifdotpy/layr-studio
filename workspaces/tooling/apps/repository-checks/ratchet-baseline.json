@@ -1144,10 +1144,6 @@
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/work_write.rs",
-      "fingerprint": "b47b1da7a070a730c32415ef46ebb5877bbdd4d4b561a0823a2513977138a401:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-http/src/validation.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
@@ -2486,10 +2482,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-schema/src/usage/ledger.rs",
       "fingerprint": "7afd828f70e9fb1103aa3bec869cb40f5e8092ec75ba60e6c73558e5df7397d5:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker.rs",
-      "fingerprint": "6a766d4723e08c5ec50991a322e95cfe288559ab09ef83491825f399ae709f39:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/tests.rs",

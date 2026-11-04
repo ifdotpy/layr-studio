@@ -774,7 +774,7 @@ async fn provider_request(
         | ReceiptOutcome::NoLiveAccountWorker
         | ReceiptOutcome::ExpectedScopeMismatch
         | ReceiptOutcome::DeadlineExpired
-        | ReceiptOutcome::NotHandedOff => Err(unavailable()),
+        | ReceiptOutcome::NotHandedOff(_) => Err(unavailable()),
     }
 }
 
@@ -1966,6 +1966,7 @@ mod tests {
                     | other @ Method::BrowserWait
                     | other @ Method::ClaudeCommands
                     | other @ Method::ClaudeMoveExport
+                    | other @ Method::ClaudeMoveImport
                     | other @ Method::ClaudeMoveIdentity
                     | other @ Method::ClaudeMovePreflight
                     | other @ Method::ClaudeMoveProof

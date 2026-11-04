@@ -530,6 +530,11 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
     {
         projected["taskDefaultGate"] = gate.clone();
     }
+    if collection == "agentSummary" {
+        projected["projectPath"] = crate::project_path::project_path(record)
+            .map(|path| Value::String(path.as_str().to_owned()))
+            .unwrap_or(Value::Null);
+    }
     Some(projected)
 }
 
@@ -1088,6 +1093,26 @@ mod projection_plan_tests {
             studio_runtime_store::sha256_hex(payload.as_bytes()),
             "706ea379b3087203fa2bd28bc462b8833b4ed5a61b6b1f36bf890de419b6a642"
         );
+    }
+
+    #[test]
+    fn agent_projection_uses_host_project_path_or_legacy_cwd() {
+        for (record, expected) in [
+            (
+                json!({"id":"lead", "cwd":"/store/projects/id/lines/main", "hostProjectPath":"/source/project"}),
+                json!("/source/project"),
+            ),
+            (
+                json!({"id":"legacy", "cwd":"/source/legacy"}),
+                json!("/source/legacy"),
+            ),
+            (json!({"id":"missing"}), Value::Null),
+        ] {
+            let view =
+                super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+            let summary = super::project_persisted_record("agentSummary", &view).unwrap();
+            assert_eq!(summary.get("projectPath"), Some(&expected));
+        }
     }
 
     #[test]

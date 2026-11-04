@@ -995,8 +995,7 @@ fn accepted_archive_preflight(
         ));
     }
 
-    if (owner_value.get("executionMode").and_then(Value::as_str) == Some("vm")
-        || crate::layr_native::is_native(&owner_value))
+    if vm_result_needs_merge(root_id, &owner)
         && !vm_merge_confirmed(
             connection,
             task_id,
@@ -1147,8 +1146,8 @@ pub struct VmSubmissionCall {
 }
 
 use studio_runtime_store::vm_work_intent::{
-    Acceptance, Intent as VmWorkIntent, Owner as VmOwner, PublicRequest as VmPublic, Submission,
-    SubmissionResult as VmSubmissionResult, View as VmView,
+    Acceptance, AcceptanceResult, Intent as VmWorkIntent, Owner as VmOwner,
+    PublicRequest as VmPublic, Submission, SubmissionResult as VmSubmissionResult, View as VmView,
 };
 
 fn read_vm_view(connection: &Connection, task_id: &str) -> Result<VmView, WorkWriteError> {
@@ -1187,6 +1186,11 @@ pub enum VmSubmissionPreparation {
         request_id: String,
     },
     Call(VmSubmissionCall),
+}
+
+fn reviewer_without_revision(owner: &AgentRecord, revision: &str) -> bool {
+    owner.role.value().copied() == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+        && revision.trim().is_empty()
 }
 
 /// Persist an exact layr evidence request before contacting the guest. A pending
@@ -1237,6 +1241,9 @@ pub async fn prepare_vm_submission(
             text(input.result.as_str().ok_or(Error::InvalidRequest("Supply result as text when the task has no result_schema"))?, false)?;
         }
         text(&input.checks, false)?;
+        if reviewer_without_revision(&owner, &input.revision) {
+            return Ok(VmSubmissionPreparation::NotVm);
+        }
         let revision = python_bounded_text(&input.revision, 200)?;
         validate_submission_files(&owner, &input.files, input.prepared_files.as_ref())?;
         if owner.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) && owner.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative) {
@@ -1524,8 +1531,9 @@ pub async fn finish_vm_accept(
     task_id: &str,
     request_id: &str,
     uncertain: Option<bool>,
+    merge: Option<studio_runtime_store::vm_work_intent::MergeReceipt>,
 ) -> Result<(), WorkWriteError> {
-    let outcome = uncertain.map_or(Ok(()), Err);
+    let outcome = uncertain.map_or(Ok(AcceptanceResult { merge }), Err);
     finish_vm_intent(store, task_id, request_id, outcome, |view| {
         &mut view.vm_accept
     })
@@ -2526,7 +2534,11 @@ fn decide_submit(
         )?
     };
     let checks_text = python_bounded_text(&input.checks, 32000)?;
-    let revision_text = python_bounded_text(&input.revision, 200)?;
+    let revision_text = if reviewer_without_revision(submitter, &input.revision) {
+        String::new()
+    } else {
+        python_bounded_text(&input.revision, 200)?
+    };
     let mut result = json!({
         "id": result_id,
         "agent": submitter_id,
@@ -3086,9 +3098,10 @@ fn submit(
         );
     }
     validate_submission_files(&submitter, &input.files, input.prepared_files.as_ref())?;
-    if submitter.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        || submitter.workspace_mode
-            == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
+    if !reviewer_without_revision(&submitter, &input.revision)
+        && (submitter.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+            || submitter.workspace_mode
+                == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative))
     {
         let Some(request_id) = input.vm_evidence_request_id.as_deref() else {
             return Err(Error::Conflict(
@@ -3508,6 +3521,14 @@ fn accept(
     WorkItemsRepository::update_checked_work(tx, &input.task_id, &updated)?;
     let mut record = single_view(tx, &updated)?;
     record["archivePending"] = json!(archive_owner.is_some());
+    if let Some(VmWorkIntent::Completed {
+        owner,
+        result: AcceptanceResult { merge: Some(merge) },
+    }) = read_vm_view(tx, &input.task_id)?.vm_accept
+        && owner.id.result_id == result_id
+    {
+        record["merge"] = json!(merge);
+    }
 
     Ok(WorkWriteResult {
         record,
@@ -3982,6 +4003,48 @@ mod actor_tests {
         connection
     }
 
+    #[tokio::test]
+    async fn native_reviewer_submission_needs_no_revision_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
+        let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"reviewer","rootId":"lead","epoch":1,"status":"running","autoWake":true,"role":"reviewer","workspaceMode":"layr-native"});
+        let lead = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"agentMode":"multi","concurrency":8});
+        let item = work("review", Some("reviewer"), "running", json!([]));
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &AgentRecord::from_value(record)?)?;
+                AgentRepository::put(tx, &AgentRecord::from_value(lead)?)?;
+                WorkItemsRepository::put_work(tx, "review", &item)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut input = super::SubmitWork {
+            prepared_gate_workspace: None,
+            task_id: "review".into(),
+            version: Some(2),
+            result: "reviewed".into(),
+            checks: "read".into(),
+            revision: String::new(),
+            files: vec![],
+            prepared_files: None,
+            state_dir: dir.path().into(),
+            vm_evidence: None,
+            vm_evidence_request_id: None,
+        };
+        let result = super::prepare_vm_submission(&store, "reviewer", None, "review", &mut input)
+            .await
+            .unwrap();
+        assert!(matches!(result, super::VmSubmissionPreparation::NotVm));
+        let result = store
+            .transaction_with_error(move |tx| {
+                super::write(tx, "reviewer", None, "review", WorkWrite::Submit(input))
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.record["status"], "review");
+    }
+
     #[test]
     fn receipt_domain_invalid_work_root_reports_fieldless_expiry() {
         let connection = database();
@@ -4044,9 +4107,12 @@ mod actor_tests {
                 json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","epoch":2,"status":"idle","autoWake":true,"executionMode":"vm"}),
             ] { AgentRepository::put(tx, &AgentRecord::from_value(agent).expect("agent"))?; }
             let mut item = work("retry", Some("worker"), "review", json!([{"id":"result-1","agent":"worker","text":"done","checks":"checked","revision":"state","files":[]}]));
-            item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"retry","owner":"worker","revision":"state","resultId":"result-1","created":1.0});
+            item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"retry","owner":"worker","revision":"state","resultId":"result-1","created":1.0,"merge":{"from_state":"old","to_state":"new"}});
             WorkItemsRepository::put_work(tx, "retry", &item)?;
-            super::write(tx, "lead", Some(&request), "accept", WorkWrite::Accept(AcceptWork { task_id:"retry".into(), version:Some(2), reason:"verified".into(), override_reason:None, merged_result_id:Some("result-1".into()) }))?;
+            let accepted = super::write(tx, "lead", Some(&request), "accept", WorkWrite::Accept(AcceptWork { task_id:"retry".into(), version:Some(2), reason:"verified".into(), override_reason:None, merged_result_id:Some("result-1".into()) }))?;
+            assert_eq!(accepted.record["merge"], json!({"from_state":"old","to_state":"new"}));
+            let saved = WorkItemsRepository::work_record(tx, "retry")?.unwrap().value();
+            assert_eq!(saved["archiveIntent"]["publicResponse"]["merge"], accepted.record["merge"]);
             Ok(())
         }).await.expect("accepted pending archive");
         let input = AcceptWork {
@@ -4356,11 +4422,11 @@ mod actor_tests {
             .await
             .is_err()
         );
-        super::finish_vm_accept(&store, "vm-known", "merge", Some(true))
+        super::finish_vm_accept(&store, "vm-known", "merge", Some(true), None)
             .await
             .expect("late merge reply");
         for outcome in [Some(false), None] {
-            super::finish_vm_accept(&store, "vm-known", "merge", outcome)
+            super::finish_vm_accept(&store, "vm-known", "merge", outcome, None)
                 .await
                 .expect("stable merge proof");
         }
@@ -5540,6 +5606,37 @@ mod actor_tests {
         assert!(!super::vm_result_needs_merge("lead", &reviewer));
         let result = accept(&tx).expect("a reviewer result needs no merge");
         assert_eq!(result.record["status"], "accepted");
+        let intent = super::ArchiveIntent {
+            status: super::WorkEffectStatus::Pending,
+            task_id: "review-task".into(),
+            intent_id: "review-task:result-r".into(),
+            actor: "lead".into(),
+            actor_epoch: 2,
+            target: "worker".into(),
+            attempts: 0,
+            created: 10.0,
+            next_attempt_at: Some(10.0),
+            attempt_started_at: None,
+            updated: None,
+            last_outcome: None,
+            outcome: None,
+            public_request_id: None,
+            public_admission: None,
+            public_response: None,
+        };
+        assert_eq!(
+            super::accepted_archive_preflight(
+                &tx,
+                "review-task",
+                &result.record,
+                &intent,
+                "worker",
+                "lead",
+                2
+            )
+            .unwrap(),
+            None
+        );
         tx.rollback().expect("transaction rolls back");
 
         // An implementer's line still needs the merge before acceptance.

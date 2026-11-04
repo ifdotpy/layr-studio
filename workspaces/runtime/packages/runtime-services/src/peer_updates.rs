@@ -417,7 +417,9 @@ pub(crate) fn tool(program: &Path, args: &[&str], timeout: Duration) -> Result<S
     })
     .map_err(|error| {
         let text = match error {
-            ChildError::Failed(message) | ChildError::Launch(message) => message,
+            ChildError::Failed(message)
+            | ChildError::MergeConflict(message)
+            | ChildError::Launch(message) => message,
             ChildError::TimedOut => "the program did not finish in time".to_owned(),
         };
         let skip = text.chars().count().saturating_sub(ERROR_TAIL_CHARS);

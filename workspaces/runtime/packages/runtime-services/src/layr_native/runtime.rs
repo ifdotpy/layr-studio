@@ -13,6 +13,8 @@ use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, 
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeLayrError {
+    #[error("Native Layr merge conflict: {0}")]
+    Conflict(String),
     #[error("Native Layr: {0}")]
     Refused(String),
     #[error("Native Layr operation has an unknown outcome; inspect its receipt: {0}")]
@@ -38,6 +40,7 @@ enum ReceiptStatus {
     Pending,
     Completed,
     Failed,
+    Conflict,
     #[default]
     #[serde(other)]
     Unknown,
@@ -164,7 +167,7 @@ pub(super) fn run_with_binary(
             .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 cwd".into()))?,
     ]);
     argv.extend(args);
-    let output = bounded_child::run_without_git_environment(Request {
+    let request = Request {
         program: std::ffi::OsStr::new("/usr/bin/env"),
         git_directory: None,
         args: &argv,
@@ -177,8 +180,14 @@ pub(super) fn run_with_binary(
         } else {
             COMMAND_TIMEOUT
         },
-    })
+    };
+    let output = if args.first() == Some(&"merge") {
+        bounded_child::run_layr_merge(request)
+    } else {
+        bounded_child::run_without_git_environment(request)
+    }
     .map_err(|error| match error {
+        ChildError::MergeConflict(detail) => NativeLayrError::Conflict(detail),
         ChildError::Failed(detail) => NativeLayrError::Refused(format!(
             "{}: {detail}",
             args.first().copied().unwrap_or("layr")
@@ -247,6 +256,18 @@ pub(super) fn operation_with_preflight_in_store(
     preflight: impl FnOnce() -> Result<()>,
     effect: impl FnOnce() -> Result<Value>,
 ) -> Result<Value> {
+    operation_with_recovery(state_dir, root, id, intent, preflight, effect, None)
+}
+
+fn operation_with_recovery(
+    state_dir: &Path,
+    root: &Path,
+    id: &str,
+    intent: &Value,
+    preflight: impl FnOnce() -> Result<()>,
+    effect: impl FnOnce() -> Result<Value>,
+    recover: Option<&dyn Fn() -> Result<Option<Value>>>,
+) -> Result<Value> {
     let _lock = lock(state_dir, &format!("{}:{id}", root.display()))?;
     let folder = settings::metadata(state_dir, root).join("receipts");
     fs::create_dir_all(&folder)?;
@@ -285,7 +306,28 @@ pub(super) fn operation_with_preflight_in_store(
             {
                 retry_import = intent["project"].as_str();
             }
-            ReceiptStatus::Failed => {
+            ReceiptStatus::Failed | ReceiptStatus::Conflict => {
+                if let Some(recover) = recover
+                    && let Some(result) = recover()?
+                {
+                    crate::atomic_file::replace(
+                        &path,
+                        &OperationReceipt::completed(id, intent, &result).bytes()?,
+                        Some(0o600),
+                        true,
+                    )?;
+                    return Ok(result);
+                }
+                if matches!(receipt.status, ReceiptStatus::Conflict) {
+                    return Err(NativeLayrError::Conflict(
+                        receipt
+                            .error
+                            .value()
+                            .and_then(Value::as_str)
+                            .unwrap_or("merge conflict")
+                            .into(),
+                    ));
+                }
                 return Err(NativeLayrError::Refused(
                     receipt
                         .error
@@ -347,6 +389,11 @@ pub(super) fn operation_with_preflight_in_store(
     let receipt = match &outcome {
         Ok(result) => OperationReceipt::completed(id, intent, result),
         Err(NativeLayrError::Unknown(_)) => return outcome,
+        Err(NativeLayrError::Conflict(detail)) => {
+            let mut receipt = OperationReceipt::failed(id, intent, detail);
+            receipt.status = ReceiptStatus::Conflict;
+            receipt
+        }
         Err(error) => OperationReceipt::failed(id, intent, &error.to_string()),
     };
     crate::atomic_file::replace(&path, &receipt.bytes()?, Some(0o600), true)?;
@@ -486,7 +533,8 @@ fn create_worker_line(
                     NativeLayrError::Refused(detail) => NativeLayrError::Refused(format!(
                         "Native Layr base revision could not be resolved: {detail}"
                     )),
-                    other @ (NativeLayrError::Unknown(_)
+                    other @ (NativeLayrError::Conflict(_)
+                    | NativeLayrError::Unknown(_)
                     | NativeLayrError::Io(_)
                     | NativeLayrError::Store(_)
                     | NativeLayrError::Worker) => other,
@@ -619,7 +667,8 @@ pub(super) fn prepare_files_with_git_policy(
                         NativeLayrError::Refused(message) => {
                             NativeLayrError::Refused(format!("{message}{retained}"))
                         }
-                        other @ (NativeLayrError::Io(_)
+                        other @ (NativeLayrError::Conflict(_)
+                        | NativeLayrError::Io(_)
                         | NativeLayrError::Store(_)
                         | NativeLayrError::Worker) => {
                             NativeLayrError::Refused(format!("{other}{retained}"))
@@ -978,19 +1027,60 @@ pub fn merge(
     }
     let main = associated_cwd(state_dir, lead)?;
     associated_cwd(state_dir, worker)?;
-    operation_in_store(
+    let root = settings::record_store(state_dir, lead)?;
+    let project = project_id(lead)?;
+    operation_with_recovery(
         state_dir,
-        &settings::record_store(state_dir, lead)?,
+        &root,
         request_id,
         &json!({"lead":lead["id"],"worker":worker["id"],"revision":revision}),
+        || Ok(()),
         || {
+            let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
+            let from_state = run(state_dir, &main, &["rev-parse", "head"])?;
             run(
                 state_dir,
                 &main,
                 &["merge", text(worker, "layrLine")?, "--expect", revision],
             )?;
-            Ok(json!({"stateId":run(state_dir,&main,&["rev-parse","head"])?}))
+            Ok(
+                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                    from_state: Some(from_state),
+                    to_state: run(state_dir, &main, &["rev-parse", "head"])?
+                }}),
+            )
         },
+        Some(&|| {
+            let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
+            let status: Value =
+                serde_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
+                    .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
+            if !["staged", "unstaged", "untracked", "conflicts"]
+                .iter()
+                .all(|key| status[*key].as_array().is_some_and(Vec::is_empty))
+            {
+                return Ok(None);
+            }
+            let head = run(state_dir, &main, &["rev-parse", "head"])?;
+            if run(
+                state_dir,
+                &main,
+                &["merge-base", "--is-ancestor", revision, &head],
+            )
+            .is_err()
+            {
+                return Ok(None);
+            }
+            if run(state_dir, &main, &["rev-parse", "head"])? != head {
+                return Ok(None);
+            }
+            Ok(Some(
+                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                    from_state: None,
+                    to_state: head
+                }}),
+            ))
+        }),
     )
 }
 
@@ -1109,7 +1199,10 @@ esac
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
-        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        super::super::configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored(source.to_str().unwrap()),
+        );
         prepare_files(&state, &record.value()).expect("fixture import succeeds");
         assert!(
             fixture.path().join("removed").exists(),
@@ -1142,7 +1235,10 @@ esac
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
-        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        super::super::configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored(source.to_str().unwrap()),
+        );
         let error = prepare_files(&state, &record.value()).unwrap_err();
         let path = fs::read_to_string(fixture.path().join("staging-path")).expect("init reached");
         assert!(
@@ -1527,6 +1623,142 @@ esac
 mod worker_base_tests {
     use super::*;
     #[test]
+    fn concurrent_accepts_record_serial_main_states() {
+        use std::io::{Read, Write};
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let state = tempfile::tempdir().unwrap();
+        let root = super::super::store_path(state.path());
+        let project = "a".repeat(64);
+        let main = main_path(state.path(), &project);
+        std::fs::create_dir_all(&main).unwrap();
+        std::fs::write(root.join("head"), "initial").unwrap();
+        for name in ["first", "second", "release"] {
+            // rustix has no mknodat on macOS; the fixture runs mkfifo directly.
+            #[allow(clippy::disallowed_methods)]
+            let created = std::process::Command::new("mkfifo")
+                .arg(root.join(name))
+                .status()
+                .unwrap();
+            assert!(created.success());
+        }
+        let signal = |name: &str| {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(root.join(name))
+                .unwrap();
+            let mut reader = file.try_clone().unwrap();
+            let (sender, receiver) = mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                let mut byte = [0];
+                reader.read_exact(&mut byte).unwrap();
+                sender.send(()).unwrap();
+            });
+            (file, receiver, thread)
+        };
+        let (_first, first_rx, first_reader) = signal("first");
+        let (mut second, second_rx, second_reader) = signal("second");
+        let binary = state.path().join("fake-layr");
+        std::fs::write(
+            &binary,
+            r#"#!/bin/sh
+if [ "$3" = rev-parse ]; then
+  if [ ! -e "$LAYR_ROOT/released" ]; then
+    if mkdir "$LAYR_ROOT/entered" 2>/dev/null; then
+      printf x > "$LAYR_ROOT/first"
+      read unused < "$LAYR_ROOT/release"
+    else
+      printf x > "$LAYR_ROOT/second"
+    fi
+  fi
+  cat "$LAYR_ROOT/head"
+else
+  printf '%s' "$4" > "$LAYR_ROOT/head"
+fi
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let lead = json!({"id":"lead","isLead":true,"layrReady":true,"layrProjectId":project,"layrLine":"main","cwd":main});
+        let (sender, receiver) = mpsc::channel();
+        let spawn = |id: &'static str| {
+            let line = format!("agent-{}", studio_runtime_store::sha256_hex(id.as_bytes()));
+            let cwd = main.parent().unwrap().join(&line);
+            std::fs::create_dir_all(&cwd).unwrap();
+            let worker =
+                json!({"id":id,"layrReady":true,"layrProjectId":project,"layrLine":line,"cwd":cwd});
+            let (state, binary, lead, sender) = (
+                state.path().to_owned(),
+                binary.clone(),
+                lead.clone(),
+                sender.clone(),
+            );
+            std::thread::spawn(move || {
+                super::super::capability::TEST_BINARY
+                    .with(|slot| *slot.borrow_mut() = Some(binary));
+                sender
+                    .send(merge(&state, &lead, &worker, "reviewed", id))
+                    .unwrap();
+            })
+        };
+        let first = spawn("one");
+        first_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first merge reached rev-parse");
+        let lock_name = format!("{}:project:{project}", root.display());
+        let probe = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(
+                state
+                    .path()
+                    .join(NATIVE_LAYR_DIRECTORY)
+                    .join("locks")
+                    .join(studio_runtime_store::sha256_hex(lock_name.as_bytes())),
+            )
+            .unwrap();
+        let project_lock_held = probe.try_lock().is_err();
+        drop(probe);
+        let second_thread = spawn("two");
+        let second_started_early = second_rx.try_recv().is_ok();
+        std::fs::write(root.join("released"), "").unwrap();
+        writeln!(
+            OpenOptions::new()
+                .write(true)
+                .open(root.join("release"))
+                .unwrap(),
+            "go"
+        )
+        .unwrap();
+        if !second_started_early {
+            second.write_all(b"x").unwrap();
+        }
+        first.join().unwrap();
+        second_thread.join().unwrap();
+        first_reader.join().unwrap();
+        second_reader.join().unwrap();
+        let mut receipts = receiver
+            .try_iter()
+            .map(|r| r.unwrap()["merge"].clone())
+            .collect::<Vec<_>>();
+        assert!(
+            project_lock_held,
+            "first merge did not hold the project lock during rev-parse"
+        );
+        assert!(
+            !second_started_early,
+            "second merge reached rev-parse while the first was held"
+        );
+        assert_eq!(receipts.len(), 2);
+        receipts.sort_by_key(|r| r["from_state"].as_str().unwrap() != "initial");
+        assert_eq!(receipts[0]["from_state"], "initial");
+        assert_eq!(receipts[0]["to_state"], receipts[1]["from_state"]);
+    }
+    #[test]
     fn native_layr_worker_line_uses_requested_base() {
         let state = tempfile::tempdir().unwrap();
         let root = super::super::store_path(state.path());
@@ -1646,5 +1878,57 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
         assert!(commands.contains("line new default cached-main"));
         assert!(!commands.contains("line new missing"));
         assert!(!commands.contains("line new worker other"));
+    }
+}
+
+#[cfg(test)]
+mod merge_conflict_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn merge_failure_preserves_conflict_output() {
+        let state = tempfile::tempdir().unwrap();
+        let binary = state.path().join("layr");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nprintf 'CONFLICT (content): Merge conflict in file\\n'\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["merge", "worker"],
+            &binary,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("CONFLICT (content): Merge conflict in file"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn merge_conflict_after_long_output_keeps_its_type_and_message() {
+        let state = tempfile::tempdir().unwrap();
+        let binary = state.path().join("layr");
+        std::fs::write(&binary, "#!/bin/sh\ni=0; while [ $i -lt 100 ]; do echo 'Auto-merging a-very-long-file-name'; i=$((i+1)); done\necho 'CONFLICT (content): Merge conflict in important-file'\nexit 1\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["merge", "worker"],
+            &binary,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, NativeLayrError::Conflict(ref message) if message.contains("CONFLICT (content): Merge conflict in important-file")),
+            "{error}"
+        );
     }
 }

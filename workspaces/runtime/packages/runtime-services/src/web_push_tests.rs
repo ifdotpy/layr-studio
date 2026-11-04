@@ -7,6 +7,16 @@ use super::*;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Mutex;
 
+#[test]
+fn no_subscriptions_skip_remote_access_read() {
+    let subject = subscribed_subject(false, || panic!("remote access must not be read"));
+    assert!(subject.is_none());
+    assert_eq!(
+        subscribed_subject(true, || Some("https://example.test".into())).as_deref(),
+        Some("https://example.test")
+    );
+}
+
 fn base64url(data: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data)
 }

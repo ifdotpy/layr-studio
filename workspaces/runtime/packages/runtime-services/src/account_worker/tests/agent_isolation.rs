@@ -439,7 +439,17 @@ async fn poisoned_durable_effect_is_parked_once_and_does_not_end_the_worker() {
     worker_barrier(&worker).await;
     assert_running(&mut worker).await;
     let held = record_of(&state, &a).await;
-    assert_held(&held, &format!("account_worker/{a}"));
+    assert_eq!(held["status"], "failed", "{held}");
+    assert_eq!(
+        held["nativeFailureHold"]["terminalFault"],
+        "pending_receipt"
+    );
+    assert!(
+        held["error"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("account_worker/{a}"))
+    );
     worker.shutdown().await.unwrap();
 
     // A restarted worker has nothing to run again and stays up.
@@ -488,8 +498,84 @@ async fn journal_keeps_reading_behind_a_completion_no_request_can_bind() {
     tokio::time::timeout(PROGRESS_DEADLINE, progress)
         .await
         .expect("the journal keeps reading and settling provider frames");
-    assert_held(&record_of(&state, &a).await, "has no bound attempt");
+    let record = record_of(&state, &a).await;
+    assert_eq!(record["status"], "completed", "{record}");
+    assert_eq!(record["inFlight"], false, "{record}");
+    assert_ne!(record["nativeFailureHold"], true, "{record}");
+    assert_eq!(record["lastCompletedTurn"], "turn", "{record}");
     assert_running(&mut worker).await;
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn uncorrelated_completion_fails_without_holding_or_replaying_input() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    corrupt(&state, &agent,
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.turnId','$.turnId') WHERE id=?1").await;
+    corrupt(&state, &agent,
+        "UPDATE runtime_execution_attempts SET record=json_remove(record,'$.turnId') WHERE run IN (SELECT id FROM runtime_execution_runs WHERE agent=?1)").await;
+    corrupt(
+        &state,
+        &agent,
+        "UPDATE runtime_events SET status='dispatching',turn_id=NULL WHERE agent=?1",
+    )
+    .await;
+    let cursor = peer.frame(json!({"method":"turn/completed","params":{"threadId":"fake-thread-0","turn":{"id":"turn","status":"completed"}}})).await;
+    peer.acknowledged_at_least(cursor).await;
+    worker_barrier(&worker).await;
+    let record = record_of(&state, &agent).await;
+    assert_eq!(record["status"], "failed", "{record}");
+    assert_eq!(record["inFlight"], false, "{record}");
+    assert_ne!(record["nativeFailureHold"], true, "{record}");
+    assert_eq!(state.event_status("input").await, "uncertain");
+    assert!(
+        record["error"].to_string().contains("could not be matched"),
+        "{record}"
+    );
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "no provider input is repeated"
+    );
+    let id = agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            scheduler::lifecycle_transaction_with(&store, move |tx| {
+                let message_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+                crate::coordination::post_message_with_admission(
+                    tx,
+                    crate::coordination::PostManagedMessage {
+                        room: &id,
+                        id: &message_id,
+                        text: "next message",
+                        delivery: studio_runtime_schema::delivery::DeliveryMoment::CurrentTurn,
+                        assets: &[],
+                    },
+                    &crate::message_admission::PreparedAdmission::default(),
+                )
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+                Ok::<_, WorkerError>(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let next = state.start(&mut peer, &worker).await;
+    assert!(
+        next["params"]["input"].to_string().contains("next message"),
+        "{next}"
+    );
+    assert!(
+        !next["params"]["input"]
+            .to_string()
+            .contains("Review comment"),
+        "{next}"
+    );
     worker.shutdown().await.unwrap();
 }
 
@@ -678,6 +764,104 @@ async fn held_agent_keeps_its_unsent_input_and_a_message_starts_it_once() {
     assert!(peer.writes.try_recv().is_err(), "the input is sent once");
     assert_running(&mut worker).await;
     worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn invalid_attempt_identity_is_a_terminal_error_with_input_preserved() {
+    let state = State::new().await;
+    let id = state.agent.clone();
+    let claim_id = id.clone();
+    let epoch = state.epoch;
+    state
+        .bridge
+        .run(move |store| async move {
+            store::claim(Arc::clone(&store), "default", &claim_id, epoch)
+                .await?
+                .unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    corrupt(
+        &state,
+        &id,
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.id') WHERE id=?1",
+    )
+    .await;
+    let fault_id = id.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            scheduler::lifecycle_transaction_with(&store, move |tx| {
+                agent_fault::hold_agent(
+                    tx,
+                    None,
+                    &fault_id,
+                    agent_fault::FaultStage::TurnPreparation,
+                    "invalid attempt",
+                )?;
+                Ok::<_, WorkerError>(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let held = record_of(&state, &id).await;
+    assert_eq!(held["status"], "failed");
+    assert_eq!(
+        held["nativeFailureHold"]["terminalFault"],
+        "invalid_attempt"
+    );
+    assert!(!held["error"].as_str().unwrap().contains("retry"));
+    assert_eq!(state.event_status("input").await, "reserved");
+}
+
+#[tokio::test]
+async fn orphaned_reservation_is_a_terminal_error() {
+    for sql in [
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.submitted') WHERE id=?1",
+    ] {
+        let state = State::new().await;
+        let id = state.agent.clone();
+        let claim_id = id.clone();
+        let epoch = state.epoch;
+        state
+            .bridge
+            .run(move |store| async move {
+                store::claim(Arc::clone(&store), "default", &claim_id, epoch)
+                    .await?
+                    .unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        corrupt(&state, &id, sql).await;
+        let fault_id = id.clone();
+        state
+            .bridge
+            .run(move |store| async move {
+                scheduler::lifecycle_transaction_with(&store, move |tx| {
+                    agent_fault::hold_agent(
+                        tx,
+                        None,
+                        &fault_id,
+                        agent_fault::FaultStage::TurnPreparation,
+                        "orphaned reservation",
+                    )?;
+                    Ok::<_, WorkerError>(())
+                })
+                .await
+            })
+            .await
+            .unwrap();
+        let held = record_of(&state, &id).await;
+        assert_eq!(
+            held["nativeFailureHold"]["terminalFault"], "invalid_attempt",
+            "{held}"
+        );
+        assert_eq!(state.event_status("input").await, "reserved");
+    }
 }
 
 #[tokio::test]

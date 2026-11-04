@@ -338,8 +338,8 @@ export default function SharedChatCreate({
           ];
         }),
         ...data.threads.flatMap((thread) =>
-          typeof thread.cwd === "string" && thread.cwd
-            ? [[thread.cwd, thread.cwd] as const]
+          typeof thread.projectPath === "string" && thread.projectPath
+            ? [[thread.projectPath, thread.projectPath] as const]
             : [],
         ),
       ].map(([path, label]) => [path, { value: path, label }]),

@@ -660,7 +660,7 @@ pub(super) async fn provider_call(
         ReceiptOutcome::WorkerNotSent { .. }
         | ReceiptOutcome::ExpectedScopeMismatch
         | ReceiptOutcome::DeadlineExpired
-        | ReceiptOutcome::NotHandedOff
+        | ReceiptOutcome::NotHandedOff(_)
         | ReceiptOutcome::NoLiveAccountWorker => Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "Native provider request was not sent",

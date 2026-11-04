@@ -879,7 +879,7 @@ fn execute_once(
             }
             (value, staged.signals)
         }
-        Err(CallbackError::InvalidResultSchema(message)) => {
+        Err(CallbackError::InvalidResultSchema(message) | CallbackError::Refusal(message)) => {
             tx.execute_batch("ROLLBACK TO callback_service; RELEASE callback_service")?;
             (
                 studio_runtime_store::ToolResultRecord::text(false, message),

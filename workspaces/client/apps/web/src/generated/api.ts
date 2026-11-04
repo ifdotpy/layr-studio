@@ -5910,6 +5910,8 @@ export interface components {
        * @default null
        */
       hasApproval?: boolean | null | undefined;
+      /** @description Whether managed commands or monitors are active; no command output is included. */
+      hasBackgroundWork?: boolean | undefined;
       /**
        * Hasquestion
        * @default null
@@ -6237,6 +6239,7 @@ export interface components {
        * @default null
        */
       tail?: null | string | undefined;
+      taskDefaultGate?: components["schemas"]["TaskAcceptanceGate"] | undefined;
       teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /**
        * Threadid
@@ -6270,6 +6273,10 @@ export interface components {
       /** @default null */
       workerDefaults?:
         | components["schemas"]["WorkerDefaultsDto"]
+        | null
+        | undefined;
+      workspaceCleanupIntent?:
+        | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
         | undefined;
       /** Workspacemode */
@@ -6442,6 +6449,8 @@ export interface components {
       projectFolderRevision?: number | null | undefined;
       /** Projectid */
       projectId?: null | string | undefined;
+      /** Projectpath */
+      projectPath?: string | null | undefined;
       provider?: components["schemas"]["AgentProvider"] | null | undefined;
       readState?: components["schemas"]["ReadStateDto"] | null | undefined;
       /** Readstatesupported */
@@ -27647,7 +27656,8 @@ export interface components {
           files?: string[] | undefined;
           id?: string | null | undefined;
           result: components["schemas"]["JsonValue"];
-          revision: string;
+          /** @default  */
+          revision?: string | undefined;
           task_id: string;
           /**
            * Format: int64
