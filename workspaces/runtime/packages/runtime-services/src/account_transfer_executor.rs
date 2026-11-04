@@ -1136,6 +1136,7 @@ impl TransferExecutor for AccountTransferExecutor {
 
             let mut portable = None;
             let mut history_text = None;
+            let mut transcript_source = None;
             let mut copied_history_path = None;
             let mut claude_export = None;
             let source_thread = member.source_thread_id.value().map(String::as_str);
@@ -1380,6 +1381,7 @@ impl TransferExecutor for AccountTransferExecutor {
                     })
                     .await?;
                     history_text = Some(validated_history);
+                    transcript_source = Some(descriptor.clone());
                     portable = Some(descriptor.to_value().map_err(|_| {
                         TransferError::Refused("Invalid portable archive descriptor")
                     })?);
@@ -1441,7 +1443,28 @@ impl TransferExecutor for AccountTransferExecutor {
                 "default"
             });
             if let Some(text) = history_text {
-                params["developerInstructions"] = json!(text);
+                let mut instructions = text;
+                if let Some(source) = transcript_source {
+                    // The model reads the full history from a file in the destination folder.
+                    let project = PathBuf::from(
+                        params["cwd"]
+                            .as_str()
+                            .ok_or(TransferError::Refused("Destination folder is missing"))?,
+                    );
+                    let root = self.store.root().to_path_buf();
+                    let transcript = run_transfer_blocking(move || {
+                        portable_history::write_readable_transcript(&root, &source, &project)
+                            .map_err(|_| {
+                                TransferError::Refused("Source transcript file write failed")
+                            })
+                    })
+                    .await?;
+                    instructions.push_str(&format!(
+                        "\n\nThe complete earlier conversation is in this read-only file: {}. Read it when earlier context is needed.",
+                        transcript.display()
+                    ));
+                }
+                params["developerInstructions"] = json!(instructions);
             }
             if let Some(path) = copied_history_path {
                 params["path"] = json!(path);
