@@ -826,7 +826,7 @@ struct State {
 }
 
 #[tokio::test]
-async fn disk_failure_does_not_replay_input_when_space_returns() {
+async fn disk_wait_keeps_input_queued_and_starts_it_once_space_returns() {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     let mut state = State::new().await;
@@ -839,12 +839,13 @@ async fn disk_failure_does_not_replay_input_when_space_returns() {
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
     state.wake(&worker).await;
-    let failed = state
-        .wait_record(|record| record["status"] == "failed")
+    let waiting = state
+        .wait_record(|record| record["startWait"]["reason"] == "disk")
         .await;
-    assert_eq!(failed["inFlight"], false);
-    assert!(failed["error"].as_str().unwrap().contains("disk space"));
-    assert_eq!(state.event_status("input").await, "failed");
+    assert_eq!(waiting["status"], "queued");
+    assert_eq!(waiting["inFlight"], false);
+    assert!(waiting["error"].is_null(), "{waiting}");
+    assert_eq!(state.event_status("input").await, "pending");
     assert!(peer.writes.try_recv().is_err());
 
     free.store(
@@ -852,10 +853,15 @@ async fn disk_failure_does_not_replay_input_when_space_returns() {
         Ordering::SeqCst,
     );
     state.wake(&worker).await;
-    worker_barrier(&worker).await;
-    assert_eq!(state.record().await["status"], "failed");
-    assert_eq!(state.event_status("input").await, "failed");
-    assert!(peer.writes.try_recv().is_err());
+    state
+        .wait_record(|record| record["startWait"].is_null())
+        .await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(60), peer.writes.recv())
+            .await
+            .expect("the input starts once space returns")
+            .is_some()
+    );
     worker.shutdown().await.unwrap();
 }
 

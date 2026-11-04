@@ -472,6 +472,9 @@ const STORAGE_HOLD_PREFIX: &str = "Storage error: ";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnStorageAdmission {
     Ready,
+    /// The disk is full: the input stays queued and the agent shows a free-space wait.
+    Waiting,
+    /// The start already reserved for this attempt failed on a full disk.
     Failed,
     Stale,
 }
@@ -557,9 +560,9 @@ async fn hold_agent_turn_with_gate(
             if agent.auto_wake != Some(true) || agent.is_deleted() {
                 return Ok(TurnStorageAdmission::Stale);
             }
-            let legacy_disk_wait = matches!(agent.start_wait, Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: wait_epoch }) if wait_epoch == epoch);
-            if !blocked && !legacy_disk_wait {
-                if agent.error_text().is_some_and(|text| text.starts_with("Storage hold: ")) {
+            let disk_wait = matches!(agent.start_wait, Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: wait_epoch }) if wait_epoch == epoch);
+            if !blocked {
+                if disk_wait || agent.error_text().is_some_and(|text| text.starts_with("Storage hold: ")) {
                     agent.error = studio_runtime_schema::queue_command::Field::Missing;
                     agent.start_wait = None;
                     studio_runtime_store::AgentRepository::put(tx, &agent)?;
@@ -579,16 +582,22 @@ async fn hold_agent_turn_with_gate(
                 if agent.status != studio_runtime_store::AgentStatus::Failed {
                     return Ok(TurnStorageAdmission::Stale);
                 }
-            } else if agent.in_flight == Some(true) {
+                tx.execute("UPDATE runtime_events SET status='failed',error=?1 WHERE agent=?2 AND epoch=?3 AND status='pending'", rusqlite::params![reason, id.0, epoch])?;
+                agent.status = studio_runtime_store::AgentStatus::Failed;
+                agent.in_flight = Some(false);
+                agent.start_wait = None;
+                agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(reason));
+                studio_runtime_store::AgentRepository::put(tx, &agent)?;
+                return Ok(TurnStorageAdmission::Failed);
+            }
+            if agent.in_flight == Some(true) {
                 return Ok(TurnStorageAdmission::Stale);
             }
-            tx.execute("UPDATE runtime_events SET status='failed',error=?1 WHERE agent=?2 AND epoch=?3 AND status='pending'", rusqlite::params![reason, id.0, epoch])?;
-            agent.status = studio_runtime_store::AgentStatus::Failed;
-            agent.in_flight = Some(false);
-            agent.start_wait = None;
-            agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(reason));
+            // A queued input stays pending; the account worker rechecks the disk.
+            agent.start_wait = Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch });
+            agent.error = studio_runtime_schema::queue_command::Field::Missing;
             studio_runtime_store::AgentRepository::put(tx, &agent)?;
-            Ok::<_, studio_runtime_store::StoreError>(TurnStorageAdmission::Failed)
+            Ok::<_, studio_runtime_store::StoreError>(TurnStorageAdmission::Waiting)
         })
         .await
 }
@@ -775,7 +784,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_storage_failure_preserves_input_without_replaying_after_space_returns() {
+    async fn worker_storage_hold_waits_for_free_space_without_failing_the_input() {
+        use studio_runtime_schema::agent_progress::AgentStartWait;
         use studio_runtime_store::{
             AgentId, AgentRecord, AgentRepository, QueueEventId, QueueEventRepository,
             RuntimeStore, StoreError,
@@ -813,85 +823,74 @@ mod tests {
             .expect("queued identity")
             .expect("pending input");
         let free = Arc::new(AtomicU64::new(WORKER_STORAGE_MIN_FREE_BYTES - 1));
-        let sample = Arc::clone(&free);
-        let gate = DiskGate::with_sampler(
-            root.path().to_path_buf(),
-            Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
-        );
+        let full_gate = |free: &Arc<AtomicU64>| {
+            let sample = Arc::clone(free);
+            DiskGate::with_sampler(
+                root.path().to_path_buf(),
+                Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
+            )
+        };
         assert_eq!(
-            hold_agent_turn_with_gate(&store, "worker", 1, Some(&gate))
+            hold_agent_turn_with_gate(&store, "worker", 1, Some(&full_gate(&free)))
                 .await
-                .expect("failed"),
-            TurnStorageAdmission::Failed
+                .expect("waiting"),
+            TurnStorageAdmission::Waiting
         );
         let agent = store
-            .read_async("test/storage-hold", |tx| {
+            .read_async("test/storage-wait", |tx| {
                 AgentRepository::get(tx, &AgentId::from("worker"))
             })
             .await
             .expect("read")
             .expect("worker");
-        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Failed);
+        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Queued);
         assert_eq!(agent.epoch, 1);
         assert_ne!(agent.in_flight, Some(true));
-        assert!(agent.start_wait.is_none());
-        let chat_status = store
-            .read_async("test/storage-chat", |tx| {
-                tx.query_row("SELECT status FROM chats WHERE id='worker'", [], |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(StoreError::from)
+        assert_eq!(
+            agent.start_wait,
+            Some(AgentStartWait::Disk { epoch: 1 }),
+            "the chat shows the free-space wait"
+        );
+        assert!(agent.error_text().is_none(), "no failure is recorded");
+        let queued = store
+            .read_async("test/storage-queue-waiting", |tx| {
+                QueueEventRepository::get(tx, &QueueEventId::from("original-input"))
             })
             .await
-            .expect("chat state");
-        assert_eq!(chat_status, "failed");
-        assert!(
-            agent
-                .error_text()
-                .expect("visible reason")
-                .starts_with(STORAGE_HOLD_PREFIX)
-        );
-        let error = agent.error_text().unwrap();
-        assert!(
-            error.contains("free")
-                && error.contains("required")
-                && error.contains("Resend after freeing space")
-        );
-        // One sampler serves the state volume too, and a full state volume keeps
-        // its sample and latch until its recheck; a new gate sees the freed disk.
+            .expect("queued identity while waiting")
+            .expect("pending input");
+        assert_eq!(queued.status, "pending");
+        assert_eq!(queued.id, before.id);
+        assert_eq!(queued.text, before.text);
+
+        // Space returns: the hold admits the start and clears the wait.
         free.store(DISK_FULL_EXIT_FREE_BYTES, Ordering::SeqCst);
-        let sample = Arc::clone(&free);
-        let gate = DiskGate::with_sampler(
-            root.path().to_path_buf(),
-            Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
-        );
         assert_eq!(
-            hold_agent_turn_with_gate(&store, "worker", 1, Some(&gate))
+            hold_agent_turn_with_gate(&store, "worker", 1, Some(&full_gate(&free)))
                 .await
-                .expect("stale wake"),
-            TurnStorageAdmission::Stale
+                .expect("ready"),
+            TurnStorageAdmission::Ready
         );
         let agent = store
-            .read_async("test/storage-recovered", |tx| {
+            .read_async("test/storage-ready", |tx| {
                 AgentRepository::get(tx, &AgentId::from("worker"))
             })
             .await
             .expect("read")
             .expect("worker");
-        assert!(agent.error_text().is_some());
+        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Queued);
         assert!(agent.start_wait.is_none());
-        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Failed);
         let after = store
             .read_async("test/storage-queue-after", |tx| {
                 QueueEventRepository::get(tx, &QueueEventId::from("original-input"))
             })
             .await
-            .expect("queued identity after hold and recovery")
+            .expect("queued identity after recovery")
             .expect("pending input");
-        assert_eq!(after.id, before.id);
-        assert_eq!(after.text, before.text);
-        assert_eq!(after.status, "failed");
+        assert_eq!(after.status, "pending");
 
+        // A legacy disk wait on a still-full disk waits the same way.
+        free.store(WORKER_STORAGE_MIN_FREE_BYTES - 1, Ordering::SeqCst);
         let legacy_cwd = root.path().to_path_buf();
         store.transaction_with_error(move |tx| {
             let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"legacy","rootId":"legacy","epoch":1,"status":"queued","autoWake":true,"cwd":legacy_cwd,"startWait":{"reason":"disk","epoch":1}}))?;
@@ -900,10 +899,10 @@ mod tests {
             Ok::<_, StoreError>(())
         }).await.unwrap();
         assert_eq!(
-            hold_agent_turn_with_gate(&store, "legacy", 1, Some(&gate))
+            hold_agent_turn_with_gate(&store, "legacy", 1, Some(&full_gate(&free)))
                 .await
                 .unwrap(),
-            TurnStorageAdmission::Failed
+            TurnStorageAdmission::Waiting
         );
         let legacy = store
             .read_async("test/legacy-disk", |tx| {
@@ -912,7 +911,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(legacy.status, "failed");
+        assert_eq!(legacy.status, "pending");
         assert_eq!(legacy.text, "keep me");
     }
 

@@ -64,6 +64,8 @@ pub(super) enum Unclaimed {
     Deferred(i64, String, super::PreparationDeadline),
     /// A queued native review child: its first turn is `review/start`.
     NativeReview,
+    /// The disk is full: recheck free space after the recheck interval.
+    DiskWait(i64),
     /// Nothing to start now.
     Nothing,
 }
@@ -350,6 +352,9 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
         .await?
         {
             crate::disk_space::TurnStorageAdmission::Ready => {}
+            crate::disk_space::TurnStorageAdmission::Waiting => {
+                return Ok(Err(Unclaimed::DiskWait(epoch)));
+            }
             crate::disk_space::TurnStorageAdmission::Failed
             | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
         }
@@ -388,6 +393,9 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     .await?
     {
         crate::disk_space::TurnStorageAdmission::Ready => {}
+        crate::disk_space::TurnStorageAdmission::Waiting => {
+            return Ok(Err(Unclaimed::DiskWait(epoch)));
+        }
         crate::disk_space::TurnStorageAdmission::Failed
         | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
     }
