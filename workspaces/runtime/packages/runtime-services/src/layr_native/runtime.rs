@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, StoreError};
@@ -28,6 +29,74 @@ pub enum NativeLayrError {
 }
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
+type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
+
+/// Minimum interval between progress publications, in milliseconds.
+const PROGRESS_PUBLICATION_INTERVAL: Duration = Duration::from_millis(250);
+
+fn progress_channel() -> (
+    ProgressSink,
+    tokio::sync::watch::Receiver<Option<CopyProgress>>,
+) {
+    let (sender, receiver) = tokio::sync::watch::channel(None);
+    let sink = Arc::new(move |value| {
+        let _ = sender.send_replace(Some(value));
+    });
+    (sink, receiver)
+}
+
+async fn next_progress(
+    receiver: &mut tokio::sync::watch::Receiver<Option<CopyProgress>>,
+    last: Option<tokio::time::Instant>,
+) -> Option<CopyProgress> {
+    receiver.changed().await.ok()?;
+    if let Some(last) = last {
+        tokio::time::sleep_until(last + PROGRESS_PUBLICATION_INTERVAL).await;
+    }
+    receiver.borrow_and_update().clone()
+}
+
+fn parse_import_progress(line: &[u8]) -> Option<CopyProgress> {
+    let text = std::str::from_utf8(line).ok()?;
+    let (count, reference) = text
+        .strip_prefix("layr: imported ")?
+        .split_once(" commits of ")?;
+    if reference.is_empty() {
+        return None;
+    }
+    Some(CopyProgress {
+        phase: CopyPhase::ImportingCommits,
+        done: count.parse().ok()?,
+        total: None,
+        unit: CopyUnit::Commits,
+    })
+}
+
+fn progress_guard(current: &Value, expected: &Value) -> bool {
+    current["id"] == expected["id"]
+        && current["epoch"] == expected["epoch"]
+        && matches!(current["status"].as_str(), Some("queued" | "starting"))
+        && studio_runtime_store::workspace_ready::workspace_generation(current)
+            == studio_runtime_store::workspace_ready::workspace_generation(expected)
+}
+
+fn report(
+    sink: Option<&ProgressSink>,
+    phase: CopyPhase,
+    done: u64,
+    total: Option<u64>,
+    unit: CopyUnit,
+) {
+    if let Some(sink) = sink {
+        sink(CopyProgress {
+            phase,
+            done,
+            total,
+            unit,
+        });
+    }
+}
+
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 /// Deadline for the potentially long first import, in seconds (24 hours).
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -139,6 +208,17 @@ pub(super) fn run_with_binary(
     args: &[&str],
     binary: &Path,
 ) -> Result<String> {
+    run_with_binary_progress(state_dir, root, cwd, args, binary, None)
+}
+
+fn run_with_binary_progress(
+    state_dir: &Path,
+    root: &Path,
+    cwd: &Path,
+    args: &[&str],
+    binary: &Path,
+    progress: Option<ProgressSink>,
+) -> Result<String> {
     // APFS clonefile traversal refuses symlink ancestors, including macOS /var and /tmp.
     let state_dir = CanonicalPath::existing(state_dir).map(CanonicalPath::into_path_buf)?;
     let mut argv = vec![
@@ -183,6 +263,15 @@ pub(super) fn run_with_binary(
     };
     let output = if args.first() == Some(&"merge") {
         bounded_child::run_layr_merge(request)
+    } else if let Some(progress) = progress {
+        bounded_child::run_without_git_environment_streaming(
+            request,
+            Arc::new(move |line| {
+                if let Some(value) = parse_import_progress(line) {
+                    progress(value);
+                }
+            }),
+        )
     } else {
         bounded_child::run_without_git_environment(request)
     }
@@ -558,6 +647,15 @@ pub(super) fn prepare_files_with_git_policy(
     record: &Value,
     without_git: bool,
 ) -> Result<Value> {
+    prepare_files_reporting(state_dir, record, without_git, None)
+}
+
+fn prepare_files_reporting(
+    state_dir: &Path,
+    record: &Value,
+    without_git: bool,
+    progress: Option<&ProgressSink>,
+) -> Result<Value> {
     let root = settings::record_store(state_dir, record)?;
     let project = super::mapping::resolve(state_dir, &root, record)?;
     let main = main_path_in_store(&root, &project);
@@ -587,6 +685,7 @@ pub(super) fn prepare_files_with_git_policy(
                 "The Studio state directory must be outside the project".into(),
             ));
         }
+        report(progress, CopyPhase::Sizing, 0, None, CopyUnit::Files);
         let plan = super::import::Plan::new_with_git_policy(
             &source,
             false,
@@ -637,14 +736,38 @@ pub(super) fn prepare_files_with_git_policy(
             || plan.size.preflight(&state_dir.join(NATIVE_LAYR_DIRECTORY)),
             || {
                 let staging = tempfile::tempdir_in(state_dir.join(NATIVE_LAYR_DIRECTORY))?;
-                plan.stage(staging.path())?;
+                if progress.is_some() {
+                    plan.stage_with_progress(staging.path(), &|done, total| {
+                        report(
+                            progress,
+                            CopyPhase::Staging,
+                            done,
+                            Some(total),
+                            CopyUnit::Files,
+                        )
+                    })?;
+                } else {
+                    plan.stage(staging.path())?;
+                }
                 // Layr 0.2.2 clears the no-fetch environment. Its Git input must be private.
                 if staging.path().join(".git").is_dir() {
                     super::import::validate_private_git(staging.path())?;
                 }
                 // A client error does not prove the daemon stopped reading the source.
                 let staging = staging.keep();
-                run_in_store(
+                report(
+                    progress,
+                    CopyPhase::ImportingCommits,
+                    0,
+                    None,
+                    CopyUnit::Commits,
+                );
+                let binary = super::capability::resolve_binary().map_err(|capability| {
+                    NativeLayrError::Refused(
+                        capability.message().unwrap_or("Layr is unavailable").into(),
+                    )
+                })?;
+                run_with_binary_progress(
                     state_dir,
                     &root,
                     state_dir,
@@ -654,6 +777,8 @@ pub(super) fn prepare_files_with_git_policy(
                         "--from",
                         staging.to_str().unwrap_or_default(),
                     ],
+                    &binary,
+                    progress.cloned(),
                 )
                 .map_err(|error| {
                     let retained = format!(
@@ -678,9 +803,17 @@ pub(super) fn prepare_files_with_git_policy(
                 run(state_dir, &main, &["git", "remote", "remove", "local"])?;
                 fs::remove_dir_all(staging)?;
                 run(state_dir, &main, &["protect", "main", "--direct"])?;
+                report(
+                    progress,
+                    CopyPhase::RestoringAttributes,
+                    0,
+                    None,
+                    CopyUnit::Files,
+                );
                 if plan.restore_directory_attributes(&main)? {
                     save_imported_tree(state_dir, &main, "Preserve imported directory attributes")?;
                 }
+                report(progress, CopyPhase::WarmingCaches, 0, None, CopyUnit::Files);
                 plan.warm_caches(state_dir, &main, Path::new(""))?;
                 let receipt = json!({"projectId":project,"source":source,"mainPath":main,"withoutGit":without_git});
                 crate::atomic_file::replace(
@@ -760,6 +893,43 @@ pub(super) fn prepare_files_with_git_policy(
     Ok(result)
 }
 
+async fn publish_progress(
+    store: &RuntimeStore,
+    expected: &Value,
+    progress: Option<CopyProgress>,
+) -> Result<()> {
+    let expected = expected.clone();
+    store
+        .transaction_with_error(move |tx| {
+            let id = text(&expected, "id")?;
+            let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(id))? else {
+                return Ok(());
+            };
+            let current = agent.value();
+            if !progress_guard(&current, &expected) {
+                return Ok(());
+            }
+            if let Some(progress) = progress {
+                let Some(epoch) = expected["epoch"].as_i64() else {
+                    return Ok(());
+                };
+                agent.start_wait = Some(
+                    studio_runtime_schema::agent_progress::AgentStartWait::WorkspaceCopy {
+                        epoch,
+                        progress,
+                    },
+                );
+            } else if matches!(agent.start_wait.as_ref(), Some(studio_runtime_schema::agent_progress::AgentStartWait::WorkspaceCopy { epoch, .. }) if Some(*epoch) == expected["epoch"].as_i64()) {
+                agent.start_wait = None;
+            } else {
+                return Ok(());
+            }
+            AgentRepository::put(tx, &agent)?;
+            Ok(())
+        })
+        .await
+}
+
 pub async fn prepare(store: Arc<RuntimeStore>, mut record: Value) -> Result<Value> {
     if record["deletedAt"].is_string()
         || record["deletedAt"].is_number()
@@ -782,12 +952,23 @@ pub async fn prepare(store: Arc<RuntimeStore>, mut record: Value) -> Result<Valu
     }
     let state_dir = store.root().to_owned();
     let expected = record.clone();
-    let prepared = studio_runtime_process::blocking_pool::spawn_blocking(
+    let (progress, mut receiver) = progress_channel();
+    let mut last_published = None;
+    let mut task = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/layr-native/prepare",
-        move || prepare_files(&state_dir, &expected),
-    )
-    .await
-    .map_err(|_| NativeLayrError::Worker)??;
+        move || prepare_files_reporting(&state_dir, &expected, false, Some(&progress)),
+    );
+    let prepared = loop {
+        tokio::select! {
+            result = &mut task => break result.map_err(|_| NativeLayrError::Worker).and_then(|value| value),
+            Some(progress) = next_progress(&mut receiver, last_published) => {
+                drop(publish_progress(&store, &record, Some(progress)).await);
+                last_published = Some(tokio::time::Instant::now());
+            }
+        }
+    };
+    drop(publish_progress(&store, &record, None).await);
+    let prepared = prepared?;
     store
         .transaction_with_error(move |tx| {
             let id = text(&record, "id")?;
@@ -1930,5 +2111,131 @@ mod merge_conflict_tests {
             matches!(error, NativeLayrError::Conflict(ref message) if message.contains("CONFLICT (content): Merge conflict in important-file")),
             "{error}"
         );
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    #[tokio::test(start_paused = true)]
+    async fn delayed_consumer_publishes_only_the_latest_count_at_the_interval() {
+        use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+        let (send, mut receive) = super::progress_channel();
+        let progress = |done| CopyProgress {
+            phase: CopyPhase::Staging,
+            done,
+            total: Some(10),
+            unit: CopyUnit::Files,
+        };
+        send(progress(1));
+        let first = super::next_progress(&mut receive, None).await.unwrap();
+        assert_eq!(first.done, 1);
+        let last = tokio::time::Instant::now();
+        send(progress(2));
+        let pending = tokio::spawn(async move {
+            super::next_progress(&mut receive, Some(last))
+                .await
+                .unwrap()
+        });
+        tokio::task::yield_now().await;
+        send(progress(3));
+        tokio::time::advance(
+            super::PROGRESS_PUBLICATION_INTERVAL - std::time::Duration::from_millis(1),
+        )
+        .await;
+        assert!(!pending.is_finished());
+        send(progress(4));
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        assert_eq!(pending.await.unwrap().done, 4);
+    }
+    #[tokio::test]
+    async fn progress_is_published_to_the_agent_and_cleared() {
+        use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, StoreError};
+        let (_dir, store) = crate::entity_publication::test_support::store().await;
+        let expected = serde_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"a","rootId":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
+        let inserted = expected.clone();
+        store
+            .transaction_with(move |tx| -> Result<(), StoreError> {
+                AgentRepository::put(tx, &AgentRecord::from_value(inserted)?)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let progress = CopyProgress {
+            phase: CopyPhase::Staging,
+            done: 2,
+            total: Some(4),
+            unit: CopyUnit::Files,
+        };
+        super::publish_progress(&store, &expected, Some(progress))
+            .await
+            .unwrap();
+        let (_, summary) =
+            crate::entity_publication::test_support::client_entity(&store, "agentSummary", "a")
+                .unwrap();
+        assert_eq!(summary["startWait"]["progress"]["done"], 2);
+        store
+            .transaction_with(|tx| -> Result<(), StoreError> {
+                let record = AgentRepository::get(tx, &AgentId::from("a"))?
+                    .unwrap()
+                    .value();
+                assert_eq!(
+                    crate::sync_views::agent_start_wait(&record)
+                        .unwrap()
+                        .unwrap()
+                        .epoch(),
+                    2
+                );
+                assert_eq!(record["startWait"]["progress"]["done"], 2);
+                let summary =
+                    crate::sync_views::project_persisted_record("agentSummary", &record).unwrap();
+                assert_eq!(summary["startWait"]["progress"]["done"], 2);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        super::publish_progress(&store, &expected, None)
+            .await
+            .unwrap();
+        store
+            .transaction_with(|tx| -> Result<(), StoreError> {
+                let record = AgentRepository::get(tx, &AgentId::from("a"))?
+                    .unwrap()
+                    .value();
+                assert!(record.get("startWait").is_none());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    #[test]
+    fn progress_guard_rejects_a_changed_workspace_or_inactive_agent() {
+        let expected = serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
+        assert!(super::progress_guard(&expected, &expected));
+        for changed in [
+            serde_json::json!({"id":"a","epoch":3,"status":"starting","cwd":"/one","autoWake":true}),
+            serde_json::json!({"id":"a","epoch":2,"status":"running","cwd":"/one","autoWake":true}),
+            serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/other","autoWake":true}),
+        ] {
+            assert!(!super::progress_guard(&changed, &expected));
+        }
+    }
+    #[test]
+    fn vendored_git_import_progress_is_typed_at_the_boundary() {
+        let source = include_str!("../../../../apps/layr/src/gitbridge.rs");
+        assert!(source.contains("layr: imported {imported} commits of {refname}"));
+        let progress =
+            super::parse_import_progress(b"layr: imported 50 commits of local/main").unwrap();
+        assert_eq!(
+            progress.phase,
+            studio_runtime_schema::layr_progress::CopyPhase::ImportingCommits
+        );
+        assert_eq!(progress.done, 50);
+        assert_eq!(progress.total, None);
+        assert_eq!(
+            progress.unit,
+            studio_runtime_schema::layr_progress::CopyUnit::Commits
+        );
+        assert!(super::parse_import_progress(b"unrelated diagnostic").is_none());
     }
 }

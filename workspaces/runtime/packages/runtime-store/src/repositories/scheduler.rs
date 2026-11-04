@@ -536,6 +536,41 @@ mod tests {
     }
 
     #[test]
+    fn restart_requeue_clears_persisted_workspace_copy_wait() {
+        let mut connection = database();
+        let transaction = connection.transaction().unwrap();
+        SchedulerRepository::claim(&transaction, "agent", 4, "attempt", 10.0, 2).unwrap();
+        transaction.commit().unwrap();
+        let mut agent = AgentRepository::get(&connection, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        agent.start_wait = Some(
+            studio_runtime_schema::agent_progress::AgentStartWait::WorkspaceCopy {
+                epoch: 4,
+                progress: studio_runtime_schema::layr_progress::CopyProgress {
+                    phase: studio_runtime_schema::layr_progress::CopyPhase::Staging,
+                    done: 2,
+                    total: Some(4),
+                    unit: studio_runtime_schema::layr_progress::CopyUnit::Files,
+                },
+            },
+        );
+        AgentRepository::put(&connection, &agent).unwrap();
+        let transaction = connection.transaction().unwrap();
+        assert_eq!(
+            SchedulerRepository::recover_unsubmitted(&transaction).unwrap(),
+            2
+        );
+        transaction.commit().unwrap();
+        let recovered = AgentRepository::get(&connection, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.epoch, 4);
+        assert_eq!(recovered.status, AgentStatus::Queued);
+        assert!(recovered.start_wait.is_none());
+    }
+
+    #[test]
     fn stop_revocation_cancels_only_the_exact_unsubmitted_claim() {
         let mut connection = database();
         let transaction = connection.transaction().expect("claim transaction begins");
