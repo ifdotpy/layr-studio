@@ -613,11 +613,18 @@ fn close_turn_approvals(connection: &Connection, turn: &str) -> StoreResult<()> 
     if !crate::schema::table_exists(connection, approvals::TABLE)? {
         return Ok(());
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
-    approvals::turn_ended(connection, &ApprovalTurnId(turn.to_owned()), Timestamp(now))?;
+    approvals::turn_ended(
+        connection,
+        &ApprovalTurnId(turn.to_owned()),
+        Timestamp(unix_now()),
+    )?;
     Ok(())
+}
+
+fn unix_now() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64())
 }
 
 type RawTurn = (
@@ -834,11 +841,20 @@ pub fn turn_completed(
 
 /// A lost provider connection: every ready session of the chat is `Lost`.
 pub fn mark_sessions_lost(connection: &Connection, chat: &str) -> StoreResult<usize> {
-    Ok(connection
+    let lost = connection
         .prepare_cached(
             "UPDATE sessions SET state='lost' WHERE chat=?1 AND state IN ('starting','ready')",
         )?
-        .execute([chat])?)
+        .execute([chat])?;
+    // The provider that asked the open approvals of the chat is gone with its session.
+    if lost > 0 && crate::schema::table_exists(connection, approvals::TABLE)? {
+        approvals::session_lost(
+            connection,
+            &studio_runtime_schema::approvals::AgentId(chat.to_owned()),
+            Timestamp(unix_now()),
+        )?;
+    }
+    Ok(lost)
 }
 
 /// Tables of this format as the agents repository's schema check lists them.
@@ -1399,6 +1415,51 @@ mod tests {
             state("pending"),
             ApprovalState::Closed {
                 reason: CloseReason::TurnEnded,
+                ..
+            }
+        ));
+        assert!(matches!(state("answering"), ApprovalState::Unknown { .. }));
+    }
+
+    #[test]
+    fn a_lost_session_closes_the_open_approvals_of_its_chat() {
+        use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, CloseReason};
+        let db = crate::fresh_state::test_canvas();
+        turn_with_open_approvals(&db);
+        assert_eq!(mark_sessions_lost(&db, "c").unwrap(), 1);
+        let state = |id: &str| {
+            approvals::get(&db, &ApprovalId(id.into()))
+                .unwrap()
+                .unwrap()
+                .state
+        };
+        assert!(matches!(
+            state("pending"),
+            ApprovalState::Closed {
+                reason: CloseReason::SessionLost,
+                ..
+            }
+        ));
+        assert!(matches!(state("answering"), ApprovalState::Unknown { .. }));
+    }
+
+    #[test]
+    fn deleting_a_chat_closes_its_open_approvals() {
+        use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, CloseReason};
+        let db = crate::fresh_state::test_canvas();
+        turn_with_open_approvals(&db);
+        db.execute("DELETE FROM runtime_agents WHERE id='c'", [])
+            .unwrap();
+        let state = |id: &str| {
+            approvals::get(&db, &ApprovalId(id.into()))
+                .unwrap()
+                .unwrap()
+                .state
+        };
+        assert!(matches!(
+            state("pending"),
+            ApprovalState::Closed {
+                reason: CloseReason::ChatDeleted,
                 ..
             }
         ));
