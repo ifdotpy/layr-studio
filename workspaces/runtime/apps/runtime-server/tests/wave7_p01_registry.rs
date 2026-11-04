@@ -797,8 +797,9 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
         .store
         .transaction(move |db| {
             for (table, rows) in snapshot.as_object().unwrap() {
-                // Historical ingress receipts are already retired in a current store.
-                if table == "operation_receipts" {
+                // Historical ingress receipts and completed turns are retired in a current
+                // store (completed turns live in `turns`).
+                if table == "operation_receipts" || table == "completed_turns" {
                     continue;
                 }
                 let table_name = match table.as_str() {

@@ -1391,13 +1391,6 @@
         "type": "table"
       },
       {
-        "create_order": 63,
-        "name": "runtime_completed_turns",
-        "sql": "CREATE TABLE runtime_completed_turns (id TEXT PRIMARY KEY)",
-        "table": "runtime_completed_turns",
-        "type": "table"
-      },
-      {
         "create_order": 48,
         "name": "runtime_context_manifests",
         "sql": "CREATE TABLE runtime_context_manifests (\n                  agent TEXT NOT NULL, thread_id TEXT NOT NULL, compactions INTEGER NOT NULL,\n                  sequence INTEGER NOT NULL, event_id TEXT NOT NULL, record TEXT NOT NULL,\n                  PRIMARY KEY(agent,thread_id,compactions))",
@@ -2102,27 +2095,6 @@
         "name": "runtime_chat_message_revision",
         "sql": "CREATE TRIGGER runtime_chat_message_revision AFTER UPDATE OF room,sender,text,created,deliveries ON runtime_chat_messages WHEN OLD.room IS NOT NEW.room OR OLD.sender IS NOT NEW.sender OR OLD.text IS NOT NEW.text OR OLD.created IS NOT NEW.created OR OLD.deliveries IS NOT NEW.deliveries BEGIN UPDATE runtime_chat_messages SET rev=OLD.rev+1 WHERE seq=NEW.seq; END",
         "table": "runtime_chat_messages",
-        "type": "trigger"
-      },
-      {
-        "create_order": 295,
-        "name": "runtime_completed_turns_read_only_delete",
-        "sql": "CREATE TRIGGER runtime_completed_turns_read_only_delete BEFORE DELETE ON runtime_completed_turns\n             BEGIN SELECT RAISE(ABORT,'runtime_completed_turns is read only; use turns'); END",
-        "table": "runtime_completed_turns",
-        "type": "trigger"
-      },
-      {
-        "create_order": 293,
-        "name": "runtime_completed_turns_read_only_insert",
-        "sql": "CREATE TRIGGER runtime_completed_turns_read_only_insert BEFORE INSERT ON runtime_completed_turns\n             BEGIN SELECT RAISE(ABORT,'runtime_completed_turns is read only; use turns'); END",
-        "table": "runtime_completed_turns",
-        "type": "trigger"
-      },
-      {
-        "create_order": 294,
-        "name": "runtime_completed_turns_read_only_update",
-        "sql": "CREATE TRIGGER runtime_completed_turns_read_only_update BEFORE UPDATE ON runtime_completed_turns\n             BEGIN SELECT RAISE(ABORT,'runtime_completed_turns is read only; use turns'); END",
-        "table": "runtime_completed_turns",
         "type": "trigger"
       },
       {
