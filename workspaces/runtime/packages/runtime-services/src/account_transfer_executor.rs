@@ -1216,21 +1216,24 @@ impl TransferExecutor for AccountTransferExecutor {
                         },
                     )
                     .await?;
-                    if !source_page_empty(&background, "Invalid source background command page")? {
-                        return Err(TransferError::Refused(
-                            "Source native thread has background commands; saved input remains queued",
-                        ));
+                    // A running background command stays with the source: the thread
+                    // stays attached so the command finishes there, and the chat moves on.
+                    if source_page_empty(&background, "Invalid source background command page")? {
+                        source_transfer_call(
+                            &source_context,
+                            SourceTransferCall {
+                                thread: thread_id,
+                                suffix: "unsubscribe",
+                                method: Method::ThreadUnsubscribe,
+                                params: json!({"threadId":thread_id}),
+                            },
+                        )
+                        .await?;
+                    } else {
+                        eprintln!(
+                            "account transfer of thread {thread_id} leaves a background command running on the source"
+                        );
                     }
-                    source_transfer_call(
-                        &source_context,
-                        SourceTransferCall {
-                            thread: thread_id,
-                            suffix: "unsubscribe",
-                            method: Method::ThreadUnsubscribe,
-                            params: json!({"threadId":thread_id}),
-                        },
-                    )
-                    .await?;
                 }
                 let queue = source_transfer_call(
                     &source_context,
@@ -2208,6 +2211,8 @@ mod retained_executor_tests {
         transfer_id: String,
         requests: Mutex<Vec<String>>,
         queue_has_input: bool,
+        /// The source thread runs a background command during the move.
+        background: bool,
         native_path: Option<String>,
         /// An account with no live session until `ensure_session` starts it.
         dormant: Mutex<Option<String>>,
@@ -2524,7 +2529,9 @@ mod retained_executor_tests {
                     Method::ThreadQueueList => {
                         json!({"data":if self.queue_has_input {json!([{"id":"queued-input"}])} else {json!([])},"nextCursor":null})
                     }
-                    Method::ThreadBackgroundTerminalsList => json!({"data":[],"nextCursor":null}),
+                    Method::ThreadBackgroundTerminalsList => {
+                        json!({"data":if self.background {json!([{"id":"bg-1","status":"running"}])} else {json!([])},"nextCursor":null})
+                    }
                     Method::ThreadUnsubscribe => json!({}),
                     Method::Initialize
                     | Method::Initialized
@@ -2826,6 +2833,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: true,
+            background: false,
             native_path: None,
             dormant: Mutex::new(Some("source".into())),
         });
@@ -2956,6 +2964,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: true,
+            background: false,
             native_path: None,
             dormant: Mutex::new(None),
         });
@@ -3038,11 +3047,20 @@ mod retained_executor_tests {
     }
 
     #[tokio::test]
+    async fn a_background_command_does_not_block_a_transfer() {
+        assert_history_transfer(false, true).await;
+    }
+
+    #[tokio::test]
     async fn cold_catalog_transfer_prepares_history_without_http_model_read() {
         Box::pin(assert_history_transfer_without_duplicate_fork(true)).await;
     }
 
     async fn assert_history_transfer_without_duplicate_fork(cold_catalog: bool) {
+        assert_history_transfer(cold_catalog, false).await;
+    }
+
+    async fn assert_history_transfer(cold_catalog: bool, background: bool) {
         let root = tempfile::tempdir().expect("test fixture operation succeeds");
         let fixture = root.path().join("fixture");
         let state_dir = root.path().join("state");
@@ -3113,6 +3131,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: false,
+            background,
             native_path: Some(native_path.to_string_lossy().into_owned()),
             dormant: Mutex::new(None),
         });
@@ -3267,6 +3286,14 @@ mod retained_executor_tests {
         )
         .await
         .expect("worker before-start prepares the transfer");
+        let detached = session
+            .requests
+            .lock()
+            .expect("the provider request log is available")
+            .iter()
+            .any(|method| method == "thread/unsubscribe");
+        // A background command keeps running on the source: its thread stays attached.
+        assert_eq!(detached, !background);
         if cold_catalog {
             assert_eq!(
                 session
@@ -3363,6 +3390,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: false,
+            background: false,
             native_path: Some(native_path.to_string_lossy().into_owned()),
             dormant: Mutex::new(None),
         });

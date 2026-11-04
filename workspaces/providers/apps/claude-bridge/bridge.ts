@@ -250,7 +250,9 @@ import {
   externalRefusal,
   serverAlias,
   canonicalJson,
+  movableExternalCatalog,
 } from "./move-external.ts";
+import type { ExternalServer } from "./move-external.ts";
 
 const externalConfigs = new Map<
   string,
@@ -1044,6 +1046,14 @@ async function currentExternalProof(
     ? expected.map((server) => server.alias)
     : externalAliases(proof);
   if (!aliases.length) return { catalogs: [], configs: {}, transports: {} };
+  return movableExternalCatalog(aliases, () => provenExternalCatalog(s, expected, aliases, proof));
+}
+async function provenExternalCatalog(
+  s: Pick<Session, "cwd" | "moveProof"> & Partial<Pick<Session, "id">>,
+  expected: ExternalServer[] | undefined,
+  aliases: string[],
+  proof: Partial<Pick<BridgeMoveProof, "externalTransports">>,
+) {
   if (expected) {
     try {
       return await targetExternalCatalog(s.cwd, expected, {
