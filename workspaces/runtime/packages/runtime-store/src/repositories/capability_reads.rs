@@ -1,5 +1,6 @@
 //! Narrow read projections used by the capabilities endpoint.
 
+use crate::CachedSql;
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{Connection, StoreResult};
 
@@ -22,7 +23,7 @@ pub struct CapabilityReadsRepository;
 impl CapabilityReadsRepository {
     /// Return only the task names/types observed for one agent. History records are never decoded.
     pub fn observed_names(connection: &Connection, agent_id: &str) -> StoreResult<Vec<String>> {
-        let exists: bool = connection.query_row(
+        let exists: bool = connection.query_row_cached(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_tasks')",
             [],
             |row| row.get(0),
@@ -115,6 +116,31 @@ mod tests {
             CapabilityReadsRepository::observed_names(&connection, "agent")
                 .expect("missing table is empty"),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn task_table_existence_tracks_schema_changes() {
+        let connection = Connection::open_in_memory().expect("in-memory database opens");
+        for i in 0..100 {
+            assert!(
+                CapabilityReadsRepository::observed_names(&connection, &format!("agent-{i}"))
+                    .expect("missing table is empty")
+                    .is_empty()
+            );
+        }
+        connection.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_task_status ON runtime_tasks(json_extract(record,'$.status'),json_extract(record,'$.created')); CREATE INDEX runtime_task_history ON runtime_tasks(json_extract(record,'$.created') DESC,json_extract(record,'$.agent')) WHERE json_extract(record,'$.status')!='running'; INSERT INTO runtime_tasks VALUES('t','{\"agent\":\"agent-0\",\"status\":\"running\",\"name\":\"task\"}');").unwrap();
+        assert_eq!(
+            CapabilityReadsRepository::observed_names(&connection, "agent-0").unwrap(),
+            ["task"]
+        );
+        connection
+            .execute_batch("DROP TABLE runtime_tasks")
+            .unwrap();
+        assert!(
+            CapabilityReadsRepository::observed_names(&connection, "agent-0")
+                .unwrap()
+                .is_empty()
         );
     }
 }

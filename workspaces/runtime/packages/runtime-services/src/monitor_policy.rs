@@ -254,6 +254,13 @@ impl MonitorSnapshot {
         typed: &studio_runtime_store::MonitorRecord,
         actor: Value,
     ) -> Result<Self, MonitorError> {
+        Self::checked_owned(typed.clone(), actor)
+    }
+
+    pub(crate) fn checked_owned(
+        typed: studio_runtime_store::MonitorRecord,
+        actor: Value,
+    ) -> Result<Self, MonitorError> {
         let id = typed.id.clone();
         let invalid = |location: &str| MonitorError::InvalidStored {
             id: id.clone(),
@@ -264,7 +271,7 @@ impl MonitorSnapshot {
         {
             return Err(invalid("agent"));
         }
-        crate::monitor_matches::validate(typed).map_err(invalid)?;
+        crate::monitor_matches::validate(&typed).map_err(invalid)?;
         let actor: Actor = serde_json::from_value(actor).map_err(|_| invalid("agent"))?;
         if typed.agent != actor.id {
             return Err(invalid("agent/id"));
@@ -276,7 +283,7 @@ impl MonitorSnapshot {
             return Err(invalid("operation"));
         }
         Ok(Self {
-            record: typed.clone(),
+            record: typed,
             actor,
         })
     }
@@ -1277,4 +1284,37 @@ pub(crate) fn complete_test_monitor(record: Value) -> Value {
     };
     complete.as_object_mut().unwrap().extend(fields);
     complete
+}
+
+#[cfg(test)]
+mod ownership_bench {
+    #[test]
+    #[ignore = "manual Callgrind fixture"]
+    fn snapshot_callgrind_50() {
+        let actor = studio_runtime_store::AgentRecord::from_value(serde_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"running","autoWake":true})).expect("agent").value();
+        let excerpts = (0..16)
+            .map(|i| {
+                (
+                    format!("pattern-{i}"),
+                    serde_json::json!({"excerpt":"x".repeat(100),"logOffset":0}),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let fixture = super::complete_test_monitor(
+            serde_json::json!({"bytes":1,"outputMatchExcerpts":excerpts}),
+        );
+        let borrowed = std::env::var_os("STUDIO_BENCH_BORROWED_MONITOR").is_some();
+        for _ in 0..100 {
+            for _ in 0..50 {
+                let record: studio_runtime_store::MonitorRecord =
+                    serde_path_to_error::deserialize(fixture.clone()).expect("record");
+                let snapshot = if borrowed {
+                    super::MonitorSnapshot::checked_stored(&record, actor.clone())
+                } else {
+                    super::MonitorSnapshot::checked_owned(record, actor.clone())
+                };
+                std::hint::black_box(snapshot.expect("snapshot"));
+            }
+        }
+    }
 }
