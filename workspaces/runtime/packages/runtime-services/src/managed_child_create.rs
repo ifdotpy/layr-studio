@@ -267,8 +267,8 @@ pub(crate) struct ResolvedWorkerSettings {
 }
 
 pub(crate) struct WorkerSettingsRequest<'a> {
-    pub parent: &'a Value,
-    pub root: &'a Value,
+    pub parent: &'a AgentRecord,
+    pub root: &'a AgentRecord,
     pub spec: &'a studio_runtime_schema::creation_intent::CreationIntent,
     pub profile: Option<&'a studio_runtime_store::ProfileRecord>,
     pub role: &'a str,
@@ -278,23 +278,17 @@ pub(crate) struct WorkerSettingsRequest<'a> {
 
 async fn account_scope(
     store: &RuntimeStore,
-    root: &Value,
+    root: &AgentRecord,
 ) -> Result<(Vec<String>, Option<Vec<String>>, Option<Vec<String>>), StoreError> {
     let excluded = root
-        .get("excludedAccountKeys")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
+        .excluded_account_keys
+        .value()
+        .cloned()
         .unwrap_or_default();
     let project = match root
-        .get("projectId")
-        .and_then(Value::as_str)
-        .zip(root.get("projectServerId").and_then(Value::as_str))
+        .project_id
+        .as_deref()
+        .zip(root.project_server_id.as_deref())
     {
         Some((id, home)) => {
             let id = id.to_owned();
@@ -339,7 +333,50 @@ pub(crate) async fn resolve_worker_settings(
         requested_account_key,
         account_load,
     } = request;
-    let defaults = &root["workerDefaults"];
+    let defaults = root.worker_defaults.value();
+    let known = match defaults {
+        Some(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => Some(defaults),
+        _ => None,
+    };
+    let unreadable = match defaults {
+        Some(studio_runtime_store::StoredWorkerDefaults::Unreadable(value)) => Some(value),
+        _ => None,
+    };
+    let default_model = known
+        .and_then(|value| value.model.value().map(String::as_str))
+        .or_else(|| {
+            unreadable
+                .and_then(|value| value.get("model"))
+                .and_then(Value::as_str)
+        });
+    let default_effort = known
+        .and_then(|value| value.effort.value().map(String::as_str))
+        .or_else(|| {
+            unreadable
+                .and_then(|value| value.get("effort"))
+                .and_then(Value::as_str)
+        });
+    let default_account = known
+        .and_then(|value| value.account_key.value().map(String::as_str))
+        .or_else(|| {
+            unreadable
+                .and_then(|value| value.get("accountKey"))
+                .and_then(Value::as_str)
+        });
+    let default_fast = known
+        .and_then(|value| value.fast_mode.value().copied())
+        .or_else(|| {
+            unreadable
+                .and_then(|value| value.get("fastMode"))
+                .and_then(Value::as_bool)
+        });
+    let default_daybreak = known
+        .and_then(|value| value.daybreak_enabled.value().copied())
+        .or_else(|| {
+            unreadable
+                .and_then(|value| value.get("daybreakEnabled"))
+                .and_then(Value::as_bool)
+        });
     let profile_model = profile.map(|profile| profile.model.as_str());
     let review = (role == "reviewer")
         .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort));
@@ -349,35 +386,33 @@ pub(crate) async fn resolve_worker_settings(
         .map(String::as_str)
         .or(profile_model)
         .or_else(|| review.as_ref().and_then(|(model, _, _)| model.as_deref()))
-        .or_else(|| defaults.get("model").and_then(Value::as_str))
-        .or_else(|| root.get("model").and_then(Value::as_str))
+        .or(default_model)
+        .or(root.model.as_deref())
         .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL);
     let (excluded, keys, groups) = account_scope(store, root).await?;
     let (account_key, account) =
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
-            parent_account_key: parent
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default"),
+            parent_account_key: &parent.account_key,
             requested_account_key: if role == "reviewer" {
                 requested_account_key.or_else(|| {
-                    root["reviewDefaults"]
-                        .get("accountKey")
-                        .and_then(Value::as_str)
+                    root.review_defaults
+                        .as_ref()
+                        .and_then(|value| value.account_key.as_deref())
                 })
             } else {
                 requested_account_key
             },
             default_account_key: if role == "reviewer"
                 && (requested_account_key.is_some()
-                    || root["reviewDefaults"]
-                        .get("accountKey")
-                        .and_then(Value::as_str)
+                    || root
+                        .review_defaults
+                        .as_ref()
+                        .and_then(|value| value.account_key.as_deref())
                         .is_some())
             {
                 None
             } else {
-                defaults.get("accountKey").and_then(Value::as_str)
+                default_account
             },
             model: requested_model,
             excluded_account_keys: &excluded,
@@ -387,8 +422,8 @@ pub(crate) async fn resolve_worker_settings(
         })?;
     let adapter = crate::provider_adapter::adapter(account.provider);
     let model = if requested_model == crate::agents_create::DEFAULT_LEAD_MODEL
-        && root.get("model").and_then(Value::as_str).is_none()
-        && defaults.get("model").and_then(Value::as_str).is_none()
+        && root.model.is_none()
+        && default_model.is_none()
         && profile_model.is_none()
         && spec.model.value().is_none()
         && !adapter.owns_model(requested_model)
@@ -405,20 +440,20 @@ pub(crate) async fn resolve_worker_settings(
     } else if let Some((_, effort, _)) = &review {
         effort.as_deref()
     } else {
-        defaults.get("effort").and_then(Value::as_str)
+        default_effort
     };
     let fast_mode = spec
         .fast_mode
         .value()
         .copied()
         .or_else(|| review.as_ref().and_then(|(_, _, fast)| *fast))
-        .or_else(|| defaults.get("fastMode").and_then(Value::as_bool))
+        .or(default_fast)
         .unwrap_or(false);
     let daybreak = spec
         .daybreak_enabled
         .value()
         .copied()
-        .or_else(|| defaults.get("daybreakEnabled").and_then(Value::as_bool))
+        .or(default_daybreak)
         .unwrap_or(false);
     // An inherited effort unsupported by the selected model uses its native default.
     // A request or profile explicitly choosing an effort remains a validation error.
@@ -748,8 +783,8 @@ pub(crate) async fn spawn_agents(
             store,
             environment,
             WorkerSettingsRequest {
-                parent: &parent_value,
-                root: &root_value,
+                parent: &actor_record,
+                root: &root,
                 spec: &spec,
                 profile: profile.as_ref(),
                 role,
@@ -1559,7 +1594,7 @@ pub(crate) async fn request_review(
         .get("accountKey")
         .and_then(Value::as_str);
     let (excluded, keys, groups) = if review_account.is_some() {
-        account_scope(store, &root_value).await?
+        account_scope(store, &root).await?
     } else {
         (Vec::new(), None, None)
     };
