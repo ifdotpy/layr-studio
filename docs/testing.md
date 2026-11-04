@@ -74,12 +74,22 @@ The guest service and desktop Python helpers are retained and remain independent
 of the backend. Historical verification reports describe their recorded revision;
 their removed Python commands are not current instructions.
 
+`just deny-bans` checks the locked workspace graph offline using cargo-deny 0.20.2
+(`cargo install cargo-deny --version 0.20.2 --locked`). The JSON facade migration
+must finish before this check can be enabled in the gates. `deny.toml` permits
+`studio-json` and named third-party direct dependents of `serde_json`; when a
+dependency adds one, inspect `cargo tree --locked --target all -i serde_json -e
+normal,build,dev --workspace --depth 1` and deliberately add the third-party crate to the wrappers
+list. Workspace crates must use the facade. The separate vendored Layr workspace
+is excluded by the root Cargo workspace.
+
 | Purpose                                               | Command                                  |
 | ----------------------------------------------------- | ---------------------------------------- |
 | Short safety gate                                     | `just test-fast`                         |
 | Publication gate                                      | `just test-comprehensive`                |
 | Generated contracts                                   | `just contracts-check`                   |
 | Workspace boundaries                                  | `just boundaries-check`                  |
+| Cargo dependency bans                                 | `just deny-bans`                         |
 | Browser smoke                                         | `just test-browser-smoke`                |
 | Full browser project, manual heavy                    | `just test-browser` or `just test-heavy` |
 | Multi-server browser recovery, manual heavy           | `just test-browser-multi-server`         |
