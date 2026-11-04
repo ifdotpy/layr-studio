@@ -1921,7 +1921,7 @@ mod resource_tests {
                 let plan = thread::plan(&snapshot, "next-attempt", "next-ticket");
                 assert_eq!(native_thread_blocked(&record), error["codexErrorInfo"] == "misalignmentPolicyViolation");
                 if !context_wait.is_null() {
-                    assert_eq!(plan, thread::Outcome::Hold(thread::HoldReason::ContextRepair));
+                    assert_eq!(plan, thread::Outcome::Refuse(thread::Refusal::Blocked(thread::HoldReason::ContextRepair)));
                 } else {
                     assert!(matches!(plan, thread::Outcome::Resume(_)), "{plan:?}");
                 }
@@ -2412,7 +2412,6 @@ mod resource_tests {
                                 attempt
                             }
                             other @ thread::Outcome::Ready(_)
-                            | other @ thread::Outcome::Hold(_)
                             | other @ thread::Outcome::Refuse(_) => panic!("{case}: {other:?}"),
                         };
                         assert_eq!(
@@ -2504,7 +2503,6 @@ mod resource_tests {
                                 attempt
                             }
                             other @ (thread::Outcome::Ready(_)
-                            | thread::Outcome::Hold(_)
                             | thread::Outcome::Refuse(_)) => panic!("{case}: {other:?}"),
                         };
                         assert_eq!(
@@ -2997,7 +2995,7 @@ mod workspace_fence_tests {
                         None)?;
                     let attempt = match thread::plan(&snapshot, "attempt", "ticket") {
                         thread::Outcome::Start(attempt) | thread::Outcome::Resume(attempt) => attempt,
-                        other @ thread::Outcome::Ready(_) | other @ thread::Outcome::Hold(_) | other @ thread::Outcome::Refuse(_) => panic!("expected thread launch, got {other:?}"),
+                        other @ thread::Outcome::Ready(_) | other @ thread::Outcome::Refuse(_) => panic!("expected thread launch, got {other:?}"),
                     };
                     assert_eq!(attempt.params["claude"]["permissionMode"], *mode);
                 }
@@ -3117,7 +3115,6 @@ mod workspace_fence_tests {
                                 attempt
                             }
                             other @ (thread::Outcome::Ready(_)
-                            | thread::Outcome::Hold(_)
                             | thread::Outcome::Refuse(_)) => panic!("expected thread launch, got {other:?}"),
                         };
                         let options = attempt.params.get("claude").unwrap_or(&Value::Null);
