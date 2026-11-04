@@ -239,6 +239,8 @@ impl From<crate::account_session_runtime::AccountSessionError> for TransferError
 const TRANSFER_PUBLIC_REASON_MAX_CHARS: usize = 1000;
 
 pub(crate) fn public_preparation_reason(error: &TransferError) -> String {
+    // The public reason is short; the log keeps the full cause once.
+    eprintln!("account transfer preparation failed: {error:?}");
     let reason = match error {
         TransferError::Refused(reason) => (*reason).to_owned(),
         TransferError::Stored {
