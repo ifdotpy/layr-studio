@@ -21,7 +21,7 @@ the hosted gate composition.
 
 `just test-fast` runs the [`fast` nextest profile](../.config/nextest.toml), desktop
 recovery and retained-helper boundaries, web API/type witnesses, tooling tests,
-generated-contract and dependency guards including Cargo bans, and the VM guest Python suite through its
+generated-contract and dependency guards, and the VM guest Python suite through its
 [runner](../workspaces/runtime/apps/vm-guest/run-guest-suite.mts). The facade uses five
 bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
 independent tooling/provider/desktop checks, and the guest suite. Independent
@@ -76,7 +76,8 @@ their removed Python commands are not current instructions.
 
 `just deny-bans` checks the locked workspace graph offline using cargo-deny 0.20.2
 (`cargo install cargo-deny --version 0.20.2 --locked`). Run `cargo fetch --locked`
-to populate all target dependencies before an offline check. `deny.toml` permits
+to populate all target dependencies before an offline check. The JSON facade migration
+must finish before this check can be enabled in the gates. `deny.toml` permits
 `studio-json` and named third-party direct dependents of `serde_json`; when a
 dependency adds one, inspect `cargo tree --locked --target all --all-features -i serde_json -e
 normal,build,dev --workspace --depth 1` and deliberately add the third-party crate to the wrappers
