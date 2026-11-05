@@ -602,7 +602,7 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
     if !(actorless_request || actor_method || transfer_method)
         || request.operation.is_empty()
         || request.operation.len() > 1024
-        || request.params.to_string().len() > 2 * 1024 * 1024
+        || request.params.to_string().len() > max_request_params_bytes(request.method)
         || !request.params.is_object()
         || (request.method == Method::McpServerReconnect
             && (request.expected_scope.as_ref() != Some(&request.scope)
@@ -671,6 +671,16 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
         return Err(PortError::Invalid);
     }
     Ok(())
+}
+
+/// A Claude session import carries the exported session, so it may use most of
+/// one provider frame; other requests keep the small bound.
+fn max_request_params_bytes(method: Method) -> usize {
+    if method == Method::ClaudeMoveImport {
+        studio_runtime_providers::MAX_FRAME_BYTES - 64 * 1024
+    } else {
+        2 * 1024 * 1024
+    }
 }
 
 fn valid_background_terminals_list(params: &Value) -> bool {
@@ -2181,6 +2191,13 @@ mod validation_tests {
         assert!(validate(&request).is_ok());
         request.method = Method::ThreadFork;
         assert_eq!(validate(&request), Err(PortError::Invalid));
+    }
+
+    #[test]
+    fn a_claude_session_import_may_carry_a_large_session() {
+        let big = "x".repeat(3 * 1024 * 1024);
+        assert!(super::max_request_params_bytes(Method::ClaudeMoveImport) > big.len());
+        assert!(super::max_request_params_bytes(Method::ThreadStart) < big.len());
     }
 
     #[test]
