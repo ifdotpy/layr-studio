@@ -133,7 +133,7 @@ pub struct ProjectRemoval {
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectLocation {
-    pub server_id: String,
+    pub server_id: crate::server_id::ServerId,
     pub path: String,
     pub project_id: String,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -147,7 +147,7 @@ pub struct ProjectLocation {
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectAlias {
-    pub server_id: String,
+    pub server_id: crate::server_id::ServerId,
     pub project_id: String,
     pub name: String,
 }

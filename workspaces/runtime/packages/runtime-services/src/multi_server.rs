@@ -270,8 +270,8 @@ fn identity_alerts(
             {
                 alerts.push(IdentityAlert {
                     code: IdentityAlertCode::PeerIdentityChanged,
-                    old_server_id: old.clone(),
-                    new_server_id: new.clone(),
+                    old_server_id: old.clone().into(),
+                    new_server_id: new.clone().into(),
                     origin: Some(origin.to_owned()),
                     detail: format!(
                         "{origin} now presents server {new}. References to server {old} remain unavailable."
@@ -284,8 +284,8 @@ fn identity_alerts(
     for old in previous_local_identities(tx, local)?.difference(&replaced) {
         alerts.push(IdentityAlert {
             code: IdentityAlertCode::LocalIdentityChanged,
-            old_server_id: old.clone(),
-            new_server_id: local.to_owned(),
+            old_server_id: old.clone().into(),
+            new_server_id: local.to_owned().into(),
             origin: identity.origin.clone(),
             detail: format!(
                 "Local state still names this server {old}, but its current identity is {local}. References to the previous identity remain unavailable."
@@ -496,7 +496,7 @@ pub async fn create_invite(
         let invite = PersistedAccessInvite {
             protocol: Field::Value(ACCESS_PROTOCOL_VERSION),
             invite_id: invite_id.clone().try_into().map_err(invalid_invite)?,
-            server_id: Field::Value(identity.server_id.clone()),
+            server_id: Field::Value(identity.server_id.0.clone()),
             label: Field::Value(label.to_owned()),
             origin: Field::Value(origin.to_owned()),
             public_key: Field::Value(identity.public_key.clone()),
@@ -558,7 +558,12 @@ pub async fn create_invite(
                 .try_into()
                 .map_err(|_| missing())?,
             invite_id: invite.invite_id().to_owned(),
-            server_id: invite.server_id.value().cloned().ok_or_else(missing)?,
+            server_id: invite
+                .server_id
+                .value()
+                .cloned()
+                .ok_or_else(missing)?
+                .into(),
             label: invite.label.value().cloned().ok_or_else(missing)?,
             origin: invite.origin.value().cloned().ok_or_else(missing)?,
             public_key: invite.public_key.value().cloned().ok_or_else(missing)?,
@@ -623,7 +628,7 @@ fn server_aliases(
     let clients = project_records(tx, "runtime_access_clients")?;
     let mut aliases = BTreeMap::from([
         ("local".to_owned(), local_alias.to_owned()),
-        (identity.server_id.clone(), local_alias.to_owned()),
+        (identity.server_id.0.clone(), local_alias.to_owned()),
     ]);
     let mut used = BTreeSet::from([local_alias.to_owned()]);
     for client in clients

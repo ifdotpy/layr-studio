@@ -148,7 +148,7 @@ pub fn project_record(
     if let Field::Value(locations) = &mut project.locations {
         locations.truncate(SYNC_ARRAY_ITEMS);
         for location in locations {
-            location.server_id = bound_sync_text(&location.server_id, "serverId");
+            location.server_id = bound_sync_text(location.server_id.as_str(), "serverId").into();
             location.path = bound_sync_text(&location.path, "path");
             location.project_id = bound_sync_text(&location.project_id, "projectId");
             text(&mut location.git_origin, "gitOrigin");
@@ -158,7 +158,7 @@ pub fn project_record(
     if let Field::Value(aliases) = &mut project.project_aliases {
         aliases.truncate(SYNC_ARRAY_ITEMS);
         for alias in aliases {
-            alias.server_id = bound_sync_text(&alias.server_id, "serverId");
+            alias.server_id = bound_sync_text(alias.server_id.as_str(), "serverId").into();
             alias.project_id = bound_sync_text(&alias.project_id, "projectId");
             alias.name = bound_sync_text(&alias.name, "name");
         }

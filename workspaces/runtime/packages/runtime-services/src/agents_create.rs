@@ -438,7 +438,7 @@ pub(crate) fn ensure_project(
         home_server_id: Field::Value(server.to_owned()),
         locations: Field::Value(vec![
             studio_runtime_schema::project_record::ProjectLocation {
-                server_id: server.to_owned(),
+                server_id: server.to_owned().into(),
                 path: path.to_owned(),
                 project_id: path.to_owned(),
                 git_origin: Field::Missing,

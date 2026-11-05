@@ -674,7 +674,7 @@ async fn local_project_registration(
                         || alias.project_id != project_id_for_write
                 });
                 aliases.push(studio_runtime_schema::project_record::ProjectAlias {
-                    server_id: local_server_for_write.clone(),
+                    server_id: local_server_for_write.clone().into(),
                     project_id: project_id_for_write.clone(),
                     name: name_for_write,
                 });
@@ -693,7 +693,7 @@ async fn local_project_registration(
                 .any(|location| location.server_id == local_server_for_write)
             {
                 locations.push(studio_runtime_schema::project_record::ProjectLocation {
-                    server_id: local_server_for_write,
+                    server_id: local_server_for_write.into(),
                     path: canonical_for_write,
                     project_id: physical_id_for_write,
                     git_origin: git_origin_for_write.map_or(

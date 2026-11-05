@@ -641,7 +641,7 @@ impl MultiServerBoundary {
                 let decision = auth::authorize_at(
                     &snapshot,
                     &request,
-                    &identity.server_id,
+                    identity.server_id.as_str(),
                     &owner,
                     probe.as_ref(),
                     now,

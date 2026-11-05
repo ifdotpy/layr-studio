@@ -79,6 +79,7 @@ pub mod resource_notification;
 pub mod resource_ref;
 pub mod room_record;
 pub mod rule_record;
+pub mod server_id;
 pub mod shared_values;
 pub mod shell_policy;
 pub mod start_attempt;

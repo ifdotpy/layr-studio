@@ -21,7 +21,7 @@ pub const INVITE_TOKEN_HASH_BYTES: usize = 64;
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryIdentity {
-    pub server_id: String,
+    pub server_id: crate::server_id::ServerId,
     pub label: String,
     #[serde(deserialize_with = "required_nullable")]
     pub origin: Option<String>,

@@ -43,9 +43,6 @@ pub const CAPACITY_STATUS_INDEX: &str = "chats_capacity_status";
 /// Partial index of [`CHAT_ACTIVE_STATUSES`] on `chats.status`.
 pub const ACTIVE_STATUS_INDEX: &str = "chats_active_status";
 
-/// A chat is the agent row id.
-pub type ChatId = AgentId;
-
 macro_rules! row_id {
     ($name:ident) => {
         #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -57,6 +54,21 @@ macro_rules! row_id {
             }
         }
     };
+}
+
+row_id!(ChatId);
+
+/// A chat has the id of its agent row.
+impl From<&AgentId> for ChatId {
+    fn from(agent: &AgentId) -> Self {
+        Self(agent.0.clone())
+    }
+}
+
+impl From<&ChatId> for AgentId {
+    fn from(chat: &ChatId) -> Self {
+        Self(chat.0.clone())
+    }
 }
 row_id!(TurnId);
 row_id!(SessionId);
@@ -655,7 +667,7 @@ fn decode_turn(raw: RawTurn) -> StoreResult<TurnRow> {
     let (id, chat, state, session, provider_turn, attempt, interrupt_ticket) = raw;
     Ok(TurnRow {
         id: TurnId(id),
-        chat: AgentId(chat),
+        chat: ChatId(chat),
         state: TurnState::from_columns(&state, session)?,
         provider_turn,
         attempt,
@@ -759,7 +771,7 @@ pub fn read_chat(connection: &Connection, id: &str) -> StoreResult<Option<ChatRo
                 .map(|mode| studio_json::from_value(Value::String(mode)))
                 .transpose()?;
             Ok(ChatRow {
-                id: AgentId(id),
+                id: ChatId(id),
                 state: ChatState::from_column(&state)?,
                 status,
                 auto_wake,
@@ -789,7 +801,7 @@ pub fn read_sessions(connection: &Connection, chat: &str) -> StoreResult<Vec<Ses
         let (id, chat, thread_id, account_key, state) = raw?;
         Ok(SessionRow {
             id: SessionId(id),
-            chat: AgentId(chat),
+            chat: ChatId(chat),
             thread_id,
             account_key,
             state: SessionState::from_column(&state)?,

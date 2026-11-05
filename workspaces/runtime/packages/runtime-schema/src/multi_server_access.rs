@@ -131,7 +131,7 @@ pub enum AccessGrant {
 #[serde(rename_all = "camelCase")]
 pub struct DevicePairReply {
     pub protocol: u64,
-    pub server_id: String,
+    pub server_id: crate::server_id::ServerId,
     pub client_id: String,
     pub label: String,
     pub origin: String,
@@ -144,7 +144,7 @@ pub struct DevicePairReply {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "ServerIdentity")]
 pub struct AccessIdentity {
-    pub server_id: String,
+    pub server_id: crate::server_id::ServerId,
     pub label: String,
     #[serde(deserialize_with = "required_nullable")]
     #[schemars(with = "RequiredNullableString")]
@@ -203,7 +203,7 @@ pub struct AccessInvitation {
     #[schemars(length(min = 1, max = crate::multi_server_ingress::INVITE_ID_MAX_CODEPOINTS))]
     pub invite_id: String,
     #[schemars(length(min = 1, max = crate::multi_server_ingress::SERVER_ID_MAX_CODEPOINTS))]
-    pub server_id: String,
+    pub server_id: crate::server_id::ServerId,
     #[schemars(length(min = 1, max = crate::multi_server_ingress::INVITATION_LABEL_MAX_CODEPOINTS))]
     pub label: String,
     #[schemars(length(max = crate::multi_server_ingress::ORIGIN_MAX_CODEPOINTS))]
@@ -256,8 +256,8 @@ pub enum IdentityAlertCode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct IdentityAlert {
     pub code: IdentityAlertCode,
-    pub old_server_id: String,
-    pub new_server_id: String,
+    pub old_server_id: crate::server_id::ServerId,
+    pub new_server_id: crate::server_id::ServerId,
     pub origin: Option<String>,
     pub detail: String,
 }

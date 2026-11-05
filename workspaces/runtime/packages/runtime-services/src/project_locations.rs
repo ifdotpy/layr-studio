@@ -735,7 +735,7 @@ pub struct LocationReference {
 impl From<studio_runtime_schema::project_record::ProjectLocation> for LocationReference {
     fn from(value: studio_runtime_schema::project_record::ProjectLocation) -> Self {
         Self {
-            server_id: value.server_id,
+            server_id: value.server_id.0,
             path: value.path,
             project_id: value.project_id,
             git_origin: value.git_origin,
