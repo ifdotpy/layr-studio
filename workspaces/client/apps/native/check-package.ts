@@ -72,8 +72,6 @@ for (const file of [
   "workspace/web/dist/index.html",
   "helpers/studio-speech",
   ...nativeRecoveryResourceFiles,
-  "studio-fs-events",
-  "studio-linux-vm",
   "delivery-contract.json",
   ...pythonEntryPoints,
 ])

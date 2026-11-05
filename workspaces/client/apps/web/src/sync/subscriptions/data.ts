@@ -41,10 +41,6 @@ function progressFor<K extends ResourceProgress["resource"]["kind"]>(
 const transientSelectors: ResourceDataSelectors<ResourceVersion | undefined> = {
   "auth-progress": (_ref, version) =>
     progressFor("auth-progress", version)?.value,
-  "vault-job-progress": (_ref, version) =>
-    progressFor("vault-job-progress", version)?.value,
-  "vault-readiness": (_ref, version) =>
-    progressFor("vault-readiness", version)?.value,
   "rename-progress": (_ref, version) =>
     progressFor("rename-progress", version)?.value,
   "multi-server": (_ref, version) => version?.discoverySnapshot,

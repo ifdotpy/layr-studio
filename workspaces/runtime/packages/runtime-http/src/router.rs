@@ -105,12 +105,8 @@ pub struct HttpState {
     pub(crate) callback_runtime:
         Option<Arc<studio_runtime_services::callback_runtime::CallbackRuntime>>,
     pub(crate) browser_forwarder: Option<Arc<studio_runtime_services::browser::BrowserForwarder>>,
-    pub(crate) browser_local_forwarder:
-        Option<Arc<studio_runtime_services::browser::BrowserForwarder>>,
-    pub(crate) browser_answer_guest:
-        Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
     pub(crate) browser_answer_host_guest:
-        Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
+        Option<Arc<dyn studio_runtime_services::browser_rpc::BrowserRpc>>,
     pub(crate) browser_host_local_forwarder:
         Option<Arc<studio_runtime_services::browser::BrowserForwarder>>,
     pub(crate) peer_projects_wake: Arc<studio_runtime_services::peer_projects::PeerProjectsWake>,
@@ -121,10 +117,6 @@ pub struct HttpState {
     pub(crate) tailscale_whoami: Option<
         Arc<dyn Fn() -> futures_util::future::BoxFuture<'static, Option<Value>> + Send + Sync>,
     >,
-    pub(crate) project_secrets_guest:
-        Option<Arc<dyn studio_runtime_services::project_secrets::GuestRpc>>,
-    pub(crate) vault_job_client: Option<crate::routes::VaultJobClient>,
-    pub(crate) vault_host_command: Option<studio_runtime_services::vault::VaultHostCommand>,
     pub account_session:
         Option<Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>>,
     pub claude_login: Option<Arc<studio_runtime_services::claude_login::service::LoginService>>,
@@ -149,7 +141,6 @@ pub struct HttpState {
     pub(crate) state_dir: String,
     pub(crate) cost_scan_cancelled: Arc<std::sync::atomic::AtomicBool>,
     cost_refresh_workers: Arc<CostRefreshWorkers>,
-    pub(crate) vm_state_dir: std::path::PathBuf,
     pub(crate) app_server_log: Option<OperationalLog>,
     pub(crate) port: u16,
     pub(crate) public_origin: Option<String>,
@@ -212,8 +203,6 @@ impl HttpState {
         store: Option<Arc<RuntimeStore>>,
         account_policy: Option<Arc<studio_runtime_services::account_policy::AccountPolicyState>>,
     ) -> Self {
-        let vm_state_dir =
-            studio_runtime_services::vault::linux_vm_state_dir(std::path::Path::new(&state_dir));
         let sync_changes = Arc::new(ChangeNotificationHub::new());
         let project_accounts = account_policy.as_ref().map(|policy| policy.accounts());
         let peer_projects_wake =
@@ -236,23 +225,14 @@ impl HttpState {
         let browser_forwarder = orchestration_driver
             .as_ref()
             .map(|driver| crate::routes::browser::new_forwarder(Arc::clone(driver)));
-        let browser_answer_guest: Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc> =
+        let browser_answer_host_guest: Arc<dyn studio_runtime_services::browser_rpc::BrowserRpc> =
             Arc::new(
-                studio_runtime_services::linux_vm_guest::UnixGuestRpc::for_runtime_state(
-                    &vm_state_dir,
-                ),
-            );
-        let browser_answer_host_guest: Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc> =
-            Arc::new(
-                studio_runtime_services::linux_vm_guest::UnixSocketGuestRpc::new(
+                studio_runtime_services::browser_rpc::UnixSocketBrowserRpc::new(
                     std::path::Path::new(&state_dir)
                         .join(BROWSER_HOST_FOLDER_NAME)
                         .join(BROWSER_HOST_CONTROL_SOCKET_NAME),
                 ),
             );
-        let browser_local_forwarder = Some(crate::routes::browser::new_local_forwarder(
-            Arc::clone(&browser_answer_guest),
-        ));
         let browser_host_local_forwarder = Some(crate::routes::browser::new_local_forwarder(
             Arc::clone(&browser_answer_host_guest),
         ));
@@ -275,17 +255,12 @@ impl HttpState {
             message_admission: None,
             callback_runtime: None,
             browser_forwarder,
-            browser_local_forwarder,
-            browser_answer_guest: Some(browser_answer_guest),
             browser_answer_host_guest: Some(browser_answer_host_guest),
             browser_host_local_forwarder,
             peer_projects_wake,
             orchestration_driver,
             server_discovery: None,
             tailscale_whoami: None,
-            project_secrets_guest: None,
-            vault_job_client: None,
-            vault_host_command: None,
             account_session: None,
             account_driver: None,
             provider_versions: None,
@@ -302,7 +277,6 @@ impl HttpState {
             state_dir,
             cost_scan_cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             cost_refresh_workers: Arc::new(CostRefreshWorkers::default()),
-            vm_state_dir,
             app_server_log: None,
             port,
             public_origin,
@@ -385,33 +359,6 @@ impl HttpState {
     /// Trust the connection identity that the peer link process sends with this secret.
     pub fn with_peer_link_token(mut self, token: &str) -> Self {
         self.peer_link_token = Some(token.into());
-        self
-    }
-
-    /// Attach the Linux VM guest client used by project-secrets routes.
-    pub fn with_project_secrets_guest_rpc(
-        mut self,
-        guest: Arc<dyn studio_runtime_services::project_secrets::GuestRpc>,
-    ) -> Self {
-        self.project_secrets_guest = Some(guest);
-        self
-    }
-
-    /// Attach the runtime-owned vault job client used by setup and login routes.
-    pub fn with_vault_job_client(mut self, client: crate::routes::VaultJobClient) -> Self {
-        self.vault_job_client = Some(client);
-        self
-    }
-
-    /// Attach the optional host tool used for vault setup.
-    pub fn with_vault_host_command(mut self) -> Self {
-        self.vault_host_command = Some(studio_runtime_services::vault::VaultHostCommand::new());
-        self
-    }
-
-    /// Override the VM data directory for an isolated runtime or test fixture.
-    pub fn with_vm_state_dir(mut self, path: std::path::PathBuf) -> Self {
-        self.vm_state_dir = path;
         self
     }
 
@@ -603,26 +550,13 @@ impl HttpState {
         Arc::clone(&self.continuation_wake)
     }
 
-    /// The browser bridges whose sign-in links become request cards
-    /// (docs/vm-browser-bridge.md): native chats on every server, and VM chats on a Mac,
-    /// as the Python server's `codex_browser_bridge.tick`.
+    /// The host browser bridge whose sign-in links become request cards.
     pub fn browser_card_sources(&self) -> Vec<studio_runtime_services::browser_cards::CardSource> {
         let mut sources = Vec::new();
         if let Some(guest) = &self.browser_answer_host_guest {
             sources.push(studio_runtime_services::browser_cards::CardSource {
-                source: "host",
                 guest: Arc::clone(guest),
                 forwarder: self.browser_host_local_forwarder.clone(),
-                http_providers: Default::default(),
-            });
-        }
-        if cfg!(target_os = "macos")
-            && let Some(guest) = &self.browser_answer_guest
-        {
-            sources.push(studio_runtime_services::browser_cards::CardSource {
-                source: "vm",
-                guest: Arc::clone(guest),
-                forwarder: self.browser_local_forwarder.clone(),
                 http_providers: Default::default(),
             });
         }

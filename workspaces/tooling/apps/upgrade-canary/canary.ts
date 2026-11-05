@@ -331,7 +331,6 @@ export function profiles({
   tmp,
   home,
   liveState,
-  app,
   port,
   proxyPort,
   readable,
@@ -343,7 +342,6 @@ export function profiles({
   tmp: string;
   home: string;
   liveState: string;
-  app: string;
   port: number | null;
   proxyPort: number;
   readable: string[];
@@ -373,7 +371,7 @@ export function profiles({
   const live = `(deny file-write* (subpath ${quote(liveState)}) (subpath "/Applications") (subpath ${quote(path.join(home, ".codex"))}) (subpath ${quote(path.join(home, ".claude"))}) (subpath ${quote(path.join(home, "Library/LaunchAgents"))}))
 ${readable.map((file) => `(deny file-write* (literal ${quote(file)}))`).join("\n")}
 (deny network-outbound (remote unix-socket (subpath ${quote(liveState)})))
-(deny process-exec (subpath "/Applications/Codex Studio.app") (literal ${quote(path.join(app, "Contents/Resources/studio-linux-vm"))}))
+(deny process-exec (subpath "/Applications/Codex Studio.app"))
 (deny file-read* (subpath ${quote(path.join(home, ".ssh"))}) (subpath ${quote(path.join(home, ".config/gh"))}) (literal ${quote(path.join(home, ".gitconfig"))}))
 ;; Last, so that it wins: /bin/ps is setuid, and a sandbox cannot run a setuid program.
 ;; Recovery and the installer read process start times with it; it only lists processes.
@@ -907,7 +905,6 @@ export class Canary {
       tmp,
       home: os.homedir(),
       liveState: this.liveState,
-      app: this.app,
       port: this.port,
       proxyPort: proxy.port,
       readable: this.readable,

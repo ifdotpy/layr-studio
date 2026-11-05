@@ -181,7 +181,9 @@ async fn prepare_attempt(
     queue: Duration,
 ) -> Result<WorkspaceDecision, WorkspaceError> {
     let initial = snapshot(&store, agent_id.clone()).await?;
-    if crate::layr_native::is_native(&initial.agent.value()) {
+    if crate::layr_native::is_native(&initial.agent.value())
+        && initial.agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
+    {
         let ready = crate::layr_native::prepare(Arc::clone(&store), initial.agent.value())
             .await
             .map_err(|error| WorkspaceError::Git(error.to_string()))?;
@@ -191,39 +193,6 @@ async fn prepare_attempt(
         });
     }
     let actor = actor(&initial)?;
-    // VM paths are guest paths, so they cannot enter Git canonicalization. The
-    // native-action owner binds the line; this token admits only the persisted
-    // ready association and is rechecked when the turn is submitted.
-    if actor.execution_mode.as_deref() == Some("vm") {
-        if actor.deleted_at.is_some() || !actor.auto_wake {
-            return Ok(WorkspaceDecision::Defer {
-                by: crate::workspace_ready::DeferredBy::Actor,
-            });
-        }
-        let value = &initial.agent.value();
-        if value.get("layrReady").and_then(Value::as_bool) != Some(true)
-            || value
-                .get("layrProjectId")
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
-            || value
-                .get("layrLine")
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
-        {
-            return Ok(WorkspaceDecision::Defer {
-                by: crate::workspace_ready::DeferredBy::Actor,
-            });
-        }
-        let cwd = value
-            .get("cwd")
-            .and_then(Value::as_str)
-            .filter(|cwd| !cwd.is_empty())
-            .ok_or(WorkspaceError::InvalidRecord)?;
-        return Ok(WorkspaceDecision::Ready {
-            token: ReadyToken::new(value, PathBuf::from(cwd)),
-        });
-    }
     if actor.image_bound() {
         return Ok(WorkspaceDecision::Refuse(
             crate::workspace_ready::WorkspaceRefusal::ImageWorkspaceUnsupported,

@@ -1,4 +1,4 @@
-/* The sign-in request card (docs/vm-browser-bridge.md, section 6.2). It follows the
+/* The sign-in request card. It follows the
    question card, and it is one column at phone width. */
 #requests .request-card.request-sign-in {
   border-color: var(--studio-state-answer);

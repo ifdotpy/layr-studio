@@ -995,8 +995,8 @@ fn accepted_archive_preflight(
         ));
     }
 
-    if vm_result_needs_merge(root_id, &owner)
-        && !vm_merge_confirmed(
+    if layr_result_needs_merge(root_id, &owner)
+        && !layr_merge_confirmed(
             connection,
             task_id,
             result_id,
@@ -1081,8 +1081,8 @@ pub struct SubmitWork {
     pub files: Vec<String>,
     pub prepared_files: Option<PreparedSubmissionFiles>,
     pub state_dir: PathBuf,
-    pub vm_evidence: Option<studio_runtime_store::vm_work_intent::Evidence>,
-    pub vm_evidence_request_id: Option<String>,
+    pub layr_evidence: Option<studio_runtime_store::work_intent::Evidence>,
+    pub layr_evidence_request_id: Option<String>,
 }
 
 /// File validation bound to the exact stored owner/cwd and submitted list.
@@ -1139,18 +1139,19 @@ pub async fn prepare_submission_files(
     .map_err(|_| WorkWriteError::PreparationWorker)
 }
 
-pub struct VmSubmissionCall {
+pub struct LayrSubmissionCall {
     pub owner_id: String,
     pub revision: String,
     pub request_id: String,
 }
 
-use studio_runtime_store::vm_work_intent::{
-    Acceptance, AcceptanceResult, Intent as VmWorkIntent, Owner as VmOwner,
-    PublicRequest as VmPublic, Submission, SubmissionResult as VmSubmissionResult, View as VmView,
+use studio_runtime_store::work_intent::{
+    Acceptance, AcceptanceResult, Intent as LayrWorkIntent, Owner as LayrOwner,
+    PublicRequest as LayrPublic, Submission, SubmissionResult as LayrSubmissionResult,
+    View as LayrView,
 };
 
-fn read_vm_view(connection: &Connection, task_id: &str) -> Result<VmView, WorkWriteError> {
+fn read_layr_view(connection: &Connection, task_id: &str) -> Result<LayrView, WorkWriteError> {
     WorkItemsRepository::work_record(connection, task_id)?
         .ok_or(Error::InvalidRequest("Unknown work item"))?;
     let raw: String = connection
@@ -1164,7 +1165,11 @@ fn read_vm_view(connection: &Connection, task_id: &str) -> Result<VmView, WorkWr
         .ok_or(Error::InvalidRequest("Unknown work item"))?;
     Ok(studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?)
 }
-fn write_vm_view(tx: &Transaction<'_>, task_id: &str, view: &VmView) -> Result<(), WorkWriteError> {
+fn write_layr_view(
+    tx: &Transaction<'_>,
+    task_id: &str,
+    view: &LayrView,
+) -> Result<(), WorkWriteError> {
     let mut work = WorkItemsRepository::work_record(tx, task_id)?
         .ok_or(Error::InvalidRequest("Unknown work item"))?;
     let fields = studio_runtime_store::projection_value(view);
@@ -1178,14 +1183,14 @@ fn write_vm_view(tx: &Transaction<'_>, task_id: &str, view: &VmView) -> Result<(
     WorkItemsRepository::update_checked_work(tx, task_id, &work).map_err(Into::into)
 }
 
-pub enum VmSubmissionPreparation {
-    NotVm,
+pub enum LayrSubmissionPreparation {
+    NotLayr,
     Replay,
     Evidence {
-        evidence: studio_runtime_store::vm_work_intent::Evidence,
+        evidence: studio_runtime_store::work_intent::Evidence,
         request_id: String,
     },
-    Call(VmSubmissionCall),
+    Call(LayrSubmissionCall),
 }
 
 fn reviewer_without_revision(owner: &AgentRecord, revision: &str) -> bool {
@@ -1195,13 +1200,13 @@ fn reviewer_without_revision(owner: &AgentRecord, revision: &str) -> bool {
 
 /// Persist an exact layr evidence request before contacting the guest. A pending
 /// or unknown request is never sent again; completed evidence can be replayed.
-pub async fn prepare_vm_submission(
+pub async fn prepare_layr_submission(
     store: &RuntimeStore,
     agent_id: &str,
     request_id: Option<&str>,
     signature: &str,
     input: &mut SubmitWork,
-) -> Result<VmSubmissionPreparation, WorkWriteError> {
+) -> Result<LayrSubmissionPreparation, WorkWriteError> {
     if read_work_receipt(
         store,
         agent_id.to_owned(),
@@ -1211,7 +1216,7 @@ pub async fn prepare_vm_submission(
     .await?
     .is_some()
     {
-        return Ok(VmSubmissionPreparation::Replay);
+        return Ok(LayrSubmissionPreparation::Replay);
     }
     input.prepared_files = prepare_submission_files(store, agent_id, input).await?;
     let agent_id = agent_id.to_owned();
@@ -1222,7 +1227,7 @@ pub async fn prepare_vm_submission(
         let agent = event_write::checked_agent(tx, &agent_id)?;
         if let Some(root) = request_id.as_deref()
             && work_receipt_in(tx, &agent_id, root, &signature)?.is_some() {
-            return Ok(VmSubmissionPreparation::Replay);
+            return Ok(LayrSubmissionPreparation::Replay);
         }
         let work = load_work(tx, &agent.root_id.0, &input.task_id, input.version)?;
         if !matches!(work.status(), WorkStatus::Running | WorkStatus::Ready | WorkStatus::Blocked | WorkStatus::Review) {
@@ -1233,36 +1238,36 @@ pub async fn prepare_vm_submission(
         }
         let owner_id = work.owner().unwrap_or(&agent.id.0);
         let owner = event_write::checked_agent(tx, owner_id)?;
-        // Invalid results reach submit's durable refusal before any VM operation.
+        // Invalid results reach submit's durable refusal before any workspace operation.
         if result_refusal(tx, &work.value(), &owner, &input)?.is_some() {
-            return Ok(VmSubmissionPreparation::NotVm);
+            return Ok(LayrSubmissionPreparation::NotLayr);
         }
         if work.extension("resultSchema").is_none() {
             text(input.result.as_str().ok_or(Error::InvalidRequest("Supply result as text when the task has no result_schema"))?, false)?;
         }
         text(&input.checks, false)?;
         if reviewer_without_revision(&owner, &input.revision) {
-            return Ok(VmSubmissionPreparation::NotVm);
+            return Ok(LayrSubmissionPreparation::NotLayr);
         }
         let revision = python_bounded_text(&input.revision, 200)?;
         validate_submission_files(&owner, &input.files, input.prepared_files.as_ref())?;
-        if owner.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) && owner.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative) {
-            return Ok(VmSubmissionPreparation::NotVm);
+        if owner.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative) {
+            return Ok(LayrSubmissionPreparation::NotLayr);
         }
         let rpc_id = format!("layr-evidence:{owner_id}:{revision}");
-        let mut view = read_vm_view(tx, &input.task_id)?;
-        match &view.vm_submit {
-            Some(VmWorkIntent::Pending(..) | VmWorkIntent::Unknown(..) | VmWorkIntent::UnknownUnattributed(..)) => return Err(Error::Conflict("A prior layr evidence request has an unknown outcome; inspect it before retrying").into()),
-            Some(VmWorkIntent::Completed { owner, result }) if owner.request_id==rpc_id && owner.owner==owner_id && Some(owner.id.version)==work.version().and_then(studio_json::Number::as_i64) && owner.revision==revision => return Ok(VmSubmissionPreparation::Evidence{evidence:result.evidence.clone(),request_id:rpc_id}),
-            Some(VmWorkIntent::Completed { .. } | VmWorkIntent::NotSent(..)) | None => {}
+        let mut view = read_layr_view(tx, &input.task_id)?;
+        match &view.submit {
+            Some(LayrWorkIntent::Pending(..) | LayrWorkIntent::Unknown(..) | LayrWorkIntent::UnknownUnattributed(..)) => return Err(Error::Conflict("A prior layr evidence request has an unknown outcome; inspect it before retrying").into()),
+            Some(LayrWorkIntent::Completed { owner, result }) if owner.request_id==rpc_id && owner.owner==owner_id && Some(owner.id.version)==work.version().and_then(studio_json::Number::as_i64) && owner.revision==revision => return Ok(LayrSubmissionPreparation::Evidence{evidence:result.evidence.clone(),request_id:rpc_id}),
+            Some(LayrWorkIntent::Completed { .. } | LayrWorkIntent::NotSent(..)) | None => {}
         }
-        view.vm_submit = Some(VmWorkIntent::Pending(VmOwner {request_id:rpc_id.clone(),owner:owner_id.into(),revision:revision.clone(),id:Submission { version:work.version().and_then(studio_json::Number::as_i64).ok_or_else(|| invalid("runtime_work", &input.task_id))? },public:None}));
+        view.submit = Some(LayrWorkIntent::Pending(LayrOwner {request_id:rpc_id.clone(),owner:owner_id.into(),revision:revision.clone(),id:Submission { version:work.version().and_then(studio_json::Number::as_i64).ok_or_else(|| invalid("runtime_work", &input.task_id))? },public:None}));
         if let Some(root) = request_id.as_deref()
-            && admit_vm_work_request(tx, &agent, root, &input.task_id, &signature, event_write::unix_time()?)?.is_none() {
-            return Ok(VmSubmissionPreparation::Replay);
+            && admit_layr_work_request(tx, &agent, root, &input.task_id, &signature, event_write::unix_time()?)?.is_none() {
+            return Ok(LayrSubmissionPreparation::Replay);
         }
-        write_vm_view(tx, &input.task_id, &view)?;
-        Ok(VmSubmissionPreparation::Call(VmSubmissionCall {
+        write_layr_view(tx, &input.task_id, &view)?;
+        Ok(LayrSubmissionPreparation::Call(LayrSubmissionCall {
             owner_id: owner_id.to_owned(),
             revision,
             request_id: rpc_id,
@@ -1272,70 +1277,68 @@ pub async fn prepare_vm_submission(
 
 /// Record the guest's terminal response before the normal work submission write.
 /// A lost response is persisted as unknown and can never trigger an automatic resend.
-pub async fn finish_vm_submission(
+pub async fn finish_layr_submission(
     store: &RuntimeStore,
     task_id: &str,
     request_id: &str,
-    outcome: Result<studio_runtime_store::vm_work_intent::Evidence, bool>,
-) -> Result<Option<studio_runtime_store::vm_work_intent::Evidence>, WorkWriteError> {
-    let outcome = outcome.map(|evidence| VmSubmissionResult { evidence });
-    finish_vm_intent(store, task_id, request_id, outcome, |view| {
-        &mut view.vm_submit
-    })
-    .await
-    .map(|result| result.map(|result| result.evidence))
+    outcome: Result<studio_runtime_store::work_intent::Evidence, bool>,
+) -> Result<Option<studio_runtime_store::work_intent::Evidence>, WorkWriteError> {
+    let outcome = outcome.map(|evidence| LayrSubmissionResult { evidence });
+    finish_layr_intent(store, task_id, request_id, outcome, |view| &mut view.submit)
+        .await
+        .map(|result| result.map(|result| result.evidence))
 }
 
-async fn finish_vm_intent<I: Clone + Send + 'static, R: Clone + PartialEq + Send + 'static>(
+async fn finish_layr_intent<I: Clone + Send + 'static, R: Clone + PartialEq + Send + 'static>(
     store: &RuntimeStore,
     task_id: &str,
     request_id: &str,
     outcome: Result<R, bool>,
-    select: for<'a> fn(&'a mut VmView) -> &'a mut Option<VmWorkIntent<I, R>>,
+    select: for<'a> fn(&'a mut LayrView) -> &'a mut Option<LayrWorkIntent<I, R>>,
 ) -> Result<Option<R>, WorkWriteError> {
     let task_id = task_id.to_owned();
     let request_id = request_id.to_owned();
     store
         .transaction_with_error(move |tx| {
-            let mut view = read_vm_view(tx, &task_id)?;
+            let mut view = read_layr_view(tx, &task_id)?;
             let intent = select(&mut view)
                 .take()
                 .ok_or(Error::Conflict("The layr intent changed"))?;
             let owner = match intent {
-                VmWorkIntent::Completed { owner, result } if owner.request_id == request_id => {
+                LayrWorkIntent::Completed { owner, result } if owner.request_id == request_id => {
                     if outcome.as_ref().is_ok_and(|value| value != &result) {
                         return Err(Error::Conflict("The layr result changed").into());
                     }
                     return Ok(Some(result));
                 }
-                VmWorkIntent::Pending(owner)
-                | VmWorkIntent::Unknown(owner)
-                | VmWorkIntent::NotSent(owner)
+                LayrWorkIntent::Pending(owner)
+                | LayrWorkIntent::Unknown(owner)
+                | LayrWorkIntent::NotSent(owner)
                     if owner.request_id == request_id =>
                 {
                     owner
                 }
-                VmWorkIntent::Pending(..)
-                | VmWorkIntent::Unknown(..)
-                | VmWorkIntent::NotSent(..)
-                | VmWorkIntent::Completed { .. }
-                | VmWorkIntent::UnknownUnattributed(..) => {
+                LayrWorkIntent::Pending(..)
+                | LayrWorkIntent::Unknown(..)
+                | LayrWorkIntent::NotSent(..)
+                | LayrWorkIntent::Completed { .. }
+                | LayrWorkIntent::UnknownUnattributed(..) => {
                     return Err(Error::Conflict("The layr intent changed").into());
                 }
             };
             let (intent, result) = match outcome {
                 Ok(result) => (
-                    VmWorkIntent::Completed {
+                    LayrWorkIntent::Completed {
                         owner,
                         result: result.clone(),
                     },
                     Some(result),
                 ),
-                Err(true) => (VmWorkIntent::Unknown(owner), None),
-                Err(false) => (VmWorkIntent::NotSent(owner), None),
+                Err(true) => (LayrWorkIntent::Unknown(owner), None),
+                Err(false) => (LayrWorkIntent::NotSent(owner), None),
             };
             *select(&mut view) = Some(intent);
-            write_vm_view(tx, &task_id, &view)?;
+            write_layr_view(tx, &task_id, &view)?;
             Ok(result)
         })
         .await
@@ -1355,7 +1358,7 @@ pub struct AcceptWork {
     pub merged_result_id: Option<String>,
 }
 
-pub struct VmMergeCall {
+pub struct LayrMergeCall {
     pub lead_id: String,
     pub owner_id: String,
     pub result_id: String,
@@ -1363,34 +1366,29 @@ pub struct VmMergeCall {
     pub request_id: String,
 }
 
-pub enum VmAcceptPreparation {
-    NotVm,
+pub enum LayrAcceptPreparation {
+    NotLayr,
     Merged(String),
-    Call(VmMergeCall),
+    Call(LayrMergeCall),
 }
 
-/// Persist a merge intent before calling the VM guest. Pending or unknown
-/// identities are never resent; a completed exact merge can be replayed.
 /// Whether accepting a task result merges the owner's layr line into main. A result of the
 /// lead is in main already. A reviewer's line is read-only and has no changes by design; the
-/// guest refuses it as a merge source. Python keeps the same rule
-/// (codex_vm_agents.result_needs_merge).
-fn vm_result_needs_merge(lead_id: &str, owner: &AgentRecord) -> bool {
+/// reviewer is not a merge source.
+fn layr_result_needs_merge(lead_id: &str, owner: &AgentRecord) -> bool {
     owner.id.0 != lead_id
-        && (owner.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-            || owner.workspace_mode
-                == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative))
+        && owner.workspace_mode == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
         && owner.role.value().copied()
             != Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
 }
 
-pub async fn prepare_vm_accept(
+pub async fn prepare_layr_accept(
     store: &RuntimeStore,
     agent_id: &str,
     request_id: Option<&str>,
     signature: &str,
     input: &AcceptWork,
-) -> Result<VmAcceptPreparation, WorkWriteError> {
+) -> Result<LayrAcceptPreparation, WorkWriteError> {
     let agent_id = agent_id.to_owned();
     let task_id = input.task_id.clone();
     let version = input.version;
@@ -1401,11 +1399,10 @@ pub async fn prepare_vm_accept(
     store
         .transaction_with_error(move |tx| {
             let lead = event_write::checked_agent(tx, &agent_id)?;
-            if lead.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
-                && lead.workspace_mode
-                    != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
+            if lead.workspace_mode
+                != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
             {
-                return Ok(VmAcceptPreparation::NotVm);
+                return Ok(LayrAcceptPreparation::NotLayr);
             }
             if lead.is_lead != Some(true) || lead.root_id.0 != agent_id {
                 return Err(
@@ -1419,23 +1416,23 @@ pub async fn prepare_vm_accept(
                     return Err(Error::Conflict("This request id has different content").into());
                 }
                 if saved.archive {
-                    return Ok(VmAcceptPreparation::NotVm);
+                    return Ok(LayrAcceptPreparation::NotLayr);
                 }
             }
             let work = load_work(tx, &lead.root_id.0, &task_id, version)?;
             if work.status() != studio_runtime_store::WorkStatus::Review {
-                return Ok(VmAcceptPreparation::NotVm);
+                return Ok(LayrAcceptPreparation::NotLayr);
             }
             let Some(owner_id) = work.owner().map(str::to_owned) else {
-                return Ok(VmAcceptPreparation::NotVm);
+                return Ok(LayrAcceptPreparation::NotLayr);
             };
             let owner = event_write::checked_agent(tx, &owner_id)?;
-            if !vm_result_needs_merge(&lead.id.0, &owner) {
-                return Ok(VmAcceptPreparation::NotVm);
+            if !layr_result_needs_merge(&lead.id.0, &owner) {
+                return Ok(LayrAcceptPreparation::NotLayr);
             }
             // Validate the acceptance and all dependent recipients before the guest
             // merge. Python's WorkMixin refuses unsupported remote recipients while
-            // applying accept; the VM merge must not happen before that refusal.
+            // applying accept; the merge must not happen before that refusal.
             let statuses = dependency_statuses(tx, &work)?;
             let now = event_write::unix_time()?;
             decide_accept(
@@ -1479,24 +1476,24 @@ pub async fn prepare_vm_accept(
                 .ok_or_else(|| invalid("runtime_work", &task_id))?
                 .to_owned();
             let rpc_id = format!("layr-accept:{result_id}");
-            let mut view = read_vm_view(tx, &task_id)?;
-            match &view.vm_accept {
+            let mut view = read_layr_view(tx, &task_id)?;
+            match &view.accept {
                 Some(
-                    VmWorkIntent::Pending(..)
-                    | VmWorkIntent::Unknown(..)
-                    | VmWorkIntent::UnknownUnattributed(..),
+                    LayrWorkIntent::Pending(..)
+                    | LayrWorkIntent::Unknown(..)
+                    | LayrWorkIntent::UnknownUnattributed(..),
                 ) => {
                     return Err(Error::Conflict(
                         "The prior layr merge outcome is unknown; inspect it before retrying",
                     )
                     .into());
                 }
-                Some(VmWorkIntent::Completed { owner, .. }) if owner.request_id == rpc_id => {
-                    return Ok(VmAcceptPreparation::Merged(result_id.to_owned()));
+                Some(LayrWorkIntent::Completed { owner, .. }) if owner.request_id == rpc_id => {
+                    return Ok(LayrAcceptPreparation::Merged(result_id.to_owned()));
                 }
-                Some(VmWorkIntent::Completed { .. } | VmWorkIntent::NotSent(..)) | None => {}
+                Some(LayrWorkIntent::Completed { .. } | LayrWorkIntent::NotSent(..)) | None => {}
             }
-            let mut owner = VmOwner {
+            let mut owner = LayrOwner {
                 request_id: rpc_id.clone(),
                 owner: owner_id.clone(),
                 revision: revision.clone(),
@@ -1506,16 +1503,16 @@ pub async fn prepare_vm_accept(
                 public: None,
             };
             if let Some(root) = request_id.as_deref() {
-                let token = admit_vm_work_request(tx, &lead, root, &task_id, &signature, now)?
+                let token = admit_layr_work_request(tx, &lead, root, &task_id, &signature, now)?
                     .ok_or(Error::Conflict("The acceptance already completed"))?;
-                owner.public = Some(VmPublic {
+                owner.public = Some(LayrPublic {
                     public_admission: token,
                     public_request_id: root.into(),
                 });
             }
-            view.vm_accept = Some(VmWorkIntent::Pending(owner));
-            write_vm_view(tx, &task_id, &view)?;
-            Ok(VmAcceptPreparation::Call(VmMergeCall {
+            view.accept = Some(LayrWorkIntent::Pending(owner));
+            write_layr_view(tx, &task_id, &view)?;
+            Ok(LayrAcceptPreparation::Call(LayrMergeCall {
                 lead_id: lead.id.0,
                 owner_id,
                 result_id,
@@ -1526,30 +1523,28 @@ pub async fn prepare_vm_accept(
         .await
 }
 
-pub async fn finish_vm_accept(
+pub async fn finish_layr_accept(
     store: &RuntimeStore,
     task_id: &str,
     request_id: &str,
     uncertain: Option<bool>,
-    merge: Option<studio_runtime_store::vm_work_intent::MergeReceipt>,
+    merge: Option<studio_runtime_store::work_intent::MergeReceipt>,
 ) -> Result<(), WorkWriteError> {
     let outcome = uncertain.map_or(Ok(AcceptanceResult { merge }), Err);
-    finish_vm_intent(store, task_id, request_id, outcome, |view| {
-        &mut view.vm_accept
-    })
-    .await
-    .map(|_| ())
+    finish_layr_intent(store, task_id, request_id, outcome, |view| &mut view.accept)
+        .await
+        .map(|_| ())
 }
 
 /// Verify the exact accepted result has a durable successful guest merge.
-pub fn vm_merge_confirmed(
+pub fn layr_merge_confirmed(
     connection: &Connection,
     task_id: &str,
     result_id: &str,
     revision: &str,
 ) -> Result<bool, WorkWriteError> {
-    Ok(matches!(read_vm_view(connection, task_id)?.vm_accept,
-        Some(VmWorkIntent::Completed { owner, .. }) if owner.id.result_id == result_id && owner.revision == revision))
+    Ok(matches!(read_layr_view(connection, task_id)?.accept,
+        Some(LayrWorkIntent::Completed { owner, .. }) if owner.id.result_id == result_id && owner.revision == revision))
 }
 
 pub enum WorkWrite {
@@ -1560,7 +1555,7 @@ pub enum WorkWrite {
     Accept(AcceptWork),
 }
 
-/// Convert the shared ingress command once. Filesystem and VM preparation remain
+/// Convert the shared ingress command once. Filesystem preparation remains
 /// owned by the HTTP driver; authenticated actor selection stays with the caller.
 pub fn task_command<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
     command: studio_runtime_schema::task_command::TaskCommand<DESCRIPTION_MAX, CANCEL_MAX>,
@@ -1664,8 +1659,8 @@ pub fn task_command<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
             state_dir,
             prepared_gate_workspace: None,
             prepared_files: None,
-            vm_evidence: None,
-            vm_evidence_request_id: None,
+            layr_evidence: None,
+            layr_evidence_request_id: None,
         }),
         TaskCommand::Accept {
             task_id,
@@ -1722,7 +1717,7 @@ pub enum WorkWriteError {
     PreparationWorker,
 }
 
-/// Read and validate an idempotency receipt before an external VM side effect.
+/// Read and validate an idempotency receipt before an external side effect.
 pub async fn read_work_receipt(
     store: &RuntimeStore,
     agent_id: String,
@@ -1802,7 +1797,7 @@ fn pending_work_request(
     root: &str,
     signature: &str,
 ) -> Result<Option<WorkReservation>, Error> {
-    let rows = Outbox::for_request_kind::<WorkReservation>(connection, root, OutboxKind::WorkVm)
+    let rows = Outbox::for_request_kind::<WorkReservation>(connection, root, OutboxKind::WorkLayr)
         .map_err(outbox_error)?;
     for row in rows {
         if row.payload.root != agent.root_id.0 {
@@ -1816,7 +1811,7 @@ fn pending_work_request(
     Ok(None)
 }
 
-fn admit_vm_work_request(
+fn admit_layr_work_request(
     tx: &Transaction<'_>,
     agent: &AgentRecord,
     root: &str,
@@ -1856,7 +1851,7 @@ fn reserve_work_request(
 ) -> Result<(), Error> {
     let id = Outbox::effect_id(
         admitted.id(),
-        OutboxKind::WorkVm,
+        OutboxKind::WorkLayr,
         OwnerKind::Task,
         task,
         &["public-request"],
@@ -1865,7 +1860,7 @@ fn reserve_work_request(
         tx,
         &OutboxRow {
             id,
-            kind: OutboxKind::WorkVm,
+            kind: OutboxKind::WorkLayr,
             owner_kind: OwnerKind::Task,
             owner_id: task.into(),
             request_id: Some(root.into()),
@@ -1896,7 +1891,7 @@ fn clear_work_request(
     admitted: &AdmittedRequest,
 ) -> Result<(), Error> {
     // The request result and owner transition must commit before this obligation retires.
-    let rows = Outbox::for_request_kind::<WorkReservation>(tx, root, OutboxKind::WorkVm)
+    let rows = Outbox::for_request_kind::<WorkReservation>(tx, root, OutboxKind::WorkLayr)
         .map_err(outbox_error)?;
     for mut row in rows {
         if row.payload.admitted.id() != admitted.id() {
@@ -2552,7 +2547,7 @@ fn decide_submit(
     if let Some(value) = structured {
         result["result"] = value;
     }
-    if let Some(evidence) = &input.vm_evidence {
+    if let Some(evidence) = &input.layr_evidence {
         let normalized_revision = python_bounded_text(&input.revision, 200)?;
         if evidence.layr_state_id != normalized_revision {
             return Err(Error::InvalidRequest("Submit the exact layr state ID"));
@@ -3099,18 +3094,17 @@ fn submit(
     }
     validate_submission_files(&submitter, &input.files, input.prepared_files.as_ref())?;
     if !reviewer_without_revision(&submitter, &input.revision)
-        && (submitter.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-            || submitter.workspace_mode
-                == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative))
+        && submitter.workspace_mode
+            == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
     {
-        let Some(request_id) = input.vm_evidence_request_id.as_deref() else {
+        let Some(request_id) = input.layr_evidence_request_id.as_deref() else {
             return Err(Error::Conflict(
                 "Layr submission evidence must be checked before saving the result",
             )
             .into());
         };
-        let Some(VmWorkIntent::Completed { owner, result }) =
-            read_vm_view(tx, &input.task_id)?.vm_submit
+        let Some(LayrWorkIntent::Completed { owner, result }) =
+            read_layr_view(tx, &input.task_id)?.submit
         else {
             return Err(
                 Error::Conflict("Layr submission evidence changed before it was saved").into(),
@@ -3121,7 +3115,7 @@ fn submit(
             || owner.owner != submitter_id
             || Some(owner.id.version) != work.version().and_then(studio_json::Number::as_i64)
             || owner.revision != revision
-            || Some(&result.evidence) != input.vm_evidence.as_ref()
+            || Some(&result.evidence) != input.layr_evidence.as_ref()
         {
             return Err(
                 Error::Conflict("Layr submission evidence changed before it was saved").into(),
@@ -3421,7 +3415,7 @@ fn accept(
         && owner_id != agent.root_id.0
     {
         let owner = event_write::checked_agent(tx, owner_id)?;
-        if vm_result_needs_merge(&agent.root_id.0, &owner) {
+        if layr_result_needs_merge(&agent.root_id.0, &owner) {
             let latest_result_id = work
                 .results()
                 .and_then(|items| items.last())
@@ -3521,10 +3515,10 @@ fn accept(
     WorkItemsRepository::update_checked_work(tx, &input.task_id, &updated)?;
     let mut record = single_view(tx, &updated)?;
     record["archivePending"] = json!(archive_owner.is_some());
-    if let Some(VmWorkIntent::Completed {
+    if let Some(LayrWorkIntent::Completed {
         owner,
         result: AcceptanceResult { merge: Some(merge) },
-    }) = read_vm_view(tx, &input.task_id)?.vm_accept
+    }) = read_layr_view(tx, &input.task_id)?.accept
         && owner.id.result_id == result_id
     {
         record["merge"] = json!(merge);
@@ -4029,13 +4023,13 @@ mod actor_tests {
             files: vec![],
             prepared_files: None,
             state_dir: dir.path().into(),
-            vm_evidence: None,
-            vm_evidence_request_id: None,
+            layr_evidence: None,
+            layr_evidence_request_id: None,
         };
-        let result = super::prepare_vm_submission(&store, "reviewer", None, "review", &mut input)
+        let result = super::prepare_layr_submission(&store, "reviewer", None, "review", &mut input)
             .await
             .unwrap();
-        assert!(matches!(result, super::VmSubmissionPreparation::NotVm));
+        assert!(matches!(result, super::LayrSubmissionPreparation::NotLayr));
         let result = store
             .transaction_with_error(move |tx| {
                 super::write(tx, "reviewer", None, "review", WorkWrite::Submit(input))
@@ -4096,15 +4090,15 @@ mod actor_tests {
     }
 
     #[tokio::test]
-    async fn receipt_domain_vm_accept_retry_checks_archive_reservation_before_version() {
+    async fn receipt_domain_layr_accept_retry_checks_archive_reservation_before_version() {
         let dir = tempfile::tempdir().expect("state");
         let store = RuntimeStore::open(Some(dir.path())).await.expect("store");
         let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let request = root.clone();
         store.transaction_with_error(move |tx| -> Result<(), super::WorkWriteError> {
             for agent in [
-                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"executionMode":"vm"}),
-                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","epoch":2,"status":"idle","autoWake":true,"executionMode":"vm"}),
+                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"executionMode":"native","workspaceMode":"layr-native"}),
+                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","epoch":2,"status":"idle","autoWake":true,"executionMode":"native","workspaceMode":"layr-native"}),
             ] { AgentRepository::put(tx, &AgentRecord::from_value(agent).expect("agent"))?; }
             let mut item = work("retry", Some("worker"), "review", json!([{"id":"result-1","agent":"worker","text":"done","checks":"checked","revision":"state","files":[]}]));
             item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"retry","owner":"worker","revision":"state","resultId":"result-1","created":1.0,"merge":{"from_state":"old","to_state":"new"}});
@@ -4123,8 +4117,8 @@ mod actor_tests {
             merged_result_id: None,
         };
         assert!(matches!(
-            super::prepare_vm_accept(&store, "lead", Some(&root), "accept", &input).await,
-            Ok(super::VmAcceptPreparation::NotVm)
+            super::prepare_layr_accept(&store, "lead", Some(&root), "accept", &input).await,
+            Ok(super::LayrAcceptPreparation::NotLayr)
         ));
     }
 
@@ -4137,7 +4131,7 @@ mod actor_tests {
         store.transaction_with_error(move |tx| -> Result<(), super::WorkWriteError> {
             for agent in [
                 json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true}),
-                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","epoch":2,"status":"idle","autoWake":true,"executionMode":"vm"}),
+                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","epoch":2,"status":"idle","autoWake":true,"executionMode":"native","workspaceMode":"layr-native"}),
             ] { AgentRepository::put(tx, &AgentRecord::from_value(agent).expect("fixture agent"))?; }
             let mut item = work("unknown", Some("worker"), "review", json!([{"id":"result-1","agent":"worker","text":"done","checks":"checked","revision":"state","files":[]}]));
             item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"unknown","owner":"worker","revision":"state","resultId":"result-1","created":1.0});
@@ -4192,7 +4186,7 @@ mod actor_tests {
         let missing = r#"{"status":"completed","requestId":"evidence","taskId":"task","owner":"worker","revision":"state","version":2,"created":1.0}"#;
         assert!(
             studio_json::from_str::<
-                super::VmWorkIntent<super::Submission, super::VmSubmissionResult>,
+                super::LayrWorkIntent<super::Submission, super::LayrSubmissionResult>,
             >(missing)
             .is_err()
         );
@@ -4202,7 +4196,7 @@ mod actor_tests {
     fn vm_submission_migrated_unknown_round_trips() {
         let stored =
             r#"{"status":"unknown","requestId":"rpc","owner":"a","revision":"rev","version":1}"#;
-        let intent: super::VmWorkIntent<super::Submission, super::VmSubmissionResult> =
+        let intent: super::LayrWorkIntent<super::Submission, super::LayrSubmissionResult> =
             studio_json::from_str(stored).expect("migrated intent");
         assert_eq!(
             studio_runtime_store::projection_value(&intent),
@@ -4384,37 +4378,37 @@ mod actor_tests {
         let root = tempfile::tempdir().expect("state");
         let store = RuntimeStore::open(Some(root.path())).await.expect("store");
         store.transaction(|tx| {
-            let mut item = work("vm-known", Some("worker"), "running", json!([]));
-            item["vmSubmit"] = json!({"status":"completed","requestId":"evidence","taskId":"vm-known","owner":"worker","revision":"state","version":2,"created":1.0,"evidence":{"layrProjectId":"project","layrLine":"worker","layrStateId":"state"}});
-            item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"vm-known","owner":"worker","revision":"state","resultId":"result","created":1.0});
-            WorkItemsRepository::put_work(tx,"vm-known",&item)?;
+            let mut item = work("layr-known", Some("worker"), "running", json!([]));
+            item["vmSubmit"] = json!({"status":"completed","requestId":"evidence","taskId":"layr-known","owner":"worker","revision":"state","version":2,"created":1.0,"evidence":{"layrProjectId":"project","layrLine":"worker","layrStateId":"state"}});
+            item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"layr-known","owner":"worker","revision":"state","resultId":"result","created":1.0});
+            WorkItemsRepository::put_work(tx,"layr-known",&item)?;
             Ok(())
         }).await.expect("positive owner proof");
-        let evidence = studio_runtime_store::vm_work_intent::Evidence {
+        let evidence = studio_runtime_store::work_intent::Evidence {
             layr_project_id: "project".into(),
             layr_line: "worker".into(),
             layr_state_id: "state".into(),
         };
         assert_eq!(
-            super::finish_vm_submission(&store, "vm-known", "evidence", Err(true))
+            super::finish_layr_submission(&store, "layr-known", "evidence", Err(true))
                 .await
                 .expect("late reply"),
             Some(evidence.clone())
         );
         for outcome in [Err(false), Ok(evidence.clone())] {
             assert_eq!(
-                super::finish_vm_submission(&store, "vm-known", "evidence", outcome)
+                super::finish_layr_submission(&store, "layr-known", "evidence", outcome)
                     .await
                     .expect("stable evidence"),
                 Some(evidence.clone())
             );
         }
         assert!(
-            super::finish_vm_submission(
+            super::finish_layr_submission(
                 &store,
-                "vm-known",
+                "layr-known",
                 "evidence",
-                Ok(studio_runtime_store::vm_work_intent::Evidence {
+                Ok(studio_runtime_store::work_intent::Evidence {
                     layr_state_id: "different".into(),
                     ..evidence
                 })
@@ -4422,17 +4416,17 @@ mod actor_tests {
             .await
             .is_err()
         );
-        super::finish_vm_accept(&store, "vm-known", "merge", Some(true), None)
+        super::finish_layr_accept(&store, "layr-known", "merge", Some(true), None)
             .await
             .expect("late merge reply");
         for outcome in [Some(false), None] {
-            super::finish_vm_accept(&store, "vm-known", "merge", outcome, None)
+            super::finish_layr_accept(&store, "layr-known", "merge", outcome, None)
                 .await
                 .expect("stable merge proof");
         }
         let owner = store
-            .read_async("vm-proof", |db| {
-                WorkItemsRepository::work_record(db, "vm-known")
+            .read_async("layr-proof", |db| {
+                WorkItemsRepository::work_record(db, "layr-known")
             })
             .await
             .expect("read")
@@ -4461,8 +4455,8 @@ mod actor_tests {
                 files: vec![],
                 prepared_files: None,
                 state_dir: std::env::temp_dir(),
-                vm_evidence: None,
-                vm_evidence_request_id: None,
+                layr_evidence: None,
+                layr_evidence_request_id: None,
             }),
         );
         assert!(matches!(
@@ -5209,13 +5203,13 @@ mod actor_tests {
     }
 
     #[test]
-    fn vm_evidence_is_rejected_when_assignment_changes_before_commit() {
+    fn layr_evidence_is_rejected_when_assignment_changes_before_commit() {
         let public_root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let mut connection = database();
         for id in ["worker", "replacement-worker"] {
             let record = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                 "id":id,"rootId":"lead","epoch":2,"status":"running","autoWake":true,
-                "inFlight":true,"agentMode":"multi","concurrency":8,"executionMode":"vm",
+                "inFlight":true,"agentMode":"multi","concurrency":8,"executionMode":"native","workspaceMode":"layr-native",
                 "layrProjectId":"project","layrLine":id
             });
             connection
@@ -5223,7 +5217,7 @@ mod actor_tests {
                     "UPDATE runtime_agents SET record=?1 WHERE id=?2",
                     rusqlite::params![record.to_string(), id],
                 )
-                .expect("agent becomes a VM worker");
+                .expect("agent becomes a Layr worker");
             if id == "replacement-worker" {
                 connection
                     .execute(
@@ -5234,7 +5228,7 @@ mod actor_tests {
             }
         }
         let mut current = work(
-            "vm-owner-race",
+            "layr-owner-race",
             Some("replacement-worker"),
             "running",
             json!([]),
@@ -5243,7 +5237,7 @@ mod actor_tests {
         insert_work(&connection, &current);
         let request_id = "layr-evidence:worker:state-1";
         let intent = json!({
-            "status":"completed","requestId":request_id,"taskId":"vm-owner-race",
+            "status":"completed","requestId":request_id,"taskId":"layr-owner-race",
             "owner":"worker","revision":"state-1","version":2,"created":1.0,
             "evidence":{"layrProjectId":"project","layrLine":"worker","layrStateId":"state-1"}
         });
@@ -5251,7 +5245,7 @@ mod actor_tests {
             .execute(
                 "UPDATE runtime_work SET record=json_set(record,'$.vmSubmit',json(?3)) WHERE id=json_extract(?3,'$.taskId')",
                 rusqlite::params![
-                    "vm-owner-race",
+                    "layr-owner-race",
                     "work-write-vm-intent-v1",
                     intent.to_string()
                 ],
@@ -5266,7 +5260,7 @@ mod actor_tests {
             "request-signature",
             WorkWrite::Submit(super::SubmitWork {
                 prepared_gate_workspace: None,
-                task_id: "vm-owner-race".to_owned(),
+                task_id: "layr-owner-race".to_owned(),
                 version: None,
                 result: "result".into(),
                 checks: "checks".to_owned(),
@@ -5274,16 +5268,16 @@ mod actor_tests {
                 files: vec![],
                 prepared_files: None,
                 state_dir: std::env::temp_dir(),
-                vm_evidence: Some(studio_runtime_store::vm_work_intent::Evidence {
+                layr_evidence: Some(studio_runtime_store::work_intent::Evidence {
                     layr_project_id: "project".into(),
                     layr_line: "worker".into(),
                     layr_state_id: "state-1".into(),
                 }),
-                vm_evidence_request_id: Some(request_id.to_owned()),
+                layr_evidence_request_id: Some(request_id.to_owned()),
             }),
         );
         assert!(matches!(result, Err(WorkWriteError::Event(_))));
-        let saved = WorkItemsRepository::work_record(&tx, "vm-owner-race")
+        let saved = WorkItemsRepository::work_record(&tx, "layr-owner-race")
             .expect("work row reads")
             .expect("work row remains");
         assert_eq!(saved.owner(), Some("replacement-worker"));
@@ -5547,11 +5541,6 @@ mod actor_tests {
     }
 
     #[test]
-    fn vm_reviewer_result_is_accepted_without_a_layr_merge() {
-        assert_reviewer_result_is_accepted_without_a_layr_merge("vm", "layr");
-    }
-
-    #[test]
     fn native_layr_reviewer_result_is_accepted_without_a_merge_and_implementer_requires_merge() {
         assert_reviewer_result_is_accepted_without_a_layr_merge("native", "layr-native");
     }
@@ -5572,7 +5561,7 @@ mod actor_tests {
                     "UPDATE runtime_agents SET record=?1 WHERE id=?2",
                     rusqlite::params![record.to_string(), id],
                 )
-                .expect("agent becomes a VM agent");
+                .expect("agent becomes a Layr agent");
         }
         insert_work(
             &connection,
@@ -5603,7 +5592,7 @@ mod actor_tests {
         let reviewer = AgentRepository::get(&tx, &AgentId::from("worker"))
             .expect("reviewer reads")
             .expect("reviewer exists");
-        assert!(!super::vm_result_needs_merge("lead", &reviewer));
+        assert!(!super::layr_result_needs_merge("lead", &reviewer));
         let result = accept(&tx).expect("a reviewer result needs no merge");
         assert_eq!(result.record["status"], "accepted");
         let intent = super::ArchiveIntent {
@@ -5756,8 +5745,8 @@ mod actor_tests {
             files: vec!["src/first.rs".into(), "src/second.rs".into()],
             prepared_files: None,
             state_dir: state.path().into(),
-            vm_evidence: None,
-            vm_evidence_request_id: None,
+            layr_evidence: None,
+            layr_evidence_request_id: None,
         };
         input.prepared_files = super::prepare_submission_files(&store, "lead", &input)
             .await
@@ -5811,7 +5800,7 @@ mod actor_tests {
                 }
             })
             .await
-            .expect("nonempty non-VM submission");
+            .expect("nonempty submission");
         assert_eq!(result.record["results"][0]["files"], json!(input.files));
         input.prepared_files = None;
         let replay = store
@@ -5856,8 +5845,8 @@ mod actor_tests {
                 files: vec![],
                 prepared_files: None,
                 state_dir: std::env::temp_dir(),
-                vm_evidence: None,
-                vm_evidence_request_id: None,
+                layr_evidence: None,
+                layr_evidence_request_id: None,
             }),
         )
         .expect("worker submission succeeds");
@@ -5902,8 +5891,8 @@ mod actor_tests {
                 files: vec![],
                 prepared_files: None,
                 state_dir: std::env::temp_dir(),
-                vm_evidence: None,
-                vm_evidence_request_id: None,
+                layr_evidence: None,
+                layr_evidence_request_id: None,
             }),
         )
         .expect("lead submission succeeds");

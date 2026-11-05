@@ -9,7 +9,6 @@ export const studioSettingsTabs = [
   ["agents", "Agents"],
   ["federation", "Federation"],
   ["servers", "Servers"],
-  ["linux-vm", "VM"],
   ["layr-worktrees", "Layr & worktrees"],
   ["phone-alerts", "Phone alerts"],
   ["hotkeys", "Hotkeys"],

@@ -552,45 +552,6 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
         Box::pin(async move { port?.worker_diagnostics().await })
     }
 
-    fn deliver_vm_notification(
-        &self,
-        account: String,
-        agent_id: String,
-        epoch: u64,
-        sequence: u64,
-        frame: studio_runtime_providers::Frame,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        (),
-                        studio_runtime_services::account_session_runtime::AccountSessionError,
-                    >,
-                > + Send,
-        >,
-    > {
-        use studio_runtime_services::account_session_runtime::AccountSessionError;
-
-        let session = self
-            .sessions
-            .read()
-            .ok()
-            .and_then(|sessions| sessions.get(&account).cloned())
-            .filter(|session| session.is_live());
-        Box::pin(async move {
-            let Some(session) = session else {
-                return Err(AccountSessionError::Requires(
-                    "account-worker/vm-notification",
-                ));
-            };
-            let epoch = i64::try_from(epoch).map_err(|_| AccountSessionError::Unknown)?;
-            session
-                .deliver_vm_notification(&account, &agent_id, epoch, sequence, frame)
-                .await
-                .map_err(|_| AccountSessionError::Unknown)
-        })
-    }
-
     fn claude_control_session(
         &self,
         account: &str,

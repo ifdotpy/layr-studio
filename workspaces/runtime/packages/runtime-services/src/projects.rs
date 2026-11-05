@@ -942,7 +942,7 @@ async fn set_worker_environment(
         Some(WorkerEnvironment::Host) => "host",
         Some(WorkerEnvironment::Linux) => {
             return Err(ProjectsError::BadRequest(
-                "Choose a layr chat to run agents in the VM",
+                "This worker environment is unavailable",
             ));
         }
         None => return Err(ProjectsError::Invalid("worker environment is invalid")),

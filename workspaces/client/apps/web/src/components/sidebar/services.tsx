@@ -11,9 +11,6 @@ import {
 } from "../../sync/uiPreferenceStore";
 import type { PreferenceFields } from "../../sync/uiPreferenceMerge";
 import type { Project } from "../../types";
-import type { LayrReadinessEntry } from "./LayrReadiness";
-import type { LayrSyncEntry } from "./MacSync";
-import type { VaultEntry } from "./Vault";
 
 export type SidebarTarget =
   | { kind: "chat"; id: string }
@@ -58,12 +55,6 @@ export type SidebarServices = {
   displayPath?: (path: string, target?: SidebarTarget) => string;
   chatPath?: (id: string) => string;
   alias?: (target: SidebarTarget) => string | undefined;
-  /** Each server's own report for a combined project row. */
-  layrReadiness?: (path: string) => LayrReadinessEntry[];
-  /** Each server's Mac folder sync of a combined project row, with its owner for actions. */
-  layrSync?: (path: string) => LayrSyncEntry[];
-  /** Each server's report of the project's vault, with its owner for actions. */
-  vault?: (path: string) => VaultEntry[];
 };
 
 export function sidebarIdentity(ownerId: string, id: string): string {

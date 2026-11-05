@@ -71,13 +71,6 @@ macro_rules! pattern_text {
     };
 }
 
-fn identifier(value: &str, max: usize, extra: &[u8]) -> bool {
-    let mut bytes = value.bytes();
-    value.len() <= max
-        && bytes.next().is_some_and(|b| b.is_ascii_alphanumeric())
-        && bytes.all(|b| b.is_ascii_alphanumeric() || extra.contains(&b))
-}
-pattern_text!(ProjectId, |v: &str| identifier(v, 100, b"_-"));
 pattern_text!(NonWhitespace, |v: &str| v.chars().any(|c| {
     // JSON Schema uses ECMA-262 whitespace: unlike Unicode White_Space,
     // it excludes NEXT LINE and includes the byte-order mark.
@@ -87,27 +80,4 @@ pattern_text!(Uuid, |v: &str| {
     v.len() == 36
         && [8, 13, 18, 23].iter().all(|&i| v.as_bytes()[i] == b'-')
         && uuid::Uuid::parse_str(v).is_ok()
-});
-pattern_text!(VaultRequestId, |v: &str| identifier(v, 128, b":_-"));
-pattern_text!(SecretRequestId, |v: &str| identifier(v, 100, b":_-"));
-pattern_text!(AwsProfileName, |v: &str| identifier(v, 128, b"_.@+-"));
-pattern_text!(SecretName, |v: &str| {
-    let mut bytes = v.bytes();
-    v.len() <= 64
-        && bytes
-            .next()
-            .is_some_and(|b| b.is_ascii_uppercase() || b == b'_')
-        && bytes.all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
-});
-pattern_text!(Region, |v: &str| {
-    let parts: Vec<_> = v.split('-').collect();
-    parts.len() >= 3
-        && parts[0].len() == 2
-        && parts[0].bytes().all(|b| b.is_ascii_lowercase())
-        && parts[1..parts.len() - 1]
-            .iter()
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase()))
-        && parts
-            .last()
-            .is_some_and(|part| part.len() == 1 && part.as_bytes()[0].is_ascii_digit())
 });

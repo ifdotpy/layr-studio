@@ -1095,7 +1095,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
                 | crate::account_worker::WorkerError::Session(_)
                 | crate::account_worker::WorkerError::Notification(_)
                 | crate::account_worker::WorkerError::PreparationRefused(_)
-                | crate::account_worker::WorkerError::StaleVmActor
+                | crate::account_worker::WorkerError::UnavailableActor
                 | crate::account_worker::WorkerError::PreparationPending(_)
                 | crate::account_worker::WorkerError::PreparationAwaitsAgent(_)
                 | crate::account_worker::WorkerError::CleanupUnconfirmed(_)

@@ -1240,7 +1240,7 @@ mod tests {
             format!("{}\n", project.join("one/.git/objects").display()),
         )
         .expect("restore internal alternate");
-        let worktree_git = crate::vm_preparation::read_gitdir_pointer(&first, &first.join(".git"))
+        let worktree_git = crate::workspace_paths::read_gitdir_pointer(&first, &first.join(".git"))
             .expect("worktree metadata");
         fs::write(
             worktree_git.join("commondir"),

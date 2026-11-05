@@ -98,7 +98,8 @@ impl PublicationContext {
         if account.is_empty()
             || actor.is_empty()
             || epoch < 0
-            || journal_scope != crate::account_worker::vm_journal_scope(account, actor)
+            || journal_scope
+                != crate::account_worker::historical_actor_journal_scope(account, actor)
         {
             return Err(NotificationDispatchError::invalid());
         }
@@ -1534,8 +1535,7 @@ fn write_text_notification(
         index_search,
     )?;
     if completed {
-        // Sign-in links in the message become sign-in cards once it commits
-        // (docs/vm-browser-bridge.md, section 7). The text stays as it is.
+        // Sign-in links become cards once the message commits; its text stays unchanged.
         crate::sign_in::note_message(agent_id, &id, &text);
         agent["activity"] = json!({"phase":"thinking", "at":observed_at});
         agent["lastAnswer"] = Value::String(suffix(&text, 16_000));

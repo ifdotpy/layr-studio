@@ -80,11 +80,11 @@ boundaries-check:
 check-affected base *args:
     @node {{quote(facade)}} check-affected {{quote(base)}} {{args}}
 
-[doc("Run the fast nextest profile and JS/guest witnesses in five bounded concurrent lanes.")]
+[doc("Run the fast nextest profile and JS witnesses in bounded concurrent lanes.")]
 test-fast:
     @just _test-gate test-fast
 
-[doc("Run the broad nextest profile and JS/guest checks with one renderer build and browser smoke.")]
+[doc("Run the broad nextest profile and JS checks with one renderer build and browser smoke.")]
 test-comprehensive:
     @just _test-gate test-comprehensive
 
@@ -121,7 +121,7 @@ _test-gate gate:
 test-fast-rest:
     @node {{quote(facade)}} test-fast-rest
 
-[doc("Run JS and guest checks against prebuilt WASM/supervisor artifacts; never compile Rust.")]
+[doc("Run JS checks against prebuilt WASM/supervisor artifacts; never compile Rust.")]
 test-fast-rest-non-rust:
     @node {{quote(facade)}} test-fast-rest-non-rust
 
@@ -238,11 +238,7 @@ test-native-webview:
     @cargo build -p studio-native-client --features native-check --locked
     @node workspaces/client/apps/native/check-native.ts
 
-[doc("Manual check: run real guest module worker aggregation and crash scenarios.")]
-test-guest-runner-processes:
-    @node --test workspaces/runtime/apps/vm-guest/run-guest-suite-processes.test.mts
-
-[doc("Manual process check: run detached host_exec startup, replacement and guest broker scenarios.")]
+[doc("Manual process check: run desktop startup delivery.")]
 test-real-process-probe:
     @STUDIO_REAL_PROCESS_TESTS=1 python3 -I -B workspaces/client/apps/desktop/startup-delivery-test.py StartupDeliveryTests.test_owned_launcher_probe_observes_its_real_kernel_companion_without_runtime_state
 
@@ -251,6 +247,3 @@ test-live-handover:
 
 test-quarantine:
     @cargo nextest run --build-jobs 4 -p studio-runtime-services -p studio-runtime-process --run-ignored only --test-threads 1 -E 'test(=wave7_p04_review::answer_and_cancellation_restart_at_each_real_store_queue_and_transport_boundary) | test(=workspace_ready_git::tests::worktree_children_spawned_together_in_one_repository_all_start) | test(=terminal_pty::tests::printf_output_is_delivered_losslessly) | test(=account_worker::tests::publication_off_path::analytics_are_logged_in_the_journal_commit_and_projected_off_the_writer) | test(=account_worker::tests::idle_unload::codex_a_finished_worker_whose_turn_failed_unloads_its_thread) | test(=account_worker::tests::accepted_turn_reattaches_and_keeps_notification_effects) | test(=multi_server_corpus::python_authentication_outputs_match_complete_principal_and_writes) | test(=provider_task::unverifiable_retained_child_refused_before_open)'
-
-test-host-exec-processes:
-    @cargo nextest run --build-jobs 4 -p studio-runtime-server --test integration --run-ignored only --test-threads 1 -E 'test(/^host_exec_service::/)'

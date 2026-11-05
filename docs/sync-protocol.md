@@ -301,13 +301,6 @@ response does not cause another session or projection read. An empty local
 sidebar order never creates a migration write; existing pending requests and
 nonempty legacy user preferences retain their original migration lifecycle.
 
-Vault setup, AWS sign-in, and pull receipts use the transient
-`vault-job-progress` resource, scoped by job kind and request identity. The
-subscription baseline and later changes carry the in-memory receipt itself;
-sign-in codes and URLs never enter the entity stores. The start action retains
-its request identity for one bounded lost-response recovery. Terminal receipts
-release the subscription.
-
 Rename completion uses the agent entity for its title and the transient
 `rename-progress` resource for the exact request's receipt, including failure.
 The selector includes both the agent and request identity; subscription baselines

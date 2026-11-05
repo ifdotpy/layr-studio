@@ -410,8 +410,8 @@ mod tests {
                         prepared_files: None,
                         prepared_gate_workspace: Some(Arc::new(Workspace)),
                         state_dir,
-                        vm_evidence: None,
-                        vm_evidence_request_id: None,
+                        layr_evidence: None,
+                        layr_evidence_request_id: None,
                     }),
                 )
             })

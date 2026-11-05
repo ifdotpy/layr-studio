@@ -40,7 +40,6 @@ export default {
       "src/sync/entityProjection.test.ts",
       "src/sync/resourceEvents.live.test.ts",
       "src/sync/progressSubscription.test.ts",
-      "src/components/sidebar/Vault.test.ts",
       "src/hooks/chatPrefetch.test.ts",
       "src/hooks.subscriptionVisibility.test.ts",
       "src/hooks/snapshotRecovery.test.ts",

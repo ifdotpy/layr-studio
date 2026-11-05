@@ -67,15 +67,32 @@ pub enum Intent<I, R> {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct View {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vm_submit: Option<Intent<Submission, SubmissionResult>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vm_accept: Option<Intent<Acceptance, AcceptanceResult>>,
+    /// Historical wire name retained for persisted native Layr receipts.
+    #[serde(rename = "vmSubmit", default, skip_serializing_if = "Option::is_none")]
+    pub submit: Option<Intent<Submission, SubmissionResult>>,
+    /// Historical wire name retained for persisted native Layr receipts.
+    #[serde(rename = "vmAccept", default, skip_serializing_if = "Option::is_none")]
+    pub accept: Option<Intent<Acceptance, AcceptanceResult>>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn historical_native_work_intents_round_trip() {
+        let stored = studio_json::json!({
+            "vmSubmit": {"status":"completed", "requestId":"evidence", "owner":"worker", "revision":"state", "version":2, "evidence":{"layrProjectId":"project", "layrLine":"worker", "layrStateId":"state"}},
+            "vmAccept": {"status":"completed", "requestId":"merge", "owner":"worker", "revision":"state", "resultId":"result", "merge":{"from_state":"old", "to_state":"new"}}
+        });
+        let view: View = studio_json::from_str(&stored.to_string()).expect("stored native work");
+        assert_eq!(
+            studio_json::from_str::<studio_json::Value>(
+                &studio_json::to_string(&view).expect("serialized work")
+            )
+            .expect("JSON"),
+            stored
+        );
+    }
     #[test]
     fn accepted_completion_retains_merge_receipt() {
         let stored = r#"{"status":"completed","requestId":"rpc","owner":"a","revision":"rev","resultId":"r","merge":{"from_state":"old","to_state":"new"}}"#;

@@ -1,4 +1,4 @@
-//! The host fast path (docs/vm-browser-bridge.md, "Native chats"): on a Mac host the
+//! The host fast path: on a host the
 //! launcher opens the link in the browser of this Mac at once and Studio also shows the card,
 //! so the person can answer from another window or a phone. When the command stops listening
 //! after the Mac opened its page, the card closes as answered by that browser.

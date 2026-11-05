@@ -153,8 +153,6 @@ async fn transcript_initial(
         | ResourceRef::VoiceResource(_)
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::AuthProgressResource(_)
-        | ResourceRef::VaultReadinessResource(_)
-        | ResourceRef::VaultJobProgressResource(_)
         | ResourceRef::RenameProgressResource(_)
         | ResourceRef::AgentDetailResource(_)
         | ResourceRef::MonitorsResource(_)
@@ -282,8 +280,6 @@ async fn view_value(
         | ResourceRef::VoiceResource(_)
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::AuthProgressResource(_)
-        | ResourceRef::VaultReadinessResource(_)
-        | ResourceRef::VaultJobProgressResource(_)
         | ResourceRef::RenameProgressResource(_)
         | ResourceRef::AgentDetailResource(_)
         | ResourceRef::MonitorsResource(_)
@@ -460,8 +456,6 @@ resource_handlers! {
     TerminalsResourceHandler => TerminalsResource, entity_initial, Cache;
     TranscriptResourceHandler => TranscriptResource, transcript_initial, Cache;
     TranscriptsResourceHandler => TranscriptsResource, passive_initial, NoCache;
-    VaultJobProgressResourceHandler => VaultJobProgressResource, passive_initial, NoCache;
-    VaultReadinessResourceHandler => VaultReadinessResource, passive_initial, NoCache;
     VoiceResourceHandler => VoiceResource, passive_initial, NoCache;
     WorkResourceHandler => WorkResource, entity_initial, NoCache;
     WorkspaceResourceHandler => WorkspaceResource, passive_initial, NoCache;
@@ -626,24 +620,6 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .ok(),
         ResourceRef::AuthProgressResource(resource) => {
             studio_json::to_vec(&auth_progress(&state, resource.request_id.as_str()).await?).ok()
-        }
-        ResourceRef::VaultJobProgressResource(resource) => studio_json::to_vec(
-            &super::host_secrets::job_progress(&state, resource.job, resource.request_id.as_str())
-                .await,
-        )
-        .ok(),
-        ResourceRef::VaultReadinessResource(resource) => {
-            let settings = super::host_secrets::settings_dir(&state.state_dir);
-            studio_runtime_process::blocking_pool::spawn_blocking(
-                "runtime-http/vault-readiness",
-                move || {
-                    studio_runtime_services::vault::keys_ready(&settings, resource.prefix.as_str())
-                },
-            )
-            .await
-            .ok()?
-            .ok()
-            .and_then(|ready| studio_json::to_vec(&ready).ok())
         }
         ResourceRef::MultiServerResource(_) if cfg!(unix) => {
             studio_json::to_vec(&super::multi_server::read_snapshot(&state).await.ok()?).ok()

@@ -213,11 +213,11 @@ async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
     }
     #[cfg(unix)]
     if let WorkWrite::Submit(input) = &mut command {
-        prepare_vm_submission(&state, &agent, request_id.as_deref(), &signature, input).await?;
+        prepare_layr_submission(&state, &agent, request_id.as_deref(), &signature, input).await?;
     }
     #[cfg(unix)]
     if let WorkWrite::Accept(input) = &mut command {
-        prepare_vm_accept(&state, &agent, request_id.as_deref(), &signature, input).await?;
+        prepare_layr_accept(&state, &agent, request_id.as_deref(), &signature, input).await?;
     }
     if let WorkWrite::Submit(input) = &mut command {
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -274,17 +274,15 @@ async fn perform(
 }
 
 #[cfg(unix)]
-async fn prepare_vm_accept(
+async fn prepare_layr_accept(
     state: &HttpState,
     agent: &str,
     request_id: Option<&str>,
     signature: &str,
     input: &mut AcceptWork,
 ) -> Result<(), ApiError> {
-    use std::time::Duration;
-    use studio_runtime_services::linux_vm_guest::{GuestRpc, UnixGuestRpc};
     use studio_runtime_services::work_write::{
-        VmAcceptPreparation, finish_vm_accept, prepare_vm_accept as prepare,
+        LayrAcceptPreparation, finish_layr_accept, prepare_layr_accept as prepare,
     };
 
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -292,9 +290,9 @@ async fn prepare_vm_accept(
         .await
         .map_err(write_error)?;
     match preparation {
-        VmAcceptPreparation::NotVm => {}
-        VmAcceptPreparation::Merged(result_id) => input.merged_result_id = Some(result_id),
-        VmAcceptPreparation::Call(call) => {
+        LayrAcceptPreparation::NotLayr => {}
+        LayrAcceptPreparation::Merged(result_id) => input.merged_result_id = Some(result_id),
+        LayrAcceptPreparation::Call(call) => {
             let params = studio_json::json!({
                 "agentId": call.lead_id,
                 "sourceAgentId": call.owner_id,
@@ -314,24 +312,14 @@ async fn prepare_vm_accept(
             let response = studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/work_write",
                 move || {
-                    if studio_runtime_services::layr_native::is_native(&native_lead) {
-                        return studio_runtime_services::layr_native::merge(
-                            &runtime_state,
-                            &native_lead,
-                            &native_owner,
-                            params["expectedStateId"].as_str().unwrap_or_default(),
-                            &operation_id,
-                        )
-                        .map_err(WorkLayrError::Native);
-                    }
-                    UnixGuestRpc::for_runtime_state(&runtime_state)
-                        .call(
-                            "line.merge",
-                            &params,
-                            Some(&operation_id),
-                            Duration::from_secs(20),
-                        )
-                        .map_err(WorkLayrError::Guest)
+                    studio_runtime_services::layr_native::merge(
+                        &runtime_state,
+                        &native_lead,
+                        &native_owner,
+                        params["expectedStateId"].as_str().unwrap_or_default(),
+                        &operation_id,
+                    )
+                    .map_err(WorkLayrError::Native)
                 },
             )
             .await
@@ -345,7 +333,7 @@ async fn prepare_vm_accept(
                         .map(|value| studio_json::from_value(value.clone()))
                         .transpose()
                         .map_err(|_| ApiError::internal())?;
-                    finish_vm_accept(&store, &task_id, &request, None, merge)
+                    finish_layr_accept(&store, &task_id, &request, None, merge)
                         .await
                         .map_err(write_error)?;
                     input.merged_result_id = Some(result_id);
@@ -353,7 +341,7 @@ async fn prepare_vm_accept(
                 Err(error) => {
                     let request = call.request_id;
                     let uncertain = error.uncertain();
-                    finish_vm_accept(&store, &task_id, &request, Some(uncertain), None)
+                    finish_layr_accept(&store, &task_id, &request, Some(uncertain), None)
                         .await
                         .map_err(write_error)?;
                     return Err(ApiError::new(
@@ -368,17 +356,15 @@ async fn prepare_vm_accept(
 }
 
 #[cfg(unix)]
-async fn prepare_vm_submission(
+async fn prepare_layr_submission(
     state: &HttpState,
     agent: &str,
     request_id: Option<&str>,
     signature: &str,
     input: &mut SubmitWork,
 ) -> Result<(), ApiError> {
-    use std::time::Duration;
-    use studio_runtime_services::linux_vm_guest::{GuestRpc, UnixGuestRpc};
     use studio_runtime_services::work_write::{
-        VmSubmissionPreparation, finish_vm_submission, prepare_vm_submission as prepare,
+        LayrSubmissionPreparation, finish_layr_submission, prepare_layr_submission as prepare,
     };
 
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -395,21 +381,21 @@ async fn prepare_vm_submission(
     .await
     .map_err(write_error)?;
     match preparation {
-        VmSubmissionPreparation::NotVm | VmSubmissionPreparation::Replay => {}
-        VmSubmissionPreparation::Evidence {
+        LayrSubmissionPreparation::NotLayr | LayrSubmissionPreparation::Replay => {}
+        LayrSubmissionPreparation::Evidence {
             evidence,
             request_id,
         } => {
-            input.vm_evidence = Some(evidence);
-            input.vm_evidence_request_id = Some(request_id);
+            input.layr_evidence = Some(evidence);
+            input.layr_evidence_request_id = Some(request_id);
         }
-        VmSubmissionPreparation::Call(call) => {
+        LayrSubmissionPreparation::Call(call) => {
             let params = studio_json::json!({
                 "agentId": call.owner_id,
                 "stateId": call.revision,
             });
             let request_id = call.request_id.clone();
-            input.vm_evidence_request_id = Some(request_id.clone());
+            input.layr_evidence_request_id = Some(request_id.clone());
             let expected_revision = call.revision.clone();
             let runtime_state = std::path::PathBuf::from(state.state_dir.clone());
             let native_owner =
@@ -419,22 +405,12 @@ async fn prepare_vm_submission(
             let response = studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/work_write",
                 move || {
-                    if studio_runtime_services::layr_native::is_native(&native_owner) {
-                        return studio_runtime_services::layr_native::evidence(
-                            &runtime_state,
-                            &native_owner,
-                            params["stateId"].as_str().unwrap_or_default(),
-                        )
-                        .map_err(WorkLayrError::Native);
-                    }
-                    UnixGuestRpc::for_runtime_state(&runtime_state)
-                        .call(
-                            "line.evidence",
-                            &params,
-                            Some(&request_id),
-                            Duration::from_secs(20),
-                        )
-                        .map_err(WorkLayrError::Guest)
+                    studio_runtime_services::layr_native::evidence(
+                        &runtime_state,
+                        &native_owner,
+                        params["stateId"].as_str().unwrap_or_default(),
+                    )
+                    .map_err(WorkLayrError::Native)
                 },
             )
             .await
@@ -445,7 +421,7 @@ async fn prepare_vm_submission(
                     let task_id = input.task_id.clone();
                     let operation_id = call.request_id;
                     let uncertain = error.uncertain();
-                    finish_vm_submission(&store, &task_id, &operation_id, Err(uncertain))
+                    finish_layr_submission(&store, &task_id, &operation_id, Err(uncertain))
                         .await
                         .map_err(write_error)?;
                     return Err(ApiError::new(
@@ -461,7 +437,7 @@ async fn prepare_vm_submission(
             {
                 let task_id = input.task_id.clone();
                 let operation_id = call.request_id;
-                finish_vm_submission(&store, &task_id, &operation_id, Err(false))
+                finish_layr_submission(&store, &task_id, &operation_id, Err(false))
                     .await
                     .map_err(write_error)?;
                 return Err(ApiError::new(
@@ -473,7 +449,7 @@ async fn prepare_vm_submission(
                 response.as_ref().and_then(|r| r.project_id.0.as_deref()),
                 response.as_ref().and_then(|r| r.line.0.as_deref()),
             ) {
-                (Some(project), Some(line)) => studio_runtime_store::vm_work_intent::Evidence {
+                (Some(project), Some(line)) => studio_runtime_store::work_intent::Evidence {
                     layr_project_id: project.to_owned(),
                     layr_line: line.to_owned(),
                     layr_state_id: expected_revision,
@@ -481,7 +457,7 @@ async fn prepare_vm_submission(
                 _ => {
                     let task_id = input.task_id.clone();
                     let operation_id = call.request_id;
-                    finish_vm_submission(&store, &task_id, &operation_id, Err(false))
+                    finish_layr_submission(&store, &task_id, &operation_id, Err(false))
                         .await
                         .map_err(write_error)?;
                     return Err(ApiError::new(
@@ -492,11 +468,11 @@ async fn prepare_vm_submission(
             };
             let task_id = input.task_id.clone();
             let operation_id = call.request_id;
-            let evidence = finish_vm_submission(&store, &task_id, &operation_id, Ok(evidence))
+            let evidence = finish_layr_submission(&store, &task_id, &operation_id, Ok(evidence))
                 .await
                 .map_err(write_error)?
                 .ok_or_else(ApiError::internal)?;
-            input.vm_evidence = Some(evidence);
+            input.layr_evidence = Some(evidence);
         }
     }
     Ok(())
@@ -1910,12 +1886,11 @@ inventory::submit! {
     }
 }
 
-// Both Layr modes use the same durable exact-state task receipt contract.
+// Native Layr uses durable exact-state task receipts.
 #[cfg(unix)]
 #[derive(Debug)]
 enum WorkLayrError {
     Native(studio_runtime_services::layr_native::NativeLayrError),
-    Guest(studio_runtime_services::linux_vm_guest::GuestError),
 }
 
 #[cfg(unix)]
@@ -1923,7 +1898,6 @@ impl std::fmt::Display for WorkLayrError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Native(error) => error.fmt(f),
-            Self::Guest(error) => error.fmt(f),
         }
     }
 }
@@ -1937,7 +1911,6 @@ impl WorkLayrError {
                 studio_runtime_services::layr_native::NativeLayrError::Refused(_)
                     | studio_runtime_services::layr_native::NativeLayrError::Conflict(_)
             ),
-            Self::Guest(error) => error.uncertain(),
         }
     }
 }
@@ -1945,7 +1918,7 @@ impl WorkLayrError {
 #[cfg(all(test, unix))]
 mod layr_error_tests {
     use super::WorkLayrError;
-    use studio_runtime_services::{layr_native::NativeLayrError, linux_vm_guest::GuestError};
+    use studio_runtime_services::layr_native::NativeLayrError;
 
     #[test]
     fn native_merge_conflict_keeps_its_message_and_is_not_uncertain() {
@@ -1956,11 +1929,5 @@ mod layr_error_tests {
             "Native Layr merge conflict: CONFLICT (content): file"
         );
         assert!(!error.uncertain());
-        let guest = WorkLayrError::Guest(GuestError::Transport {
-            message: "lost".into(),
-            uncertain: true,
-        });
-        assert!(guest.to_string().contains("VM guest transport"));
-        assert!(guest.uncertain());
     }
 }

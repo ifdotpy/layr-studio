@@ -746,40 +746,6 @@ it("delivers subscribed auth progress without sending its URL to the entity pers
   expect(f.post).toHaveBeenCalledTimes(1);
 });
 
-it("delivers vault job codes only through transient subscribed frames", async () => {
-  const f = await fixture();
-  const resource = {
-    kind: "vault-job-progress",
-    requestId: "vault-one",
-    job: "login",
-  } as const;
-  const listener = vi.fn();
-  f.transport.watchResourceChanges(resource, listener);
-  await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
-  f.persist.mockClear();
-  const value = {
-    requestId: "vault-one",
-    state: "running",
-    page: "https://device.example/transient",
-    code: "TEMP",
-  };
-  f.source.emit("resource-progress", {
-    protocol: SYNC_PROTOCOL_VERSION,
-    workspaceId: "workspace",
-    epoch: "epoch",
-    revision: 2,
-    resource,
-    value,
-  });
-  expect(listener).toHaveBeenCalledWith(
-    expect.objectContaining({ progress: { resource, value } }),
-  );
-  expect(f.persist).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(10_000);
-  expect(f.post).toHaveBeenCalledTimes(1);
-});
-
 it("coalesces chat switches into one POST without reopening the SSE stream", async () => {
   const f = await fixture();
   for (let i = 0; i < 10; i++) {
@@ -1939,42 +1905,6 @@ it("connection: real lifecycle removes every registered listener across disposal
       await vi.advanceTimersByTimeAsync(0);
     }
   }
-});
-
-it("connection: foreign, stale and invalid progress cannot heal a replacement stream", async () => {
-  const f = await fixture(false, true, true);
-  const resource = { kind: "vault-readiness", prefix: "vault" } as const;
-  f.transport.watchResourceChanges(resource, vi.fn());
-  await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
-  const progress = {
-    protocol: SYNC_PROTOCOL_VERSION,
-    workspaceId: "workspace",
-    epoch: "epoch",
-    revision: 10,
-    resource,
-    value: true,
-  };
-  f.source.emit("resource-progress", progress);
-  const status = vi.fn();
-  f.transport.watchResourceConnection(status);
-  f.source.onerror?.();
-  await vi.advanceTimersByTimeAsync(1_000);
-  const replacement = f.sources[1]!;
-  replacement.emit("api-schema", { hash: API_SCHEMA_HASH });
-  for (const fields of [
-    { workspaceId: "foreign" },
-    { epoch: "foreign" },
-    { revision: 9 },
-  ]) {
-    replacement.emit("resource-progress", { ...progress, ...fields });
-    expect(status.mock.lastCall?.[0]).toBe("degraded");
-  }
-  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-  replacement.emit("resource-progress", { ...progress, value: "invalid" });
-  expect(replacement.closed).toBe(true);
-  expect(status.mock.lastCall?.[0]).toBe("degraded");
-  quiet.mockRestore();
 });
 
 it("staged application must not overtake an earlier resource frame", async () => {

@@ -2119,46 +2119,11 @@ impl crate::monitor_runtime::WorkspaceAdmission for ChangedProjectWorkspace {
         Ok(())
     }
 }
-struct FakeVmReviewGuest;
-thread_local! {
-    static VM_REVIEW_GUEST_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-impl crate::linux_vm_guest::GuestRpc for FakeVmReviewGuest {
-    fn stream(
-        &self,
-        method: &str,
-        params: &Value,
-        request_id: Option<&str>,
-        timeout: std::time::Duration,
-        _on_frame: &mut dyn FnMut(Value) -> Result<(), crate::linux_vm_guest::GuestError>,
-    ) -> Result<Value, crate::linux_vm_guest::GuestError> {
-        VM_REVIEW_GUEST_CALLS.with(|calls| calls.set(calls.get() + 1));
-        assert_eq!(method, "line.save");
-        assert!(params["agentId"].as_str().is_some_and(|id| !id.is_empty()));
-        let turn = params["turnId"].as_str().unwrap();
-        let key = turn.strip_prefix("review:").unwrap();
-        assert_eq!(
-            request_id,
-            Some(format!("layr-review-state:{key}").as_str())
-        );
-        assert_eq!(timeout, std::time::Duration::from_secs(130));
-        Ok(json!({"stateId":"guest-state-17"}))
-    }
-}
 thread_local! {
     static FAIL_MANAGED_WORKSPACE_PREPARATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CHANGE_PROJECT_DURING_ADMISSION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnvironment {
-    fn guest_rpc(
-        &self,
-        _: &RuntimeStore,
-    ) -> Result<
-        Arc<dyn crate::linux_vm_guest::GuestRpc>,
-        crate::managed_child_create::ManagedCreationEnvironmentError,
-    > {
-        Ok(Arc::new(FakeVmReviewGuest))
-    }
     fn select_worker_account(
         &self,
         request: crate::provider_callbacks::WorkerAccountRequest<'_>,
@@ -3416,64 +3381,6 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     assert_eq!(child["accountKey"], "alternate");
     drop(read);
 
-    actor_value["executionMode"] = json!("vm");
-    actor_value["workspaceMode"] = json!("layr");
-    actor_value["cwd"] = json!("/home/studio/project");
-    actor_value["hostProjectPath"] = json!(project_path);
-    actor_value["layrReady"] = json!(true);
-    actor_value["layrProjectId"] = json!("project-17");
-    actor_value["layrLine"] = json!("main");
-    actor_value["provider"] = json!("codex");
-    actor_value["isLead"] = json!(true);
-    let actor_value_for_vm_tx = actor_value.clone();
-    store
-        .transaction_with::<_, StoreError>(move |tx| {
-            let record = studio_runtime_store::AgentRecord::from_value(actor_value_for_vm_tx)
-                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-            studio_runtime_store::AgentRepository::put(tx, &record)?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let vm_actor = Actor::from_record(&actor_value, &context.agent, context.epoch).unwrap();
-    VM_REVIEW_GUEST_CALLS.set(0);
-    let before_vm_review: i64 = store
-        .test_reader()
-        .unwrap()
-        .query_row("SELECT count(*) FROM runtime_agents", [], |row| row.get(0))
-        .unwrap();
-    let vm_review_error = crate::managed_child_create::request_review(
-        &store,
-        &vm_actor,
-        &json!({"target":{"type":"uncommittedChanges"}}),
-        "dispatcher-vm-review-api",
-        22.0,
-        &CreationEnvironment,
-    )
-    .await
-    .expect_err("VM review creation is unavailable until VM workspace preparation exists");
-    assert!(matches!(
-        vm_review_error,
-        crate::managed_child_create::Error::Managed(crate::managed_host_tools::Error::Unavailable(
-            "workspace-state/vm-workspace"
-        ))
-    ));
-    let after_vm_review: i64 = store
-        .test_reader()
-        .unwrap()
-        .query_row("SELECT count(*) FROM runtime_agents", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(
-        before_vm_review, after_vm_review,
-        "no VM reviewer was enqueued"
-    );
-    assert_eq!(VM_REVIEW_GUEST_CALLS.get(), 0, "refusal precedes line.save");
-    let after_uncertain_review: i64 = store
-        .test_reader()
-        .unwrap()
-        .query_row("SELECT count(*) FROM runtime_agents", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(before_vm_review, after_uncertain_review);
     let root_agent_id = context.agent.clone();
     let native_cwd = project_path.clone();
     store

@@ -149,7 +149,7 @@ pub(super) fn data_fault(error: &WorkerError) -> Option<(String, String)> {
         | WorkerError::Notification(_)
         | WorkerError::Expired
         | WorkerError::PreparationRefused(_)
-        | WorkerError::StaleVmActor
+        | WorkerError::UnavailableActor
         | WorkerError::PreparationPending(_)
         | WorkerError::PreparationAwaitsAgent(_)
         | WorkerError::CleanupUnconfirmed(_)

@@ -2,7 +2,7 @@ import { browserSignInUrl } from "./sign-in.fixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
 import type {} from "./browser-open-approval-ui.fixture.tsx";
 import { createFixtureViteServer } from "../playwright.ts";
-// A VM agent's sign-in link (browser/open, docs/vm-browser-bridge.md) renders as a sign-in
+// An agent's sign-in link (browser/open) renders as a sign-in
 // card. Nothing opens before the approval; after it, the desktop opens only the link that the
 // server returned. A refusal from the server, such as a remote window, opens nothing.
 
@@ -99,9 +99,7 @@ test("Browser Open Approval Ui", async ({ page }) => {
     ).toBeVisible();
     await expect(approve.getByText("kube", { exact: true })).toBeVisible();
     await expect(
-      approve.getByText(
-        "The VM on the chat's server, user studio-a-0123, port 8000",
-      ),
+      approve.getByText("the chat's server, port 8000"),
     ).toBeVisible();
     // The card offers no direct link: the link opens only through the approval.
     await expect(approve.locator("a[href]")).toHaveCount(0);

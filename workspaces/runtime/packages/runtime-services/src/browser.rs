@@ -184,30 +184,6 @@ fn forward_port<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u16
     }
 }
 
-impl ForwardInput {
-    pub(crate) fn new(
-        server: String,
-        bridge_id: String,
-        token: String,
-        host: String,
-        port: u16,
-        path: String,
-        expires_at: f64,
-    ) -> Self {
-        Self {
-            server,
-            bridge_id,
-            token,
-            host,
-            port,
-            path,
-            expires_at,
-            #[cfg(test)]
-            observe_half_close: false,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct ForwardReceipt {
     pub replayed: bool,

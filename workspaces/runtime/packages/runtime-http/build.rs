@@ -20,22 +20,12 @@ const CONSTRAINED_INGRESS: &[&str] = &[
     "ClaudeCodeRequest",
     "ClaudeStartRequest",
     "IdRequest",
-    "MacSyncConfigRequest",
-    "MacSyncResolveRequest",
     "McpReconnectRequest",
     "McpSessionBinding",
     "NativeActionRequest",
     "ActionContext",
     "SafetyActionRequest",
-    "ProjectSecretsListRequest",
     "ProjectDeleteRequest",
-    "ProjectSecretSetRequest",
-    "ProjectSecretRemoveRequest",
-    "VaultLoginRequest",
-    "VaultPullRequest",
-    "VaultSetupFactsRequest",
-    "VaultSetupRequest",
-    "VaultUnlockRequest",
     "VoiceEndRequest",
     "VoiceStartRequest",
     "VoiceStatusRequest",
@@ -57,34 +47,6 @@ const PATTERN_TYPES: &[(&str, &str)] = &[
     (
         "^[^\\s\\p{C}](?:[^\\s\\p{C}]| +[^\\s\\p{C}])*$",
         "studio_runtime_schema::multi_server_ingress::ServerLabel",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-        "crate::ingress_pattern::ProjectId",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
-        "crate::ingress_pattern::VaultRequestId",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9:_-]{0,99}$",
-        "crate::ingress_pattern::SecretRequestId",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}$",
-        "crate::ingress_pattern::AwsProfileName",
-    ),
-    (
-        "^[A-Z_][A-Z0-9_]{0,63}$",
-        "crate::ingress_pattern::SecretName",
-    ),
-    (
-        "^[a-z]{2}(-[a-z]+)+-[0-9]$",
-        "crate::ingress_pattern::Region",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9_-]{0,43}$",
-        "studio_runtime_schema::resource_ref::VaultPrefix",
     ),
 ];
 
@@ -464,9 +426,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             "TeamCounts",
             "studio_runtime_schema::agent_progress::TeamCounts",
         ),
-        ("VaultPullSequence", "studio_json::Number"),
-        ("VaultPullFiles", "studio_json::Number"),
-        ("VaultPullBytes", "studio_json::Number"),
         (
             "ProviderModel",
             "studio_runtime_schema::model_catalog::ProviderModel",

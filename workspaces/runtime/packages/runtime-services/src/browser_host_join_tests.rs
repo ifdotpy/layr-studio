@@ -1,4 +1,4 @@
-//! One card for one sign-in (docs/vm-browser-bridge.md, "One card for the same sign-in"):
+//! One card for one sign-in:
 //! a link of another chat with the same Linux user, sign-in host and client joins the open
 //! request. When that sign-in ends, every joined request ends with it: signed in, or the
 //! oldest joined request becomes the card.

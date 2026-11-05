@@ -269,7 +269,6 @@ async function accountProjectUi(_browser: Browser, nativeOnly: boolean) {
     if (url.pathname === "/api/ui-summary")
       return json({
         system: "Linux",
-        hasStudioVm: false,
         nativeLayr: { status: "ready" },
         defaultWorkspaceMode: nativeOnly ? "layr-native" : "worktree",
       });

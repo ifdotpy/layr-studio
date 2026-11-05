@@ -719,12 +719,9 @@ async fn legacy_start_absence_matches_python_writes_and_visible_wait() {
     }
 }
 
-/// GuestProviderTaskFactory exposes the host account generation on its tickets.
-/// The guest process can survive a host provider replacement, so that generation
-/// cannot prove that a missing VM input will never arrive.
 #[tokio::test]
-async fn a_replaced_host_provider_does_not_restore_an_uncertain_vm_input() {
-    for execution_mode in ["native", "vm"] {
+async fn a_replaced_host_provider_restores_native_input() {
+    {
         let case = frozen_cases(Corpus::Start)
             .into_iter()
             .find(|case| case["name"] == "waiting")
@@ -732,7 +729,7 @@ async fn a_replaced_host_provider_does_not_restore_an_uncertain_vm_input() {
         let root = fixture();
         let store = open_store(root.path()).await;
         let mut agent = case["agent"].clone();
-        agent["executionMode"] = json!(execution_mode);
+        agent["executionMode"] = json!("native");
         agent["startAttempt"]["connectionGeneration"] = json!(1);
         agent["restartRecovery"] = json!({"stage":"held"});
         agent["contextRepairWait"] = json!({"error":"Input receipt remains unknown"});
@@ -769,41 +766,14 @@ async fn a_replaced_host_provider_does_not_restore_an_uncertain_vm_input() {
         .expect("native history reconciliation")
         .outcome;
         let after = snapshot(&store);
-        if execution_mode == "vm" {
-            assert_eq!(
-                events(&store),
-                vec![("event".into(), "uncertain".into())],
-                "a host generation does not identify the retained guest process"
-            );
-            assert_eq!(
-                outcome,
-                RecoveryOutcome::Applied(
-                    studio_runtime_services::recovery::RecoveryReceipt::Unknown(
-                        json!({"status":"unconfirmed"})
-                    )
-                )
-            );
-            assert_eq!(
-                after.record()["startAttempt"],
-                before.record()["startAttempt"]
-            );
-            assert_eq!(
-                after.record()["contextRepairWait"],
-                agent["contextRepairWait"]
-            );
-            assert_eq!(after.record()["restartRecovery"]["stage"], "held");
-        } else {
-            assert_eq!(events(&store), vec![("event".into(), "pending".into())]);
-            assert_eq!(
-                outcome,
-                RecoveryOutcome::Applied(
-                    studio_runtime_services::recovery::RecoveryReceipt::Applied(
-                        json!({"status":"input_restored"})
-                    )
-                )
-            );
-            assert_eq!(after.record()["restartRecovery"]["stage"], "finished");
-        }
+        assert_eq!(events(&store), vec![("event".into(), "pending".into())]);
+        assert_eq!(
+            outcome,
+            RecoveryOutcome::Applied(studio_runtime_services::recovery::RecoveryReceipt::Applied(
+                json!({"status":"input_restored"})
+            ))
+        );
+        assert_eq!(after.record()["restartRecovery"]["stage"], "finished");
     }
 }
 

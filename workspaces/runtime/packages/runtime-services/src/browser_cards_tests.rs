@@ -1,7 +1,7 @@
 //! Cards from a fake guest `browser.wait` (the Python server's `Bridge.apply` rules).
 
 use super::{CardSource, card_id, load, poll_once, save};
-use crate::linux_vm_guest::{GuestError, GuestRpc};
+use crate::browser_rpc::{BrowserRpc, BrowserRpcError};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,15 +16,15 @@ struct WaitGuest {
     calls: Mutex<Vec<(String, Value)>>,
 }
 
-impl GuestRpc for WaitGuest {
+impl BrowserRpc for WaitGuest {
     fn stream(
         &self,
         method: &str,
         params: &Value,
         _request_id: Option<&str>,
         _timeout: Duration,
-        _on_frame: &mut dyn FnMut(Value) -> Result<(), GuestError>,
-    ) -> Result<Value, GuestError> {
+        _on_frame: &mut dyn FnMut(Value) -> Result<(), BrowserRpcError>,
+    ) -> Result<Value, BrowserRpcError> {
         self.calls
             .lock()
             .expect("test step")
@@ -35,14 +35,14 @@ impl GuestRpc for WaitGuest {
                 .lock()
                 .expect("test step")
                 .pop_front()
-                .ok_or(GuestError::InvalidRequest),
+                .ok_or(BrowserRpcError::InvalidRequest),
             "browser.close" => Ok(json!({"state":"closed"})),
-            _ => Err(GuestError::InvalidRequest),
+            _ => Err(BrowserRpcError::InvalidRequest),
         }
     }
 }
 
-const VM_AGENT: &str = "vm-agent";
+const AGENT: &str = "agent";
 const KUBE: &str = "https://id.example.com/auth?client_id=kube&redirect_uri=http%3A%2F%2Flocalhost%3A8000&scope=openid&state=S1";
 const DEVICE: &str = "https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-EFGH";
 
@@ -64,9 +64,9 @@ async fn store() -> (tempfile::TempDir, studio_runtime_store::RuntimeStore) {
             tx.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                 [
-                    VM_AGENT,
-                    &json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":VM_AGENT,"rootId":VM_AGENT,"epoch":1,"status":"running","autoWake":true,
-                             "executionMode":"vm","layrProjectId":"p1"})
+                    AGENT,
+                    &json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":AGENT,"rootId":AGENT,"epoch":1,"status":"running","autoWake":true,
+                             "executionMode":"native","layrProjectId":"p1"})
                     .to_string(),
                 ],
             )
@@ -138,13 +138,12 @@ async fn a_card_is_stored_while_pending_and_closes_with_its_request() {
     let device = "f".repeat(32);
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
-            json!({"items":[item(&device, VM_AGENT, DEVICE, Value::Null, "pending", 1)], "next": 1}),
-            json!({"items":[item(&device, VM_AGENT, DEVICE, Value::Null, "closed", 2)], "next": 2}),
+            json!({"items":[item(&device, AGENT, DEVICE, Value::Null, "pending", 1)], "next": 1}),
+            json!({"items":[item(&device, AGENT, DEVICE, Value::Null, "closed", 2)], "next": 2}),
         ])),
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "vm",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -190,16 +189,15 @@ async fn pending_links_become_cards_once_and_unknown_chats_are_refused() {
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
             json!({"items":[
-                item(&kube, VM_AGENT, KUBE, redirect.clone(), "pending", 1),
-                item(&device, VM_AGENT, DEVICE, Value::Null, "pending", 2),
+                item(&kube, AGENT, KUBE, redirect.clone(), "pending", 1),
+                item(&device, AGENT, DEVICE, Value::Null, "pending", 2),
                 item(&stranger, "missing-agent", KUBE, redirect.clone(), "pending", 3),
             ], "next": 3}),
-            json!({"items":[item(&kube, VM_AGENT, KUBE, redirect.clone(), "pending", 4)], "next": 4}),
+            json!({"items":[item(&kube, AGENT, KUBE, redirect.clone(), "pending", 4)], "next": 4}),
         ])),
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "vm",
         guest: guest.clone(),
         forwarder: None,
         http_providers: Default::default(),
@@ -211,7 +209,7 @@ async fn pending_links_become_cards_once_and_unknown_chats_are_refused() {
         3
     );
     let (row, card) = request(&store, &kube).expect("kubelogin card");
-    assert_eq!(row.agent.as_str(), VM_AGENT);
+    assert_eq!(row.agent.as_str(), AGENT);
     assert!(matches!(row.state, ApprovalState::Pending));
     assert_eq!(row.turn, None);
     let stored = card.redirect.as_ref().expect("redirect");
@@ -222,9 +220,9 @@ async fn pending_links_become_cards_once_and_unknown_chats_are_refused() {
     assert_eq!(card.url, KUBE);
     assert_eq!(
         json!(card.host),
-        item(&kube, VM_AGENT, KUBE, redirect.clone(), "pending", 1)["host"]
+        item(&kube, AGENT, KUBE, redirect.clone(), "pending", 1)["host"]
     );
-    assert_eq!(card.source, BrowserSource::Vm);
+    assert_eq!(card.source, BrowserSource::Host);
     assert_eq!(card.user_code, None);
     let (_, device_card) = request(&store, &device).expect("device card");
     assert_eq!(device_card.user_code.as_deref(), Some("ABCD-EFGH"));
@@ -261,7 +259,6 @@ async fn non_string_url_or_host_never_creates_a_browser_card() {
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "vm",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -269,7 +266,7 @@ async fn non_string_url_or_host_never_creates_a_browser_card() {
     for (id, field) in [("d".repeat(32), "url"), ("e".repeat(32), "host")] {
         let mut input = item(
             &id,
-            VM_AGENT,
+            AGENT,
             KUBE,
             json!({"host":"localhost","port":8000,"path":"/"}),
             "pending",
@@ -293,18 +290,17 @@ async fn a_final_guest_state_expires_the_card_and_tells_the_chat_after_an_approv
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
             json!({"items":[
-                item(&waiting, VM_AGENT, KUBE, redirect.clone(), "pending", 1),
-                item(&pasting, VM_AGENT, KUBE, redirect.clone(), "pending", 2),
+                item(&waiting, AGENT, KUBE, redirect.clone(), "pending", 1),
+                item(&pasting, AGENT, KUBE, redirect.clone(), "pending", 2),
             ], "next": 2}),
             json!({"items":[
-                item(&waiting, VM_AGENT, KUBE, redirect.clone(), "stale", 3),
-                item(&pasting, VM_AGENT, KUBE, redirect.clone(), "closed", 4),
+                item(&waiting, AGENT, KUBE, redirect.clone(), "stale", 3),
+                item(&pasting, AGENT, KUBE, redirect.clone(), "closed", 4),
             ], "next": 4}),
         ])),
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "vm",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -384,11 +380,11 @@ async fn a_card_follows_the_request_deadline_and_tells_the_chat_when_nobody_answ
     let timed_out = "1".repeat(32);
     let replaced = "2".repeat(32);
     let redirect = json!({"host":"localhost","port":8000,"path":"/"});
-    let pending = |id: &str, seq: u64| item(id, VM_AGENT, KUBE, redirect.clone(), "pending", seq);
+    let pending = |id: &str, seq: u64| item(id, AGENT, KUBE, redirect.clone(), "pending", seq);
     let mut moved = pending(&stopped, 4);
     moved["expiresAt"] = json!(1201.0);
     let ended =
-        |id: &str, state: &str, seq: u64| item(id, VM_AGENT, KUBE, redirect.clone(), state, seq);
+        |id: &str, state: &str, seq: u64| item(id, AGENT, KUBE, redirect.clone(), state, seq);
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
             json!({"items":[pending(&stopped, 1), pending(&timed_out, 2), pending(&replaced, 3)], "next": 3}),
@@ -404,7 +400,6 @@ async fn a_card_follows_the_request_deadline_and_tells_the_chat_when_nobody_answ
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "vm",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -464,57 +459,21 @@ async fn a_card_follows_the_request_deadline_and_tells_the_chat_when_nobody_answ
 }
 
 #[tokio::test]
-async fn the_host_bridge_shows_a_card_for_a_vm_chat_command_that_runs_on_the_mac() {
-    let (_dir, store) = store().await;
-    let bridge = "3".repeat(32);
-    let redirect = json!({"host":"localhost","port":8000,"path":"/"});
-    let guest = Arc::new(WaitGuest {
-        batches: Mutex::new(VecDeque::from([json!({"items":[
-            item(&bridge, VM_AGENT, KUBE, redirect, "pending", 1),
-        ], "next": 1})])),
-        calls: Mutex::new(Vec::new()),
-    });
-    let source = CardSource {
-        source: "host",
-        guest: guest.clone(),
-        forwarder: None,
-        http_providers: Default::default(),
-    };
-    poll_once(&store, &source, 0, 0, None)
-        .await
-        .expect("test step");
-    let (row, card) =
-        request(&store, &bridge).expect("a host_exec command of a VM chat gets a card");
-    assert!(matches!(row.state, ApprovalState::Pending));
-    assert_eq!(card.source, BrowserSource::Host);
-    assert!(
-        guest
-            .calls
-            .lock()
-            .expect("test step")
-            .iter()
-            .all(|call| call.0 != "browser.close"),
-        "the host bridge keeps the request"
-    );
-}
-
-#[tokio::test]
 async fn a_card_whose_page_this_mac_opened_closes_as_answered_when_its_command_stops() {
     let (_dir, store) = store().await;
     let bridge = "4".repeat(32);
     let redirect = json!({"host":"localhost","port":8000,"path":"/"});
-    let mut finished = item(&bridge, VM_AGENT, KUBE, redirect.clone(), "closed", 2);
+    let mut finished = item(&bridge, AGENT, KUBE, redirect.clone(), "closed", 2);
     finished["localOpen"] = json!(true);
     finished["closeReason"] = json!("local");
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
-            json!({"items":[item(&bridge, VM_AGENT, KUBE, redirect, "pending", 1)], "next": 1}),
+            json!({"items":[item(&bridge, AGENT, KUBE, redirect, "pending", 1)], "next": 1}),
             json!({"items":[finished], "next": 2}),
         ])),
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -554,8 +513,8 @@ async fn a_card_comes_back_after_a_backend_restart_while_its_request_is_open() {
     let waiting = "6".repeat(32);
     let ended = "7".repeat(32);
     let redirect = json!({"host":"localhost","port":8000,"path":"/"});
-    let pending = |id: &str, seq: u64| item(id, VM_AGENT, KUBE, redirect.clone(), "pending", seq);
-    let mut approved = item(&waiting, VM_AGENT, KUBE, redirect.clone(), "approved", 5);
+    let pending = |id: &str, seq: u64| item(id, AGENT, KUBE, redirect.clone(), "pending", seq);
+    let mut approved = item(&waiting, AGENT, KUBE, redirect.clone(), "approved", 5);
     approved["lease"] = json!({"host":"localhost","port":8000,"path":"/","expiresAt": 900.0});
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
@@ -563,13 +522,12 @@ async fn a_card_comes_back_after_a_backend_restart_while_its_request_is_open() {
             // The first poll after the restart reads the whole queue again.
             json!({"items":[
                 pending(&open, 1), approved,
-                item(&ended, VM_AGENT, KUBE, redirect.clone(), "stale", 6),
+                item(&ended, AGENT, KUBE, redirect.clone(), "stale", 6),
             ], "next": 6}),
         ])),
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "vm",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -644,7 +602,7 @@ async fn seed_agent(store: &studio_runtime_store::RuntimeStore, id: &str) {
                 [
                     id.as_str(),
                     &json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"running","autoWake":true,
-                             "executionMode":"vm","layrProjectId":"p1"})
+                             "executionMode":"native","layrProjectId":"p1"})
                     .to_string(),
                 ],
             )
@@ -689,16 +647,15 @@ async fn joined_requests_wait_on_one_card_and_hear_how_it_ended() {
     let guest = Arc::new(WaitGuest {
         batches: Mutex::new(VecDeque::from([
             json!({"items":[
-                item(&leader, VM_AGENT, KUBE, redirect.clone(), "pending", 1), second, third,
+                item(&leader, AGENT, KUBE, redirect.clone(), "pending", 1), second, third,
             ], "next": 3}),
             json!({"items":[
-                item(&leader, VM_AGENT, KUBE, redirect.clone(), "expired", 4), signed_in, card,
+                item(&leader, AGENT, KUBE, redirect.clone(), "expired", 4), signed_in, card,
             ], "next": 6}),
         ])),
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
-        source: "host",
         guest: guest.clone(),
         forwarder: None,
         http_providers: Default::default(),
