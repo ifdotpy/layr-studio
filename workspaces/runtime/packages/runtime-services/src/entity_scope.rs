@@ -80,6 +80,39 @@ pub fn resume(
     )
 }
 
+/// Every document of the selected collections that a snapshot reader sees now, from
+/// both sources.
+pub fn live_documents(
+    connection: &Connection,
+    collections_json: &str,
+) -> StoreResult<Vec<EntityRow>> {
+    let mut page = resume(
+        connection,
+        None,
+        Some(collections_json),
+        None,
+        None,
+        true,
+        SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
+    )?;
+    let mut rows = Vec::new();
+    loop {
+        rows.append(&mut page.rows);
+        if page.checkpoint >= page.max_sequence {
+            return Ok(rows);
+        }
+        page = continue_page(
+            connection,
+            &page,
+            Some(collections_json),
+            None,
+            None,
+            true,
+            SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
+        )?;
+    }
+}
+
 /// Non-fresh REST pull of the global list. Same reset rule as
 /// `SyncDocumentsRepository::pull_global_entities`: a cursor above zero that is
 /// outside the range gets an empty reset page; zero reads from the beginning.
