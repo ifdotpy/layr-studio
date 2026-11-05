@@ -129,8 +129,6 @@ impl ResourceIdentity for SubscribedResource {
             | ResourceRef::QueueResource(_)
             | ResourceRef::ReceiptsResource(_)
             | ResourceRef::RenameProgressResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_)
             | ResourceRef::VoiceResource(_) => ResourceKind::Other,
         })
     }
@@ -165,9 +163,6 @@ fn authorize_resource(
     let class = match resource {
         ResourceRef::AuthProgressResource(_) => {
             crate::route_class::class_of("POST", "/api/accounts/login")
-        }
-        ResourceRef::VaultJobProgressResource(_) | ResourceRef::VaultReadinessResource(_) => {
-            crate::route_class::class_of("POST", "/api/vault/setup")
         }
         ResourceRef::AccountsResource(_)
         | ResourceRef::CostsResource(_)
@@ -213,17 +208,11 @@ fn progress_resource(
     selector: studio_runtime_schema::progress_selector::ProgressSelector,
 ) -> Result<ResourceRef, ApiError> {
     use studio_runtime_schema::progress_selector::ProgressSelector;
-    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource, VaultJobResource};
+    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource};
     Ok(match selector {
         ProgressSelector::Auth { request_id } => {
             ResourceRef::AuthProgressResource(RequestResource {
                 request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
-            })
-        }
-        ProgressSelector::Vault { request_id, job } => {
-            ResourceRef::VaultJobProgressResource(VaultJobResource {
-                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
-                job,
             })
         }
         ProgressSelector::Rename {
@@ -488,10 +477,6 @@ async fn sync_stream(
         Err(error) => return error.into_response(),
     };
     let cache_policies = cache_decisions(&resources, locality);
-    let vault_readiness = match readiness_source(&state, &resources).await {
-        Ok(source) => source,
-        Err(error) => return error.into_response(),
-    };
     let store = match state.store.clone() {
         Some(store) => store,
         None => return ApiError::internal().into_response(),
@@ -611,8 +596,6 @@ async fn sync_stream(
             | ResourceRef::VoiceResource(_)
             | ResourceRef::WorkspaceResource(_)
             | ResourceRef::AuthProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
             | ResourceRef::RenameProgressResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
@@ -690,33 +673,10 @@ async fn sync_stream(
         principal,
         studio_runtime_services::principal::Principal::Owner
     ) {
-        let mut selectors = Vec::new();
-        if let Some(client) = &state.vault_job_client {
-            match super::host_secrets::retained_progress(client).await {
-                Ok(retained) => selectors.extend(retained),
-                Err(error) => return error.into_response(),
-            }
-        }
         let cursor = state.sync_changes.snapshot();
         if let Err(error) = append_auth_baseline(&state, &cursor, &mut initial).await {
             return error.into_response();
         }
-        let resources = match selectors
-            .into_iter()
-            .map(|selector| SubscribedResource::new(progress_resource(selector)?))
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(resources) => resources,
-            Err(error) => return error.into_response(),
-        };
-        let view = ResourceChanges {
-            versions: vec![cursor.revision; resources.len()],
-            cursor,
-            resources,
-            entity_reset: false,
-            overflow: false,
-        };
-        append_progress_frames(&state, &view, &mut initial).await;
     }
     // OpenAPI owns the omitted-selector compatibility default; the HTTP witness
     // keeps this native/signed-client behavior in parity with that contract.
@@ -732,7 +692,6 @@ async fn sync_stream(
     let stream_state = ResourceStream {
         principal: Some(principal),
         http_state: Some(state.clone()),
-        vault_readiness,
         subscription: Some(subscription),
         initial,
         entity_transfers: entity_transfers.into(),
@@ -791,37 +750,6 @@ fn discard_sample(samples: &Mutex<BTreeMap<String, Vec<u8>>>, resource: &Subscri
     }
 }
 
-/// Only sessions with a live readiness selector own a filesystem source. Dropping
-/// the stream or removing that selector drops its OS watcher as well.
-async fn readiness_source(
-    state: &HttpState,
-    resources: &[SubscribedResource],
-) -> Result<Option<studio_runtime_services::vault::VaultReadinessWatcher>, ApiError> {
-    if !resources
-        .iter()
-        .any(|resource| matches!(resource.resource, ResourceRef::VaultReadinessResource(_)))
-    {
-        return Ok(None);
-    }
-    let settings = super::host_secrets::settings_dir(&state.state_dir);
-    let changes = Arc::clone(&state.sync_changes);
-    studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-http/vault-readiness-source",
-        move || {
-            studio_runtime_services::vault::watch_readiness(
-                &settings,
-                Arc::new(move || changes.notify_one()),
-            )
-        },
-    )
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map(Some)
-    .map_err(|_| ApiError::internal())
-}
-
-/// Progress is deliberately separate from resources/entityChanges: OAuth links
-/// must never enter SQLite, RxDB, entity replay, or durable checkpoints.
 pub(super) async fn append_progress_frames(
     state: &HttpState,
     view: &ResourceChanges<SubscribedResource>,
@@ -834,9 +762,7 @@ pub(super) async fn append_progress_frames(
                     .await
                     .unwrap_or(Value::Null)
             }
-            ResourceRef::RenameProgressResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_) => {
+            ResourceRef::RenameProgressResource(_) => {
                 let Some(bytes) = resource_content(state.clone(), resource.clone()).await else {
                     continue;
                 };
@@ -1693,8 +1619,6 @@ async fn attach_transient_snapshots(
             | ResourceRef::TranscriptsResource(_)
             | ResourceRef::WorkspaceResource(_)
             | ResourceRef::AuthProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
             | ResourceRef::RenameProgressResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
@@ -1710,7 +1634,6 @@ struct ResourceStream {
     principal: Option<studio_runtime_services::principal::Principal>,
     subscription: Option<LiveSubscription>,
     http_state: Option<HttpState>,
-    vault_readiness: Option<studio_runtime_services::vault::VaultReadinessWatcher>,
     initial: VecDeque<Event>,
     entity_transfers: VecDeque<entity_transfer::TransferReader>,
     scoped_sequences: BTreeMap<String, SubscriptionCursor>,
@@ -1760,15 +1683,6 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
     state
         .scoped_sequences
         .retain(|key, _| retained_scopes.contains(key));
-    let readiness_interest = state
-        .resources
-        .iter()
-        .any(|resource| matches!(resource.resource, ResourceRef::VaultReadinessResource(_)));
-    if readiness_interest != state.vault_readiness.is_some()
-        && let Some(http) = &state.http_state
-    {
-        state.vault_readiness = readiness_source(http, &state.resources).await.ok()?;
-    }
     state.terminal_cursors.retain(|id, _| {
         state
             .resources
@@ -3035,36 +2949,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn state_stream_vault_job_progress_includes_missing_receipt() {
-        let mut state = HttpState::new(
-            "token".into(),
-            "workspace".into(),
-            "/unused".into(),
-            0,
-            None,
-            None,
-            None,
-        );
-        state.validators = crate::validation::Registry::compile(&[]).expect("validators");
-        let view = ResourceChanges {
-            cursor: state.sync_changes.snapshot(),
-            resources: fixture_resources(&[
-                json!({"kind":"vault-job-progress","requestId":"one","job":"setup"}),
-            ]),
-            versions: vec![1],
-            entity_reset: false,
-            overflow: false,
-        };
-        let mut frames = VecDeque::new();
-        append_progress_frames(&state, &view, &mut frames).await;
-        assert_eq!(
-            frames.len(),
-            1,
-            "missing receipts must have an explicit transient baseline"
-        );
-    }
-
-    #[tokio::test]
     async fn state_stream_progress_frames_are_transient_and_scoped() {
         use studio_runtime_services::claude_login::{
             LoginError,
@@ -3299,39 +3183,6 @@ mod tests {
                 .expect("frame")
                 .contains("ABCD-1234")
         );
-    }
-
-    #[test]
-    fn state_stream_vault_prefix_contract_matches_its_runtime_owner() {
-        let root = tempfile::tempdir().expect("isolated state");
-        let mut state = HttpState::new(
-            "".into(),
-            "".into(),
-            root.path().display().to_string(),
-            0,
-            None,
-            None,
-            None,
-        );
-        state.validators = crate::validation::Registry::compile(&[]).expect("router validators");
-        for prefix in [
-            "".to_owned(),
-            "a".into(),
-            "Project_1".into(),
-            "../other".into(),
-            "-bad".into(),
-            "a".repeat(44),
-            "a".repeat(45),
-        ] {
-            assert_eq!(
-                state.validators.validate_component(
-                    "ResourceRef",
-                    &json!({"kind":"vault-readiness","prefix":prefix})
-                ),
-                studio_runtime_services::vault::valid_prefix(&prefix),
-                "vault::valid_prefix owns the prefix contract: {prefix}"
-            );
-        }
     }
 
     #[test]
@@ -4046,7 +3897,7 @@ mod tests {
                     .expect("data"),
             )
             .expect("session");
-            let update = json!({"sessionId":session["sessionId"],"gen":1,"add":[{"resource":{"kind":"vault-job-progress","requestId":"one","job":"setup"}}],"remove":[]});
+            let update = json!({"sessionId":session["sessionId"],"gen":1,"add":[{"resource":{"kind":"auth-progress","requestId":"one"}}],"remove":[]});
             let denied = app
                 .clone()
                 .oneshot(request(
@@ -6519,7 +6370,6 @@ mod tests {
         let state = ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),
@@ -6574,7 +6424,6 @@ mod tests {
         let state = ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),
@@ -7013,7 +6862,6 @@ mod tests {
         ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),
@@ -7413,7 +7261,6 @@ mod tests {
         let state = ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),

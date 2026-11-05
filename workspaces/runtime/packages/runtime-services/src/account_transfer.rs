@@ -2048,7 +2048,7 @@ pub fn typed_enroll(
     ) && source != *target
     {
         return Err(TransferError::Refused(
-            "Archive VM workers before changing the team account",
+            "Archive workers in this environment before changing the team account",
         ));
     }
     let done = source == *target;
@@ -2330,10 +2330,17 @@ fn check_cancel(
             || member.transport_ticket.is_some()
             || submitted
             || result;
+        // An intent with no transport ticket, send time or result was never handed
+        // to a provider, so nothing native can be in flight.
+        let never_sent = matches!(phase, Phase::Unknown | Phase::LazySubmitted)
+            && !member.transport_ticket.is_some()
+            && !submitted
+            && !result;
         if member.lazy.value() == Some(&true)
             && !phase.terminal()
             && phase != Phase::Lazy
             && native_request
+            && !never_sent
             && !(phase == Phase::Blocked
                 && member.archive_invalidated.value() == Some(&true)
                 && (!submitted || result))
@@ -2813,6 +2820,32 @@ mod provider_receipt_tests {
                 .unwrap()
                 .changed
         );
+    }
+
+    #[test]
+    fn a_claude_session_import_is_a_valid_persisted_native_method() {
+        // A Claude to Claude move submits claude/moveImport; the record must store it.
+        let schema: studio_json::Value = studio_json::from_str(include_str!(
+            "../../runtime-schema/src/schemas/persisted-account-transfer-record.schema.json"
+        ))
+        .unwrap();
+        let methods = &schema["$defs"]["TransferMemberRecord"]["properties"]["nativeMethod"]["anyOf"]
+            [0]["enum"];
+        for method in [
+            studio_runtime_store::transfer_record::TransferMethod::Start,
+            studio_runtime_store::transfer_record::TransferMethod::Fork,
+            studio_runtime_store::transfer_record::TransferMethod::ClaudeImport,
+        ] {
+            assert!(
+                methods
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m == method.as_str()),
+                "{} is missing from nativeMethod",
+                method.as_str()
+            );
+        }
     }
 
     #[test]
@@ -3431,6 +3464,19 @@ mod provider_receipt_tests {
                 "A native history move has started. Resolve its receipt before cancelling."
             ))
         ));
+    }
+
+    #[test]
+    fn cancel_returns_a_member_whose_import_was_never_handed_to_a_provider() {
+        let mut snapshot = refused_during_source_reads(true);
+        // The refused import left an intent but no ticket, send time or result.
+        let mut operation = snapshot.operation.clone();
+        operation.members.get_mut("agent").unwrap().phase = Phase::Unknown;
+        snapshot.operation = operation;
+        let cancelled = snapshot
+            .decide(Command::Action(Action::Cancel))
+            .expect("an import that was never sent may be cancelled");
+        assert_eq!(cancelled.operation.status, TransferStatus::Cancelled);
     }
 
     #[test]

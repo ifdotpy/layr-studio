@@ -151,7 +151,6 @@ mod idle_return_tests {
                 team_state: Some(current),
                 delivered_reminders: Default::default(),
                 assets: vec![],
-                asset_paths: Default::default(),
                 guidance: crate::turn_prepare::GuidanceBundle { role: "Role".into() },
                 artifact_paths: Default::default(),
                 prepared_at: 1.0,

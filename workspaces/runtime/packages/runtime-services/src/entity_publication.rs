@@ -107,6 +107,7 @@ pub(crate) mod test_support {
                     .iter()
                     .chain(studio_runtime_store::DIRECT_COLLECTIONS)
                     .chain(studio_runtime_store::AGENT_VIEW_COLLECTIONS)
+                    .chain(studio_runtime_store::WINDOW_COLLECTIONS)
                     .any(|name| *name == collection)
                 {
                     return built_entity(tx, &collection, &id);

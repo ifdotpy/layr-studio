@@ -16,7 +16,7 @@ use studio_runtime_schema::SYNC_ENTITY_SCOPE;
 pub use studio_runtime_schema::shared_values::{SYNC_BATCH_LIMIT, SYNC_ENTITY_PAGE_LIMIT};
 use studio_runtime_store::{
     RuntimeStore, StoreError, StoreResult, SyncDocumentsRepository, Table, TranscriptItemId,
-    TranscriptItemRecord, agent_volatile, sha256_hex,
+    TranscriptItemRecord, agent_volatile,
 };
 use thiserror::Error;
 
@@ -135,34 +135,26 @@ pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
     Ok(complete)
 }
 
-/// Filesystem vault views and Mac folder sync reports captured before opening a
-/// projection write transaction.
+/// Project records captured before opening a projection write transaction.
 #[derive(Clone, Debug, Default)]
-pub struct ProjectVaultSnapshot {
+pub struct ProjectSnapshot {
     projects: BTreeMap<String, Value>,
-    views: BTreeMap<String, Result<Option<Value>, (&'static str, String)>>,
-    /// The sidebar's Mac folder sync report per project (`layrSync`).
-    sync_views: BTreeMap<String, Option<Value>>,
 }
 
-impl ProjectVaultSnapshot {
-    /// Read SQL inputs, release the snapshot, then read vault files on the blocking pool.
-    pub async fn capture_for_sync(store: &RuntimeStore, state_dir: &Path) -> StoreResult<Self> {
+impl ProjectSnapshot {
+    /// Read project records for the next projection write.
+    pub async fn capture_for_sync(store: &RuntimeStore, _state_dir: &Path) -> StoreResult<Self> {
         let projects = store
-            .read_async("runtime-services/sync-policy/projects", |connection| {
-                Self::stored_projects(connection)
+            .read_async("runtime-services/sync-policy/projects", |tx| {
+                Self::stored_projects(tx)
             })
             .await?;
-        let state_dir = state_dir.to_path_buf();
-        studio_runtime_process::blocking_pool::spawn_blocking(
-            "runtime-services/sync-policy/vault",
-            move || Self::capture(&state_dir, &projects),
-        )
-        .await
-        .map_err(|_| StoreError::ReadTaskFailed)
+        Ok(Self {
+            projects: projects.into_iter().collect(),
+        })
     }
 
-    /// Whether the SQL inputs still match the filesystem snapshot.
+    /// Whether the SQL inputs still match the snapshot.
     pub fn matches_sources(&self, connection: &Connection) -> StoreResult<bool> {
         Ok(Self::stored_projects(connection)?
             .into_iter()
@@ -170,8 +162,7 @@ impl ProjectVaultSnapshot {
             == self.projects)
     }
 
-    /// Valid stored projects for [`Self::capture`], read in a short snapshot so
-    /// the filesystem capture can run after the read ends.
+    /// Valid stored projects for [`Self::capture`].
     pub fn stored_projects(connection: &Connection) -> StoreResult<Vec<(String, Value)>> {
         let mut statement =
             connection.prepare_cached("SELECT id,record FROM runtime_projects ORDER BY rowid")?;
@@ -188,85 +179,33 @@ impl ProjectVaultSnapshot {
         Ok(projects)
     }
 
-    /// Read cached vault files outside SQL callbacks. Projection writers recheck
-    /// the captured project records before committing.
-    pub fn capture(state_dir: &Path, projects: &[(String, Value)]) -> Self {
-        studio_runtime_store::debug_assert_outside_sql();
-        let vm_state_dir = crate::vault::linux_vm_state_dir(state_dir);
-        let mut snapshot = Self::default();
-        for (id, project) in projects {
-            snapshot.projects.insert(id.clone(), project.clone());
-            let Some(source) = project_vault_source(project) else {
-                snapshot.views.insert(id.clone(), Ok(None));
-                continue;
-            };
-            let project_id = sha256_hex(source.as_bytes());
-            snapshot.sync_views.insert(
-                id.clone(),
-                crate::mac_sync::sidebar_view(&vm_state_dir, &project_id),
-            );
-            let view = crate::vault::view(&vm_state_dir, &project_id).map_err(|error| {
-                let object = match error {
-                    crate::vault::VaultError::InvalidStoredRecord(object) => object,
-                    crate::vault::VaultError::InvalidProjectId
-                    | crate::vault::VaultError::AlreadyConfigured
-                    | crate::vault::VaultError::ProjectSourceMissing
-                    | crate::vault::VaultError::InvalidPrefix
-                    | crate::vault::VaultError::InvalidSite
-                    | crate::vault::VaultError::DeskMissing
-                    | crate::vault::VaultError::InvalidConfiguration
-                    | crate::vault::VaultError::GuestFailed
-                    | crate::vault::VaultError::DeskTimedOut
-                    | crate::vault::VaultError::DeskFailed
-                    | crate::vault::VaultError::MissingRecipient
-                    | crate::vault::VaultError::InvalidProfile
-                    | crate::vault::VaultError::InvalidProfileOrRegion
-                    | crate::vault::VaultError::InvalidPullFolder
-                    | crate::vault::VaultError::NoPullTarget => "vault project id",
-                };
-                (object, project_id)
-            });
-            snapshot.views.insert(id.clone(), view);
+    /// Capture project records for projection writers to recheck.
+    pub fn capture(_state_dir: &Path, projects: &[(String, Value)]) -> Self {
+        Self {
+            projects: projects.iter().cloned().collect(),
         }
-        snapshot
     }
 
-    /// Hash the validated vault views used by project projections for a process-local skip key.
     pub fn signature(&self) -> String {
-        let serialized = studio_json::to_vec(&(&self.views, &self.sync_views))
-            .expect("project vault views serialize as JSON values and error tuples");
-        studio_runtime_store::sha256_hex(&serialized)
+        studio_runtime_store::sha256_hex(
+            &studio_json::to_vec(&self.projects).expect("projects serialize"),
+        )
     }
 
-    /// Check the small persisted project set before deciding whether a full
-    /// cold projection rebuild is needed after process restart.
     pub fn matches_entity_projections(&self, connection: &Connection) -> StoreResult<bool> {
-        for (id, project) in &self.projects {
-            let payload = connection
-                .query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                    [id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
+        for id in self.projects.keys() {
+            let payload = connection.query_row(
+                "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
+                [id], |row| row.get::<_, String>(0),
+            ).optional()?;
             let Some(payload) = payload else {
                 return Ok(false);
             };
             let payload: Value = studio_json::from_str(&payload)?;
-            let ready = payload
-                .pointer("/value/layrReadiness/state")
-                .and_then(Value::as_str)
-                == Some("ready");
-            let expected_vault = if ready { self.view(id, project)? } else { None };
-            if payload.pointer("/value/vault") != expected_vault.as_ref() {
-                return Ok(false);
-            }
-            let expected_sync = if ready {
-                self.sync_view(id, project)?
-            } else {
-                None
-            };
-            if ready && payload.pointer("/value/layrSync") != expected_sync.as_ref() {
+            if ["layrReadiness", "layrSync", "vault"]
+                .iter()
+                .any(|key| payload["value"].get(*key).is_some())
+            {
                 return Ok(false);
             }
         }
@@ -281,37 +220,10 @@ impl ProjectVaultSnapshot {
             })
         {
             return Err(StoreError::RecordContract(
-                "project records changed after cached vault views were read",
+                "project records changed after the snapshot was read",
             ));
         }
         Ok(())
-    }
-
-    fn view(&self, id: &str, project: &Value) -> StoreResult<Option<Value>> {
-        if self.projects.get(id) != Some(project) {
-            return Err(StoreError::RecordContract(
-                "project record changed after its cached vault view was read",
-            ));
-        }
-        match self.views.get(id) {
-            Some(Ok(view)) => Ok(view.clone()),
-            Some(Err((object, project_id))) => Err(StoreError::InvalidStoredRecord {
-                object,
-                id: project_id.clone(),
-            }),
-            None => Err(StoreError::RecordContract(
-                "cached vault view is missing for a persisted project",
-            )),
-        }
-    }
-
-    fn sync_view(&self, id: &str, project: &Value) -> StoreResult<Option<Value>> {
-        if self.projects.get(id) != Some(project) {
-            return Err(StoreError::RecordContract(
-                "project record changed after its cached sync report was read",
-            ));
-        }
-        Ok(self.sync_views.get(id).cloned().flatten())
     }
 }
 
@@ -321,7 +233,7 @@ impl ProjectVaultSnapshot {
 pub fn maintain_entity_projections(
     transaction: &Transaction<'_>,
     _state_dir: &str,
-    vault_snapshot: &ProjectVaultSnapshot,
+    project_snapshot: &ProjectSnapshot,
     rooms: &crate::sync_entity_context::RoomDirectory,
     validate_projection: impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
@@ -331,7 +243,7 @@ pub fn maintain_entity_projections(
         transaction,
         _state_dir,
         project_server_id.as_deref(),
-        vault_snapshot,
+        project_snapshot,
         rooms,
         validate_projection,
     )
@@ -341,7 +253,7 @@ pub fn maintain_entity_projections_with_server_id(
     transaction: &Transaction<'_>,
     state_dir: &str,
     project_server_id: Option<&str>,
-    vault_snapshot: &ProjectVaultSnapshot,
+    project_snapshot: &ProjectSnapshot,
     rooms: &crate::sync_entity_context::RoomDirectory,
     validate_projection: impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
@@ -376,8 +288,8 @@ pub fn maintain_entity_projections_with_server_id(
             work_records.push(record);
         }
     }
-    crate::diagnostics::measure_runtime_stage("projection.vault_recheck", || {
-        vault_snapshot.recheck(transaction)
+    crate::diagnostics::measure_runtime_stage("projection.project_recheck", || {
+        project_snapshot.recheck(transaction)
     })?;
     let peer_agents = source_records
         .get("runtime_agents")
@@ -500,42 +412,11 @@ pub fn maintain_entity_projections_with_server_id(
                     retire_if_live(transaction, "project", id, &validate_projection)?;
                     continue;
                 };
-                let source: Value = studio_json::from_str(raw)?;
-                let prior = transaction.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                    [&id], |row| row.get::<_, Option<String>>(0),
-                ).optional()?.flatten();
-                let prior = prior
-                    .map(|payload| studio_json::from_str::<Value>(&payload))
-                    .transpose()?;
-                let value = prior.as_ref().and_then(|payload| payload.get("value"));
-                let readiness =
-                    project_context::<studio_runtime_schema::project_projection::ProjectReadiness>(
-                        value.and_then(|value| value.get("layrReadiness")),
-                    )?;
-                let ready = matches!(&readiness, studio_runtime_schema::queue_command::Field::Value(context) if context.state == studio_runtime_schema::project_projection::ReadinessState::Ready);
-                let (sync, vault) = if ready && !state_dir.is_empty() {
-                    let cached_sync = vault_snapshot.sync_view(id, &source)?;
-                    let cached_vault = vault_snapshot.view(id, &source)?;
-                    (
-                        project_context(cached_sync.as_ref())?,
-                        project_context(cached_vault.as_ref())?,
-                    )
-                } else {
-                    (
-                        project_context(value.and_then(|value| value.get("layrSync")))?,
-                        project_context(value.and_then(|value| value.get("vault")))?,
-                    )
-                };
                 let peer_leads =
                     crate::project_projection::peer_leads_of(transaction, &project.id)?;
-                if let Some(projected) = crate::project_projection::project_record(
-                    *project,
-                    readiness,
-                    sync,
-                    vault,
-                    &peer_leads,
-                ) {
+                if let Some(projected) =
+                    crate::project_projection::project_record(*project, &peer_leads)
+                {
                     SyncDocumentsRepository::put_entity(
                         transaction,
                         "project",
@@ -841,22 +722,8 @@ pub(crate) fn publish_summary_changes(
                 id,
             });
         }
-        let prior: Option<String> = transaction
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='task' AND id=?1 AND deleted=0",
-                [&id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let prior = prior
-            .map(|raw| studio_json::from_str::<Value>(&raw))
-            .transpose()?;
-        maintain_task_window_after_write(
-            transaction,
-            prior.as_ref().and_then(|payload| payload.get("value")),
-            &task,
-            &|_, _, _, _| true,
-        )?;
+        let prior = task_window_prior(transaction, &id)?;
+        maintain_task_window_after_write(transaction, prior.as_ref(), &task, &|_, _, _, _| true)?;
     }
     let mut events = pending.receipt_events.clone();
     for id in &pending.receipt_items {
@@ -1253,6 +1120,37 @@ pub(crate) fn complaint_view(
         .map_err(StoreError::from)
 }
 
+/// The client document of a window member: a `task` or a `monitor`. None when the row
+/// is gone or has no view.
+pub(crate) fn window_view(
+    connection: &Connection,
+    collection: &str,
+    id: &str,
+) -> StoreResult<Option<(String, RawValue)>> {
+    let table = if collection == "task" {
+        "runtime_tasks"
+    } else {
+        "runtime_monitors"
+    };
+    let raw: Option<String> = connection
+        .prepare_cached(&format!("SELECT record FROM {table} WHERE id=?1"))?
+        .query_row([id], |row| row.get(0))
+        .optional()?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if collection == "task" {
+        let record: studio_runtime_store::TaskRecord = studio_json::from_str(&raw)?;
+        let agent = record.agent().to_owned();
+        return crate::sync_views::project_task_record(&record)
+            .map(|view| Ok((agent, studio_json::to_raw_value(&view)?)))
+            .transpose();
+    }
+    let record = decode_monitor(id, &raw)?;
+    let view = project_monitor_record(&record)?;
+    Ok(Some((record.agent, studio_json::to_raw_value(&view)?)))
+}
+
 /// The client view of a rule row: its id, agent and name.
 pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<RawValue> {
     let invalid = || StoreError::InvalidStoredRecord {
@@ -1409,44 +1307,6 @@ pub fn seed_workspace_projection(
         false,
         &validate_projection,
     )
-}
-
-/// Identity selected by Python's `codex_vm_agents.project_vault` projection.
-fn project_vault_source(project: &Value) -> Option<&str> {
-    let aliases = project.get("projectAliases").and_then(Value::as_array);
-    let logical_id = aliases
-        .and_then(|aliases| aliases.first())
-        .and_then(|alias| alias.get("projectId"))
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty());
-    logical_id
-        .or_else(|| {
-            project
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-        })
-        .or_else(|| {
-            project
-                .get("path")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-        })
-}
-
-fn project_context<T: serde::de::DeserializeOwned>(
-    value: Option<&Value>,
-) -> StoreResult<studio_runtime_schema::queue_command::Field<T>> {
-    use studio_runtime_schema::queue_command::Field;
-    match value {
-        None => Ok(Field::Missing),
-        Some(Value::Null) => Ok(Field::Null),
-        Some(value) => {
-            let studio_runtime_schema::json_object::JsonObject(context) =
-                serde::Deserialize::deserialize(value)?;
-            Ok(Field::Value(context))
-        }
-    }
 }
 
 fn put_projection(
@@ -1607,9 +1467,72 @@ fn retire_if_live(
     Ok(())
 }
 
+/// What the task window holds of a member: owner, created time and running state, so
+/// a write can compare with it. The documents themselves are built at read time.
+fn join_task_window(
+    transaction: &Transaction<'_>,
+    task: &studio_runtime_store::TaskRecord,
+) -> StoreResult<()> {
+    let id = task.id().as_ref();
+    studio_runtime_store::durable_seq::join_window(
+        transaction,
+        studio_runtime_store::durable_seq::TASK_WINDOW,
+        id,
+    )?;
+    // The state of a task that left is kept, so a return under another owner is seen.
+    let previous: Option<String> = transaction
+        .prepare_cached("SELECT agent FROM task_window_state WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
+        .optional()?;
+    if let Some(previous) = previous.filter(|previous| previous != task.agent()) {
+        // The task moved: the scoped readers of both owners start from a snapshot.
+        for owner in [previous.as_str(), task.agent()] {
+            SyncDocumentsRepository::move_scope_visibility(transaction, "task", owner)?;
+        }
+    }
+    transaction
+        .prepare_cached(
+            "INSERT INTO task_window_state(id,agent,created,running) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(id) DO UPDATE SET agent=excluded.agent,created=excluded.created,
+               running=excluded.running",
+        )?
+        .execute(rusqlite::params![
+            task.id().as_ref(),
+            task.agent(),
+            task.created_number().number().as_f64(),
+            task.status() == studio_runtime_schema::task_record::TaskStatus::Running
+        ])?;
+    Ok(())
+}
+
+fn leave_task_window(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
+    studio_runtime_store::durable_seq::leave_window(
+        transaction,
+        studio_runtime_store::durable_seq::TASK_WINDOW,
+        id,
+    )?;
+    Ok(())
+}
+
+/// The window state of task `id` as the fields a view had: `status` (running or not),
+/// `agent` and `created`. None when the task is not in the window.
+fn task_window_prior(transaction: &Transaction<'_>, id: &str) -> StoreResult<Option<Value>> {
+    let row: Option<(String, Option<f64>, bool)> = transaction
+        .prepare_cached(
+            "SELECT s.agent,s.created,s.running FROM task_window_state s
+             JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
+             WHERE s.id=?1",
+        )?
+        .query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .optional()?;
+    Ok(row.map(|(agent, created, running)| {
+        json!({"agent":agent,"created":created,"status":if running {"running"} else {"finished"}})
+    }))
+}
+
 pub(crate) fn maintain_task_window(
     transaction: &Transaction<'_>,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
+    _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     if !table_exists(transaction, "runtime_tasks")? || !table_exists(transaction, "runtime_agents")?
     {
@@ -1640,23 +1563,21 @@ pub(crate) fn maintain_task_window(
                 id,
             });
         }
-        if let Some(projected) = crate::sync_views::project_task_record(&record) {
+        if crate::sync_views::project_task_record(&record).is_some() {
             kept.insert(id.clone());
-            SyncDocumentsRepository::put_entity(transaction, "task", &id, projected, false)?;
+            join_task_window(transaction, &record)?;
         }
     }
-    let mut statement = transaction
-        .prepare("SELECT id FROM sync_entities WHERE collection='task' AND deleted=0")?;
-    let candidates = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
+    let candidates = studio_runtime_store::durable_seq::window_members(
+        transaction,
+        studio_runtime_store::durable_seq::TASK_WINDOW,
+    )?;
     let stale = candidates
         .into_iter()
         .filter(|id| !kept.contains(id))
         .collect::<Vec<_>>();
     for id in stale.iter().take(TASK_RETIRE_BATCH) {
-        put_projection(transaction, "task", id, json!({}), true, validate)?;
+        leave_task_window(transaction, id)?;
     }
     if stale.is_empty() {
         let migrated = transaction
@@ -1715,33 +1636,32 @@ pub(crate) fn maintain_task_window_after_write(
             && !task_running
             && previous.is_some_and(|previous| {
                 previous.get("agent").and_then(Value::as_str) == Some(agent_id)
-                    && previous.get("created").and_then(Value::as_number)
-                        == Some(task.created_number().number())
+                    && previous.get("created").and_then(Value::as_f64)
+                        == task.created_number().number().as_f64()
             });
         if unmoved_finished
-            && !transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM sync_entities \
-                 WHERE collection='task' AND id=?1 AND deleted=0)",
-                [task_id],
-                |row| row.get::<_, bool>(0),
+            && !studio_runtime_store::durable_seq::in_window(
+                transaction,
+                studio_runtime_store::durable_seq::TASK_WINDOW,
+                task_id,
             )?
         {
             return Ok(());
         }
-        SyncDocumentsRepository::put_entity(transaction, "task", task_id, projected, false)?;
+        let _ = projected;
+        join_task_window(transaction, task)?;
         if !task_running {
             let evicted: Option<String> = transaction
                 .query_row(
-                    "SELECT id FROM sync_entities WHERE collection='task' AND deleted=0 \
-                     AND json_extract(payload,'$.value.status')!='running' \
-                     ORDER BY json_extract(payload,'$.value.created') DESC \
-                     LIMIT 1 OFFSET ?1",
+                    "SELECT s.id FROM task_window_state s \
+                     JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 \
+                     WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
                     [TASK_WINDOW_HISTORY_ROWS as i64],
                     |row| row.get(0),
                 )
                 .optional()?;
             if let Some(id) = evicted {
-                put_projection(transaction, "task", &id, json!({}), true, validate)?;
+                leave_task_window(transaction, &id)?;
             }
         }
         return Ok(());
@@ -1845,16 +1765,16 @@ pub fn project_monitor_record(
         timeout_ms: record.timeout_ms.get(),
     })
 }
+/// Put a checked monitor in the client window; its document is built at read time.
 fn publish_typed_monitor(
     tx: &Transaction<'_>,
     record: &studio_runtime_store::MonitorRecord,
 ) -> StoreResult<()> {
-    SyncDocumentsRepository::put_entity(
+    project_monitor_record(record)?;
+    studio_runtime_store::durable_seq::join_window(
         tx,
-        "monitor",
+        studio_runtime_store::durable_seq::MONITOR_WINDOW,
         &record.id,
-        project_monitor_record(record)?,
-        false,
     )?;
     Ok(())
 }
@@ -1874,21 +1794,17 @@ pub(crate) fn publish_monitor_change(
     if previous.is_none_or(|previous| !previous.same_window_position(monitor)) {
         return maintain_monitor_window(transaction, validate);
     }
-    let retained: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entities \
-         WHERE collection='monitor' AND id=?1 AND deleted=0)",
-        [monitor.id()],
-        |row| row.get(0),
+    let retained = studio_runtime_store::durable_seq::in_window(
+        transaction,
+        studio_runtime_store::durable_seq::MONITOR_WINDOW,
+        monitor.id(),
     )?;
     if !monitor.live_window_owner() {
         if retained {
-            put_projection(
+            studio_runtime_store::durable_seq::leave_window(
                 transaction,
-                "monitor",
+                studio_runtime_store::durable_seq::MONITOR_WINDOW,
                 monitor.id(),
-                json!({}),
-                true,
-                validate,
             )?;
         }
     } else if monitor.active() || retained {
@@ -1899,7 +1815,7 @@ pub(crate) fn publish_monitor_change(
 
 fn maintain_monitor_window(
     transaction: &Transaction<'_>,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
+    _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     if !table_exists(transaction, "runtime_monitors")? {
         return Ok(());
@@ -2035,7 +1951,19 @@ fn maintain_monitor_window(
         kept_ids.insert(id);
         publish_typed_monitor(transaction, &record)?;
     }
-    retire_unkept(transaction, "monitor", &kept_ids, None, validate)
+    for id in studio_runtime_store::durable_seq::window_members(
+        transaction,
+        studio_runtime_store::durable_seq::MONITOR_WINDOW,
+    )? {
+        if !kept_ids.contains(&id) {
+            studio_runtime_store::durable_seq::leave_window(
+                transaction,
+                studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                &id,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn maintain_event_window(
@@ -2115,7 +2043,10 @@ fn maintain_event_window(
     )
 }
 
-fn decode_monitor(id: &str, raw: &str) -> StoreResult<studio_runtime_store::MonitorRecord> {
+pub(crate) fn decode_monitor(
+    id: &str,
+    raw: &str,
+) -> StoreResult<studio_runtime_store::MonitorRecord> {
     let invalid = || StoreError::InvalidStoredRecord {
         object: "monitors",
         id: id.to_owned(),
@@ -2839,7 +2770,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let snapshot = ProjectVaultSnapshot::capture_for_sync(&store, root.path())
+        let snapshot = ProjectSnapshot::capture_for_sync(&store, root.path())
             .await
             .unwrap();
         store.transaction(move |tx| {
@@ -2964,8 +2895,6 @@ mod tests {
     use rusqlite::Connection;
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
     use std::cell::RefCell;
-    use std::fs;
-    use studio_runtime_store::ProjectsRepository;
 
     thread_local! {
         static TRACED_SQL: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -2987,23 +2916,50 @@ mod tests {
         }
     }
 
+    /// The window of `collection` as a reader builds it: id to (envelope, left).
+    fn window_rows(
+        connection: &Connection,
+        collection: &str,
+    ) -> BTreeMap<String, (Option<String>, bool)> {
+        let window = if collection == "task" {
+            studio_runtime_store::durable_seq::TASK_WINDOW
+        } else {
+            studio_runtime_store::durable_seq::MONITOR_WINDOW
+        };
+        let entries: Vec<(String, bool)> = connection
+            .prepare("SELECT id,deleted FROM durable_rows WHERE tbl=?1 ORDER BY id")
+            .unwrap()
+            .query_map([window], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        entries
+            .into_iter()
+            .map(|(id, left)| {
+                let payload = (!left)
+                    .then(|| window_view(connection, collection, &id).ok().flatten())
+                    .flatten()
+                    .map(|(_, value)| {
+                        json!({"collection":collection,"id":id,"value":studio_json::from_str::<Value>(value.as_str()).unwrap()})
+                            .to_string()
+                    });
+                (id, (payload, left))
+            })
+            .collect()
+    }
+
     fn monitor_entity(connection: &Connection, id: &str) -> StoreResult<Option<Value>> {
-        let payload: Option<String> = connection.query_row(
-            "SELECT payload FROM sync_entities WHERE collection='monitor' AND id=?1 AND deleted=0",
-            [id], |row| row.get(0),
-        ).optional()?;
-        payload
-            .map(|raw| Ok(studio_json::from_str::<Value>(&raw)?["value"].clone()))
-            .transpose()
+        Ok(window_rows(connection, "monitor")
+            .remove(id)
+            .and_then(|(payload, left)| (!left).then_some(payload).flatten())
+            .map(|raw| studio_json::from_str::<Value>(&raw).unwrap()["value"].clone()))
     }
 
     fn monitor_entities(connection: &Connection) -> StoreResult<Vec<(String, String, bool)>> {
-        let mut statement = connection.prepare(
-            "SELECT id,payload,deleted FROM sync_entities WHERE collection='monitor' ORDER BY id",
-        )?;
-        Ok(statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-            .collect::<Result<_, _>>()?)
+        Ok(window_rows(connection, "monitor")
+            .into_iter()
+            .map(|(id, (payload, left))| (id, payload.unwrap_or_else(|| "{}".into()), left))
+            .collect())
     }
 
     #[tokio::test]
@@ -3047,22 +3003,20 @@ mod tests {
                     maintain_monitor_window(tx, &|_, _, _, _| true)?;
                     let retired: String = tx.query_row(
                     "SELECT id FROM runtime_monitors WHERE id LIKE 'terminal-%' AND id NOT IN \
-                     (SELECT id FROM sync_entities WHERE collection='monitor' AND deleted=0)",
+                     (SELECT id FROM durable_rows WHERE tbl='monitor_window' AND deleted=0)",
                     [],
                     |row| row.get(0),
                 ).map_err(StoreError::from)?;
-                    SyncDocumentsRepository::put_entity(tx, "monitor", &retired, json!({}), true)?;
+                    studio_runtime_store::durable_seq::leave_window(tx, "monitor_window", &retired).map(|_| true)?;
                     tx.execute(
                         "INSERT INTO runtime_monitors(id,record) VALUES('invalid-monitor','[]')",
                         [],
                     )
                     .map_err(StoreError::from)?;
-                    SyncDocumentsRepository::put_entity(
+                    studio_runtime_store::durable_seq::join_window(
                         tx,
-                        "monitor",
+                        studio_runtime_store::durable_seq::MONITOR_WINDOW,
                         "invalid-monitor",
-                        json!({"preserve":"prior"}),
-                        false,
                     )?;
                     Ok::<_, monitor_policy::MonitorError>(id)
                 })
@@ -3084,13 +3038,12 @@ mod tests {
                 monitor_runtime::apply(tx, &before, &actor, &decision, 2.0)?;
                 tx.trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, None);
                 let statements = TRACED_SQL.with_borrow_mut(std::mem::take);
-                // Count attempted publication, including unchanged entities that
-                // put_entity would suppress after hashing and validation.
+                // Count attempted window joins, including a member already there.
                 let publications = statements
                     .iter()
                     .filter(|sql| {
-                        sql.starts_with("SELECT hash,deleted FROM sync_entities")
-                            && sql.contains("collection='monitor'")
+                        sql.starts_with("INSERT INTO durable_rows")
+                            && sql.contains("monitor_window")
                     })
                     .collect::<Vec<_>>();
                 assert_eq!(publications.len(), 1, "{publications:?}");
@@ -3104,10 +3057,12 @@ mod tests {
                 let projected = monitor_entity(tx, &output_id)?.expect("updated projection");
                 assert_eq!(projected["tail"], "fragment");
                 assert_eq!(projected["bytes"], b"fragment".len());
-                assert_eq!(
-                    monitor_entity(tx, "invalid-monitor")?,
-                    Some(json!({"preserve":"prior"}))
-                );
+                // A member that does not decode keeps its place; readers skip it.
+                assert!(studio_runtime_store::durable_seq::in_window(
+                    tx,
+                    studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                    "invalid-monitor",
+                )?);
                 Ok::<_, monitor_policy::MonitorError>(())
             })
             .await
@@ -3156,7 +3111,7 @@ mod tests {
                 let excluded: String = tx
                     .query_row(
                         "SELECT id FROM runtime_monitors WHERE id LIKE 'terminal-%' AND id NOT IN \
-                 (SELECT id FROM sync_entities WHERE collection='monitor' AND deleted=0)",
+                 (SELECT id FROM durable_rows WHERE tbl='monitor_window' AND deleted=0)",
                         [],
                         |row| row.get(0),
                     )
@@ -3268,20 +3223,20 @@ mod tests {
         assert_eq!(expected_terminal_ids.len(), MONITOR_TERMINAL_WINDOW);
         assert!(expected_terminal_ids.contains("terminal-50"));
         let transaction = connection.transaction().expect("projection transaction");
-        for (id, value) in [
-            ("stale", json!({"agent":"active"})),
-            ("invalid-monitor", json!({"preserve":"prior"})),
-            ("invalid-owner", json!({"preserve":"owner-prior"})),
-        ] {
-            SyncDocumentsRepository::put_entity(&transaction, "monitor", id, value, false)
-                .expect("prior canonical monitor entity");
+        for id in ["stale", "invalid-monitor", "invalid-owner"] {
+            studio_runtime_store::durable_seq::join_window(
+                &transaction,
+                studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                id,
+            )
+            .expect("prior window member");
         }
         maintain_monitor_window(&transaction, &|_, _, _, _| true)
             .expect("bounded monitor projection");
 
         let count: i64 = transaction
             .query_row(
-                "SELECT COUNT(*) FROM sync_entities WHERE collection='monitor' AND deleted=0",
+                "SELECT COUNT(*) FROM durable_rows WHERE tbl='monitor_window' AND deleted=0",
                 [],
                 |row| row.get(0),
             )
@@ -3290,7 +3245,7 @@ mod tests {
         for id in ["deleted-owner", "missing-owner"] {
             let exists: bool = transaction
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='monitor' AND id=?1 AND deleted=0)",
+                    "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl='monitor_window' AND id=?1 AND deleted=0)",
                     [id],
                     |row| row.get(0),
                 )
@@ -3300,7 +3255,7 @@ mod tests {
         for id in ["active-0", "active-104", "invalid-owner"] {
             let exists: bool = transaction
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='monitor' AND id=?1 AND deleted=0)",
+                    "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl='monitor_window' AND id=?1 AND deleted=0)",
                     [id],
                     |row| row.get(0),
                 )
@@ -3309,7 +3264,7 @@ mod tests {
         }
         let actual_terminal_ids = transaction
             .prepare(
-                "SELECT id FROM sync_entities WHERE collection='monitor' AND id GLOB 'terminal-*' AND deleted=0",
+                "SELECT id FROM durable_rows WHERE tbl='monitor_window' AND id GLOB 'terminal-*' AND deleted=0",
             )
             .expect("projected terminal ids")
             .query_map([], |row| row.get::<_, String>(0))
@@ -3323,26 +3278,24 @@ mod tests {
         assert_eq!(actual_terminal_ids, expected_active_terminal_ids);
         let stale_deleted: bool = transaction
             .query_row(
-                "SELECT deleted=1 FROM sync_entities WHERE collection='monitor' AND id='stale'",
+                "SELECT COALESCE((SELECT deleted=1 FROM durable_rows WHERE tbl='monitor_window' AND id='stale'),1)",
                 [],
                 |row| row.get(0),
             )
             .expect("stale canonical tombstone");
         assert!(stale_deleted, "unselected canonical rows still tombstone");
         let invalid_deleted: bool = transaction.query_row(
-            "SELECT deleted=1 FROM sync_entities WHERE collection='monitor' AND id='invalid-monitor'", [], |row| row.get(0),
+            "SELECT COALESCE((SELECT deleted=1 FROM durable_rows WHERE tbl='monitor_window' AND id='invalid-monitor'),1)", [], |row| row.get(0),
         ).expect("unselected monitor tombstone");
         assert!(invalid_deleted);
-        let invalid_owner_payload: String = transaction
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='monitor' AND id='invalid-owner' AND deleted=0",
-                [],
-                |row| row.get(0),
+        assert!(
+            studio_runtime_store::durable_seq::in_window(
+                &transaction,
+                studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                "invalid-owner",
             )
-            .expect("invalid owner keeps existing canonical entity");
-        assert_eq!(
-            studio_json::from_str::<Value>(&invalid_owner_payload).expect("prior payload")["value"],
-            json!({"preserve":"owner-prior"})
+            .expect("window reads"),
+            "invalid owner keeps its window member"
         );
         transaction
             .execute(
@@ -3439,7 +3392,7 @@ mod tests {
             );
         }
         let actual_ids = transaction
-            .prepare("SELECT id FROM sync_entities WHERE collection='monitor' AND deleted=0")
+            .prepare("SELECT id FROM durable_rows WHERE tbl='monitor_window' AND deleted=0")
             .expect("projected terminal ids")
             .query_map([], |row| row.get::<_, String>(0))
             .expect("projected terminal rows")
@@ -3450,6 +3403,25 @@ mod tests {
             .filter(|id| id != "terminal-50")
             .collect::<BTreeSet<_>>();
         assert_eq!(actual_ids, expected_active_ids);
+    }
+
+    #[test]
+    fn historical_project_context_is_readable_and_marked_for_rebuild() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE sync_entities(collection TEXT, id TEXT, deleted INTEGER, payload TEXT)").unwrap();
+        let payload = json!({"value":{"id":"p", "layrReadiness":{"state":"ready"}}});
+        connection
+            .execute(
+                "INSERT INTO sync_entities VALUES('project', 'p', 0, ?1)",
+                [payload.to_string()],
+            )
+            .unwrap();
+        let snapshot = ProjectSnapshot::capture(Path::new("/"), &[("p".into(), json!({"id":"p"}))]);
+        assert!(
+            !snapshot
+                .matches_entity_projections(&connection)
+                .expect("historical projection remains readable")
+        );
     }
 
     #[test]
@@ -3488,7 +3460,7 @@ mod tests {
             .await
             .expect("open isolated runtime store");
         let agent = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent","rootId":"agent","epoch":0,"status":"idle","isLead":true});
-        let snapshot = ProjectVaultSnapshot::default();
+        let snapshot = ProjectSnapshot::default();
 
         store
             .transaction(move |transaction| {
@@ -3522,12 +3494,12 @@ mod tests {
                     &rooms,
                     |_, _, _, _| true,
                 )?;
-                let payload: String = transaction.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='task' AND id='task' AND deleted=0",
-                    [],
-                    |row| row.get(0),
+                let payload: Value = studio_json::from_str(
+                    window_rows(transaction, "task")["task"]
+                        .0
+                        .as_deref()
+                        .expect("task document"),
                 )?;
-                let payload: Value = studio_json::from_str(&payload)?;
                 assert_eq!(payload["value"]["status"], "running");
                 transaction.trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, None);
                 Ok(TRACED_SQL.with_borrow_mut(std::mem::take))
@@ -3563,12 +3535,9 @@ mod tests {
                     &rooms,
                     |_, _, _, _| true,
                 )?;
-                let payload: String = transaction.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='task' AND id='task' AND deleted=0",
-                    [],
-                    |row| row.get(0),
+                let payload: Value = studio_json::from_str(
+                    window_rows(transaction, "task")["task"].0.as_deref().expect("task document"),
                 )?;
-                let payload: Value = studio_json::from_str(&payload)?;
                 assert_eq!(payload["value"]["status"], "completed");
 
                 let mut deleted_agent = studio_runtime_store::AgentRepository::get(
@@ -3588,7 +3557,7 @@ mod tests {
                     |_, _, _, _| true,
                 )?;
                 let deleted: bool = transaction.query_row(
-                    "SELECT deleted FROM sync_entities WHERE collection='task' AND id='task'",
+                    "SELECT COALESCE((SELECT deleted FROM durable_rows WHERE tbl='task_window' AND id='task'),1)",
                     [],
                     |row| row.get(0),
                 )?;
@@ -3656,22 +3625,7 @@ mod tests {
             .await
             .expect("seed complete task-window projection");
 
-        let task_projection = |connection: &Connection| {
-            connection
-                .prepare(
-                    "SELECT id,payload,deleted FROM sync_entities WHERE collection='task' ORDER BY id",
-                )
-                .expect("task projection rows")
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        (row.get::<_, Option<String>>(1)?, row.get::<_, bool>(2)?),
-                    ))
-                })
-                .expect("task projection query")
-                .collect::<Result<BTreeMap<_, _>, _>>()
-                .expect("task projection snapshot")
-        };
+        let task_projection = |connection: &Connection| window_rows(connection, "task");
         let full_window_was_traced = || {
             TRACED_SQL.with_borrow(|statements| {
                 statements
@@ -3729,14 +3683,7 @@ mod tests {
                 )?;
                 let task: studio_runtime_store::TaskRecord = studio_json::from_str(&raw)?;
                 let task = studio_runtime_store::projection_value(&task);
-                put_projection(
-                    transaction,
-                    "task",
-                    "running-stable",
-                    json!({}),
-                    true,
-                    &|_, _, _, _| true,
-                )?;
+                leave_task_window(transaction, "running-stable")?;
                 maintain_task_window_after_write(
                     transaction,
                     Some(&task),
@@ -3766,22 +3713,7 @@ mod tests {
             let id = id.to_owned();
             let status = status.to_owned();
             async move {
-                let task_projection = |connection: &Connection| {
-                    connection
-                        .prepare(
-                            "SELECT id,payload,deleted FROM sync_entities WHERE collection='task' ORDER BY id",
-                        )
-                        .expect("task projection rows")
-                        .query_map([], |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                (row.get::<_, Option<String>>(1)?, row.get::<_, bool>(2)?),
-                            ))
-                        })
-                        .expect("task projection query")
-                        .collect::<Result<BTreeMap<_, _>, _>>()
-                        .expect("task projection snapshot")
-                };
+                let task_projection = |connection: &Connection| window_rows(connection, "task");
                 let full_window_was_traced = || {
                     TRACED_SQL.with_borrow(|statements| {
                         statements.iter().any(|sql| {
@@ -3884,13 +3816,11 @@ mod tests {
 
     /// Live task projections: id to payload.
     fn live_task_projection(connection: &Connection) -> BTreeMap<String, Option<String>> {
-        connection
-            .prepare("SELECT id,payload FROM sync_entities WHERE collection='task' AND deleted=0")
-            .expect("task projection rows")
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .expect("task projection query")
-            .collect::<Result<_, _>>()
-            .expect("task projection snapshot")
+        window_rows(connection, "task")
+            .into_iter()
+            .filter(|(_, (_, left))| !left)
+            .map(|(id, (payload, _))| (id, payload))
+            .collect()
     }
 
     /// Writes one task as `put_task` does and applies the incremental window.
@@ -4040,7 +3970,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_vault_snapshot_skips_malformed_persisted_projects() {
+    fn sync_project_snapshot_skips_malformed_persisted_projects() {
         let connection = Connection::open_in_memory().expect("open test database");
         connection
             .execute_batch("CREATE TABLE runtime_projects (id TEXT, record TEXT);")
@@ -4052,9 +3982,9 @@ mod tests {
             )
             .expect("insert malformed project row");
 
-        let snapshot = ProjectVaultSnapshot::capture(
+        let snapshot = ProjectSnapshot::capture(
             Path::new("/unused"),
-            &ProjectVaultSnapshot::stored_projects(&connection).expect("project rows"),
+            &ProjectSnapshot::stored_projects(&connection).expect("project rows"),
         );
         let mut connection = connection;
         let transaction = connection.transaction().expect("begin sync transaction");
@@ -4418,182 +4348,6 @@ mod tests {
             Err(SyncPolicyError::InvalidStoredObject { scope, id })
                 if scope == "uiPreferences" && id == "user"
         ));
-    }
-
-    /// The sidebar chip reads the Mac sync report of each round, not the report that an
-    /// older build left in the projected entity (Python `codex_vm_agents.project_sync`).
-    #[tokio::test]
-    async fn maintained_project_projection_reads_the_current_mac_sync_report() {
-        let root = tempfile::tempdir().expect("isolated state directory");
-        let store = RuntimeStore::open(Some(root.path()))
-            .await
-            .expect("open isolated runtime store");
-        let source = "/workspace/Synced";
-        let layr_id = sha256_hex(source.as_bytes());
-        let folder = store.root().join("linux-vm/layr-projects").join(&layr_id);
-        fs::create_dir_all(folder.join("sync")).unwrap();
-        fs::write(
-            folder.join("project.json"),
-            json!({"projectId":layr_id,"source":root.path()}).to_string(),
-        )
-        .unwrap();
-        fs::write(
-            folder.join("sync/status.json"),
-            json!({"state":"conflict","conflicts":["a.txt"],"choices":[],"withAgent":[],"deletes":0,"reason":null,"at":5.0,"sent":2}).to_string(),
-        )
-        .unwrap();
-        let project = json!({"recordKind":"live","id":source,"path":source,"peerTeams":[],"projectAliases":[{"serverId":"local","projectId":source,"name":"Synced"}]});
-        let other = json!({"recordKind":"live","id":"/workspace/Plain","path":"/workspace/Plain","peerTeams":[]});
-        let records = [
-            (source.to_owned(), project.clone()),
-            ("/workspace/Plain".to_owned(), other.clone()),
-        ];
-        let snapshot = ProjectVaultSnapshot::capture(store.root(), &records);
-        let state_dir = store.root().to_string_lossy().into_owned();
-        let expected = json!({
-            "projectId":layr_id,"state":"conflict","enabled":true,"conflicts":["a.txt"],
-            "choices":[],"withAgent":[],"deletes":0,"reason":null,
-        });
-        store
-            .transaction(move |transaction| {
-                for record in [&project, &other] {
-                    ProjectsRepository::put_project(transaction, record)?;
-                    let mut prior = record.clone();
-                    prior["layrReadiness"] = json!({"state":"ready"});
-                    prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
-                    SyncDocumentsRepository::put_entity(
-                        transaction,
-                        "project",
-                        record["id"].as_str().unwrap(),
-                        prior,
-                        false,
-                    )?;
-                }
-                let rooms = crate::sync_entity_context::RoomDirectory::load(transaction)?;
-                maintain_entity_projections_with_server_id(
-                    transaction,
-                    &state_dir,
-                    None,
-                    &snapshot,
-                    &rooms,
-                    |_, _, _, _| true,
-                )?;
-                let read = |id: &str| -> Result<Value, StoreError> {
-                    let payload: String = transaction.query_row(
-                        "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                        [id],
-                        |row| row.get(0),
-                    )?;
-                    Ok(studio_json::from_str(&payload)?)
-                };
-                assert_eq!(read(source)?["value"]["layrSync"], expected);
-                // A project without a Mac folder shows no sync report.
-                assert!(read("/workspace/Plain")?["value"].get("layrSync").is_none());
-                assert!(snapshot.matches_entity_projections(transaction)?);
-                Ok::<_, StoreError>(())
-            })
-            .await
-            .expect("maintain project projection");
-    }
-
-    #[tokio::test]
-    async fn maintained_project_projection_matches_python_vault_corpus_and_surfaces_bad_records() {
-        let cases: Vec<Value> =
-            studio_json::from_str(include_str!("../tests/vault/project-view-cases.json"))
-                .expect("project vault corpus");
-        for case in cases {
-            let root = tempfile::tempdir().expect("isolated state directory");
-            let store = RuntimeStore::open(Some(root.path()))
-                .await
-                .expect("open isolated runtime store");
-            let project_id = case["projectId"]
-                .as_str()
-                .expect("fixture project id")
-                .to_owned();
-            let folder = store
-                .root()
-                .join("linux-vm/layr-projects")
-                .join(&project_id);
-            fs::create_dir_all(&folder).unwrap();
-            for (name, value) in case["records"].as_object().unwrap() {
-                fs::write(folder.join(name), studio_json::to_vec(value).unwrap()).unwrap();
-            }
-            if let Some(records) = case.get("rawRecords").and_then(Value::as_object) {
-                for (name, contents) in records {
-                    fs::write(folder.join(name), contents.as_str().unwrap()).unwrap();
-                }
-            }
-            let workspace = root.path().join("workspace");
-            fs::create_dir(&workspace).unwrap();
-            let mut project = case["project"].clone();
-            project["recordKind"] = json!("live");
-            if let Some(aliases) = project
-                .get_mut("projectAliases")
-                .and_then(Value::as_array_mut)
-            {
-                for alias in aliases {
-                    alias["serverId"] = json!("local");
-                    alias["name"] = json!("Project");
-                }
-            }
-            project["path"] = json!(workspace.to_string_lossy());
-            project["peerTeams"] = json!([]);
-            let prior = project.clone();
-            let snapshot = ProjectVaultSnapshot::capture(
-                store.root(),
-                &[(project["id"].as_str().unwrap().to_owned(), project.clone())],
-            );
-
-            let state_dir = store.root().to_string_lossy().into_owned();
-            let expected = case["expected"].clone();
-            let expected_error = case.get("expectedError").is_some();
-            let transaction_project_id = project["id"]
-                .as_str()
-                .expect("fixture project record ID")
-                .to_owned();
-            let result = store.transaction(move |transaction| {
-                ProjectsRepository::put_project(transaction, &project)?;
-                let mut prior = prior;
-                prior["layrReadiness"] = json!({"state":"ready"});
-                prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
-                prior["vault"] = json!({"projectId":"old","state":"none"});
-                SyncDocumentsRepository::put_entity(
-                    transaction,
-                    "project",
-                    project["id"].as_str().unwrap(),
-                    prior,
-                    false,
-                )?;
-                let rooms = crate::sync_entity_context::RoomDirectory::load(transaction)?;
-                maintain_entity_projections_with_server_id(
-                    transaction,
-                    &state_dir,
-                    None,
-                    &snapshot,
-                    &rooms,
-                    |_, _, _, _| true,
-                )?;
-                let payload: String = transaction.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                    [transaction_project_id.as_str()],
-                    |row| row.get(0),
-                )?;
-                let payload: Value = studio_json::from_str(&payload)?;
-                assert_eq!(payload["value"]["vault"], expected);
-                Ok(())
-            }).await;
-            if expected_error {
-                assert!(matches!(
-                    result,
-                    Err(StoreError::InvalidStoredRecord {
-                        object: "vault.json",
-                        id,
-                    }) if id == project_id
-                ));
-            } else {
-                result.expect("maintain project projection");
-            }
-        }
     }
 }
 

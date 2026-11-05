@@ -459,38 +459,6 @@ async fn clone_store(root: &std::path::Path) -> RuntimeStore {
         .await
         .expect("seeded store opens")
 }
-#[tokio::test]
-async fn explicit_repair_skips_ready_linux_workspace_and_persists_note() {
-    let dir = tempfile::tempdir().expect("valid synthetic fixture");
-    let root = dir.path().join("state");
-    let store = std::sync::Arc::new(clone_store(&root).await);
-    store
-        .transaction(|tx| {
-            let mut agent =
-                ContextRepairRepository::agent(tx, "agent")?.expect("seeded agent exists");
-            agent["environment"] = json!("linux");
-            agent["executionMode"] = json!("vm");
-            agent
-                .as_object_mut()
-                .expect("agent object")
-                .remove("contextRepairWait");
-            agent["contextRepair"] = Value::Null;
-            ContextRepairRepository::put_agent(tx, &agent)
-        })
-        .await
-        .expect("Linux workspace fixture commits");
-
-    let result = context_repair::repair_idle(std::sync::Arc::clone(&store), "agent")
-        .await
-        .expect("guest history is skipped");
-    assert_eq!(result["id"], "agent");
-    assert_eq!(
-        ContextRepairRepository::agent(&store.test_reader().expect("store readable"), "agent")
-            .expect("agent read")
-            .expect("agent present")["contextRepairNote"],
-        "Automatic context repair is skipped for VM workers. The rollout stays in the guest. The next turn can proceed."
-    );
-}
 fn state(store: &RuntimeStore) -> Value {
     let db = store.test_reader().expect("valid synthetic fixture");
     let agent = ContextRepairRepository::agent(&db, "agent")

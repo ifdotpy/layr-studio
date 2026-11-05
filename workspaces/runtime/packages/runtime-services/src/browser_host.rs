@@ -1,7 +1,6 @@
-//! Sign-in links of native chats on this server (docs/vm-browser-bridge.md, "Native chats").
+//! Sign-in links of native chats on this server.
 //!
-//! The Rust port of `vm-guest/browser_bridge.py` as `codex_browser_host.py` runs it in the
-//! Python server: the same sockets, the same queue file, the same JSON-RPC methods. Agents run
+//! Agents run
 //! the launcher `<state>/browser-host/studio-browser URL` (it is also `BROWSER`, and
 //! `xdg-open`, and `open` on macOS, in `<state>/browser-host/bin`). The launcher sends the
 //! link on `open.sock`; this bridge checks it with the URL rules (`browser_policy`), finds the
@@ -55,8 +54,7 @@ const TTL_SECONDS: f64 = 600.0;
 /// A closed request stays in the queue this long, in seconds.
 const KEEP_SECONDS: f64 = 3600.0;
 /// A pending request whose command still listens gets a new deadline when its current one is
-/// at most this many seconds away (`EXTEND_BEFORE_SECONDS`, docs/vm-browser-bridge.md,
-/// "Card lifetime").
+/// at most this many seconds away (`EXTEND_BEFORE_SECONDS`).
 const EXTEND_BEFORE_SECONDS: f64 = TTL_SECONDS / 2.0;
 /// The open limit of a listening request, in seconds from its creation. Its owner is
 /// `SIGN_IN_OPEN_LIMIT_SECONDS`; the final state at this bound must still be in the queue.
@@ -396,8 +394,7 @@ pub trait ChatLookup: Send + Sync {
 }
 
 /// The chat lookup of a runtime store: a not deleted chat whose ID or native `threadId` is the
-/// hint. A VM chat reaches this bridge only through a `host_exec` command, which runs on this
-/// Mac as this user (`host_exec_service`); its own guest commands use the guest bridge. Agents
+/// hint. Agents
 /// of one user can act for each other, so the hint is not a security boundary; the approval
 /// card is the consent.
 pub struct StoreChats {
@@ -726,7 +723,6 @@ pub struct HostBridgeOptions {
     pub clock: Clock,
     /// The launcher also opens each link in the browser of this Mac at once, as the tool would
     /// without Studio, and the card stays for another window or a phone
-    /// (docs/vm-browser-bridge.md, "Native chats").
     pub local_open: bool,
 }
 
@@ -1001,8 +997,7 @@ impl HostBridge {
             return Ok(item);
         }
         // One card for one sign-in: a link of another chat with the same Linux user, sign-in
-        // host and client waits on the open request (docs/vm-browser-bridge.md, "One card for
-        // the same sign-in"). A device code page has no client and stays on its own.
+        // host and client waits on the open request. A device code page has no client and stays on its own.
         let leader = final_link.client_id.as_deref().and_then(|client| {
             queue
                 .items
@@ -1803,7 +1798,7 @@ pub fn shim_main(arguments: impl IntoIterator<Item = OsString>) -> Option<i32> {
     let socket = std::env::var("STUDIO_BROWSER_SOCKET")
         .ok()
         .filter(|value| !value.is_empty());
-    // A VM chat names itself with LAYR_SESSION; a native chat with its session.
+    // Native Layr and other sessions supply their respective session identifiers.
     let session = std::env::var("LAYR_SESSION")
         .ok()
         .filter(|value| !value.is_empty())

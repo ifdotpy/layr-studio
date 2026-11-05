@@ -21,8 +21,8 @@ function writePathScript(file: string, folder: string) {
   renameSync(temporary, file);
 }
 
-// Studio's launcher for browser links of a session (docs/vm-browser-bridge.md, "Native chats"
-// and section 6.4). The server writes studio-browser.json next to the bridge state; the bridge
+// Studio's launcher for browser links of a session. The server writes studio-browser.json
+// next to the bridge state; the bridge
 // process keeps its own environment, so its launch identity does not change.
 export function browserEnvironment(
   root: string,

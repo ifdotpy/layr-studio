@@ -5,30 +5,27 @@ use studio_runtime_store::path_identity::CanonicalPath;
 const FLUSH_OPERATION_PROGRESS_GUARD: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[tokio::test]
-async fn current_provider_scope_reads_host_and_vm_owners() {
+async fn current_provider_scope_reads_host_owner() {
     let directory = tempfile::tempdir().unwrap();
     let store = studio_runtime_store::RuntimeStore::open(Some(directory.path()))
         .await
         .unwrap();
     store.transaction(|tx| {
-        for (id, mode) in [("host", "native"), ("vm", "vm")] {
+        {
+            let (id, mode) = ("host", "native");
             let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":id,"rootId":id,"epoch":0,"status":"idle","provider":"codex","accountKey":"default","executionMode":mode})).unwrap();
             assert!(studio_runtime_store::account_state::current_provider_scope(tx, &agent).is_err());
             studio_runtime_store::AgentRepository::put(tx, &agent)?;
         }
         Ok(())
     }).await.unwrap();
-    store::attach_provider_stream_for_test(&store, "default", None, 4, "host-connection")
-        .await
-        .unwrap();
-    store::attach_provider_stream(&store, "default", Some("vm"), 7, "vm-connection")
+    store::attach_provider_stream_for_test(&store, "default", 4, "host-connection")
         .await
         .unwrap();
     store
         .transaction(|tx| {
-            for (id, generation, connection) in
-                [("host", 4, "host-connection"), ("vm", 7, "vm-connection")]
             {
+                let (id, generation, connection) = ("host", 4, "host-connection");
                 let agent = studio_runtime_store::AgentRepository::get(tx, &id.into())?.unwrap();
                 let scope = studio_runtime_store::account_state::current_provider_scope(tx, &agent)
                     .unwrap();
@@ -55,7 +52,7 @@ async fn current_provider_scope_reads_host_and_vm_owners() {
         .await
         .unwrap();
     assert!(
-        store::attach_provider_stream(&store, "default", None, 3, "stale")
+        store::attach_provider_stream(&store, "default", 3, "stale")
             .await
             .is_err()
     );
@@ -77,7 +74,7 @@ async fn new_supervisor_generation_after_direct_does_not_reuse_ack() {
         })
         .await
         .unwrap();
-    store::attach_provider_stream(&store, "default", None, direct, "direct")
+    store::attach_provider_stream(&store, "default", direct, "direct")
         .await
         .unwrap();
     store
@@ -104,7 +101,7 @@ async fn new_supervisor_generation_after_direct_does_not_reuse_ack() {
         supervisor > direct,
         "new supervisor must use a new host generation"
     );
-    store::attach_provider_stream(&store, "default", None, supervisor, "supervisor")
+    store::attach_provider_stream(&store, "default", supervisor, "supervisor")
         .await
         .unwrap();
     let ack = store
@@ -122,7 +119,7 @@ async fn new_supervisor_generation_after_direct_does_not_reuse_ack() {
         })
         .await
         .unwrap();
-    store::attach_provider_stream(&store, "default", None, supervisor, "reattach")
+    store::attach_provider_stream(&store, "default", supervisor, "reattach")
         .await
         .unwrap();
     let ack = store
@@ -151,7 +148,7 @@ async fn direct_generation_after_supervisor_attachment_does_not_reuse_ack() {
         })
         .await
         .unwrap();
-    store::attach_provider_stream(&store, "default", None, 42, "supervisor")
+    store::attach_provider_stream(&store, "default", 42, "supervisor")
         .await
         .unwrap();
     store
@@ -170,7 +167,7 @@ async fn direct_generation_after_supervisor_attachment_does_not_reuse_ack() {
         next > 42,
         "direct generation must exceed the supervisor generation"
     );
-    store::attach_provider_stream(&store, "default", None, next, "direct")
+    store::attach_provider_stream(&store, "default", next, "direct")
         .await
         .unwrap();
     let ack = store

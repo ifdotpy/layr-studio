@@ -475,24 +475,10 @@ async fn ui_summary(
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::UiSummaryResponse>, ApiError> {
     let store = state.store.ok_or_else(ApiError::internal)?;
-    let vm_state_dir = state.vm_state_dir;
     let native_state_dir = store.state_dir().to_path_buf();
-    let (has_studio_vm, native_layr) = studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-http/ui-summary/vm-capability",
-        move || {
-            #[cfg(unix)]
-            let has_vm =
-                studio_runtime_services::linux_vm_runtime::studio_vm_is_created(&vm_state_dir);
-            #[cfg(not(unix))]
-            let has_vm = {
-                let _ = vm_state_dir;
-                false
-            };
-            (
-                has_vm,
-                studio_runtime_services::layr_native::capability(&native_state_dir),
-            )
-        },
+    let native_layr = studio_runtime_process::blocking_pool::spawn_blocking(
+        "runtime-http/ui-summary/native-capability",
+        move || studio_runtime_services::layr_native::capability(&native_state_dir),
     )
     .await
     .map_err(|_| ApiError::internal())?;
@@ -519,7 +505,6 @@ async fn ui_summary(
             let mut summary = super::generated_json::<crate::generated::UiSummaryResponse>(
                 system_reads::ui_summary(transaction, accounts).map_err(ApiError::stored)?,
             )?;
-            summary.has_studio_vm = Some(has_studio_vm);
             summary.native_layr_message = native_layr.message().map(str::to_owned);
             summary.default_workspace_mode = Some(
                 studio_runtime_schema::workspace_modes::default_chat_workspace_mode(

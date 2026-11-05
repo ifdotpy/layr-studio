@@ -98,7 +98,8 @@ impl PublicationContext {
         if account.is_empty()
             || actor.is_empty()
             || epoch < 0
-            || journal_scope != crate::account_worker::vm_journal_scope(account, actor)
+            || journal_scope
+                != crate::account_worker::historical_actor_journal_scope(account, actor)
         {
             return Err(NotificationDispatchError::invalid());
         }
@@ -944,6 +945,26 @@ pub(crate) fn put_task_record(
     kinds::put_task(tx, task)
 }
 
+/// Test entry to the canonical task writer and its window, for other crates' tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_put_task(
+    tx: &Transaction<'_>,
+    task: &studio_runtime_store::TaskRecord,
+) -> Result<(), NotificationDispatchError> {
+    kinds::put_checked_task(tx, task)?;
+    crate::sync_policy::maintain_task_window(tx, &|_, _, _, _| true)?;
+    Ok(())
+}
+
+/// Test entry: delete a task row and keep its window.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_delete_task(tx: &Transaction<'_>, id: &str) -> Result<(), NotificationDispatchError> {
+    tx.execute("DELETE FROM runtime_tasks WHERE id=?1", [id])
+        .map_err(studio_runtime_store::StoreError::from)?;
+    crate::sync_policy::maintain_task_window(tx, &|_, _, _, _| true)?;
+    Ok(())
+}
+
 pub(crate) fn put_checked_task_record(
     tx: &Transaction<'_>,
     task: &studio_runtime_store::TaskRecord,
@@ -1514,8 +1535,7 @@ fn write_text_notification(
         index_search,
     )?;
     if completed {
-        // Sign-in links in the message become sign-in cards once it commits
-        // (docs/vm-browser-bridge.md, section 7). The text stays as it is.
+        // Sign-in links become cards once the message commits; its text stays unchanged.
         crate::sign_in::note_message(agent_id, &id, &text);
         agent["activity"] = json!({"phase":"thinking", "at":observed_at});
         agent["lastAnswer"] = Value::String(suffix(&text, 16_000));

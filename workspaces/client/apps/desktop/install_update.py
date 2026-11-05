@@ -48,8 +48,7 @@ recovery = load_recovery()
 def load_updates(resources):
     """Use helpers shipped beside this installer, independent of the backend."""
     import desktop_updates
-    import desktop_vm
-    return desktop_updates, desktop_vm
+    return desktop_updates
 
 
 def event(**fields):
@@ -197,7 +196,7 @@ def stop_backend(config, state, backend):
 def install(state, config, *, applications=Path("/Applications"), run=None, verify=verify_backend,
             stop=stop_backend, sleep=time.sleep, clock=time.time, target=signal_target, kill=os.kill):
     """Install the pending update. Returns (exit status, detail)."""
-    updates, vm = load_updates(config["resources"])
+    updates = load_updates(config["resources"])
     run = run or updates.run_tool
     pending = updates.read_pending(state)
     if pending is None:
@@ -209,11 +208,8 @@ def install(state, config, *, applications=Path("/Applications"), run=None, veri
     with held(state / "update-install.lock") as alone:
         if not alone:
             return WAITING, "another install runs"
-        with held(vm.vm_state_dir(state) / vm.MAINTENANCE_LOCK, create=False) as free:
-            if not free:
-                return WAITING, "waiting for the VM maintenance lock"
-            return _install(state, config, pending, updates, applications, run, verify, stop, sleep, clock,
-                            target, kill)
+        return _install(state, config, pending, updates, applications, run, verify, stop, sleep, clock,
+                        target, kill)
 
 
 def _install(state, config, pending, updates, applications, run, verify, stop, sleep, clock, target, kill):

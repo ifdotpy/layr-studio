@@ -17,11 +17,7 @@ pub(super) use receipts::{accept_thread, accept_turn};
 pub(crate) use snapshot::actor_tool_definitions;
 #[cfg(test)]
 pub(crate) use snapshot::ensure_context_tables;
-pub use snapshot::{
-    PreparationFilesystem, PreparationResources, VmProviderAuthFuture, VmProviderLaunch,
-    VmProviderLaunchFuture, VmProviderLaunchRequest, VmProviderLaunchResolver,
-    VmProviderRefreshFuture,
-};
+pub use snapshot::{PreparationFilesystem, PreparationResources};
 
 fn refusal(reason: String) -> WorkerError {
     WorkerError::PreparationRefused(reason)

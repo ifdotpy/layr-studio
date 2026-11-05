@@ -163,8 +163,30 @@ pub(crate) fn agent_view_context(
     })
 }
 
-/// The status is read from the chat row (`domain`), not from the retired agent column.
-pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),''),json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT COALESCE(json_extract(record,'$.status'),'unknown') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+
+fn status_is_working(status: &studio_runtime_store::AgentStatus) -> bool {
+    use studio_runtime_store::AgentStatus;
+    match status {
+        AgentStatus::Starting
+        | AgentStatus::Running
+        | AgentStatus::Waiting
+        | AgentStatus::WaitingOnMonitor
+        | AgentStatus::Approval => true,
+        AgentStatus::Unknown
+        | AgentStatus::Idle
+        | AgentStatus::Queued
+        | AgentStatus::Completed
+        | AgentStatus::Interrupted
+        | AgentStatus::Failed
+        | AgentStatus::Blocked
+        | AgentStatus::Paused
+        | AgentStatus::Parked
+        | AgentStatus::Abandoned
+        | AgentStatus::CapacityRetry
+        | AgentStatus::Other(_) => false,
+    }
+}
 
 /// The team counts of a lead as its view shows them, as JSON text; None for a member.
 pub(crate) fn team_counts_text(transaction: &Connection, id: &str) -> StoreResult<Option<String>> {
@@ -193,16 +215,11 @@ fn team_counts(
     let mut total = 0;
     let mut working = 0;
     let mut statement = transaction.prepare_cached(TEAM_COUNT_INPUTS_SQL)?;
-    let rows = statement.query_map([id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<bool>>(1)?.unwrap_or(false),
-        ))
-    })?;
+    let rows = statement.query_map([id], |row| row.get::<_, String>(0))?;
     for row in rows {
-        let (status, auto_wake) = row?;
+        let status = studio_runtime_store::AgentStatus::parse(&row?);
         total += 1;
-        if crate::turn_prepare::WorkerStatus::from_agent_status(&status).working(auto_wake) {
+        if status_is_working(&status) {
             working += 1;
         }
     }

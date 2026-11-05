@@ -59,7 +59,6 @@ test.each([
 );
 
 test.each([
-  ["layr", "Layr VM"],
   ["layr-native", "Layr"],
   ["worktree", "WT"],
 ] as const)("shows the chat workspace %s as %s", (workspaceMode, label) => {
@@ -69,17 +68,6 @@ test.each([
   );
   expect(workspaceBadgeInfo(current)?.label).toBe(label);
   expect(markup).toContain(`>${label}</span>`);
-});
-
-test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
-  const current = agent({
-    ...(remote ? { remoteWorker: { server: "remote", link: "link" } } : {}),
-    workspaceMode: GeneratedApiWorkspaceMode.layr,
-  });
-  expect(workspaceBadgeInfo(current)).toEqual({
-    label: "Layr VM",
-    title: "Virtual machine with Layr · /projects/example",
-  });
 });
 
 test("missing modes retain lead and remote badge visibility", () => {

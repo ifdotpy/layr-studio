@@ -31,7 +31,7 @@ Rust, provider, and client suites in [docs/testing.md](docs/testing.md) as the p
 
 ## Where things live
 
-- [Runtime](workspaces/runtime/README.md): Rust server, VM guest, and prompts.
+- [Runtime](workspaces/runtime/README.md): Rust server and prompts.
 - [Providers](workspaces/providers/README.md): provider process integrations.
 - [Client](workspaces/client/README.md): web renderer and Electron desktop app.
 - [Tooling](workspaces/tooling/README.md): repository checks and commit hooks.

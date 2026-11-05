@@ -5,7 +5,7 @@
   },
   {
     "file": "workspaces/providers/apps/claude-bridge/bridge.mjs",
-    "purpose": "Stable VM launcher checks Node TypeScript support before loading the bridge."
+    "purpose": "Stable launcher checks Node TypeScript support before loading the bridge."
   },
   {
     "file": "workspaces/client/apps/native/src-tauri/src/native-check.js",

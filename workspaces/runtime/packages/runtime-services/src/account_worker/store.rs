@@ -198,7 +198,7 @@ pub(super) fn save_account_submission(
             status: OutboxStatus::Unknown,
             account: Some(account.clone()),
             stream_id: Some(if vm {
-                super::vm_journal_scope(account, &context.intent.agent_id)
+                super::historical_actor_journal_scope(account, &context.intent.agent_id)
             } else {
                 account.clone()
             }),
@@ -743,45 +743,6 @@ pub(super) async fn recover(
         Ok(recovered)
     })
     .await
-}
-
-/// Restore outstanding tickets belonging to one VM actor into that actor's
-/// guest session. Host tickets are handled by `recover` and never cross this
-/// boundary.
-pub(super) fn recover_vm_actor_requests(
-    connection: &rusqlite::Connection,
-    account: &str,
-    agent: &str,
-    generation: u64,
-) -> Result<Vec<(Pending, RecoveredRequest)>, WorkerError> {
-    let Some(agent_record) = AgentRepository::get(connection, &AgentId::from(agent))? else {
-        return Ok(Vec::new());
-    };
-    if agent_record.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        return Ok(Vec::new());
-    }
-    let mut recovered = Vec::new();
-    for row in Outbox::for_owner_tagged::<ProviderCall>(
-        connection,
-        OwnerKind::Agent,
-        agent,
-        OutboxKind::ProviderCall,
-        PROVIDER_CALL_TAG,
-    )
-    .map_err(outbox_error)?
-    {
-        let ProviderCall::Account(call) = row.payload else {
-            continue;
-        };
-        if call.context.intent.account_key != account {
-            continue;
-        }
-        let request = call.written.as_ref().unwrap_or(&call.request).recovered();
-        if request.ticket.generation == generation {
-            recovered.push((call.context, request));
-        }
-    }
-    Ok(recovered)
 }
 
 /// An unsubmitted preparation whose reserved batch can be resumed.
@@ -1986,21 +1947,6 @@ fn settle_outcome(
     })
 }
 
-pub(super) async fn disconnect_vm_actor(
-    store: &RuntimeStore,
-    agent_id: &str,
-    epoch: i64,
-    account: &str,
-    generation: u64,
-) -> Result<bool, WorkerError> {
-    let agent_id = agent_id.to_owned();
-    let account = account.to_owned();
-    let disconnected = scheduler::lifecycle_transaction_with(store, move |tx| {
-        SchedulerRepository::disconnect_vm_actor(tx, &agent_id, epoch, &account, generation, now())
-    })
-    .await?;
-    Ok(disconnected)
-}
 /// Disconnect one ended provider generation and tell each interrupted child's
 /// parent. The notice id is the stop id a later connection recovery would use
 /// for the same turn or start attempt, so each parent hears of the stop once.
@@ -2008,8 +1954,7 @@ pub(super) async fn disconnect_vm_actor(
 /// A retained provider (a supervised process that outlives this worker) keeps
 /// its turns: the next worker attaches to the same generation and continues
 /// them, and a replaced generation disconnects them then
-/// (`SchedulerRepository::reconcile_generation`). Only the VM actors end here:
-/// their sessions belong to this worker.
+/// (`SchedulerRepository::reconcile_generation`).
 pub(super) fn disconnect_provider_generation(
     tx: &studio_runtime_store::Transaction<'_>,
     account: &str,
@@ -2018,7 +1963,7 @@ pub(super) fn disconnect_provider_generation(
 ) -> studio_runtime_store::StoreResult<()> {
     let at = now();
     let interrupted = if provider_retained {
-        SchedulerRepository::disconnect_vm_actors(tx, account, generation, at)?
+        Vec::new()
     } else {
         SchedulerRepository::disconnect_account(tx, account, generation, at, false)?
     };
@@ -2607,10 +2552,8 @@ fn journal_one(
     } = identity;
     let operation = journal_operation(journal_scope, entry.generation.0, entry.cursor.0);
     let digest = journal_digest(entry, &operation)?;
-    if let Some((actor_id, expected_epoch)) = expected_vm_actor
-        && !crate::linux_vm_provider::vm_actor_matches(tx, actor_id, expected_epoch, account, None)?
-    {
-        return Err(WorkerError::StaleVmActor);
+    if expected_vm_actor.is_some() {
+        return Err(WorkerError::UnavailableActor);
     }
     let stream_generation = current_stream_generation(tx, journal_scope, entry.generation.0)?;
     if entry.cursor.0 <= checkpoint(tx, journal_scope, stream_generation)? {
@@ -2942,6 +2885,14 @@ fn journal_one(
                             "uncertain",
                             None,
                         )?;
+                        // A running turn can no longer report its end: interrupt it.
+                        if SchedulerRepository::settle_unloaded_turn(tx, &identity, now())? {
+                            crate::lifecycle_effects::notify_parent_of_disconnect(
+                                tx,
+                                &identity.agent_id,
+                                now(),
+                            )?;
+                        }
                     }
                     _ => {
                         let dispatched = dispatch_notification_with_effects(
@@ -3486,42 +3437,25 @@ fn set_checkpoint(
 pub(super) async fn attach_provider_stream(
     store: &RuntimeStore,
     account: &str,
-    actor: Option<&str>,
     generation: u64,
     connection: &str,
 ) -> Result<(), WorkerError> {
     let account = account.to_owned();
-    let actor = actor.map(str::to_owned);
     let connection = connection.to_owned();
-    store.transaction_with(move|tx| {
-        if let Some(actor)=actor {
-            let agent = stored_agent(tx, &actor)?;
-            if account_key(&agent) != account || agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) { return Err(invalid(&actor)); }
-            let current = studio_runtime_store::account_state::provider_state(tx, studio_runtime_store::account_state::ProviderOwner::Agent(&agent))?;
-            let previous = current.as_ref().map(|(state, _)| state.generation());
-            if previous.is_some_and(|old| old > generation) { return Err(invalid(&actor)); }
-            if let Some(previous) = previous && previous != generation {
-                let ack = current.as_ref().map_or(0, |(_, ack)| *ack);
-                super::retained::storage::checkpoint_covered(tx, &super::vm_journal_scope(&account, &actor), previous, ack)?;
-            }
-            // Settlement above can update this same source owner.
-            let mut agent = stored_agent(tx, &actor)?;
-            let state = agent.extra.entry("providerStream".into()).or_insert_with(|| json!({}));
-            if previous != Some(generation) || state.get("ack").is_none() { state["ack"] = json!(0); }
-            state["generation"] = json!(generation);
-            state["connection"] = json!(connection);
-            AgentRepository::put(tx, &agent)?;
-        } else {
-            studio_runtime_store::account_state::ensure_account(tx,&account)?;
-            let current=studio_runtime_store::account_state::provider_state(tx,studio_runtime_store::account_state::ProviderOwner::Account(&account))?;
-            let previous=current.as_ref().map(|(state,_)|state.generation());
-            let ack=current.as_ref().map_or(0,|(_,ack)|*ack);
-            let generation=i64::try_from(generation).map_err(|_|invalid(&account))?;
-            let next_generation=generation.checked_add(1).ok_or_else(||invalid(&account))?;
-            if previous.is_some_and(|old|old>generation as u64){return Err(invalid(&account));}
-            if let Some(previous)=previous && previous!=generation as u64 {super::retained::storage::checkpoint_covered(tx,&account,previous,ack)?;}
-            tx.execute_cached("UPDATE runtime_account_state SET connection_generation=?2,connection_id=?3,journal_ack=CASE WHEN connection_generation=?2 THEN journal_ack ELSE 0 END,recovery_required=0,next_generation=MAX(next_generation,?4) WHERE account=?1",params![account,generation,connection,next_generation])?;
+    store.transaction_with(move |tx| {
+        studio_runtime_store::account_state::ensure_account(tx, &account)?;
+        let current = studio_runtime_store::account_state::provider_state(
+            tx, studio_runtime_store::account_state::ProviderOwner::Account(&account),
+        )?;
+        let previous = current.as_ref().map(|(state, _)| state.generation());
+        let ack = current.as_ref().map_or(0, |(_, ack)| *ack);
+        let generation = i64::try_from(generation).map_err(|_| invalid(&account))?;
+        let next_generation = generation.checked_add(1).ok_or_else(|| invalid(&account))?;
+        if previous.is_some_and(|old| old > generation as u64) { return Err(invalid(&account)); }
+        if let Some(previous) = previous && previous != generation as u64 {
+            super::retained::storage::checkpoint_covered(tx, &account, previous, ack)?;
         }
+        tx.execute_cached("UPDATE runtime_account_state SET connection_generation=?2,connection_id=?3,journal_ack=CASE WHEN connection_generation=?2 THEN journal_ack ELSE 0 END,recovery_required=0,next_generation=MAX(next_generation,?4) WHERE account=?1", params![account,generation,connection,next_generation])?;
         Ok(())
     }).await
 }
@@ -3530,11 +3464,10 @@ pub(super) async fn attach_provider_stream(
 pub async fn attach_provider_stream_for_test(
     store: &RuntimeStore,
     account: &str,
-    actor: Option<&str>,
     generation: u64,
     connection: &str,
 ) -> Result<(), WorkerError> {
-    attach_provider_stream(store, account, actor, generation, connection).await
+    attach_provider_stream(store, account, generation, connection).await
 }
 pub(super) fn journal_committed(
     tx: &studio_runtime_store::Transaction<'_>,
@@ -4189,7 +4122,7 @@ pub(crate) fn persist_streams(
     drop(query);
     for actor in actors {
         let lane = host.take_owner(&actor);
-        let scope = super::vm_journal_scope(account, &actor);
+        let scope = super::historical_actor_journal_scope(account, &actor);
         let saved = persist_stream_lane(tx, account, &scope, Some(&actor), &revision, &lane)?;
         stored_agent(tx, &actor)?;
         tx.execute_cached("UPDATE runtime_agents SET record=json_set(record,'$.providerStream.streams',json(?2)) WHERE id=?1", params![actor, studio_json::to_string(&saved).map_err(StoreError::from)?])?;
@@ -4262,7 +4195,7 @@ pub(super) fn load_streams(
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for (actor, raw) in lanes {
-        let scope = super::vm_journal_scope(account, &actor);
+        let scope = super::historical_actor_journal_scope(account, &actor);
         let saved = restore_stream_lane(
             tx,
             &scope,
@@ -4887,7 +4820,7 @@ mod pending_thread_start_tests {
                 epoch: 0,
                 attempt_id: operation.clone(),
                 account_key: account.into(),
-                provider: ProviderKind::Codex,
+                provider: studio_runtime_providers::ProviderKind::Codex,
                 thread_id: None,
                 cwd: None,
                 model: None,

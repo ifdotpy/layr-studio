@@ -62,13 +62,7 @@ fn store(state: &HttpState) -> Result<Arc<RuntimeStore>, ApiError> {
 fn provider(state: &HttpState, owner: &Value) -> Result<Arc<dyn AccountSessionPort>, ApiError> {
     let agent = <AgentRecord as serde::Deserialize>::deserialize(owner)
         .map_err(|_| ApiError::internal())?;
-    Ok(super::agent_management::native_action_provider(
-        store(state)?.as_ref(),
-        &agent,
-        state.account_session.clone(),
-        state.browser_answer_guest.clone(),
-    )?
-    .0)
+    super::agent_management::native_action_provider(&agent, state.account_session.clone())
 }
 fn connections(
     state: &HttpState,

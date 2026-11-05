@@ -467,3 +467,15 @@ fn shared_workspace_ignores_worktree_preference_and_stopped_or_deleted_actor_def
         ));
     }
 }
+
+#[test]
+fn historical_layr_workspace_remains_readable_and_is_refused() {
+    let actor: WorkspaceActor = studio_json::from_str(
+        r#"{"id":"legacy","epoch":1,"cwd":"/legacy","autoWake":true,"workspaceMode":"layr"}"#,
+    )
+    .expect("historical workspace record remains readable");
+    assert_eq!(
+        unsupported(&actor),
+        Some(WorkspaceRefusal::VmWorkspaceUnsupported)
+    );
+}

@@ -632,30 +632,6 @@ async fn requested_base_is_pinned_and_unsupported_or_restore_refusals_do_not_wri
         before
     );
     fixture.patch(key, original).await;
-    let original_vm_fields = fixture.actor();
-    fixture.patch("executionMode", json!("vm")).await;
-    fixture.patch("layrReady", json!(true)).await;
-    fixture.patch("layrProjectId", json!("fake-project")).await;
-    fixture.patch("layrLine", json!("fake-line")).await;
-    fixture
-        .patch("cwd", json!("/guest/project/lines/fake-line"))
-        .await;
-    assert!(matches!(
-        prepare(std::sync::Arc::clone(&fixture.store), fixture.id.clone())
-            .await
-            .expect("ready VM workspace"),
-        WorkspaceDecision::Ready { .. }
-    ));
-    fixture.patch("executionMode", json!("native")).await;
-    fixture.patch("layrReady", json!(false)).await;
-    for key in ["layrProjectId", "layrLine", "cwd"] {
-        fixture
-            .patch(
-                key,
-                original_vm_fields.get(key).cloned().unwrap_or(Value::Null),
-            )
-            .await;
-    }
     let fixture_id = fixture.id.clone();
     let fixture_cwd = fixture.actor()["cwd"].clone();
     fixture.store.transaction(move |tx| {tx.execute("INSERT INTO runtime_workspace_operations(id,record) VALUES('restore:lost-marker',?1)", [json!({"id":"restore:lost-marker","kind":"restore","agent":fixture_id,"cwd":fixture_cwd,"phase":"recovery_required"}).to_string()])?;Ok(())}).await.expect("orphan restore");
@@ -2372,4 +2348,36 @@ async fn a_message_to_a_child_whose_provision_failed_is_admitted_and_its_worktre
             .expect("ids")
     };
     assert_eq!(pending, ["workspace-input", &message_id]);
+}
+
+#[tokio::test]
+async fn persisted_ready_vm_is_refused_before_host_preparation() {
+    let fixture = Fixture::new().await;
+    fixture.patch("executionMode", json!("vm")).await;
+    fixture.patch("workspaceMode", json!("layr")).await;
+    fixture.patch("layrReady", json!(true)).await;
+    fixture
+        .patch("layrProjectId", json!("legacy-project"))
+        .await;
+    fixture.patch("layrLine", json!("legacy-line")).await;
+    fixture.patch("cwd", json!("/legacy-guest-only/line")).await;
+    let before = fixture.actor();
+    assert!(matches!(
+        prepare(std::sync::Arc::clone(&fixture.store), fixture.id.clone()).await,
+        Ok(WorkspaceDecision::Refuse(
+            crate::workspace_ready::WorkspaceRefusal::VmWorkspaceUnsupported
+        ))
+    ));
+    assert_eq!(
+        fixture.actor(),
+        before,
+        "refusal must not prepare the workspace"
+    );
+    fixture.patch("workspaceMode", json!("layr-native")).await;
+    assert!(matches!(
+        prepare(std::sync::Arc::clone(&fixture.store), fixture.id.clone()).await,
+        Ok(WorkspaceDecision::Refuse(
+            crate::workspace_ready::WorkspaceRefusal::VmWorkspaceUnsupported
+        ))
+    ));
 }

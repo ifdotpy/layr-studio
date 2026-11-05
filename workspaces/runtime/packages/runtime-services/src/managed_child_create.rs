@@ -19,57 +19,15 @@ use thiserror::Error;
 use crate::managed_host_tools::MAX_SPAWN_BATCH_AGENTS;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_PROMPT_CHARS: usize = 32_000;
-/// Python's Linux VM review state save timeout, in seconds.
-const VM_REVIEW_STATE_TIMEOUT_SECONDS: u64 = 130;
-
-fn vm_review_guest_ids(
-    request_id: &str,
-) -> Result<(String, String), crate::managed_host_tools::Error> {
-    let digest = studio_runtime_store::sha256_hex(request_id.as_bytes());
-    let guest_request_id = format!("layr-review-state:{digest}");
-    let turn_id = format!("review:{digest}");
-    let limit = crate::linux_vm_guest::GUEST_REQUEST_ID_MAX_CHARS;
-    if guest_request_id.chars().count() > limit || turn_id.chars().count() > limit {
-        return Err(crate::managed_host_tools::Error::Invalid(
-            "The VM review request identity is too long",
-        ));
-    }
-    Ok((guest_request_id, turn_id))
-}
-
-/// A new worker uses its parent's workspace mode unless the reviewer or VM rule applies.
-/// A lead switched to Layr therefore creates Layr workers.
-pub(crate) fn default_workspace<'a>(role: &str, vm_actor: bool, parent: &'a Value) -> &'a str {
-    if role == "reviewer" && !vm_actor && !crate::layr_native::is_native(parent) {
+/// A new worker uses its parent's workspace mode; ordinary reviewers share the folder.
+pub(crate) fn default_workspace<'a>(role: &str, parent: &'a Value) -> &'a str {
+    if role == "reviewer" && !crate::layr_native::is_native(parent) {
         "shared"
-    } else if vm_actor {
-        "layr"
     } else {
         parent
             .get("workspaceMode")
             .and_then(Value::as_str)
             .unwrap_or("worktree")
-    }
-}
-
-fn validate_vm_parent_workspace(workspace: &str, vm_parent: bool) -> Result<(), Error> {
-    if matches!(workspace, "layr" | "linux") && !vm_parent {
-        return Err(crate::managed_host_tools::Error::Invalid(
-            "A VM workspace requires a VM parent",
-        )
-        .into());
-    }
-    Ok(())
-}
-
-fn host_project_cwd<'a>(vm_workspace: bool, root: &'a Value, parent_cwd: &'a str) -> &'a str {
-    if vm_workspace {
-        root.get("hostProjectPath")
-            .or_else(|| root.get("cwd"))
-            .and_then(Value::as_str)
-            .unwrap_or(parent_cwd)
-    } else {
-        parent_cwd
     }
 }
 
@@ -84,27 +42,6 @@ pub enum ManagedCreationEnvironmentError {
 /// Host account facts and model admission. Production implementations resolve
 /// model settings through the retained `AccountSessionPort` broker.
 pub trait ManagedCreationEnvironment: Send + Sync {
-    /// Guest RPC boundary used by VM review state capture. Production uses the
-    /// runtime's Linux VM socket; tests inject a fake guest.
-    fn guest_rpc(
-        &self,
-        store: &RuntimeStore,
-    ) -> Result<std::sync::Arc<dyn crate::linux_vm_guest::GuestRpc>, ManagedCreationEnvironmentError>
-    {
-        #[cfg(unix)]
-        {
-            Ok(std::sync::Arc::new(
-                crate::linux_vm_guest::UnixGuestRpc::for_runtime_state(store.state_dir()),
-            ))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = store;
-            Err(ManagedCreationEnvironmentError::Unavailable(
-                "linux-vm/guest-rpc",
-            ))
-        }
-    }
     /// Wait for the actor and worker-candidate model catalogs at the callback's async
     /// boundary. Implementations keep this bounded and never run it at worker
     /// startup or inside the synchronous store callback.
@@ -199,30 +136,6 @@ fn spawn_directory(parent: &str, requested: Option<&str>) -> Result<Option<Strin
             Err(crate::managed_host_tools::Error::Invalid("cwd must be an existing folder").into())
         }
     }
-}
-
-fn vm_child_directory(parent: &str, requested: Option<&str>) -> Result<(String, String), Error> {
-    let root = Path::new(parent);
-    let raw = requested.map(Path::new).unwrap_or(root);
-    let joined = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        root.join(raw)
-    };
-    let normalized = studio_runtime_store::path_identity::LexicalPath::new(&joined).ok_or(
-        crate::managed_host_tools::Error::Invalid(
-            "A worker directory must stay in its parent layr line",
-        ),
-    )?;
-    let subpath = normalized.strip_prefix(root).map_err(|_| {
-        Error::Managed(crate::managed_host_tools::Error::Invalid(
-            "A worker directory must stay in its parent layr line",
-        ))
-    })?;
-    Ok((
-        normalized.to_string_lossy().into_owned(),
-        subpath.to_string_lossy().into_owned(),
-    ))
 }
 
 #[derive(Debug, Error)]
@@ -549,7 +462,6 @@ pub(crate) async fn spawn_agents(
     let root = Box::new(stored_root(store, AgentId::from(root_id)).await?);
     event_write::assert_delegation(&root)
         .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
-    let root_value = root.value();
     let parent_cwd =
         actor_record
             .cwd
@@ -656,38 +568,14 @@ pub(crate) async fn spawn_agents(
         if spec.server.as_ref().is_some_and(|value| !value.is_empty()) {
             return Err(Error::Unavailable("multi-server/worker-call"));
         }
-        let vm_actor = parent_value.get("executionMode").and_then(Value::as_str) == Some("vm");
-        if vm_actor
-            && (spec.workspace.is_some_and(|value| value.as_str() != "layr")
-                || spec
-                    .environment
-                    .as_deref()
-                    .is_some_and(|value| value != "linux"))
-        {
-            return Err(crate::managed_host_tools::Error::Invalid(
-                "All agents in a VM chat use layr in the VM",
-            )
-            .into());
-        }
-        if vm_actor && role == "reviewer" {
+        if parent_value.get("executionMode").and_then(Value::as_str) == Some("vm") {
             return Err(crate::managed_host_tools::Error::Unavailable(
-                "workspace-state/vm-workspace",
+                "workspace-state/unavailable",
             )
             .into());
         }
-        let vm_directory = if vm_actor {
-            Some(vm_child_directory(parent_cwd, spec.cwd.as_deref())?)
-        } else {
-            None
-        };
-        // Python `spawn_directory`: a host child may work in another folder;
-        // a relative path starts at the parent's folder.
-        let alternate_directory = if vm_actor {
-            None
-        } else {
-            spawn_directory(parent_cwd, spec.cwd.as_deref())?
-                .filter(|directory| directory.as_str() != parent_cwd)
-        };
+        let alternate_directory = spawn_directory(parent_cwd, spec.cwd.as_deref())?
+            .filter(|directory| directory.as_str() != parent_cwd);
         let child_directory = alternate_directory.as_deref().unwrap_or(parent_cwd);
         if role == "reviewer" && spec.workspace.is_some() {
             return Err(crate::managed_host_tools::Error::Invalid(
@@ -698,7 +586,7 @@ pub(crate) async fn spawn_agents(
         let workspace = spec
             .workspace
             .map(|mode| mode.as_str())
-            .unwrap_or_else(|| default_workspace(role, vm_actor, &parent_value));
+            .unwrap_or_else(|| default_workspace(role, &parent_value));
         if let Some(state) = &spec.review_state {
             if role != "reviewer" || workspace != "layr-native" || alternate_directory.is_some() {
                 return Err(crate::managed_host_tools::Error::Invalid(
@@ -729,7 +617,6 @@ pub(crate) async fn spawn_agents(
                 .into());
             }
         }
-        validate_vm_parent_workspace(workspace, vm_actor)?;
         if workspace == "layr-native" && !crate::layr_native::is_native(&parent_value) {
             return Err(crate::managed_host_tools::Error::Invalid(
                 "A native Layr workspace requires a native Layr parent",
@@ -748,17 +635,16 @@ pub(crate) async fn spawn_agents(
         let worktree = workspace == "worktree";
         // Python `git_toplevel` decides Git support for an implementer's
         // folder; a reviewer has no repository there (`spawn_agents`).
-        let in_git = !vm_actor
-            && role == "implementer"
+        let in_git = role == "implementer"
             && crate::host_worker_create::inside_git_work_tree(Path::new(child_directory));
         let explicit_workspace = spec.workspace.map(|mode| mode.as_str());
-        if !vm_actor && explicit_workspace == Some("worktree") && !in_git {
+        if explicit_workspace == Some("worktree") && !in_git {
             return Err(crate::managed_host_tools::Error::Invalid(
                 "workspace \"worktree\" requires a Git repository",
             )
             .into());
         }
-        if !vm_actor && workspace != "layr-native" && requested_base_ref.is_some() && !in_git {
+        if workspace != "layr-native" && requested_base_ref.is_some() && !in_git {
             return Err(crate::managed_host_tools::Error::Invalid(
                 "base_ref requires an implementer in a Git repository",
             )
@@ -772,8 +658,7 @@ pub(crate) async fn spawn_agents(
         }
         // Python `select_workspace`: the parent's default worktree mode uses
         // the shared folder, with a note, where the folder has no Git.
-        let workspace_note = (!vm_actor
-            && worktree
+        let workspace_note = (worktree
             && !in_git
             && explicit_workspace.is_none()
             && parent_value.get("workspaceMode").and_then(Value::as_str) == Some("worktree"))
@@ -806,8 +691,7 @@ pub(crate) async fn spawn_agents(
         let effort = resolved.effort.as_deref();
         let fast_mode = resolved.fast_mode;
         let daybreak = resolved.daybreak;
-        let vm_workspace = matches!(workspace, "layr" | "linux");
-        let host_cwd = host_project_cwd(vm_workspace, &root_value, child_directory);
+        let host_cwd = child_directory;
         // The parent's project binding names the parent's folder. Another
         // folder uses its own path settings, as Python `settings_key` does.
         let parent_project_id = parent_value
@@ -830,14 +714,7 @@ pub(crate) async fn spawn_agents(
         let base_ref_request = requested_base_ref.or(project_worker_base);
         let (worktree, (base_ref, base_commit, main_ref, behind_main)) =
             resolve_child_base(worktree, Path::new(host_cwd), base_ref_request)?;
-        let workspace_in_git = if vm_actor {
-            parent_value
-                .get("workspaceInGit")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        } else {
-            in_git
-        };
+        let workspace_in_git = in_git;
         let body = json!({"account_key":account_key,"name":name,"model":model,"effort":effort,
             "prompt":prompt,"workspace_explicit":spec.workspace.is_some(),
             "_workspaceInGit":workspace_in_git});
@@ -889,21 +766,12 @@ pub(crate) async fn spawn_agents(
                 })?;
                 record.layr_base_state = Some(base_state);
             }
-        } else if vm_workspace {
-            let (child_cwd, subpath) = vm_directory.as_ref().ok_or(Error::Refused)?;
-            crate::agents_create::set_vm_workspace_fields(&mut record, host_cwd);
-            record.cwd = Some(child_cwd.clone());
-            record.layr_subpath = Some(subpath.clone());
-            if let Some(base_state) = &spec.base_ref {
-                record.layr_base_state = Some(base_state.clone());
-            }
         }
         if let Some(note) = workspace_note {
             record.worktree_warning = Some(note.to_owned());
         }
         // An implementer outside Git uses the selected folder.
-        if !vm_actor && role == "implementer" && !worktree && workspace != "layr-native" && !in_git
-        {
+        if role == "implementer" && !worktree && workspace != "layr-native" && !in_git {
             record.worktree_warning = Some(no_worktree_warning(
                 record.cwd.as_deref().unwrap_or(child_directory),
             ));
@@ -941,7 +809,7 @@ pub(crate) async fn spawn_agents(
             task_id: spec.task_id.clone(),
             intent: spec.clone(),
             worktree,
-            workspace: if vm_workspace { "layr" } else { workspace }.to_owned(),
+            workspace: workspace.to_owned(),
             worker_base_main_ref: main_ref,
             worker_base_behind_main: behind_main,
             epoch: actor_record.epoch,
@@ -1023,7 +891,7 @@ pub(crate) async fn spawn_agents(
             let record = &draft.record;
             AgentRepository::put(tx, record)?;
             let record_value = record.value();
-            record_spawn_effect(tx, &actor_record, &record_value, &request_id);
+            record_spawn_effect(tx, &actor_record, record, &request_id);
             crate::agents_create::publish_agent(tx, &record_value)?;
             if let Some(task_id) = &draft.task_id {
                 crate::work_assignment_runtime::assign_in_transaction(tx, task_id, &draft.id, &actor_record, now)
@@ -1175,7 +1043,12 @@ fn active_agents(
 /// Preserve Python's best-effort execution history for a spawned child. The
 /// child row itself is authoritative; a broken optional history table must not
 /// turn successful child creation into a refusal.
-fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value, request_id: &str) {
+fn record_spawn_effect(
+    tx: &Transaction<'_>,
+    actor: &AgentRecord,
+    child: &AgentRecord,
+    request_id: &str,
+) {
     let result = (|| -> Result<(), rusqlite::Error> {
         tx.execute_batch("SAVEPOINT managed_spawn_execution_effect")?;
         let write = (|| -> Result<(), rusqlite::Error> {
@@ -1187,13 +1060,9 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
             if !has_runs {
                 return Ok(());
             }
-            let actor_value = actor.value();
-            let account = actor_value
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default");
-            let thread = actor_value.get("threadId").and_then(Value::as_str);
-            let turn = actor_value.get("turnId").and_then(Value::as_str);
+            let account = actor.account_key.as_str();
+            let thread = actor.thread_id.as_deref();
+            let turn = actor.turn_id.as_deref();
             let active_turn = turn.filter(|turn| !turn.is_empty());
             let run = if let Some(turn) = active_turn {
                 let mut statement = tx.prepare_cached(
@@ -1228,9 +1097,7 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
             {
                 return Ok(());
             }
-            let Some(child_id) = child.get("id").and_then(Value::as_str) else {
-                return Ok(());
-            };
+            let child_id = child.id.0.as_str();
             let effect_id = format!("spawn:{child_id}");
             let previous: Option<String> = tx
                 .query_row(
@@ -1253,14 +1120,14 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
                 .unwrap_or(Value::Null);
             let effect = json!({"id":effect_id,"runId":effect_run,"kind":"spawn",
                 "referenceId":child_id,"attemptId":attempt_id,"requestId":request_id,
-                "status":child.get("status").cloned().unwrap_or(Value::Null)});
+                "status":child.status});
             tx.execute(
                 "INSERT INTO runtime_execution_effects(id,run,kind,reference,record) VALUES(?1,?2,'spawn',?3,?4) ON CONFLICT(id) DO UPDATE SET run=excluded.run,kind=excluded.kind,reference=excluded.reference,record=excluded.record",
                 rusqlite::params![effect_id, effect_run, child_id, effect.to_string()],
             )?;
             let node_id = format!("worker:{child_id}");
             let node = json!({"id":node_id,"runId":run_id,"kind":"managed_worker",
-                "agentId":child_id,"status":child.get("status").cloned().unwrap_or(Value::Null)});
+                "agentId":child_id,"status":child.status});
             tx.execute(
                 "INSERT INTO runtime_execution_nodes(id,run,record) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET run=excluded.run,record=excluded.record",
                 rusqlite::params![node_id, run_id, node.to_string()],
@@ -1498,17 +1365,8 @@ pub(crate) async fn request_review(
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = Box::new(actor.record().clone());
     if actor_record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        if actor_record.is_lead != Some(true) {
-            return Err(crate::managed_host_tools::Error::Invalid(
-                "Only the lead can create a layr reviewer",
-            )
-            .into());
-        }
-        // VM reviewer preparation is not implemented by the production worker path yet.
-        // Refuse before line.save so a request that cannot be fulfilled does not mutate
-        // the lead's guest workspace.
         return Err(
-            crate::managed_host_tools::Error::Unavailable("workspace-state/vm-workspace").into(),
+            crate::managed_host_tools::Error::Unavailable("workspace-state/unavailable").into(),
         );
     }
     if actor_record.provider.value().copied() != Some(studio_runtime_providers::ProviderKind::Codex)
@@ -1783,12 +1641,8 @@ impl crate::native_review::ReviewCreator for ReviewCreator<'_> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod vm_review_identity_tests {
-    use super::{
-        Error, WorkerBase, host_project_cwd, resolve_child_base, validate_vm_parent_workspace,
-        vm_review_guest_ids,
-    };
-    use studio_json::json;
+mod review_identity_tests {
+    use super::{WorkerBase, resolve_child_base};
 
     #[test]
     fn worker_recheck_refusal_reports_its_cause() {
@@ -1808,59 +1662,6 @@ mod vm_review_identity_tests {
     }
 
     #[test]
-    fn guest_review_ids_are_bounded_by_the_named_limit() {
-        #[cfg(unix)]
-        {
-            use crate::linux_vm_guest::{
-                GUEST_REQUEST_ID_MAX_CHARS, GuestError, GuestRpc, UnixGuestRpc,
-            };
-            let root = tempfile::tempdir().unwrap();
-            let rpc = UnixGuestRpc::new(root.path());
-            for character in ["a", "界"] {
-                let mut identity = character.repeat(GUEST_REQUEST_ID_MAX_CHARS);
-                let call = |identity: &str| {
-                    rpc.call(
-                        "health",
-                        &json!({}),
-                        Some(identity),
-                        std::time::Duration::from_secs(1),
-                    )
-                };
-                assert!(
-                    matches!(
-                        call(&identity),
-                        Err(GuestError::Transport {
-                            uncertain: false,
-                            ..
-                        })
-                    ),
-                    "the limit is admitted up to the absent socket"
-                );
-                identity.push_str(character);
-                assert!(
-                    matches!(call(&identity), Err(GuestError::InvalidRequest)),
-                    "over-limit identity must be refused before transport"
-                );
-            }
-        }
-        let long = "r".repeat(4096);
-        for supplied in ["short-request", long.as_str()] {
-            let (request_id, turn_id) = vm_review_guest_ids(supplied).unwrap();
-            assert!(
-                request_id.chars().count() <= crate::linux_vm_guest::GUEST_REQUEST_ID_MAX_CHARS
-            );
-            assert!(turn_id.chars().count() <= crate::linux_vm_guest::GUEST_REQUEST_ID_MAX_CHARS);
-            assert!(request_id.starts_with("layr-review-state:"));
-            assert!(turn_id.starts_with("review:"));
-            assert_eq!(
-                (request_id, turn_id),
-                vm_review_guest_ids(supplied).unwrap(),
-                "operation IDs are stable for the same source request"
-            );
-        }
-    }
-
-    #[test]
     fn review_home_expansion_uses_the_supplied_home() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().to_str().unwrap();
@@ -1872,30 +1673,6 @@ mod vm_review_identity_tests {
         assert_eq!(
             super::expand_review_home("~/review-target", None),
             std::path::Path::new("~/review-target")
-        );
-    }
-
-    #[test]
-    fn native_parent_cannot_create_layr_child_without_panicking() {
-        assert!(matches!(
-            validate_vm_parent_workspace("layr", false),
-            Err(Error::Managed(crate::managed_host_tools::Error::Invalid(
-                "A VM workspace requires a VM parent"
-            )))
-        ));
-        assert!(validate_vm_parent_workspace("layr", true).is_ok());
-    }
-
-    #[test]
-    fn vm_child_rechecks_parent_project_with_host_cwd() {
-        let root = json!({"cwd":"/guest/project","hostProjectPath":"/host/project"});
-        assert_eq!(
-            host_project_cwd(true, &root, "/guest/project"),
-            "/host/project"
-        );
-        assert_eq!(
-            host_project_cwd(false, &root, "/host/project"),
-            "/host/project"
         );
     }
 

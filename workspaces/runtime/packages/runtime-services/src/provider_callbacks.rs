@@ -33,8 +33,8 @@ pub use recovery::{
 pub use storage::{
     CallbackBody, CallbackOwner, CallbackResponse, DeliveryOutcome, FrameAdmission, Reopen,
     admit_callback_request, begin_frame, callback_admission, callback_origin_key, delivery,
-    pending_callback_count, prepared_replies, record_frame_outcome, reserve_credential_refresh,
-    response_frame, save_frame_response, settle_response, submission_ready,
+    pending_callback_count, prepared_replies, record_frame_outcome, response_frame,
+    save_frame_response, settle_response, submission_ready,
 };
 use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, ResponseBody};
@@ -266,7 +266,7 @@ pub(crate) async fn dispatch_with_managed_tools(
         }
         let result = match request.method.as_str() {
             "currentTime/read" => Some(ResponseBody::Result(json!({"currentTimeAt":now.trunc() as u64}))),
-            "account/chatgptAuthTokens/refresh" => Some(ResponseBody::Error(json!({"code":-32601,"message":"Not implemented: requires linux-vm-auth/refresh; use the host account authentication flow"}))),
+            "account/chatgptAuthTokens/refresh" => Some(ResponseBody::Error(json!({"code":-32601,"message":"Authentication refresh is unavailable; use the host account authentication flow"}))),
             method if cards::interactive(method) => {
                 let snapshot = storage::snapshot(tx, &context)?;
                 if let Some(body) = cards::immediate(&snapshot, &request)? {

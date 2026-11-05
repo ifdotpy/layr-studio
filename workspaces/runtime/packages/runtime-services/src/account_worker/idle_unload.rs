@@ -14,7 +14,7 @@
 //! owner was deleted; deleting an owner re-evaluates its running clock at once.
 //! The next turn's `thread/resume` reloads the thread with its history.
 //! When every loaded thread is unsubscribed and the worker holds no request,
-//! callback, effect, or VM session for the same setting, the worker closes its
+//! callback or effect for the same setting, the worker closes its
 //! session, which stops the provider process. Zero minutes turns idle
 //! unloading off. A request whose reply is lost leaves the thread loaded;
 //! unsubscribe is never assumed.
@@ -1078,8 +1078,8 @@ impl Worker {
         )
     }
 
-    /// The worker holds no provider request, callback, effect, recovery, or
-    /// VM session. Buffered stream text needs no provider; closing flushes it.
+    /// The worker holds no provider request, callback, effect, or recovery.
+    /// Buffered stream text needs no provider; closing flushes it.
     // Queued commands are fenced at the final stop decision; they do not erase
     // the provider's idle clock before those commands have been processed.
     fn provider_quiescent(&self) -> bool {
@@ -1093,9 +1093,6 @@ impl Worker {
             && self.effects.is_empty()
             && self.deferred.is_empty()
             && self.capacity_blocked.is_empty()
-            && self.vm_sessions.is_empty()
-            && self.resolving_vm_actors.is_empty()
-            && self.vm_notification_waiters.is_empty()
             && self.request_waiters.is_empty()
             && self.restart_recovery.is_none()
             && self.connection_recovery_active == super::ConnectionRecoveryPhase::Idle

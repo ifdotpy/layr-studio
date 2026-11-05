@@ -367,7 +367,7 @@ try {
     // Vendored sources keep their upstream bytes; the Oxfmt ignorePatterns skip them.
     stage(
       root,
-      "workspaces/runtime/apps/layr-desk/crates/vectors.json",
+      "workspaces/runtime/apps/layr/crates/vectors.json",
       '{"a":[1,\n2]}\n',
     );
     const result = runHook(root);

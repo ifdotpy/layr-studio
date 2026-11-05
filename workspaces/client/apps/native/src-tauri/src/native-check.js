@@ -218,7 +218,6 @@
     for (const method of [
       "desktop.fileAction",
       "desktop.revealPath",
-      "desktop.showVaultKeys",
       "desktop.saveBegin",
       "desktop.requestMicrophone",
       "desktop.prepareTranscription",

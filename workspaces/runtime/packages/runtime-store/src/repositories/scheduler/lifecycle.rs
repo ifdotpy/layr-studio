@@ -208,6 +208,29 @@ impl SchedulerRepository {
         Ok(())
     }
 
+    /// A provider unload of a running turn ends it as interrupted, with the same
+    /// disconnect receipt as a lost provider answer. An unbound start is not
+    /// touched. Returns whether the turn was interrupted.
+    pub fn settle_unloaded_turn(
+        transaction: &Transaction<'_>,
+        identity: &TurnAttemptIdentity,
+        at: f64,
+    ) -> StoreResult<bool> {
+        let Some(mut agent) = load_agent(transaction, &identity.agent_id)? else {
+            return Ok(false);
+        };
+        let running = stored_attempt(&agent).is_some_and(|attempt| {
+            attempt.id.as_deref() == Some(identity.attempt_id.as_str())
+                && attempt
+                    .turn_id
+                    .as_deref()
+                    .is_some_and(|turn| !turn.is_empty())
+        });
+        Ok(running
+            && disconnect_agent(transaction, &mut agent, at, false, false)?
+            && agent.status == AgentStatus::Interrupted)
+    }
+
     /// An activity notice is not a receipt for the input batch. It may still require interruption.
     pub fn observe_started(
         transaction: &Transaction<'_>,
@@ -312,55 +335,6 @@ impl SchedulerRepository {
             }
         }
         Ok(interrupted)
-    }
-
-    /// Disconnect the VM actors of an ended account worker whose host provider
-    /// stays retained. Returns the agents this disconnect left interrupted.
-    pub fn disconnect_vm_actors(
-        transaction: &Transaction<'_>,
-        account: &str,
-        generation: u64,
-        at: f64,
-    ) -> StoreResult<Vec<String>> {
-        let mut interrupted = Vec::new();
-        for mut agent in account_agents(transaction, account, &unresolved_sql())? {
-            if agent.execution_mode == Some(crate::AgentExecutionMode::Vm)
-                && stored_attempt(&agent)
-                    .and_then(|attempt| attempt.connection_generation)
-                    .is_none_or(|g| g == generation)
-                && disconnect_agent(transaction, &mut agent, at, false, false)?
-                && agent.status == AgentStatus::Interrupted
-            {
-                interrupted.push(agent.id.0);
-            }
-        }
-        Ok(interrupted)
-    }
-
-    /// Retire one VM actor after its provider session closes, preserving that
-    /// actor's recovery receipt without disconnecting sibling actors.
-    pub fn disconnect_vm_actor(
-        transaction: &Transaction<'_>,
-        id: &str,
-        epoch: i64,
-        account: &str,
-        generation: u64,
-        at: f64,
-    ) -> StoreResult<bool> {
-        for mut agent in account_agents(transaction, account, &unresolved_sql())? {
-            if agent.id.0 != id
-                || agent.epoch != epoch
-                || agent.execution_mode != Some(crate::AgentExecutionMode::Vm)
-                || stored_attempt(&agent)
-                    .and_then(|attempt| attempt.connection_generation)
-                    .is_some_and(|current| current != generation)
-            {
-                continue;
-            }
-            disconnect_agent(transaction, &mut agent, at, false, false)?;
-            return Ok(true);
-        }
-        Ok(false)
     }
 
     /// A new supervisor generation cannot prove an old turn's outcome. History reconciliation

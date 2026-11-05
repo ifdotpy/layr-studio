@@ -356,7 +356,7 @@ fn stream_store_error(
         | super::WorkerError::Session(_)
         | super::WorkerError::Notification(_)
         | super::WorkerError::PreparationRefused(_)
-        | super::WorkerError::StaleVmActor
+        | super::WorkerError::UnavailableActor
         | super::WorkerError::PreparationPending(_)
         | super::WorkerError::PreparationAwaitsAgent(_)
         | super::WorkerError::CleanupUnconfirmed(_)

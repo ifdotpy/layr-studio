@@ -110,7 +110,7 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
             }
             Some(folder_id.to_owned())
         };
-        let current = stored_revision(agent.extra.get("projectFolderRevision"), id)?;
+        let current = stored_folder_revision(&agent.project_folder_revision, id)?;
         let revision = body
             .expected_revision
             .value()
@@ -136,9 +136,10 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
                 .ok_or(EventWriteError::InvalidRequest(
                     "The chat folder revision is invalid",
                 ))?;
-            agent
-                .extra
-                .insert("projectFolderRevision".into(), json!(revision));
+            agent.project_folder_revision = Field::Value(studio_runtime_schema::raw_json::RawJson(
+                studio_json::to_raw_value(&revision)
+                    .map_err(studio_runtime_store::StoreError::from)?,
+            ));
         }
         match desired {
             Some(folder) => {
@@ -247,6 +248,26 @@ fn apply_read_state(
     publish(tx, agent)
 }
 
+fn stored_folder_revision(
+    value: &Field<studio_runtime_schema::raw_json::RawJson>,
+    id: &str,
+) -> Result<i64, EventWriteError> {
+    match value {
+        Field::Missing => Ok(0),
+        Field::Value(raw) => studio_json::from_str::<i64>(raw.0.as_str())
+            .ok()
+            .filter(|revision| *revision >= 0)
+            .ok_or_else(|| EventWriteError::InvalidStoredObject {
+                object: "runtime_agents",
+                id: id.to_owned(),
+            }),
+        Field::Null => Err(EventWriteError::InvalidStoredObject {
+            object: "runtime_agents",
+            id: id.to_owned(),
+        }),
+    }
+}
+
 fn stored_revision(value: Option<&Value>, id: &str) -> Result<i64, EventWriteError> {
     match value {
         None => Ok(0),
@@ -274,6 +295,38 @@ mod tests {
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
 
     const CHAT: &str = "organized-chat";
+
+    #[test]
+    fn folder_revision_preserves_missing_valid_and_malformed_behavior() {
+        use studio_runtime_schema::{queue_command::Field, raw_json::RawJson};
+        let decode = |raw: &str| {
+            Field::Value(RawJson(
+                studio_json::OwnedRawJson::from_string(raw.into()).unwrap(),
+            ))
+        };
+        assert_eq!(
+            super::stored_folder_revision(&Field::Missing, CHAT).unwrap(),
+            0
+        );
+        assert_eq!(
+            super::stored_folder_revision(&decode("1"), CHAT).unwrap(),
+            1
+        );
+        for field in [
+            Field::Null,
+            decode("-1"),
+            decode("1.0"),
+            decode(r#""invalid""#),
+        ] {
+            assert!(matches!(
+                super::stored_folder_revision(&field, CHAT),
+                Err(super::EventWriteError::InvalidStoredObject {
+                    object: "runtime_agents",
+                    ..
+                })
+            ));
+        }
+    }
 
     #[test]
     fn organization_request_is_strict_and_bounds_revision() {

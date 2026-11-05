@@ -8,7 +8,7 @@ import {
 } from "./newChatSettings";
 import { isServerCommand } from "../servers/navigation";
 
-test.each(["layr-native", "layr", "worktree"] satisfies NewChatWorkspaceMode[])(
+test.each(["layr-native", "worktree"] satisfies NewChatWorkspaceMode[])(
   "accepts the generated new-chat workspace mode %s",
   (workspaceMode) => expect(isNewChatSettings({ workspaceMode })).toBe(true),
 );
@@ -68,7 +68,7 @@ test("switching the lead account preserves an explicitly selected review account
 
 test("accepts the actual selector values and rejects receipt overrides", () => {
   const settings = {
-    workspaceMode: "layr",
+    workspaceMode: "layr-native",
     model: "gpt-6-astra",
     effort: "high",
     fast_mode: true,

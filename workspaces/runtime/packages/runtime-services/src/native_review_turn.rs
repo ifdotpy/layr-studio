@@ -428,7 +428,7 @@ fn worker_error(error: WorkerError) -> NativeError {
         | WorkerError::Session(_)
         | WorkerError::Notification(_)
         | WorkerError::PreparationRefused(_)
-        | WorkerError::StaleVmActor
+        | WorkerError::UnavailableActor
         | WorkerError::CleanupUnconfirmed(_)
         | WorkerError::AlreadyRunning
         | WorkerError::Closed

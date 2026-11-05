@@ -2,7 +2,11 @@ import { required } from "./componentTestFixtures.ts";
 import type { Message } from "../types";
 import assert from "node:assert/strict";
 import { it } from "vitest";
-import { historyGroups, incrementalHistoryGroups } from "./turnHistoryModel.ts";
+import {
+  historyGroups,
+  historyPresentationGroups,
+  incrementalHistoryGroups,
+} from "./turnHistoryModel.ts";
 
 it("does not create a failed turn group for an empty turn ID", () => {
   const [group] = historyGroups([
@@ -151,4 +155,28 @@ it("moves a user-only outcome to a later reply without a duplicate notice", () =
     incrementalHistoryGroups(next, undefined, { items, groups }),
     historyGroups(next),
   );
+});
+
+it("retains unchanged history groups while a live answer changes", () => {
+  const items: Message[] = [
+    { id: "old", role: "user", text: "Earlier" },
+    {
+      id: "live",
+      role: "assistant",
+      text: "a",
+      turnId: "turn",
+      streaming: true,
+    },
+  ];
+  const groups = historyGroups(items, "turn");
+  const before = historyPresentationGroups(groups);
+  const next = [items[0]!, { ...items[1]!, text: "ab" }];
+  const changed = incrementalHistoryGroups(next, "turn", {
+    items,
+    currentTurn: "turn",
+    groups,
+  });
+  const after = historyPresentationGroups(changed);
+  assert.equal(after[0], before[0]);
+  assert.notEqual(after[1], before[1]);
 });

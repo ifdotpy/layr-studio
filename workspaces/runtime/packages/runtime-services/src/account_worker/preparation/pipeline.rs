@@ -127,37 +127,6 @@ async fn compile_with_artifacts(
     Ok((turn_snapshot, events, compiled))
 }
 
-/// Copy authorized host attachments before freezing the provider projection.
-/// Both a new turn and a steer use this boundary; commit rechecks its evidence.
-async fn vm_attachment_paths(
-    store: &Arc<RuntimeStore>,
-    resources: &PreparationResources,
-    intent: &TurnIntent,
-    snapshot: &mut turn::PreparationSnapshot,
-) -> Result<(), WorkerError> {
-    if snapshot.assets.is_empty() {
-        return Ok(());
-    }
-    let record = workspace_agent(store, &intent.agent_id).await?;
-    if record.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        return Ok(());
-    }
-    #[cfg(unix)]
-    let guest: Arc<dyn crate::linux_vm_guest::GuestRpc> =
-        resources.guest_rpc.clone().unwrap_or_else(|| {
-            Arc::new(crate::linux_vm_guest::UnixGuestRpc::for_runtime_state(
-                store.state_dir(),
-            ))
-        });
-    #[cfg(not(unix))]
-    let guest = resources
-        .guest_rpc
-        .clone()
-        .ok_or_else(|| refusal("VM attachment guest unavailable".into()))?;
-    snapshot.asset_paths = crate::vm_attachments::prepare(store, guest, intent, snapshot).await?;
-    Ok(())
-}
-
 /// Canonical transcript projection shared by turn starts and acknowledged steers.
 pub(crate) fn compiled_submission(
     intent: &TurnIntent,
@@ -219,7 +188,6 @@ pub(crate) async fn prepare_steer(
     })
     .await?;
     snapshot.operation_id = super::super::steer::operation(&intent.account_key, &intent.attempt_id);
-    vm_attachment_paths(&store, resources, intent, &mut snapshot).await?;
     let (snapshot, _, compiled) = compile_with_artifacts(&store, snapshot, events).await?;
     let transport_intent = intent.clone();
     let expected_turn = expected_turn.to_owned();
@@ -273,7 +241,6 @@ pub(crate) fn commit_steer(
     snapshot.operation_id = prepared.snapshot.operation_id.clone();
     snapshot.prepared_at = prepared.snapshot.prepared_at;
     snapshot.artifact_paths = prepared.snapshot.artifact_paths.clone();
-    snapshot.asset_paths = prepared.snapshot.asset_paths.clone();
     let current = turn::compile(&snapshot, &events).map_err(|e| refusal(e.to_string()))?;
     if current != prepared.compiled {
         return Err(refusal("steer-preparation/snapshot-changed".into()));
@@ -299,7 +266,7 @@ fn rejected_notifications(
             | error @ WorkerError::Scheduler(_)
             | error @ WorkerError::Session(_)
             | error @ WorkerError::Notification(_)
-            | error @ WorkerError::StaleVmActor
+            | error @ WorkerError::UnavailableActor
             | error @ WorkerError::PreparationPending(_)
             | error @ WorkerError::PreparationAwaitsAgent(_)
             | error @ WorkerError::CleanupUnconfirmed(_)
@@ -786,10 +753,10 @@ fn native_turn_params(
             .thread_config
             .contains_key("shell_environment_policy.set.LAYR_ROOT")
     {
-        let permissions = vm_reviewer_permissions(
+        let permissions = layr_reviewer_permissions(
             &json!({"workspaceMode":"layr-native","role":"reviewer","layrScratch":snapshot.actor.cwd}),
         );
-        apply_vm_reviewer_permissions(&mut params, permissions.as_ref());
+        apply_layr_reviewer_permissions(&mut params, permissions.as_ref());
     }
     Ok(params)
 }
@@ -911,10 +878,10 @@ async fn admit_for_purpose(
 }
 pub(crate) async fn workspace(
     store: Arc<RuntimeStore>,
-    resources: &PreparationResources,
+    _resources: &PreparationResources,
     intent: &TurnIntent,
 ) -> Result<crate::workspace_ready::ReadyToken, WorkerError> {
-    Box::pin(workspace_with_vm_action(store, resources, intent, false)).await
+    Box::pin(workspace_host(store, intent)).await
 }
 
 /// The stored agent of a turn being prepared; a missing row is invalid.
@@ -946,112 +913,10 @@ async fn stored_agent_value(store: &RuntimeStore, agent_id: &str) -> Result<Valu
         .await
 }
 
-async fn workspace_with_vm_action(
+async fn workspace_host(
     store: Arc<RuntimeStore>,
-    resources: &PreparationResources,
     intent: &TurnIntent,
-    allow_vm_native_action: bool,
 ) -> Result<crate::workspace_ready::ReadyToken, WorkerError> {
-    let record = workspace_agent(&store, &intent.agent_id).await?;
-    if record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        if record.layr_ready != Some(true) {
-            let start_attempt = record
-                .start_attempt
-                .as_ref()
-                .ok_or_else(|| refusal("workspace-state/vm-start-attempt".into()))?;
-            let attempt_id = start_attempt
-                .id
-                .as_deref()
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| refusal("workspace-state/vm-start-attempt".into()))?;
-            let action_request_id = start_attempt
-                .action_request_id
-                .as_deref()
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("vm-turn-preparation:{attempt_id}"));
-            let epoch = u64::try_from(record.epoch)
-                .map_err(|_| refusal("workspace-state/vm-epoch".into()))?;
-            #[cfg(unix)]
-            let guest: Arc<dyn crate::linux_vm_guest::GuestRpc> =
-                resources.guest_rpc.clone().unwrap_or_else(|| {
-                    Arc::new(crate::linux_vm_guest::UnixGuestRpc::for_runtime_state(
-                        store.state_dir(),
-                    ))
-                });
-            #[cfg(not(unix))]
-            let guest = resources.guest_rpc.clone().ok_or_else(|| {
-                WorkerError::PreparationPending("workspace-readiness/vm-guest-unavailable".into())
-            })?;
-            // Python's `codex_runtime.py:6405-6413` calls VM preparation from
-            // `prepare_locked` before connecting the provider for every VM turn.
-            let prepared = if record.is_lead == Some(true) {
-                crate::vm_preparation::prepare_lead(
-                    &store,
-                    Arc::clone(&guest),
-                    &intent.agent_id,
-                    attempt_id,
-                    &action_request_id,
-                    epoch,
-                )
-                .await
-            } else {
-                crate::vm_preparation::prepare_child(
-                    &store,
-                    Arc::clone(&guest),
-                    &intent.agent_id,
-                    attempt_id,
-                    &action_request_id,
-                    epoch,
-                )
-                .await
-            };
-            prepared.map_err(|error| match error {
-                error @ (crate::native_actions::NativeError::Unknown
-                | crate::native_actions::NativeError::Unavailable(_)) => {
-                    WorkerError::PreparationPending(format!("workspace-readiness/{error}").into())
-                }
-                error @ crate::native_actions::NativeError::Expired
-                | error @ crate::native_actions::NativeError::Invalid(_)
-                | error @ crate::native_actions::NativeError::InvalidStored { .. }
-                | error @ crate::native_actions::NativeError::Conflict
-                | error @ crate::native_actions::NativeError::Changed
-                | error @ crate::native_actions::NativeError::Store(_)
-                | error @ crate::native_actions::NativeError::Json(_)
-                | error @ crate::native_actions::NativeError::Sql(_) => refusal(error.to_string()),
-            })?;
-        }
-        let ready = workspace_agent(&store, &intent.agent_id).await?;
-        if ready.layr_ready != Some(true) {
-            return Err(WorkerError::PreparationAwaitsAgent(
-                "workspace-readiness/vm-not-ready".into(),
-            ));
-        }
-        // Native actions operate on the host project; guest turn execution uses
-        // the guest's cwd. Keep the project binding frozen from creation time.
-        let cwd = if allow_vm_native_action {
-            ready
-                .host_project_path
-                .value()
-                .map(String::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| refusal("workspace-readiness/vm-host-project-required".into()))?
-        } else {
-            ready
-                .cwd
-                .as_deref()
-                .filter(|value| value.starts_with('/'))
-                .ok_or_else(|| refusal("workspace-state/vm-cwd".into()))?
-        };
-        let paths =
-            crate::workspace_ready_git::prepared_paths(&store, &intent.agent_id, Vec::new())
-                .await
-                .map_err(|error| refusal(error.to_string()))?;
-        return Ok(
-            crate::workspace_ready::ReadyToken::new(&ready.value(), PathBuf::from(cwd))
-                .with_paths(paths),
-        );
-    }
     // Git provisioning acquires its own short transactions. No store transaction is held here.
     match Box::pin(crate::workspace_ready_git::prepare(
         Arc::clone(&store),
@@ -1419,22 +1284,12 @@ fn execution_cwd(record: &Value, validated_workspace_cwd: &Path) -> Option<Strin
     if crate::layr_native::is_native(record) && record["role"] == "reviewer" {
         return record["layrScratch"].as_str().map(str::to_owned);
     }
-    if record.get("executionMode").and_then(Value::as_str) == Some("vm") {
-        record.get("cwd").and_then(Value::as_str).map(str::to_owned)
-    } else {
-        Some(validated_workspace_cwd.to_string_lossy().into_owned())
-    }
+    Some(validated_workspace_cwd.to_string_lossy().into_owned())
 }
 
-/// The turn permissions of a VM reviewer. Its line is read-only on disk and owned by root. With
-/// the private scratch folder of a current guest (`layrScratch`), it may write only there. It
-/// has no network access; it reads states through layr outside its sandbox (Python's
-/// `layr_read` tool). Without a scratch folder (an older guest) it stays read-only. Python keeps
-/// the same rule (codex_vm_agents.reviewer_permissions).
-fn vm_reviewer_permissions(record: &Value) -> Option<Value> {
-    if (record["executionMode"] != "vm" && !crate::layr_native::is_native(record))
-        || record["role"] != "reviewer"
-    {
+/// Keep native Layr reviewers read-only except for their private scratch folder.
+fn layr_reviewer_permissions(record: &Value) -> Option<Value> {
+    if !crate::layr_native::is_native(record) || record["role"] != "reviewer" {
         return None;
     }
     let scratch = record["layrScratch"]
@@ -1449,11 +1304,11 @@ fn vm_reviewer_permissions(record: &Value) -> Option<Value> {
     Some(json!({"approvalPolicy":"never","sandboxPolicy":sandbox}))
 }
 
-fn apply_vm_reviewer_permissions(
+fn apply_layr_reviewer_permissions(
     params: &mut studio_json::Map<String, Value>,
-    vm_reviewer: Option<&Value>,
+    layr_reviewer: Option<&Value>,
 ) {
-    if let Some(Value::Object(permissions)) = vm_reviewer {
+    if let Some(Value::Object(permissions)) = layr_reviewer {
         for (key, value) in permissions {
             params.insert(key.clone(), value.clone());
         }
@@ -1467,7 +1322,7 @@ fn monitor_command_settings(
     yolo_mode: Option<bool>,
 ) -> Result<Value, WorkerError> {
     let permissions = if let Some(permissions) =
-        vm_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
+        layr_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
     {
         permissions
     } else {
@@ -1548,7 +1403,7 @@ async fn prepare_native_snapshot(
     let token = if allow_paused_start {
         None
     } else {
-        Some(workspace_with_vm_action(Arc::clone(&store), resources, &intent, true).await?)
+        Some(workspace_host(Arc::clone(&store), &intent).await?)
     };
     let restore_cwd = if allow_paused_start {
         let cwd = intent
@@ -1805,7 +1660,7 @@ pub(crate) async fn prepare_ready(
         mut turn_snapshot,
         events,
         mut prepared_intent,
-        vm_reviewer,
+        layr_reviewer,
         filesystem,
         prepared_host,
         selection,
@@ -1830,7 +1685,7 @@ pub(crate) async fn prepare_ready(
             let cwd = token_for_snapshot
                 .validate(tx)?
                 .map_err(|_| refusal(WORKSPACE_TOKEN_STALE.into()))?;
-            let vm_reviewer = vm_reviewer_permissions(&frozen);
+            let layr_reviewer = layr_reviewer_permissions(&frozen);
             if let Some(execution_cwd) = execution_cwd(&frozen, &cwd) {
                 frozen["cwd"] = json!(execution_cwd);
             }
@@ -1861,7 +1716,7 @@ pub(crate) async fn prepare_ready(
                 turn_snapshot,
                 events,
                 prepared_intent,
-                vm_reviewer,
+                layr_reviewer,
                 filesystem,
                 prepared_host,
                 selection_for_snapshot,
@@ -1920,7 +1775,6 @@ pub(crate) async fn prepare_ready(
         intent.attempt_id,
         method.as_str()
     );
-    vm_attachment_paths(&store, &resources, intent, &mut turn_snapshot).await?;
     let (turn_snapshot, events, compiled) =
         compile_with_artifacts(&store, turn_snapshot, events).await?;
     guard.compiler_snapshot = Some(turn_snapshot.clone());
@@ -1938,7 +1792,7 @@ pub(crate) async fn prepare_ready(
         },
     )
     .map_err(thread_refusal)?;
-    apply_vm_reviewer_permissions(&mut params, vm_reviewer.as_ref());
+    apply_layr_reviewer_permissions(&mut params, layr_reviewer.as_ref());
     if snapshot.account.provider == studio_runtime_providers::ProviderKind::Claude {
         let agent_id = intent.agent_id.clone();
         let mode = store
@@ -2070,7 +1924,6 @@ pub(crate) fn commit(
         current_submission.prepared_at = baseline.prepared_at;
         current_submission.operation_id = baseline.operation_id.clone();
         current_submission.artifact_paths = baseline.artifact_paths.clone();
-        current_submission.asset_paths = baseline.asset_paths.clone();
         let recompiled = stage("turn_submission.commit.compile", || {
             turn::compile(&current_submission, &current_events)
         })
@@ -2320,7 +2173,6 @@ mod daybreak_tests {
                 native_effort_present: false,
                 deleted: false,
                 native_review: false,
-                vm: false,
             },
             root: thread::Root {
                 can_delegate: true,
@@ -2505,41 +2357,13 @@ mod daybreak_tests {
                 "approvalPolicy":"on-request","sandboxPolicy":{"type":"readOnly"}
             }))
         );
-
-        let vm_reviewer = monitor_command_settings(
-            &json!({"executionMode":"vm","role":"reviewer","sandbox":"danger-full-access"}),
-            "/workspace",
-            thread::Role::Reviewer,
-            Some(true),
-        );
+        let native = json!({"workspaceMode":"layr-native", "role":"reviewer", "layrScratch":"/private/scratch"});
         assert_eq!(
-            vm_reviewer.ok(),
-            Some(json!({
-                "approvalPolicy":"never","sandboxPolicy":{"type":"readOnly"}
-            }))
-        );
-
-        let mut yolo_turn = studio_json::Map::from_iter([
-            ("approvalPolicy".into(), json!("never")),
-            ("sandboxPolicy".into(), json!({"type":"dangerFullAccess"})),
-        ]);
-        let old_guest = vm_reviewer_permissions(&json!({"executionMode":"vm","role":"reviewer"}));
-        apply_vm_reviewer_permissions(&mut yolo_turn, old_guest.as_ref());
-        assert_eq!(yolo_turn["approvalPolicy"], "never");
-        assert_eq!(yolo_turn["sandboxPolicy"], json!({"type":"readOnly"}));
-
-        // A reviewer of a current guest writes only its scratch folder, without network.
-        let scratch = vm_reviewer_permissions(&json!({
-            "executionMode":"vm","role":"reviewer","layrScratch":"/home/r/.studio/scratch/a"
-        }));
-        apply_vm_reviewer_permissions(&mut yolo_turn, scratch.as_ref());
-        assert_eq!(
-            yolo_turn["sandboxPolicy"],
-            json!({"type":"workspaceWrite","writableRoots":["/home/r/.studio/scratch/a"],"networkAccess":false})
-        );
-        assert_eq!(
-            vm_reviewer_permissions(&json!({"executionMode":"vm","role":"implementer"})),
-            None
+            monitor_command_settings(&native, "/workspace", thread::Role::Reviewer, Some(true))
+                .ok(),
+            Some(
+                json!({"approvalPolicy":"never", "sandboxPolicy":{"type":"workspaceWrite", "writableRoots":["/private/scratch"], "networkAccess":false}})
+            )
         );
     }
 
@@ -2552,24 +2376,6 @@ mod daybreak_tests {
                 Some("/private/review-scratch".into())
             );
         }
-    }
-
-    #[test]
-    fn vm_execution_uses_guest_cwd_after_host_workspace_token_validation() {
-        assert_eq!(
-            execution_cwd(
-                &json!({"executionMode":"vm","cwd":"/guest/line"}),
-                &PathBuf::from("/host/project"),
-            ),
-            Some("/guest/line".into())
-        );
-        assert_eq!(
-            execution_cwd(
-                &json!({"cwd":"/old"}),
-                &PathBuf::from("/validated/host/workspace"),
-            ),
-            Some("/validated/host/workspace".into())
-        );
     }
 }
 

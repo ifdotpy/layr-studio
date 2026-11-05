@@ -958,57 +958,6 @@ fn owner_by_root(db: &Connection, root: &str) -> Result<Option<Owner>, CallbackE
     Ok(task)
 }
 
-/// First dispatch reserves and points at the effect atomically. Retries return
-/// the persisted final pointer and never call the reservation API again.
-pub fn reserve_credential_refresh(
-    tx: &Transaction<'_>,
-    root: &str,
-    source: &AdmittedRequest,
-    intent: crate::account_worker::retained::ProviderCallIntent,
-) -> Result<AdmittedRequest, CallbackError> {
-    let mut owner = owner_by_root(tx, root)?.ok_or(CallbackError::Unknown)?;
-    if owner.payload.admission.as_ref() != Some(source)
-        || intent.root_request_id != root
-        || intent.scope.account != owner.payload.identity.context.account
-    {
-        return Err(CallbackError::Conflict);
-    }
-    if let Some(final_effect) = owner.payload.credential_refresh_admission {
-        if final_effect.signature()
-            != intent.fingerprint(&intent.scope.account, intent.method.as_str())
-        {
-            return Err(CallbackError::Conflict);
-        }
-        return Ok(final_effect);
-    }
-    if owner.status != ToolRequestStatus::Queued {
-        return Err(CallbackError::Unknown);
-    }
-    let final_effect = crate::account_worker::retained::reserve_provider_call(tx, source, intent)
-        .map_err(|error| match error {
-        crate::account_worker::WorkerError::Expired => CallbackError::Expired,
-        crate::account_worker::WorkerError::Store(error) => CallbackError::Store(error),
-        crate::account_worker::WorkerError::Recovery(_)
-        | crate::account_worker::WorkerError::Scheduler(_)
-        | crate::account_worker::WorkerError::Session(_)
-        | crate::account_worker::WorkerError::Notification(_)
-        | crate::account_worker::WorkerError::PreparationRefused(_)
-        | crate::account_worker::WorkerError::StaleVmActor
-        | crate::account_worker::WorkerError::PreparationPending(_)
-        | crate::account_worker::WorkerError::PreparationAwaitsAgent(_)
-        | crate::account_worker::WorkerError::CleanupUnconfirmed(_)
-        | crate::account_worker::WorkerError::AlreadyRunning
-        | crate::account_worker::WorkerError::Closed
-        | crate::account_worker::WorkerError::ShutdownTimeout
-        | crate::account_worker::WorkerError::TaskFailed
-        | crate::account_worker::WorkerError::Capacity
-        | crate::account_worker::WorkerError::CallbackUnknown => CallbackError::Unknown,
-    })?;
-    owner.payload.credential_refresh_admission = Some(final_effect.clone());
-    put_owner(tx, &owner)?;
-    Ok(final_effect)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1306,70 +1255,6 @@ mod tests {
         assert!(
             detail.contains("runtime_tool_request_current_status"),
             "{detail}"
-        );
-    }
-
-    #[test]
-    fn callback_credential_refresh_reuses_final_pointer_after_response_loss() {
-        let mut db = database();
-        let tx = db.transaction().expect("transaction");
-        let (identity, input) = input();
-        let owner = admit_owner(&tx, &identity, &input.signature()).expect("callback owner");
-        let source = owner.payload.admission.expect("source token");
-        let intent = crate::account_worker::retained::ProviderCallIntent {
-            root_request_id: owner.id.clone(),
-            admitted_request: None,
-            scope: crate::recovery_history::ConnectionScope {
-                account: "account".into(),
-                connection: "host-attachment".into(),
-                generation: 9,
-            },
-            operation: format!("vm-codex-token-refresh:account:{}", owner.id),
-            actor: None,
-            transfer: None,
-            deleted_actor_session: None,
-            method: studio_runtime_providers::Method::AccountRead,
-            params: json!({"refreshToken":true}),
-        };
-        let final_effect = reserve_credential_refresh(&tx, &owner.id, &source, intent.clone())
-            .expect("reserve once");
-        assert_ne!(final_effect, source);
-        assert_eq!(
-            callback_admission(&tx, &owner.id).expect("source unchanged"),
-            Some(source.clone())
-        );
-        assert_eq!(
-            owner_by_root(&tx, &owner.id)
-                .expect("owner")
-                .unwrap()
-                .payload
-                .credential_refresh_admission,
-            Some(final_effect.clone())
-        );
-        tx.execute("DELETE FROM runtime_outbox", [])
-            .expect("completed transport reply retired");
-        assert_eq!(
-            reserve_credential_refresh(&tx, &owner.id, &source, intent.clone())
-                .expect("retry saved pointer"),
-            final_effect
-        );
-        let count: i64 = tx
-            .query_row("SELECT count(*) FROM runtime_outbox", [], |row| row.get(0))
-            .expect("no new effect");
-        assert_eq!(count, 0);
-        let mut changed = intent;
-        changed.params = json!({"refreshToken":false});
-        assert!(matches!(
-            reserve_credential_refresh(&tx, &owner.id, &source, changed),
-            Err(CallbackError::Conflict)
-        ));
-        assert_eq!(
-            owner_by_root(&tx, &owner.id)
-                .expect("owner")
-                .unwrap()
-                .payload
-                .credential_refresh_admission,
-            Some(final_effect)
         );
     }
 

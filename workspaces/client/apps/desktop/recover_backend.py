@@ -464,29 +464,25 @@ def verify_installed_admission(config, state, installed, proof, handles):
 
 
 def installed_delivery_admission(state):
-    """Fence publication with existing install, maintenance, and authoritative runtime leases."""
+    """Fence publication with existing install and authoritative runtime leases."""
     from contextlib import contextmanager
     from install_update import held
-    import desktop_vm as vm
     @contextmanager
     def admission():
         with held(state / "update-install.lock") as alone:
             if not alone:
                 raise RuntimeError("Another install owns the delivery boundary")
-            with held(vm.vm_state_dir(state) / vm.MAINTENANCE_LOCK, create=False) as free:
-                if not free:
-                    raise RuntimeError("VM maintenance owns the delivery boundary")
-                startup_file_identity(state / "runtime.lock")
-                descriptor = os.open(state / "runtime.lock", os.O_RDONLY | os.O_NOFOLLOW)
-                with os.fdopen(descriptor, "rb") as lease:
-                    try:
-                        fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError as error:
-                        raise RuntimeError("A runtime owner appeared before delivery publication") from error
-                    try:
-                        yield
-                    finally:
-                        fcntl.flock(lease, fcntl.LOCK_UN)
+            startup_file_identity(state / "runtime.lock")
+            descriptor = os.open(state / "runtime.lock", os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "rb") as lease:
+                try:
+                    fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as error:
+                    raise RuntimeError("A runtime owner appeared before delivery publication") from error
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lease, fcntl.LOCK_UN)
     return admission()
 
 
@@ -732,7 +728,6 @@ def startup_delivery_tick(config, state):
     import desktop_delivery as delivery
     import desktop_updates as updates
     from install_update import held
-    import desktop_vm as vm
     pointer = state / delivery.STARTUP_INTENT_FILE
     if not pointer.exists() and not pointer.is_symlink():
         return False, None
@@ -756,84 +751,81 @@ def startup_delivery_tick(config, state):
     with held(state / "update-install.lock") as alone:
         if not alone:
             return True, "startup delivery waits for the install owner"
-        with held(vm.vm_state_dir(state) / vm.MAINTENANCE_LOCK, create=False) as free:
-            if not free:
-                return True, "startup delivery waits for VM maintenance"
-            request = record["request"]
-            installed = Path(request["installed"])
-            if "installedDelivery" in request:
-                return installed_delivery_tick(config, state, record)
-            verify_startup_launch_scope(config, state, installed, request["startupBackend"])
-            try:
-                receipt = delivery.read_private_json(state / updates.RECEIPT_FILE)
-            except FileNotFoundError:
-                receipt = {}
-            if (receipt.get("id") != record["id"] or receipt.get("outcome") != "installed"
-                    or receipt.get("from") != "local-delivery" or receipt.get("build") != request["build"]):
-                pending = updates.read_pending(state)
-                if (pending is not None and pending["id"] == record["id"]
-                        and pending["build"] == request["build"] and pending["from"] == "local-delivery"
-                        and delivery.bundle_hash(Path(pending["app"])) == request["bundleHash"]):
-                    proof = request["startupBackend"]
-                    if startup_backend_birth(proof["pid"]) is None:
-                        verify_startup_artifact(config, state, installed, proof, record["handles"], swapped=False)
-                        if startup_lease_held(state) or listener_pids(config["port"]):
-                            return True, "startup delivery waits for its ended backend lease and listener"
-                        if startup_backend_birth(proof["pid"]) is not None:
-                            raise RuntimeError("The pinned startup backend PID was reused")
-                    else:
-                        verify_startup_backend(config, state, installed, proof, record["handles"], swapped=False)
-                    return "install-pending", "startup delivery waits for its existing install owner"
-                if record.get("phase") == delivery.PHASES["publishing"]:
-                    try:
-                        # deliver_server publishes the pointer and the pending file under this lease.
-                        with delivery.delivery_lease(state):
-                            if updates.read_pending(state) is None:
-                                return False, None  # Publication failed: the installed app keeps running.
-                    except delivery.DeliveryError:
-                        pass  # An active local delivery decides the next step.
-                return True, "startup delivery waits for its exact installed receipt"
-            if (updates.read_build(installed) != request["build"]
-                    or delivery.bundle_hash(installed) != request["bundleHash"]
-                    or file_sha256(delivery.server_path(installed)) != request["backendHash"]):
-                raise RuntimeError("The installed bundle differs from the startup delivery request")
-            proof = request["startupBackend"]
-            if recovery == {"phase": "stopped"}:
-                if startup_supervisor_handles(state, record["handles"]) != proof["supervisorHandles"]:
-                    raise RuntimeError("The retained supervisor handle identity changed")
-                return False, None
-            birth = startup_backend_birth(proof["pid"])
-            if birth is None:
-                if listener_pids(config["port"]):
-                    if not startup_replacement_ready(config, state, request, record["handles"]):
-                        return True, "startup delivery waits for the running target's exact HTTP identity"
-                    record["startupRecovery"] = {"phase": "stopped"}
-                    delivery.save_journal(state, record)
-                    return False, None
-                verify_startup_artifact(config, state, installed, proof, record["handles"], swapped=True)
-                if (startup_lease_held(state) or listener_pids(config["port"])
-                        or startup_supervisor_handles(state, record["handles"]) != proof["supervisorHandles"]):
-                    return True, "startup delivery waits for its exact backend and lease to end"
-                if startup_backend_birth(proof["pid"]) is not None:
-                    raise RuntimeError("The pinned startup backend PID was reused")
+        request = record["request"]
+        installed = Path(request["installed"])
+        if "installedDelivery" in request:
+            return installed_delivery_tick(config, state, record)
+        verify_startup_launch_scope(config, state, installed, request["startupBackend"])
+        try:
+            receipt = delivery.read_private_json(state / updates.RECEIPT_FILE)
+        except FileNotFoundError:
+            receipt = {}
+        if (receipt.get("id") != record["id"] or receipt.get("outcome") != "installed"
+                or receipt.get("from") != "local-delivery" or receipt.get("build") != request["build"]):
+            pending = updates.read_pending(state)
+            if (pending is not None and pending["id"] == record["id"]
+                    and pending["build"] == request["build"] and pending["from"] == "local-delivery"
+                    and delivery.bundle_hash(Path(pending["app"])) == request["bundleHash"]):
+                proof = request["startupBackend"]
+                if startup_backend_birth(proof["pid"]) is None:
+                    verify_startup_artifact(config, state, installed, proof, record["handles"], swapped=False)
+                    if startup_lease_held(state) or listener_pids(config["port"]):
+                        return True, "startup delivery waits for its ended backend lease and listener"
+                    if startup_backend_birth(proof["pid"]) is not None:
+                        raise RuntimeError("The pinned startup backend PID was reused")
+                else:
+                    verify_startup_backend(config, state, installed, proof, record["handles"], swapped=False)
+                return "install-pending", "startup delivery waits for its existing install owner"
+            if record.get("phase") == delivery.PHASES["publishing"]:
+                try:
+                    # deliver_server publishes the pointer and the pending file under this lease.
+                    with delivery.delivery_lease(state):
+                        if updates.read_pending(state) is None:
+                            return False, None  # Publication failed: the installed app keeps running.
+                except delivery.DeliveryError:
+                    pass  # An active local delivery decides the next step.
+            return True, "startup delivery waits for its exact installed receipt"
+        if (updates.read_build(installed) != request["build"]
+                or delivery.bundle_hash(installed) != request["bundleHash"]
+                or file_sha256(delivery.server_path(installed)) != request["backendHash"]):
+            raise RuntimeError("The installed bundle differs from the startup delivery request")
+        proof = request["startupBackend"]
+        if recovery == {"phase": "stopped"}:
+            if startup_supervisor_handles(state, record["handles"]) != proof["supervisorHandles"]:
+                raise RuntimeError("The retained supervisor handle identity changed")
+            return False, None
+        birth = startup_backend_birth(proof["pid"])
+        if birth is None:
+            if listener_pids(config["port"]):
+                if not startup_replacement_ready(config, state, request, record["handles"]):
+                    return True, "startup delivery waits for the running target's exact HTTP identity"
                 record["startupRecovery"] = {"phase": "stopped"}
                 delivery.save_journal(state, record)
                 return False, None
-            if birth != proof["birth"]:
+            verify_startup_artifact(config, state, installed, proof, record["handles"], swapped=True)
+            if (startup_lease_held(state) or listener_pids(config["port"])
+                    or startup_supervisor_handles(state, record["handles"]) != proof["supervisorHandles"]):
+                return True, "startup delivery waits for its exact backend and lease to end"
+            if startup_backend_birth(proof["pid"]) is not None:
                 raise RuntimeError("The pinned startup backend PID was reused")
-            if recovery is not None:
-                return True, "startup backend stop outcome remains pending"
-            verify_startup_backend(config, state, installed, proof, record["handles"], swapped=True)
-            record["startupRecovery"] = {"phase": "stop-requested"}
+            record["startupRecovery"] = {"phase": "stopped"}
             delivery.save_journal(state, record)
-            # Re-read the exact kernel birth immediately before signaling. A lost local outcome
-            # leaves stop-requested durable, so a later tick cannot send another signal.
-            if startup_backend_birth(proof["pid"]) != proof["birth"]:
-                raise RuntimeError("The pinned startup backend changed before its stop")
-            os.kill(proof["pid"], signal.SIGTERM)
-            record["startupRecovery"] = {"phase": "stop-sent"}
-            delivery.save_journal(state, record)
-            return True, "pinned startup backend stopping after verified delivery"
+            return False, None
+        if birth != proof["birth"]:
+            raise RuntimeError("The pinned startup backend PID was reused")
+        if recovery is not None:
+            return True, "startup backend stop outcome remains pending"
+        verify_startup_backend(config, state, installed, proof, record["handles"], swapped=True)
+        record["startupRecovery"] = {"phase": "stop-requested"}
+        delivery.save_journal(state, record)
+        # Re-read the exact kernel birth immediately before signaling. A lost local outcome
+        # leaves stop-requested durable, so a later tick cannot send another signal.
+        if startup_backend_birth(proof["pid"]) != proof["birth"]:
+            raise RuntimeError("The pinned startup backend changed before its stop")
+        os.kill(proof["pid"], signal.SIGTERM)
+        record["startupRecovery"] = {"phase": "stop-sent"}
+        delivery.save_journal(state, record)
+        return True, "pinned startup backend stopping after verified delivery"
 
 
 def load_config(filename, state):
@@ -1222,7 +1214,6 @@ def check_interpreter():
     Python 3.11) and the helpers shipped beside this file."""
     import desktop_process  # noqa: F401
     import desktop_updates  # noqa: F401
-    import desktop_vm  # noqa: F401
     import desktop_delivery  # noqa: F401
     print(json.dumps({"python": sys.executable, "version": list(sys.version_info[:3])}))
 

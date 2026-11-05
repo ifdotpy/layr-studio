@@ -9,6 +9,7 @@ export default {
     include: [
       "src/accountName.test.ts",
       "src/components/RadioChat.test.ts",
+      "src/components/composerStyleInvalidation.test.ts",
       "src/layout/deriveWorkspaceLayout.test.ts",
       "src/hooks/mobileViewport.test.ts",
       "src/layout/terminalGeometry.test.ts",
@@ -40,7 +41,6 @@ export default {
       "src/sync/entityProjection.test.ts",
       "src/sync/resourceEvents.live.test.ts",
       "src/sync/progressSubscription.test.ts",
-      "src/components/sidebar/Vault.test.ts",
       "src/hooks/chatPrefetch.test.ts",
       "src/hooks.subscriptionVisibility.test.ts",
       "src/hooks/snapshotRecovery.test.ts",

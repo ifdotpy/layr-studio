@@ -343,30 +343,38 @@ mod tests {
         state.validators = crate::validation::Registry::compile(&[]).expect("canonical validators");
         (directory, state)
     }
-    fn task(
+    /// Write a task through the canonical task writer, which keeps its window.
+    fn put_task(
+        tx: &rusqlite::Transaction<'_>,
         id: &str,
         agent: &str,
         status: &str,
-    ) -> studio_runtime_schema::process_controls::TaskProjection {
-        use studio_runtime_schema::task_record::{TaskStatus, TaskType};
-        let mut record = studio_runtime_store::TaskRecord::new(
-            agent.into(),
-            id.into(),
-            "turn".into(),
-            studio_json::from_str("1").expect("valid timestamp"),
-            TaskType::CommandExecution,
-            "commandExecution".into(),
-        );
-        record.set_status(match status {
-            "running" => TaskStatus::Running,
-            "completed" => TaskStatus::Completed,
-            _ => panic!("unsupported fixture status"),
-        });
-        let mut projection = studio_runtime_services::sync_views::project_task_record(&record)
-            .expect("task projection");
-        projection.id = id.into();
-        projection
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        studio_runtime_services::notification_dispatch::test_put_task(
+            tx,
+            &task_record(id, agent, status),
+        )
+        .map_err(|_| studio_runtime_store::StoreError::RecordContract("task write"))
     }
+
+    fn delete_task(
+        tx: &rusqlite::Transaction<'_>,
+        id: &str,
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        studio_runtime_services::notification_dispatch::test_delete_task(tx, id)
+            .map_err(|_| studio_runtime_store::StoreError::RecordContract("task delete"))
+    }
+
+    /// A task row with the given id, owner and status.
+    fn task_record(id: &str, agent: &str, status: &str) -> studio_runtime_store::TaskRecord {
+        studio_json::from_str(
+            &json!({"id":id,"agent":agent,"itemId":id,"turnId":"turn","created":1,
+                "type":"commandExecution","name":"commandExecution","kind":"command","status":status})
+            .to_string(),
+        )
+        .expect("task fixture")
+    }
+
     fn event(state: &HttpState) -> ResourceChangeEvent {
         studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"fixture","revision":1,"reason":"initial","resources":[],"resourceVersions":[]})).expect("event")
     }
@@ -549,17 +557,16 @@ mod tests {
         let store = state.store.as_ref().expect("store");
         store
             .transaction(|tx| {
-                for (id, agent) in [("a-task", "a"), ("b-task", "b"), ("latest", "lead")] {
-                    SyncDocumentsRepository::put_entity(
-                        tx,
-                        "task",
-                        id,
-                        task(id, agent, "running"),
-                        false,
-                    )?;
-                }
-                for (id, root) in [("a", "lead"), ("b", "other")] {
+                for (id, root) in [
+                    ("lead", "lead"),
+                    ("other", "other"),
+                    ("a", "lead"),
+                    ("b", "other"),
+                ] {
                     put_member(tx, id, root)?;
+                }
+                for (id, agent) in [("a-task", "a"), ("b-task", "b"), ("latest", "lead")] {
+                    put_task(tx, id, agent, "running")?;
                 }
                 Ok(())
             })
@@ -602,13 +609,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "b-task",
-                    task("b-task", "a", "running"),
-                    false,
-                )?;
+                put_task(tx, "b-task", "a", "running")?;
                 Ok(())
             })
             .await
@@ -640,13 +641,7 @@ mod tests {
                     json!({"id":"unrelated","rootId":"other","status":"idle","source":"managed"}),
                     false,
                 )?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "latest",
-                    task("latest", "lead", "completed"),
-                    false,
-                )?;
+                put_task(tx, "latest", "lead", "completed")?;
                 Ok(())
             })
             .await
@@ -671,13 +666,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "new",
-                    task("new", "lead", "running"),
-                    false,
-                )?;
+                put_task(tx, "new", "lead", "running")?;
                 Ok(())
             })
             .await
@@ -708,13 +697,10 @@ mod tests {
         let store = state.store.as_ref().expect("fixture store");
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "restored",
-                    task("restored", "alpha", "running"),
-                    false,
-                )?;
+                for owner in ["alpha", "beta"] {
+                    put_member(tx, owner, owner)?;
+                }
+                put_task(tx, "restored", "alpha", "running")?;
                 Ok(())
             })
             .await
@@ -728,14 +714,8 @@ mod tests {
             .expect("initial owner baseline");
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(tx, "task", "restored", json!({}), true)?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "restored",
-                    task("restored", "beta", "running"),
-                    false,
-                )?;
+                delete_task(tx, "restored")?;
+                put_task(tx, "restored", "beta", "running")?;
                 Ok(())
             })
             .await

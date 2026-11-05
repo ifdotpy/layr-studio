@@ -119,7 +119,6 @@ fn native_action_needs_gesture(request: &mut Request, window: &str) -> Result<bo
             request.method.as_str(),
             "desktop.fileAction"
                 | "desktop.revealPath"
-                | "desktop.showVaultKeys"
                 | "desktop.requestMicrophone"
                 | "desktop.prepareTranscription"
                 | "desktop.cancelTranscription"
@@ -341,7 +340,6 @@ fn connected_method(method: &str) -> bool {
             | "desktop.pickAttachments"
             | "desktop.fileAction"
             | "desktop.revealPath"
-            | "desktop.showVaultKeys"
             | "desktop.requestMicrophone"
             | "desktop.prepareTranscription"
             | "desktop.cancelTranscription"

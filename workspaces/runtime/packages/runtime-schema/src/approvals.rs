@@ -138,7 +138,7 @@ pub enum Request {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserSource {
-    /// The guest service of the Linux VM on this Mac.
+    /// Historical guest source retained for saved cards.
     Vm,
     /// The browser host of commands that run on this server.
     Host,

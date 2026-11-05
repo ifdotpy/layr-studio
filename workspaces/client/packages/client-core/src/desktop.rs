@@ -73,7 +73,6 @@ fn purpose(method: &str) -> Option<u32> {
         "desktop.requestMicrophone" => 7,
         "desktop.prepareTranscription" => 8,
         "desktop.cancelTranscription" => 9,
-        "desktop.showVaultKeys" => 11,
         _ => return None,
     })
 }
@@ -278,7 +277,6 @@ pub async fn dispatch(request: Request, backend: Option<&crate::backend::Backend
             .await?;
         }
         match request.method.as_str() {
-            "desktop.showVaultKeys" => return crate::vault_keys::show(&value).await,
             "desktop.saveBegin" => return crate::file_save::command(&request.method, &value),
             "desktop.requestMicrophone" => return crate::media::request_microphone().await,
             "desktop.prepareTranscription" => return crate::speech::prepare(Instant::now()),
@@ -787,7 +785,6 @@ mod tests {
             "desktop.openExternal",
             crate::desktop::SIGN_IN_OPEN_METHOD,
             "desktop.revealPath",
-            "desktop.showVaultKeys",
             "desktop.saveBegin",
             "desktop.fileAction",
         ] {
