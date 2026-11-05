@@ -5,7 +5,6 @@ use studio_json::json;
 
 use crate::StoreResult;
 use crate::records::{AgentRecord, Table};
-use crate::repositories::sync_documents::SyncDocumentsRepository;
 use crate::schema::{SchemaRequirements, TableRequirement};
 
 const GROUPS: &[TableRequirement] = &[TableRequirement {
@@ -197,7 +196,7 @@ impl CoordinationRepository {
             "INSERT INTO groups(id,name,members) VALUES(?1,?2,?3)",
             params![group.id, group.name, group.original_members],
         )?;
-        Ok(())
+        Self::mark_chat(transaction, &group.id)
     }
 
     pub fn put_edge(
@@ -210,12 +209,20 @@ impl CoordinationRepository {
             "INSERT OR IGNORE INTO graph_edges(id,source,target,kind) VALUES(?1,?2,?3,'chat')",
             params![id, source, target],
         )?;
-        Ok(())
+        Self::mark_chat(transaction, target)
     }
 
     pub fn remove_edge(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
+        let target: Option<String> = transaction
+            .query_row("SELECT target FROM graph_edges WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .optional()?;
         transaction.execute("DELETE FROM graph_edges WHERE id=?1", [id])?;
-        Ok(())
+        match target {
+            Some(target) => Self::mark_chat(transaction, &target),
+            None => Ok(()),
+        }
     }
 
     pub fn put_message(transaction: &Transaction<'_>, message: &CanvasMessage) -> StoreResult<()> {
@@ -230,54 +237,41 @@ impl CoordinationRepository {
                 message.deliveries
             ],
         )?;
-        Ok(())
+        Self::mark_chat(transaction, &message.room)
     }
 
-    pub fn chat_projection(
-        transaction: &Transaction<'_>,
+    /// The `chat` document of a chat group at read time; None when it is not a chat.
+    pub fn chat_view(
+        connection: &rusqlite::Connection,
         id: &str,
-        deleted: bool,
-    ) -> StoreResult<()> {
-        let value = if deleted {
-            json!({})
-        } else {
-            let group = Self::group(transaction, id)?.ok_or_else(|| {
-                crate::StoreError::SchemaMismatch(
-                    "chat group disappeared during projection".to_owned(),
-                )
-            })?;
-            let members = members(transaction, id)?;
-            let last = transaction
-                .query_row(
-                    "SELECT text,at FROM messages WHERE room=?1 ORDER BY at DESC LIMIT 1",
-                    [id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
-                )
-                .optional()?;
-            let count: i64 = transaction.query_row(
-                "SELECT count(*) FROM messages WHERE room=?1",
-                [id],
-                |row| row.get(0),
-            )?;
-            let tail = last
-                .as_ref()
-                .map(|item| item.0.chars().take(2_000).collect::<String>())
-                .unwrap_or_default();
-            json!({"id":id,"name":group.name,"members":members,"kind":"chat","messageCount":count,"tail":tail,"lastMessageAt":last.map(|item| item.1)})
+    ) -> StoreResult<Option<studio_json::Value>> {
+        let Some(group) = Self::group(connection, id)? else {
+            return Ok(None);
         };
-        SyncDocumentsRepository::put_entity(transaction, "chat", id, value, deleted)?;
-        Ok(())
+        let members = members(connection, id)?;
+        let last = connection
+            .prepare_cached("SELECT text,at FROM messages WHERE room=?1 ORDER BY at DESC LIMIT 1")?
+            .query_row([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            })
+            .optional()?;
+        let count: i64 = connection
+            .prepare_cached("SELECT count(*) FROM messages WHERE room=?1")?
+            .query_row([id], |row| row.get(0))?;
+        let tail = last
+            .as_ref()
+            .map(|item| item.0.chars().take(2_000).collect::<String>())
+            .unwrap_or_default();
+        Ok(Some(
+            json!({"id":id,"name":group.name,"members":members,"kind":"chat","messageCount":count,"tail":tail,"lastMessageAt":last.map(|item| item.1)}),
+        ))
     }
 
-    pub fn edge_projection(
-        transaction: &Transaction<'_>,
-        id: &str,
-        source: &str,
-        target: &str,
-        deleted: bool,
-    ) -> StoreResult<()> {
-        let value = json!({"id":id,"source":source,"target":target,"kind":"chat"});
-        SyncDocumentsRepository::put_entity(transaction, "edge", id, value, deleted)?;
+    /// Ask readers to build the view of chat `id` again, when `id` is a chat.
+    fn mark_chat(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
+        if Self::group(transaction, id)?.is_some() {
+            crate::durable_seq::mark(transaction, crate::durable_seq::CHAT_VIEW_MARK, id)?;
+        }
         Ok(())
     }
 }

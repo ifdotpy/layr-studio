@@ -415,7 +415,8 @@ mod tests {
     #[test]
     fn summary_shows_pending_approval_questions_and_excludes_deferred_and_answering() {
         let mut db = studio_runtime_store::test_canvas();
-        let agent = json!({"id":"a","name":"Lead"});
+        let agent = json!({"compactions":0,"id":"a","rootId":"a","epoch":0,"status":"idle",
+            "accountKey":"default","provider":"codex","name":"Lead"});
         let base = json!({"id":"q","agent":"a","turn":"t1","created":1.0,"epoch":null,
             "request":{"kind":"agent_question","questions":[{"id":"1","question":"Continue?","header":null,"options":[],"is_secret":false,"multi_select":null,"is_other":null}]},
             "delivery":null,"detail":{"params":{},"preview":null,"answer_error":null,"host_close_reason":null},
@@ -431,8 +432,11 @@ mod tests {
         answering["state"] =
             json!({"kind":"answering","answer":{"kind":"answers","answers":[]},"command":"cmd"});
         let tx = db.transaction().unwrap();
-        studio_runtime_store::SyncDocumentsRepository::put_entity(&tx, "agent", "a", agent, false)
-            .unwrap();
+        studio_runtime_store::AgentRepository::put(
+            &tx,
+            &studio_runtime_store::AgentRecord::from_value(agent).unwrap(),
+        )
+        .unwrap();
         // Requests come from approval rows, as in production.
         for value in [base, permission, deferred, answering] {
             let row: studio_runtime_schema::approvals::Approval =

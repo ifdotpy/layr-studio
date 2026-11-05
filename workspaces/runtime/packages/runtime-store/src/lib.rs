@@ -170,8 +170,9 @@ pub use repositories::scheduler::{
 };
 pub use repositories::startup_recovery::{self, StartupRecoveryRepository};
 pub use repositories::sync_documents::{
-    DIRECT_COLLECTIONS, ENTITY_TOMBSTONE_LIMIT, ENTITY_TOMBSTONE_PRUNE_BATCH, EntityPage,
-    EntityRow, SyncDocument, SyncDocumentsRepository, WORK_COLLECTIONS,
+    AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, ENTITY_TOMBSTONE_LIMIT,
+    ENTITY_TOMBSTONE_PRUNE_BATCH, EntityPage, EntityRow, SyncDocument, SyncDocumentsRepository,
+    WORK_COLLECTIONS,
 };
 pub use repositories::terminals::{ArchiveAppend, TerminalRow, TerminalsRepository};
 pub use repositories::transcript::{
@@ -288,11 +289,10 @@ pub enum ResourceChange {
 }
 
 // Entity projection tables whose rows are delivered by entity-backed sync refs.
-const ENTITY_RESOURCE_TABLES: [&str; 5] = [
+const ENTITY_RESOURCE_TABLES: [&str; 4] = [
     "sync_entities",
     "sync_entity_meta",
     "durable_rows",
-    "durable_view_log",
     "durable_floor",
 ];
 
@@ -1570,9 +1570,7 @@ impl RuntimeStore {
             ))
     }
 
-    pub fn transaction_local_server_id(
-        transaction: &Transaction<'_>,
-    ) -> StoreResult<Option<String>> {
+    pub fn transaction_local_server_id(transaction: &Connection) -> StoreResult<Option<String>> {
         let Some(path) = transaction.path() else {
             return Ok(None);
         };

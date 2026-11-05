@@ -140,25 +140,13 @@ impl Fixture {
         store.transaction(move |tx| {
             tx.execute_batch(&sql)?;
             // These legacy rows are inserted after the template was migrated.
-            // Apply the permission migration to the records and retained projections.
+            // Apply the permission migration to the records.
             tx.execute("UPDATE runtime_agents SET record=json_remove(json_set(record,'$.permissionMode',CASE WHEN json_extract(record,'$.yoloMode') THEN 'bypassPermissions' ELSE 'default' END),'$.yoloMode') WHERE json_type(record,'$.yoloMode') IN ('true','false')", [])?;
-            tx.execute("UPDATE sync_entities SET payload=json_remove(json_set(payload,'$.value.permissionMode',CASE WHEN json_extract(payload,'$.value.yoloMode') THEN 'bypassPermissions' ELSE 'default' END),'$.value.yoloMode') WHERE collection='agent' AND json_type(payload,'$.value.yoloMode') IN ('true','false')", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.threadId') WHERE json_type(record,'$.threadId')='null'", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.turnId') WHERE json_type(record,'$.turnId')='null'", [])?;
             tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
             studio_runtime_store::migrations::migrate_2026_10_20(tx)?;
             studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
-            let projections = {
-                let mut query = tx.prepare("SELECT id,payload FROM sync_entities WHERE collection='agent' AND deleted=0 AND payload IS NOT NULL")?;
-                let rows = query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()?
-            };
-            for (id, raw) in projections {
-                let mut payload: Value = studio_json::from_str(&raw)?;
-                crate::agent_view_fixtures::normalize_legacy_agent(payload.get_mut("value").expect("agent projection"));
-                let raw = payload.to_string();
-                tx.execute("UPDATE sync_entities SET payload=?1,hash=sync_entity_hash(?1) WHERE collection='agent' AND id=?2", (&raw, &id))?;
-            }
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
                 tx.execute(&format!("UPDATE runtime_agent_volatile SET \"{field}\"=NULL WHERE \"{field}\"='null'"), [])?;
             }
@@ -395,6 +383,34 @@ async fn python_send_and_receipt_corpus() {
             }
             crate::removed_budget_fields::strip(&mut rows);
             crate::removed_budget_fields::strip(&mut python);
+            if table == "sync_entities" {
+                // A view exists for each agent row and for nothing else. The oracle
+                // kept copies only for the agents it published, of some agents
+                // without a row, and deletes, which a snapshot leaves out: compare
+                // the live agents that have both.
+                let agents = actual["agents"].as_object().expect("agents");
+                python.as_array_mut().expect("sync rows").retain(|row| {
+                    row["collection"] != "agent"
+                        || row["deleted"] == 0
+                            && row["id"].as_str().is_some_and(|id| agents.contains_key(id))
+                });
+                let published = python
+                    .as_array()
+                    .expect("sync rows")
+                    .iter()
+                    .filter(|row| row["collection"] == "agent")
+                    .map(|row| row["id"].clone())
+                    .collect::<Vec<_>>();
+                rows.as_array_mut()
+                    .expect("sync rows")
+                    .retain(|row| row["collection"] != "agent" || published.contains(&row["id"]));
+                // Agent views are built at read time, so their copies have no rowid order.
+                for list in [&mut rows, &mut python] {
+                    list.as_array_mut()
+                        .expect("sync rows")
+                        .sort_by_key(|row| (row["collection"].to_string(), row["id"].to_string()));
+                }
+            }
             assert_json(&rows, &python, &format!("{name}/{table}"));
         }
     }
@@ -481,7 +497,7 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
         ),
         (
             "sync_entities",
-            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agentSummary','agentDetail') ORDER BY rowid",
+            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree') ORDER BY rowid",
         ),
         (
             "sync_documents",
@@ -493,6 +509,19 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
         ),
     ] {
         state.insert(name.into(), json!(json_rows(sql)));
+    }
+    let views = studio_runtime_services::entity_scope::agent_snapshot(&db).expect("agent views");
+    let sync = state
+        .get_mut("sync_entities")
+        .and_then(Value::as_array_mut)
+        .expect("sync rows");
+    for row in views.into_iter().filter(|row| row.collection == "agent") {
+        let payload: Value =
+            studio_json::from_str(row.payload.as_deref().expect("agent view")).expect("view JSON");
+        sync.push(
+            json!({"collection":row.collection,"id":row.id,"seq":row.sequence,
+            "hash":"verified payload hash","payload":payload,"deleted":0}),
+        );
     }
     state
 }

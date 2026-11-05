@@ -8,10 +8,7 @@ use studio_runtime_schema::complaint_record::{
     ComplaintRecipient, ComplaintSource, ComplaintStatus,
 };
 use studio_runtime_store::CachedSql;
-use studio_runtime_store::system_reads as records;
-use studio_runtime_store::{
-    AgentId, AgentRepository, ComplaintRecord, SyncDocumentsRepository, Table, Transaction,
-};
+use studio_runtime_store::{AgentId, AgentRepository, ComplaintRecord, Table, Transaction};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -94,15 +91,6 @@ pub(crate) fn submit_agent_complaint(
     let record = typed.clone().into_value();
     checked("runtime_complaints", &record)?;
     Table::<ComplaintRecord>::new(tx).put(&typed)?;
-    let context = crate::sync_views::ComplaintViewContext {
-        agents: &[
-            serde::Deserialize::deserialize(agent.clone())?,
-            serde::Deserialize::deserialize(lead.value())?,
-        ],
-    };
-    let view = crate::sync_views::project_complaint_record(&typed, &context)
-        .ok_or_else(|| stored("runtime_complaints", &complaint_id))?;
-    SyncDocumentsRepository::put_entity(tx, "complaint", &complaint_id, view, false)?;
     if recipient == ComplaintRecipient::Lead {
         let complaint = ordered_text(
             &json!({"complaint_id":complaint_id,"author":agent_id,"author_name":agent.get("name").filter(|v| !v.is_null()).unwrap_or(&agent["id"]),"text":text,"status":"open","created":at}),
@@ -152,7 +140,7 @@ pub(super) fn submit_user_message(
     }
     let mut message = submit_agent_complaint(tx, lead, request_id, text, at)?;
     message.source_type = Some(ComplaintSource::Message);
-    save_complaint_projection(tx, &message, &mut None)?;
+    save_complaint(tx, &message)?;
     Ok(message)
 }
 
@@ -218,7 +206,6 @@ pub(crate) fn agent_complaint_action(
                     })
             });
             let total = complaints.len();
-            let mut agents = None;
             for complaint in complaints.iter_mut().take(50) {
                 if actor_id == root_id
                     && complaint.recipient == ComplaintRecipient::Lead
@@ -226,7 +213,7 @@ pub(crate) fn agent_complaint_action(
                 {
                     complaint.read_at =
                         studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
-                    save_complaint_projection(tx, complaint, &mut agents)?;
+                    save_complaint(tx, complaint)?;
                 }
             }
             complaints.truncate(50);
@@ -302,7 +289,7 @@ pub(crate) fn agent_complaint_action(
                     studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
             }
             complaint.version = Some(complaint.version.unwrap_or(0) + 1);
-            save_complaint_projection(tx, &complaint, &mut None)?;
+            save_complaint(tx, &complaint)?;
             reconcile_complaint_notifications(tx, actor_id)?;
             let author = complaint.author().unwrap_or_default();
             if author != "user" && author != actor_id {
@@ -421,27 +408,12 @@ fn reconcile_complaint_notifications(
     Ok(())
 }
 
-fn save_complaint_projection(
+/// Store a complaint row. Its client view is built at read time (`entity_scope`).
+fn save_complaint(
     tx: &Transaction<'_>,
     complaint: &ComplaintRecord,
-    agents: &mut Option<Vec<crate::submit_gates::AgentAuthorityRow>>,
 ) -> Result<(), NotificationDispatchError> {
-    let id = complaint.id();
     Table::<ComplaintRecord>::new(tx).put(complaint)?;
-    if agents.is_none() {
-        *agents = Some(
-            records::all(tx, "runtime_agents")?
-                .into_iter()
-                .map(serde::Deserialize::deserialize)
-                .collect::<Result<_, _>>()?,
-        );
-    }
-    let context = crate::sync_views::ComplaintViewContext {
-        agents: agents.as_deref().unwrap_or_default(),
-    };
-    let view = crate::sync_views::project_complaint_record(complaint, &context)
-        .ok_or_else(|| stored("runtime_complaints", id))?;
-    SyncDocumentsRepository::put_entity(tx, "complaint", id, view, false)?;
     Ok(())
 }
 

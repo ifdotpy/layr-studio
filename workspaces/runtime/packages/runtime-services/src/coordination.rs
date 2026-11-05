@@ -139,9 +139,7 @@ pub fn create_chat(
     for member in members {
         let edge_id = CoordinationRepository::edge_id(&member, id);
         CoordinationRepository::put_edge(transaction, &edge_id, &member, id)?;
-        CoordinationRepository::edge_projection(transaction, &edge_id, &member, id, false)?;
     }
-    CoordinationRepository::chat_projection(transaction, id, false)?;
     Ok(json!({"id":id}))
 }
 
@@ -168,7 +166,6 @@ pub fn connect_chat(
     } else {
         CoordinationRepository::remove_edge(transaction, &edge_id)?;
     }
-    CoordinationRepository::edge_projection(transaction, &edge_id, source, target, !connected)?;
     Ok(json!({"id":edge_id,"connected":connected}))
 }
 
@@ -894,7 +891,6 @@ pub fn post_message(
             .map_err(|_| CoordinationError::InvalidRequest("Invalid message delivery state"))?,
     };
     CoordinationRepository::put_message(transaction, &message)?;
-    CoordinationRepository::chat_projection(transaction, input.room, false)?;
     Ok(message_receipt(validated_message(message)?, true))
 }
 
@@ -1181,7 +1177,7 @@ mod tests {
              CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
              CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
-             CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")
+             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE IF NOT EXISTS agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT);  CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")
         ).expect("coordination schema creates");
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
@@ -1210,7 +1206,7 @@ mod tests {
              CREATE TABLE IF NOT EXISTS runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
              CREATE TABLE IF NOT EXISTS sync_documents(seq INTEGER PRIMARY KEY,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
-             CREATE TABLE IF NOT EXISTS durable_rows(seq INTEGER); CREATE TABLE IF NOT EXISTS sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT OR IGNORE INTO sync_generation VALUES(1,0);")
+             CREATE TABLE IF NOT EXISTS durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE IF NOT EXISTS agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT);  CREATE TABLE IF NOT EXISTS sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT OR IGNORE INTO sync_generation VALUES(1,0);")
         ).expect("durable test schema creates");
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
@@ -1881,7 +1877,11 @@ mod tests {
         ));
         assert_eq!(count(&connection, "groups"), 1);
         assert_eq!(count(&connection, "graph_edges"), 2);
-        assert_eq!(count(&connection, "sync_entities"), 3);
+        assert_eq!(count(&connection, "sync_entities"), 0);
+        assert_eq!(
+            chat(&connection, id).expect("chat document")["value"]["members"],
+            json!(["lead", "worker"])
+        );
     }
 
     #[test]
@@ -1899,7 +1899,10 @@ mod tests {
         ));
         drop(transaction);
         assert_eq!(count(&connection, "graph_edges"), 1);
-        assert_eq!(count(&connection, "sync_entities"), 2);
+        assert_eq!(
+            chat(&connection, id).expect("chat document")["value"]["members"],
+            json!(["lead"])
+        );
     }
 
     #[test]
@@ -1963,7 +1966,7 @@ mod tests {
                 ))
         ));
         assert_eq!(count(&connection, "messages"), 1);
-        assert_eq!(count(&connection, "sync_entities"), 3);
+        assert_eq!(count(&connection, "sync_entities"), 0);
     }
 
     #[test]
@@ -2251,15 +2254,7 @@ mod tests {
         );
         assert!(!receipt.deliveries.contains_key("user"));
         transaction.commit().expect("message commits");
-        let payload: String = connection
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat projection reads");
-        let payload: studio_json::Value =
-            studio_json::from_str(&payload).expect("projection parses");
+        let payload = chat(&connection, room).expect("chat document");
         assert_eq!(
             payload["value"]["tail"]
                 .as_str()
@@ -2310,11 +2305,11 @@ mod tests {
     }
 
     #[test]
-    fn late_chat_projection_failure_rolls_back_group_edges_and_sync_rows() {
+    fn late_chat_mark_failure_rolls_back_group_edges_and_marks() {
         let mut connection = database();
         connection.execute_batch(
-            "CREATE TRIGGER fail_chat_projection BEFORE INSERT ON sync_entities
-             WHEN NEW.collection='chat' BEGIN SELECT RAISE(ABORT,'injected chat projection failure'); END;",
+            "CREATE TRIGGER fail_chat_mark BEFORE INSERT ON durable_rows
+             WHEN NEW.tbl='chat_views' BEGIN SELECT RAISE(ABORT,'injected chat mark failure'); END;",
         ).expect("failure trigger creates");
         let transaction = connection.transaction().expect("transaction starts");
         let result = create_chat(
@@ -2327,45 +2322,48 @@ mod tests {
         drop(transaction);
         assert_eq!(count(&connection, "groups"), 0);
         assert_eq!(count(&connection, "graph_edges"), 0);
-        assert_eq!(count(&connection, "sync_entities"), 0);
+        assert_eq!(count(&connection, "durable_rows"), 0);
         assert_eq!(count(&connection, "sync_documents"), 0);
     }
 
+    /// The `chat` document of a chat, as a reader builds it.
+    fn chat(connection: &Connection, id: &str) -> Option<studio_json::Value> {
+        crate::entity_scope::direct_document(connection, "chat", id)
+            .expect("chat reads")
+            .and_then(|row| row.payload)
+            .map(|payload| studio_json::from_str(&payload).expect("chat JSON"))
+    }
+
     #[test]
-    fn connection_changes_publish_only_edge_projection() {
+    fn connection_changes_refresh_the_chat_members() {
         let mut connection = database();
         let room = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
         let transaction = connection.transaction().expect("transaction starts");
         create_chat(&transaction, room, "Team", &["lead".to_owned()]).expect("chat creates");
         transaction.commit().expect("chat commits");
-        let chat_sequence: i64 = connection
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat sequence reads");
+        let sequence = |connection: &Connection| {
+            crate::entity_scope::direct_document(connection, "chat", room)
+                .expect("chat reads")
+                .expect("chat document")
+                .sequence
+        };
+        let created = sequence(&connection);
         let transaction = connection.transaction().expect("transaction starts");
         connect_chat(&transaction, "worker", room, true).expect("edge connects");
         transaction.commit().expect("edge commits");
-        let after_connect: i64 = connection
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat sequence reads");
-        assert_eq!(chat_sequence, after_connect);
+        assert!(sequence(&connection) > created);
+        assert_eq!(
+            chat(&connection, room).expect("chat")["value"]["members"],
+            json!(["lead", "worker"])
+        );
+        let connected = sequence(&connection);
         let transaction = connection.transaction().expect("transaction starts");
         connect_chat(&transaction, "worker", room, false).expect("edge disconnects");
         transaction.commit().expect("edge removal commits");
-        let after_disconnect: i64 = connection
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat sequence reads");
-        assert_eq!(chat_sequence, after_disconnect);
+        assert!(sequence(&connection) > connected);
+        assert_eq!(
+            chat(&connection, room).expect("chat")["value"]["members"],
+            json!(["lead"])
+        );
     }
 }
