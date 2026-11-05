@@ -210,7 +210,12 @@ workDecision, workRelease) from `runtime_work`, its history tables and `durable_
 read time. They have no copy in `sync_entities`; migration `2026-11-04-work-read-time`
 deleted the old copies. The direct collections (`DIRECT_COLLECTIONS`) have one document
 per row of a main table: `plan` (`runtime_plans`), `annotation` (`runtime_annotations`),
-`rule` (`runtime_rules`), and `request` and `questionHistory` (`approvals`). They are built
+`rule` (`runtime_rules`), `request` and `questionHistory` (`approvals`), `complaint`
+(`runtime_complaints`, with the current names of its author and lead) and `edge`
+(chat rows of `graph_edges`). A `chat` document reads its group, its member edges and
+its messages; their writers mark the chat (`durable_rows` table `chat_views`), so a
+member change or a new message refreshes it. Migration `2026-11-04-chat-read-time`
+numbered these rows, marked every chat and deleted the copies. They are built
 at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
 their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
 agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that

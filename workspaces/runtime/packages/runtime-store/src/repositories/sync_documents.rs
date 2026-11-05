@@ -110,10 +110,19 @@ pub const WORK_COLLECTIONS: &[&str] = &[
 ];
 
 /// Collections with one document per row of a main table (`runtime_plans`,
-/// `runtime_annotations`, `runtime_rules`, `approvals`). Like the work documents, they
-/// are built at read time and have no copy in `sync_entities`.
-pub const DIRECT_COLLECTIONS: &[&str] =
-    &["plan", "annotation", "rule", "request", "questionHistory"];
+/// `runtime_annotations`, `runtime_rules`, `approvals`, `runtime_complaints`,
+/// `graph_edges`) or per chat (`chat`, marked by its writers). Like the work documents,
+/// they are built at read time and have no copy in `sync_entities`.
+pub const DIRECT_COLLECTIONS: &[&str] = &[
+    "plan",
+    "annotation",
+    "rule",
+    "request",
+    "questionHistory",
+    "complaint",
+    "edge",
+    "chat",
+];
 
 /// The views of one agent, built at read time from `runtime_agents` and the rows its
 /// view reads. They have no copy in `sync_entities`.
