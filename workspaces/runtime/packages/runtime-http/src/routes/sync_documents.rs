@@ -1891,6 +1891,19 @@ mod vault_maintenance_tests {
             Ok(())
         }).await.unwrap();
         drop(store);
+        // A completed writer response can arrive just before its actor drops
+        // the last runtime-lock lease. Wait for that lease before reopening.
+        let lock_path = directory.path().join("runtime.lock");
+        studio_runtime_process::blocking_pool::spawn_blocking("test/runtime-lock", move || {
+            let lock = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(lock_path)
+                .unwrap();
+            lock.lock().unwrap();
+        })
+        .await
+        .unwrap();
         studio_runtime_store::migrations::test_apply_catalog_before_capacity(
             &directory.path().join("canvas.sqlite3"),
         )

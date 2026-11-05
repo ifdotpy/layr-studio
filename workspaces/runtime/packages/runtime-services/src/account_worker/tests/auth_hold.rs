@@ -118,6 +118,14 @@ impl Account {
 /// The fixture agent and `others` clones, each on its own thread with its own
 /// input, all on the provider of `kind`.
 pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> Vec<String> {
+    let agents = agent_rows(state, kind, others).await;
+    for id in &agents[1..] {
+        state.enqueue_for(id, id).await;
+    }
+    agents
+}
+
+pub(super) async fn agent_rows(state: &State, kind: ProviderKind, others: usize) -> Vec<String> {
     let first = state.agent.clone();
     let clones = (1..=others)
         .map(|index| format!("agent-{index}"))
@@ -153,9 +161,6 @@ pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> 
         })
         .await
         .unwrap();
-    for id in &clones {
-        state.enqueue_for(id, id).await;
-    }
     std::iter::once(state.agent.clone()).chain(clones).collect()
 }
 
