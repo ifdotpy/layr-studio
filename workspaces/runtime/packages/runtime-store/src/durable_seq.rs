@@ -112,10 +112,14 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_complaints"),
     // Chat membership edges: an `edge` document per chat edge, built at read time.
     DurableTable::new("graph_edges", "target"),
+<<<<<<< head
     // Window sources: a row in its window (`TASK_WINDOW`, `MONITOR_WINDOW`) is sent
     // again when it changes.
     DurableTable::record("runtime_tasks"),
     DurableTable::record("runtime_monitors"),
+||||||| base
+=======
+>>>>>>> https/main
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -242,6 +246,7 @@ pub const AGENT_VIEW_MARK: &str = "agent_views";
 /// its member edges and its messages, so their writers mark the chat.
 pub const CHAT_VIEW_MARK: &str = "chat_views";
 
+<<<<<<< head
 /// The `durable_rows` tables of the window members: a live entry puts the task or
 /// monitor of that id in its client window, a tombstone takes it out. The writer that
 /// owns the window rule (`sync_policy` in runtime-services) keeps them.
@@ -291,6 +296,9 @@ pub fn in_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bo
         .query_row(rusqlite::params![tbl, id], |row| row.get(0))?)
 }
 
+||||||| base
+=======
+>>>>>>> https/main
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.
 pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {

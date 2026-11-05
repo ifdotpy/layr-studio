@@ -1239,6 +1239,7 @@ pub(crate) fn complaint_view(
         .map_err(StoreError::from)
 }
 
+<<<<<<< head
 /// The client document of a window member: a `task` or a `monitor`. None when the row
 /// is gone or has no view.
 pub(crate) fn window_view(
@@ -1273,6 +1274,9 @@ pub(crate) fn window_view(
     )))
 }
 
+||||||| base
+=======
+>>>>>>> https/main
 /// The client view of a rule row: its id, agent and name.
 pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<RawValue> {
     let invalid = || StoreError::InvalidStoredRecord {
