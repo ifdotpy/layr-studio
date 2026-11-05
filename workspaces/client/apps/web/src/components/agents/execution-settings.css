@@ -138,21 +138,19 @@
   gap: var(--mantine-spacing-sm);
   min-height: 0;
 }
-:is(.execution-dropdown, .new-chat-model-settings) .execution-profile {
-  flex: 0 1 auto;
-  min-height: 0;
+/* No control shrinks, and the model list keeps its own five-row bound. When
+   the controls need more than the height (many accounts), the body scrolls
+   and the role switch stays at its top. */
+.mantine-Popover-dropdown.execution-dropdown > div,
+.new-chat-model-settings > .execution-profile-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
-:is(.execution-dropdown, .new-chat-model-settings)
-  .execution-profile
-  > .model-field {
-  display: flex;
-  flex: 0 1 auto;
-  flex-direction: column;
-  min-height: 0;
+:is(.execution-dropdown, .new-chat-model-settings) .execution-profile > * {
+  flex-shrink: 0;
 }
-:is(.execution-dropdown, .new-chat-model-settings) .setup-models {
-  flex: 0 1 auto;
-  align-content: start;
-  min-height: 0;
-  max-height: none;
+:is(.execution-dropdown, .new-chat-model-settings) .model-picker-role-switch {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
