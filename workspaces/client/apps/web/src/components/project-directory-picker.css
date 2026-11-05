@@ -83,3 +83,14 @@
 .directory-picker[data-server-selector="true"] .directory-list {
   height: min(260px, 28vh);
 }
+
+.directory-list [role="alert"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+.directory-list [role="alert"] > p {
+  flex-basis: 100%;
+  margin: 0;
+}

@@ -142,8 +142,7 @@
   font-size: var(--studio-text-body);
 }
 
-/* Paths and runtime diagnostics read as code. */
-.layr-store-input,
+/* Runtime diagnostics read as code. */
 .layr-settings-detail {
   font-family: var(--studio-font-mono);
   font-size: var(--studio-text-code);
