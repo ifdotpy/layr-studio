@@ -2684,113 +2684,128 @@ export default function App({ active = true }: { active?: boolean }) {
                 onClose={() => setCodexLoginKey("")}
               />
             )}
-          {[
-            ...accounts.data.accounts,
-            ...(accounts.data.archivedAccounts || []),
-          ]
-            .filter(
-              (account) =>
-                account.id === accountKey ||
-                agents.some(
-                  (item) =>
-                    item.rootId === lead?.id &&
-                    !item.deletedAt &&
-                    (item.accountKey || "default") === account.id &&
-                    item.status === GeneratedApiAgentStatus.failed,
-                ),
-            )
-            .map((account) => (
-              <AccountSignInNotice
-                key={account.id}
-                account={account}
-                errors={agents
-                  .filter(
-                    (item) =>
-                      (item.id === agent?.id || item.rootId === lead?.id) &&
-                      (item.accountKey || "default") === account.id,
-                  )
-                  .flatMap((item) => {
-                    const nativeStatus = item.nativeStatus;
-                    const nativeError =
-                      nativeStatus &&
-                      typeof nativeStatus === "object" &&
-                      "error" in nativeStatus
-                        ? nativeStatus.error
-                        : undefined;
-                    return [item.error, nativeError];
-                  })
-                  .filter(
-                    (value): value is string => typeof value === "string",
-                  )}
-                onSignIn={
-                  (
-                    {
-                      [ProviderKind.Codex]: setCodexLoginKey,
-                      [ProviderKind.Claude]: setClaudeLoginKey,
-                    } satisfies Record<ProviderKind, (key: string) => void>
-                  )[account.provider]
-                }
-              />
-            ))}
-          {error && !offlineSendFeedback.owns(error) && (
-            <div id="error" role="alert">
-              {error}
-            </div>
-          )}
-          <div className="sync-notices">
-            {!creating &&
-              pendingCreations.filter(isLeadCreateRequest).map((request) => (
-                <div className="sync-status" key={request.id}>
-                  <p>
-                    Studio lost confirmation for this chat request in{" "}
-                    {request.cwd || "default project"}
-                    {request.project_folder
-                      ? ` (${request.project_folder})`
-                      : ""}
-                    . Retrying uses the saved request ID to check whether the
-                    chat was created. Dismissing stops checking; a chat this
-                    request created still appears in the chat list.
-                  </p>
-                  <Button
-                    onClick={() =>
-                      void newChat(
-                        request.cwd,
-                        request.project_folder,
-                        request.id,
+          {/* Transient notices float under the header over the transcript, so
+              their arrival and dismissal never move the conversation. */}
+          <div className="workspace-notices">
+            <div className="workspace-notices-stack">
+              {[
+                ...accounts.data.accounts,
+                ...(accounts.data.archivedAccounts || []),
+              ]
+                .filter(
+                  (account) =>
+                    account.id === accountKey ||
+                    agents.some(
+                      (item) =>
+                        item.rootId === lead?.id &&
+                        !item.deletedAt &&
+                        (item.accountKey || "default") === account.id &&
+                        item.status === GeneratedApiAgentStatus.failed,
+                    ),
+                )
+                .map((account) => (
+                  <AccountSignInNotice
+                    key={account.id}
+                    account={account}
+                    errors={agents
+                      .filter(
+                        (item) =>
+                          (item.id === agent?.id || item.rootId === lead?.id) &&
+                          (item.accountKey || "default") === account.id,
                       )
+                      .flatMap((item) => {
+                        const nativeStatus = item.nativeStatus;
+                        const nativeError =
+                          nativeStatus &&
+                          typeof nativeStatus === "object" &&
+                          "error" in nativeStatus
+                            ? nativeStatus.error
+                            : undefined;
+                        return [item.error, nativeError];
+                      })
+                      .filter(
+                        (value): value is string => typeof value === "string",
+                      )}
+                    onSignIn={
+                      (
+                        {
+                          [ProviderKind.Codex]: setCodexLoginKey,
+                          [ProviderKind.Claude]: setClaudeLoginKey,
+                        } satisfies Record<ProviderKind, (key: string) => void>
+                      )[account.provider]
                     }
-                  >
-                    Retry chat request
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      try {
-                        dismissChatCreation(creationKey, request.id);
-                        if (creation.current?.id === request.id)
-                          creation.current = null;
-                        setPendingCreations(pendingChatCreations(creationKey));
-                      } catch (error) {
-                        notify(
-                          "Cannot dismiss the saved chat request: " +
-                            errorText(error),
-                        );
-                      }
-                    }}
-                  >
-                    Dismiss
-                  </Button>
+                  />
+                ))}
+              {error && !offlineSendFeedback.owns(error) && (
+                <div id="error" role="alert">
+                  {error}
                 </div>
-              ))}
-            {draftError && !offlineSendFeedback.owns(draftError) && (
-              <p className="sync-status" role="status" data-draft-sync-status>
-                {draftError}
-              </p>
-            )}
-            {outbox.error && !offlineSendFeedback.owns(outbox.error) && (
-              <p className="sync-status" role="alert">
-                {outbox.error}
-              </p>
-            )}
+              )}
+              <div className="sync-notices">
+                {!creating &&
+                  pendingCreations
+                    .filter(isLeadCreateRequest)
+                    .map((request) => (
+                      <div className="sync-status" key={request.id}>
+                        <p>
+                          Studio lost confirmation for this chat request in{" "}
+                          {request.cwd || "default project"}
+                          {request.project_folder
+                            ? ` (${request.project_folder})`
+                            : ""}
+                          . Retrying uses the saved request ID to check whether
+                          the chat was created. Dismissing stops checking; a
+                          chat this request created still appears in the chat
+                          list.
+                        </p>
+                        <Button
+                          onClick={() =>
+                            void newChat(
+                              request.cwd,
+                              request.project_folder,
+                              request.id,
+                            )
+                          }
+                        >
+                          Retry chat request
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            try {
+                              dismissChatCreation(creationKey, request.id);
+                              if (creation.current?.id === request.id)
+                                creation.current = null;
+                              setPendingCreations(
+                                pendingChatCreations(creationKey),
+                              );
+                            } catch (error) {
+                              notify(
+                                "Cannot dismiss the saved chat request: " +
+                                  errorText(error),
+                              );
+                            }
+                          }}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    ))}
+                {draftError && !offlineSendFeedback.owns(draftError) && (
+                  <p
+                    className="sync-status"
+                    role="status"
+                    data-draft-sync-status
+                  >
+                    {draftError}
+                  </p>
+                )}
+                {outbox.error && !offlineSendFeedback.owns(outbox.error) && (
+                  <p className="sync-status" role="alert">
+                    {outbox.error}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
           <UIErrorBoundary label="this conversation" resetKey={opened}>
             {opened && projectDeleteScope.has(opened) ? (

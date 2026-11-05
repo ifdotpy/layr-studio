@@ -516,9 +516,12 @@
 .session-cost-summary:empty {
   display: none;
 }
+/* "Context" and "Context 100%" take one width, so the first usage report
+   does not push the session cost. */
 .context-use {
   order: -1;
-  min-width: 0;
+  min-width: 4.75rem;
+  text-align: start;
   min-height: var(--studio-control-size);
   padding: 0;
   border: 0;
@@ -526,6 +529,7 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -717,6 +721,10 @@
   .usage-footer .session-cost-summary {
     min-height: var(--studio-secondary-touch-target);
     min-width: var(--studio-secondary-touch-target);
+  }
+  /* The context label keeps the "Context 100%" width on touch too. */
+  .usage-footer .context-use {
+    min-width: max(4.75rem, var(--studio-secondary-touch-target));
   }
   .usage-footer .session-cost-summary {
     display: flex;

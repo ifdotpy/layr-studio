@@ -19,6 +19,7 @@ export interface EdgeRailProps {
   geometry: EdgeRailGeometry | null;
   sidebar: RailAction & { label?: string };
   messages?: RailAction & { count: number };
+  /** Messages is always offered; a positive count adds the attention badge. */
   /** Existing Menu.Item children retain their handlers and permissions. */
   menu?: ReactNode;
   menuButtonRef?: Ref<HTMLButtonElement>;
@@ -117,8 +118,8 @@ export function EdgeRail({
         <PanelLeft size={20} />,
         sidebar,
       )}
+      {/* Messages stays reachable from the rail; the badge marks attention. */}
       {messages &&
-        messages.count > 0 &&
         button(
           messages.count > 0
             ? `Messages, ${messages.count} need you`
