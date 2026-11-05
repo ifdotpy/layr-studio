@@ -4,7 +4,8 @@ import {
   useServerApi,
   useServerResources,
 } from "../servers/ServerServicesContext";
-import { Button, Group, TextInput } from "@mantine/core";
+import { Button, Group } from "@mantine/core";
+import DirectoryField from "./DirectoryField";
 import { SettingsRow } from "./ui/primitives";
 
 type Configuration = GetResult<"/api/native-layr/settings">;
@@ -44,13 +45,12 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
                   ? "Unavailable"
                   : "Not installed"}
             </SettingsRow>
-            <TextInput
+            <DirectoryField
               id="layr-store-root"
               label="Default store directory"
               description="Leave the directory empty to use Studio's default store."
-              classNames={{ input: "layr-store-input" }}
               value={storeRoot}
-              onChange={(event) => setStoreRoot(event.currentTarget.value)}
+              onChange={setStoreRoot}
             />
             <Group justify="flex-end">
               <Button

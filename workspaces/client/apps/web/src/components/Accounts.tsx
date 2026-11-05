@@ -1,4 +1,5 @@
 import { appendAppLog } from "../appLog";
+import DirectoryField from "./DirectoryField";
 import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
 import ClaudeOrganization from "./ClaudeOrganization";
@@ -1402,12 +1403,12 @@ export default function Accounts({
                   });
                 }}
               >
-                <TextInput
+                <DirectoryField
                   label="Codex home"
-                  description="Enter the path to the existing .codex directory for this account."
+                  description="Enter or choose the existing .codex directory for this account."
                   placeholder="/path/to/.codex"
                   value={home}
-                  onChange={(e) => setHome(e.target.value)}
+                  onChange={setHome}
                   autoComplete="off"
                 />
                 <Button
