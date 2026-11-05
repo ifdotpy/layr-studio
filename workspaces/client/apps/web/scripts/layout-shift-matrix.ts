@@ -500,7 +500,7 @@ async function runProfile(profile: Profile, chromiumPath: string | undefined) {
           id: `c${turn}`,
           type: "commandExecution",
           command: "pnpm test --filter web",
-          cwd: "/tmp",
+          cwd: "/work/project",
           status: "inProgress",
           commandActions: [],
           aggregatedOutput: "",

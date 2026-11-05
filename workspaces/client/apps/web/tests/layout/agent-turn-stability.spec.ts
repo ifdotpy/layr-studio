@@ -125,7 +125,7 @@ for (const device of [
                     id: "c1",
                     type: "commandExecution",
                     command: "pnpm test",
-                    cwd: "/tmp",
+                    cwd: "/work/project",
                     status: "inProgress",
                     commandActions: [],
                     aggregatedOutput: "",
