@@ -6,7 +6,6 @@ use crate::account_registry::{
 };
 use std::{
     collections::BTreeMap,
-    env,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
