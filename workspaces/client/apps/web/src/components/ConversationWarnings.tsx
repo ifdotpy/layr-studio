@@ -82,7 +82,7 @@ export default function ConversationWarnings({
       <ActionIcon
         className={`conversation-warning-trigger${hasWarning ? "" : " conversation-info-trigger"}`}
         variant="subtle"
-        color={highest ? LEVEL_COLORS[highest] : "blue"}
+        color={hasWarning && highest ? LEVEL_COLORS[highest] : "gray"}
         aria-label={title}
         title={`${title} (${count})`}
         onClick={() => {

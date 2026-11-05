@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { providerLabel } from "../../generated/providerKind.ts";
 import { Button, NativeSelect, Text } from "@mantine/core";
 import {
@@ -125,6 +126,9 @@ export function ModelField({
                   .join(", ")}
               </small>
             )}
+            <span className="setup-model-check" aria-hidden="true">
+              {selectedValue === option.value && <Check size={14} />}
+            </span>
           </Button>
         ))}
       </div>

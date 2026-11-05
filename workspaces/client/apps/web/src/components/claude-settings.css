@@ -11,7 +11,7 @@
 }
 
 .claude-settings .mantine-InputWrapper-label {
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   font-weight: 500;
   color: var(--text);
 }
@@ -20,14 +20,14 @@
 .claude-setting-help {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   line-height: 1.4;
 }
 
 .claude-save-status {
   min-height: 16px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 
 .claude-advanced {
@@ -68,7 +68,7 @@
 .claude-task {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 
 .claude-task {
@@ -86,7 +86,7 @@
 .claude-setting-error {
   margin: 0;
   color: light-dark(var(--mantine-color-red-7), var(--mantine-color-red-5));
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   overflow-wrap: anywhere;
 }
 

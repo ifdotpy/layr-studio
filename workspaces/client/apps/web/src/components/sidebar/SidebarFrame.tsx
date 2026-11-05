@@ -1,4 +1,4 @@
-import { Drawer } from "@mantine/core";
+import { Drawer, FocusTrap } from "@mantine/core";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   layoutQueries,
@@ -250,6 +250,8 @@ export function SidebarFrame(p: SidebarFrameProps) {
       title="Conversations"
       classNames={{ header: "sr-only", body: "sidebar-drawer-body" }}
     >
+      {/* Focus enters the drawer without ringing its first link. */}
+      <FocusTrap.InitialFocus />
       {content}
     </Drawer>
   );

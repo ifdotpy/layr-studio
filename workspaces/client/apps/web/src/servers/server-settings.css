@@ -20,8 +20,14 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--mantine-spacing-xs);
   min-width: 0;
-  padding: var(--mantine-spacing-xs) var(--mantine-spacing-md);
-  border-bottom: var(--studio-border-width) solid var(--line);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: var(--studio-border-width) solid var(--line);
+  border-radius: var(--studio-radius-card);
+  background: var(--surface);
+}
+/* An online server reads as healthy green, not as agent work. */
+.server-settings-card[data-studio-state="working"] {
+  --studio-state: var(--studio-state-unread);
 }
 .server-settings-card-header {
   grid-column: 1 / -1;
@@ -56,9 +62,18 @@
   font-size: var(--studio-text-meta);
 }
 .server-settings-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   white-space: nowrap;
   flex: none;
-  color: var(--studio-state);
+}
+.server-settings-status::before {
+  content: "";
+  width: var(--studio-dot-size);
+  height: var(--studio-dot-size);
+  border-radius: 50%;
+  background: var(--studio-state);
 }
 .server-settings-card .server-settings-alias {
   flex: none;
@@ -73,14 +88,18 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* The address takes its own row; counts share the next one. */
 .server-settings-card .server-settings-facts {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr);
   gap: var(--mantine-spacing-xs) var(--mantine-spacing-md);
 }
 .server-settings-facts > .mantine-DataList-item {
   min-width: 0;
+}
+.server-settings-facts > .server-settings-host {
+  grid-column: 1 / -1;
 }
 .server-settings-facts .mantine-DataList-itemValue {
   display: flex;
@@ -97,6 +116,8 @@
 }
 .server-settings-address {
   min-width: 0;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-code);
   overflow: hidden;
   text-overflow: ellipsis;
 }

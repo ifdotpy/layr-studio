@@ -2084,7 +2084,11 @@ export default function App({ active = true }: { active?: boolean }) {
     return schemaMismatch ? (
       schemaMismatchDialog
     ) : (
-      <main className="startup" aria-label="Studio startup">
+      <main
+        className="startup"
+        aria-label="Studio startup"
+        data-connecting={!error || undefined}
+      >
         <p
           role={error ? "alert" : "status"}
           className={error ? "studio-recovery-banner" : undefined}
@@ -2560,6 +2564,7 @@ export default function App({ active = true }: { active?: boolean }) {
               )}
               {!compactHeader && hasTeam && (
                 <Button
+                  variant="subtle"
                   leftSection={<Users size={16} />}
                   id="team-toggle"
                   aria-label="Team"
@@ -2576,6 +2581,7 @@ export default function App({ active = true }: { active?: boolean }) {
               )}
               {!room?.radio && (!compactHeader || attentionCount > 0) && (
                 <Button
+                  variant="subtle"
                   id="messages-toggle"
                   aria-label="Messages"
                   title={

@@ -317,3 +317,15 @@
 .team-message .agent-avatar {
   filter: grayscale(1);
 }
+
+/* An unread room shows the same dot as the reply marker. */
+.team-room-row[data-studio-state="unread"] .team-room-title strong::after {
+  content: "";
+  display: inline-block;
+  width: var(--studio-dot-size);
+  height: var(--studio-dot-size);
+  margin-inline-start: var(--mantine-spacing-xs);
+  border-radius: 50%;
+  background: var(--studio-state-unread);
+  vertical-align: middle;
+}

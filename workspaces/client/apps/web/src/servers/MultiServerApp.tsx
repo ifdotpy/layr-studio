@@ -39,7 +39,12 @@ import {
   Tabs,
   ActionIcon,
 } from "@mantine/core";
-import { ChevronUp, Plus, Terminal as TerminalIcon } from "lucide-react";
+import {
+  ChevronUp,
+  Plus,
+  Settings,
+  Terminal as TerminalIcon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -995,19 +1000,29 @@ function MultiServerShell({
           <aside className="server-sidebar" aria-label="Servers and projects">
             <header>
               <strong>LAYR Studio</strong>
-              <Button
-                variant="subtle"
+              <ActionIcon
                 aria-label="Studio settings"
+                title="Studio settings"
                 onClick={openManager}
               >
-                Settings
-              </Button>
+                <Settings size={18} />
+              </ActionIcon>
             </header>
-            <p role="status">
-              {servers.length
-                ? "Loading chats..."
-                : "Pair a server to open its projects and chats."}
-            </p>
+            {servers.length ? (
+              <>
+                <p role="status" className="sr-only">
+                  Loading chats...
+                </p>
+                {/* Placeholder rows hold the sidebar's shape while chats load. */}
+                <div className="server-sidebar-skeleton" aria-hidden="true">
+                  {[62, 48, 74, 40, 56].map((width) => (
+                    <span key={width} style={{ width: `${width}%` }} />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p role="status">Pair a server to open its projects and chats.</p>
+            )}
             {failure && <p role="alert">{failure}</p>}
           </aside>
         )}

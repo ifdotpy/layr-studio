@@ -8385,10 +8385,11 @@ export interface components {
       contentWidth?: number | undefined;
       /**
        * Fontfamily
-       * @default system
+       * @default geist
        * @enum {string}
        */
       fontFamily?:
+        | "geist"
         | "system"
         | "arial"
         | "inter"

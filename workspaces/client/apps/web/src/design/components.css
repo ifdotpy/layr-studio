@@ -1,0 +1,307 @@
+/* Owner of the Geist treatment of shared Mantine components. Tokens come from
+   studio-theme.css; this file only maps them onto Mantine parts. */
+
+:root[data-mantine-color-scheme] {
+  /* Ink fills take the page color as their foreground in both schemes. */
+  --mantine-primary-color-contrast: var(--studio-page);
+}
+
+body {
+  font-family: var(--studio-font-sans);
+  letter-spacing: var(--studio-tracking-body);
+  font-feature-settings:
+    "rlig" 1,
+    "calt" 1;
+}
+
+:is(h1, h2, h3, h4, h5, h6, .mantine-Title-root, .mantine-Modal-title) {
+  letter-spacing: var(--studio-tracking-title);
+}
+
+:is(code, kbd, pre, samp, .mantine-Code-root, .mantine-Kbd-root) {
+  font-family: var(--studio-font-mono);
+  letter-spacing: 0;
+}
+
+/* Overlays: one opaque surface, a hairline ring, and the stacked shadow. */
+:is(
+  .mantine-Menu-dropdown,
+  .mantine-Popover-dropdown,
+  .mantine-Combobox-dropdown,
+  .mantine-Select-dropdown,
+  .mantine-Autocomplete-dropdown,
+  .mantine-MultiSelect-dropdown,
+  .mantine-HoverCard-dropdown
+) {
+  border: 0;
+  background: var(--overlay);
+  box-shadow: var(--studio-shadow-lg);
+  padding: var(--mantine-spacing-xs);
+}
+
+:is(.mantine-Menu-item, .mantine-Combobox-option) {
+  border-radius: var(--studio-radius-control);
+  font-size: var(--studio-text-body);
+}
+.mantine-Menu-item:where(:hover, [data-hovered]),
+.mantine-Combobox-option:where(:hover, [data-combobox-selected]) {
+  background: var(--hover);
+}
+.mantine-Menu-label {
+  color: var(--muted);
+  font-size: var(--studio-text-meta);
+  font-weight: var(--studio-weight-medium);
+}
+.mantine-Menu-divider {
+  border-color: var(--line);
+  margin-inline: calc(-1 * var(--mantine-spacing-xs));
+}
+
+:is(.mantine-Modal-content, .mantine-Drawer-content) {
+  background: var(--overlay);
+  box-shadow: var(--studio-shadow-lg);
+}
+:is(.mantine-Modal-header, .mantine-Drawer-header) {
+  background: var(--overlay);
+}
+.mantine-Modal-title {
+  font-size: var(--studio-text-title);
+  font-weight: var(--studio-weight-strong);
+}
+:is(.mantine-Modal-overlay, .mantine-Drawer-overlay, .mantine-Overlay-root) {
+  background: var(--studio-backdrop);
+}
+
+/* Tooltips invert the scheme, like Geist: ink on light, paper on dark. */
+.mantine-Tooltip-tooltip {
+  background: var(--text);
+  color: var(--studio-page);
+  font-size: var(--studio-text-meta);
+  font-weight: var(--studio-weight-medium);
+  letter-spacing: 0;
+  padding: 0.25rem 0.5rem;
+}
+.mantine-Tooltip-arrow {
+  background: var(--text);
+}
+
+/* Fields: neutral fill, strong hairline, blue focus ring. Unstyled inputs,
+   such as the composer, belong to their container. */
+.mantine-Input-input:not([data-variant="unstyled"]) {
+  background: var(--inset);
+  border-color: var(--line-strong);
+  color: var(--text);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.mantine-Input-input:not([data-variant="unstyled"]):hover:not(
+    :focus,
+    :focus-within,
+    [data-disabled],
+    :disabled
+  ) {
+  border-color: var(--muted);
+}
+.mantine-Input-input:not([data-variant="unstyled"]):is(:focus, :focus-within) {
+  border-color: var(--text);
+  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--accent) 24%, transparent);
+  outline: none;
+}
+select.mantine-Input-input {
+  text-overflow: ellipsis;
+}
+.mantine-Input-input[data-error] {
+  border-color: var(--studio-state-error);
+}
+:is(.mantine-InputWrapper-label, .mantine-Input-label) {
+  font-size: var(--studio-text-meta);
+  font-weight: var(--studio-weight-medium);
+  color: var(--muted);
+  margin-block-end: 0.375rem;
+}
+:is(.mantine-InputWrapper-description, .mantine-Input-description) {
+  color: var(--muted);
+}
+
+/* Buttons. Default and outline buttons are paper with a hairline. */
+.mantine-Button-root {
+  letter-spacing: var(--studio-tracking-body);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.mantine-Button-root[data-variant="default"],
+.mantine-ActionIcon-root[data-variant="default"] {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
+.mantine-Button-root[data-variant="default"]:hover:not([data-disabled]),
+.mantine-ActionIcon-root[data-variant="default"]:hover:not([data-disabled]) {
+  background: var(--hover);
+}
+:is(.mantine-Button-root, .mantine-ActionIcon-root):is(
+    [data-disabled],
+    :disabled
+  ):not([data-loading]) {
+  background: var(--raised);
+  border-color: transparent;
+  color: var(--muted);
+}
+:is(.mantine-Button-root, .mantine-ActionIcon-root)[data-variant="subtle"]:is(
+    [data-disabled],
+    :disabled
+  ):not([data-loading]) {
+  background: transparent;
+}
+
+/* Badges: small pills, sentence case, never uppercase. */
+.mantine-Badge-root {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: var(--studio-weight-medium);
+}
+.mantine-Badge-root[data-variant="light"][data-color="gray"],
+.mantine-Badge-root[data-variant="light"]:not([data-color]) {
+  background: var(--raised);
+  color: var(--muted);
+}
+
+/* Toggles take the ink fill; their marks take the page color. */
+.mantine-Checkbox-input {
+  border-color: var(--line-strong);
+  background: var(--inset);
+}
+.mantine-Checkbox-input:checked {
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-filled);
+}
+:is(.mantine-Checkbox-icon, .mantine-Radio-icon) {
+  color: var(--mantine-primary-color-contrast);
+}
+/* Switch: a solid gray track off, the ink track on; the thumb is a solid
+   disc in both states, never a ring. */
+.mantine-Switch-track {
+  border-color: transparent;
+  background: var(--line-strong);
+}
+.mantine-Switch-thumb {
+  border: 0;
+  background: var(--studio-switch-thumb);
+  box-shadow: var(--studio-shadow-sm);
+}
+.mantine-Switch-input:checked + .mantine-Switch-track {
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-filled);
+}
+.mantine-Switch-input:checked + .mantine-Switch-track .mantine-Switch-thumb {
+  background: var(--mantine-primary-color-contrast);
+}
+
+.mantine-SegmentedControl-root {
+  background: var(--raised);
+  border-radius: var(--studio-radius-control);
+}
+.mantine-SegmentedControl-indicator {
+  background: var(--surface);
+  box-shadow: var(--studio-shadow-sm);
+}
+.mantine-SegmentedControl-label {
+  font-weight: var(--studio-weight-medium);
+}
+
+/* Tabs: ink underline on the active tab, muted labels elsewhere. */
+.mantine-Tabs-list {
+  --tab-border-color: var(--line);
+}
+.mantine-Tabs-tab {
+  color: var(--muted);
+  font-weight: var(--studio-weight-medium);
+}
+.mantine-Tabs-tab:hover {
+  background: transparent;
+  color: var(--text);
+}
+.mantine-Tabs-tab[data-active] {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.mantine-Accordion-item {
+  border-color: var(--line);
+}
+.mantine-Accordion-control:hover {
+  background: var(--hover);
+}
+
+.mantine-Progress-root {
+  background: var(--raised);
+}
+.mantine-Slider-track::before {
+  background: var(--raised);
+}
+.mantine-Slider-thumb {
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--studio-page);
+}
+
+.mantine-Code-root {
+  background: var(--raised);
+  color: var(--text);
+  font-size: 0.85em;
+}
+.mantine-Kbd-root {
+  background: var(--surface);
+  border: var(--studio-border-width) solid var(--line-strong);
+  border-bottom-width: calc(2 * var(--studio-border-width));
+  color: var(--muted);
+}
+
+.mantine-Alert-root {
+  border: var(--studio-border-width) solid var(--line);
+  border-radius: var(--studio-radius-card);
+}
+
+.mantine-Paper-root:not([data-with-border]) {
+  background: var(--surface);
+}
+.mantine-Paper-root[data-with-border] {
+  border-color: var(--line);
+}
+
+.mantine-Loader-root {
+  --loader-color: var(--muted);
+}
+
+/* Plain disclosures draw a chevron in place of the native triangle.
+   A disclosure or summary with a class owns its marker. */
+details:not([class]) > summary:not([class]) {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  list-style: none;
+  cursor: pointer;
+}
+details:not([class]) > summary:not([class])::-webkit-details-marker {
+  display: none;
+}
+details:not([class]) > summary:not([class])::before {
+  content: "";
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform 120ms ease;
+}
+details[open]:not([class]) > summary:not([class])::before {
+  transform: rotate(90deg);
+}
+
+/* One focus ring for Mantine and native controls: the blue accent. */
+:is(.mantine-focus-auto:focus-visible, .mantine-focus-always:focus) {
+  outline-color: var(--accent);
+}

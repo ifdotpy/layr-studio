@@ -15,7 +15,7 @@
   gap: 4px 12px;
   padding: 8px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--studio-radius-control);
   color: var(--text);
   background: transparent;
   font: inherit;
@@ -26,7 +26,7 @@
 }
 .composer-autocomplete-option[aria-selected="true"],
 .composer-autocomplete-option:hover {
-  background: light-dark(#18244712, #ffffff12);
+  background: var(--hover);
 }
 .composer-autocomplete-option > span {
   min-width: 0;
@@ -62,7 +62,7 @@
   align-items: center;
   gap: 6px;
   color: var(--mantine-color-red-4);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   padding: 6px 0;
 }
 .historical-chat-note {
@@ -71,7 +71,7 @@
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .branch-draft-actions {
   display: flex;
@@ -82,7 +82,7 @@
 .message[data-found="true"] {
   outline: 2px solid var(--mantine-color-violet-5);
   outline-offset: 5px;
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
 }
 /* Sending changes the icon, never the space between the controls. */
 .composer-bar #send-state {
@@ -121,9 +121,9 @@
   gap: 6px;
   max-width: min(220px, 100%);
   border: 1px solid var(--mantine-color-default-border);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   padding: 4px 5px 4px 7px;
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .attachment-chip span {
   overflow: hidden;
@@ -134,7 +134,7 @@
   width: 24px;
   height: 24px;
   object-fit: cover;
-  border-radius: 3px;
+  border-radius: var(--studio-radius-control);
 }
 .attachment-chip svg {
   flex-shrink: 0;
@@ -166,7 +166,7 @@
   max-width: 100%;
   max-height: 220px;
   object-fit: contain;
-  border-radius: 9px;
+  border-radius: var(--studio-radius-card);
 }
 .message-bottom {
   gap: 4px;
@@ -181,7 +181,7 @@
   display: block;
   margin-bottom: 4px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 
 .message-delivery-heading {
@@ -200,8 +200,8 @@
 }
 .message-delivery-error {
   margin-top: 8px;
-  color: var(--danger, #e7a0a6);
-  font-size: 12px;
+  color: var(--studio-state-error);
+  font-size: var(--studio-text-meta);
   overflow-wrap: anywhere;
 }
 .message-delivery-error p {
@@ -224,7 +224,7 @@
 .outbox-controls {
   min-height: 22px;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .outbox-buttons {
   display: flex;
@@ -236,7 +236,7 @@
   color: var(--muted);
 }
 .outbox-controls [role="alert"] {
-  color: var(--warning, #e3b761);
+  color: var(--studio-warning);
 }
 
 /* A panel header without help text aligns its action with the title. */

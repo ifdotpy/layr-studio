@@ -78,7 +78,7 @@
     .xterm,
     .xterm *
   ) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--studio-font-mono);
 }
 
 .studio-appearance-groups {
@@ -108,7 +108,7 @@
   display: grid;
   gap: 10px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 
 .studio-range-field > span {
@@ -131,10 +131,10 @@
 .studio-preferences-error {
   margin: 0;
   padding: 9px 11px;
-  border-radius: 7px;
+  border-radius: var(--studio-radius-control);
   background: var(--mantine-color-red-light);
   color: var(--mantine-color-red-light-color);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 
 #conversation-header-tools:empty {
@@ -191,8 +191,10 @@
 .studio-shortcut-control {
   position: relative;
 }
-.studio-shortcut-input input {
+/* The tokens below draw the value; the field text stays invisible. */
+.studio-shortcut-input input.mantine-Input-input {
   color: transparent;
+  caret-color: transparent;
 }
 .studio-shortcut-tokens {
   display: flex;
@@ -203,11 +205,15 @@
   pointer-events: none;
 }
 .studio-shortcut-tokens kbd {
-  background: var(--mantine-color-default-hover);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 2px 6px;
+  min-width: 1.5rem;
+  padding: 0.125rem 0.375rem;
+  border: var(--studio-border-width) solid var(--line-strong);
+  border-bottom-width: calc(2 * var(--studio-border-width));
+  border-radius: var(--studio-radius-control);
+  background: var(--surface);
+  color: var(--text);
   font-size: var(--studio-text-meta);
+  text-align: center;
 }
 .federation-invitation {
   display: grid;
@@ -228,7 +234,7 @@
   display: flex;
   width: 100%;
   padding: 3px;
-  border-radius: 7px;
+  border-radius: var(--studio-radius-control);
   background: var(--mantine-color-default-hover);
 }
 
@@ -255,7 +261,7 @@
   justify-content: center;
   min-height: 32px;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: var(--studio-radius-control);
   color: var(--muted);
   font-size: var(--studio-text-body);
 }
@@ -263,11 +269,11 @@
 .studio-appearance-segments input:checked + span {
   background: var(--mantine-color-body);
   color: var(--text);
-  box-shadow: 0 1px 3px #0002;
+  box-shadow: var(--studio-shadow-sm);
 }
 
 .studio-appearance-segments input:focus-visible + span {
-  outline: 2px solid var(--mantine-primary-color-filled);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 

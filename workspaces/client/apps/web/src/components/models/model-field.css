@@ -41,8 +41,21 @@
 }
 .setup-models .mantine-Button-label {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--mantine-spacing-xs);
+}
+.setup-models .mantine-Button-label > small {
+  margin-inline-start: auto;
+}
+/* A fixed slot keeps names aligned whether or not a row is selected. */
+.setup-model-check {
+  display: inline-flex;
+  flex: none;
+  width: 0.875rem;
+  margin-inline-start: auto;
+}
+.setup-models .mantine-Button-label > small + .setup-model-check {
+  margin-inline-start: 0;
 }
 .setup-models small {
   color: var(--mantine-color-dimmed);
@@ -50,7 +63,7 @@
   font-weight: 400;
 }
 .setup-models [data-selected] {
-  background: var(--mantine-primary-color-light);
+  background: var(--selected);
 }
 .setup-model-name {
   overflow: hidden;

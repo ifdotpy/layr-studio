@@ -12,7 +12,7 @@
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   cursor: pointer;
 }
 .conversation-results-toggle:hover,
@@ -39,11 +39,11 @@
   min-width: 0;
   padding: 5px 8px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--studio-radius-control);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   text-align: left;
   cursor: pointer;
 }
@@ -70,7 +70,7 @@
 }
 .conversation-results-note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .conversation-result-modal .mantine-Modal-title {
   overflow-wrap: anywhere;

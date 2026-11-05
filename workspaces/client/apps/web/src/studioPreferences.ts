@@ -7,6 +7,7 @@ export const MIN_HIDE_OLD_CHATS_THRESHOLD = 1;
 export const MAX_HIDE_OLD_CHATS_THRESHOLD = 50;
 
 export const fontFamilies = {
+  geist: { label: "Geist", css: "var(--studio-font-sans)" },
   system: {
     label: "System sans-serif",
     css: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -33,7 +34,7 @@ export const defaultStudioPreferences: StudioPreferences = {
   contentLayout: "custom",
   sidebarFontSize: 14,
   mainFontSize: 14,
-  fontFamily: "system",
+  fontFamily: "geist",
   contentWidth: 100,
   sidebarShortcut: `${navigator.platform.toLowerCase().includes("mac") ? "Meta" : "Control"}+b`,
   showMessageAvatars: false,

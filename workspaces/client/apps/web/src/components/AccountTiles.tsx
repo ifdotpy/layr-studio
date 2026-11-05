@@ -71,21 +71,24 @@ export function AccountTilesLayout({
 }) {
   return (
     <div className="account-tiles" role="group" aria-label={label}>
-      <SegmentedControl
-        fullWidth
-        aria-label={`${label} provider`}
-        value={provider}
-        onChange={onProvider}
-        data={providers.map((value) => ({
-          value,
-          label: (
-            <span className="setup-provider">
-              <ProviderMark provider={value} />
-              {providerLabel(value)}
-            </span>
-          ),
-        }))}
-      />
+      {/* A choice of one provider is no choice; the tiles name it. */}
+      {providers.length > 1 && (
+        <SegmentedControl
+          fullWidth
+          aria-label={`${label} provider`}
+          value={provider}
+          onChange={onProvider}
+          data={providers.map((value) => ({
+            value,
+            label: (
+              <span className="setup-provider">
+                <ProviderMark provider={value} />
+                {providerLabel(value)}
+              </span>
+            ),
+          }))}
+        />
+      )}
       {children}
     </div>
   );

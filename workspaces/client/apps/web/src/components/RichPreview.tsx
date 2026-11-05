@@ -65,7 +65,7 @@ export function isolatedDocument(
     "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
   doc.head.prepend(policy);
   const style = doc.createElement("style");
-  style.textContent = `html{color-scheme:${options.dark ? "dark" : "light"};background:${options.dark ? "#18191c" : "#fff"};color:${options.dark ? "#e5e5eb" : "#17202a"};font-family:system-ui,sans-serif}body{margin:16px;overflow-wrap:anywhere}img,svg{max-width:100%}*{box-sizing:border-box}`;
+  style.textContent = `html{color-scheme:${options.dark ? "dark" : "light"};background:${options.dark ? "#000" : "#fff"};color:${options.dark ? "#ededed" : "#171717"};font-family:system-ui,sans-serif}body{margin:16px;overflow-wrap:anywhere}img,svg{max-width:100%}*{box-sizing:border-box}`;
   policy.after(style);
   if (options.css) {
     const customStyle = doc.createElement("style");

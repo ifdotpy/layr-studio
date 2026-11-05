@@ -13,12 +13,14 @@
 .workspace-panel-inline[hidden] {
   display: none;
 }
+/* Same height as the conversation header, so their hairlines line up. */
 .workspace-panel-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--line);
+  min-height: var(--studio-touch-target);
+  padding: 0 0.75rem;
+  border-bottom: var(--studio-border-width) solid var(--line);
 }
 .workspace-panel-header > button:last-child {
   margin-left: auto;
