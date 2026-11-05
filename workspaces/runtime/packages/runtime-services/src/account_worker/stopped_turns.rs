@@ -198,50 +198,99 @@ pub(super) async fn end_account(
             json!({"threadId":turn.thread,"turnId":turn.turn}),
         )
         .await;
-        // An interrupt ends the turn, not the commands it left running.
-        if interrupt != Outcome::NotSent
-            && let Some(method) = turn.terminals
-        {
-            let (cleaned, _) = request(
-                &store,
-                session,
-                scope,
-                &turn,
-                turn.terminals_operation(),
-                method,
-                json!({"threadId":turn.thread}),
-            )
-            .await;
-            if cleaned != Outcome::Accepted {
-                eprintln!(
-                    "stopped agent {} command cleanup on thread {} was not confirmed: {cleaned:?}",
-                    turn.agent, turn.thread
-                );
-            }
-        }
-        if interrupt == Outcome::NotSent {
+        // A turn may start another command until its interrupt is confirmed.
+        if interrupt != Outcome::Accepted {
             continue;
         }
-        let recorded = turn.clone();
-        let outcome = interrupt.as_str();
-        let recorded_account = account.to_owned();
-        if crate::scheduler::lifecycle_transaction_with(&store, move |tx| {
-            record(
-                tx,
-                &recorded,
-                &recorded_account,
-                generation,
-                outcome,
-                &response,
-            )
-        })
-        .await
-        .is_ok_and(|changed| changed)
-        {
+        if finish_turn(&store, session, scope, turn, response).await {
             ended += 1;
         }
     }
     ended
+}
+
+/// Complete cleanup when a previously unknown interrupt receives its reply.
+pub(super) async fn finish_late_interrupt(
+    store: Arc<RuntimeStore>,
+    scope: ConnectionScope,
+    session: RetainedSessionPort,
+    agent: String,
+    operation: String,
+    response: Value,
+) {
+    let generation = scope.generation;
+    let Ok(turn) = store
+        .read_async("runtime-services/stopped_turns", move |tx| {
+            let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent.as_str()))? else {
+                return Ok(None);
+            };
+            Ok::<_, studio_runtime_store::StoreError>(
+                stopped_turn_with_late(&agent, generation, true)
+                    .or_else(|| unsettled_stop(&agent, generation)),
+            )
+        })
+        .await
+    else {
+        return;
+    };
+    if let Some(turn) = turn {
+        let interrupt_response = if turn.interrupt_operation() == operation {
+            response
+        } else if turn.terminals_operation() == operation {
+            let (outcome, response) = request(
+                &store,
+                &session,
+                &scope,
+                &turn,
+                turn.interrupt_operation(),
+                Method::TurnInterrupt,
+                json!({"threadId":turn.thread,"turnId":turn.turn}),
+            )
+            .await;
+            if outcome != Outcome::Accepted {
+                return;
+            }
+            response
+        } else {
+            return;
+        };
+        finish_turn(&store, &session, &scope, turn, interrupt_response).await;
+    }
+}
+
+async fn finish_turn(
+    store: &Arc<RuntimeStore>,
+    session: &RetainedSessionPort,
+    scope: &ConnectionScope,
+    turn: StoppedTurn,
+    response: Value,
+) -> bool {
+    // An interrupt ends the turn, not the commands it left running.
+    let cleanup = if let Some(method) = turn.terminals {
+        request(
+            store,
+            session,
+            scope,
+            &turn,
+            turn.terminals_operation(),
+            method,
+            json!({"threadId":turn.thread}),
+        )
+        .await
+        .0
+    } else {
+        Outcome::Accepted
+    };
+    if cleanup != Outcome::Accepted {
+        return false;
+    }
+    let account = scope.account.clone();
+    let generation = scope.generation;
+    crate::scheduler::lifecycle_transaction_with(store, move |tx| {
+        record(tx, &turn, &account, generation, "accepted", &response)
+    })
+    .await
+    .is_ok_and(|changed| changed)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,16 +299,6 @@ enum Outcome {
     Rejected,
     NotSent,
     Unknown,
-}
-impl Outcome {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::NotSent => "unsent",
-            Self::Unknown => "unknown",
-        }
-    }
 }
 
 /// Send one request as the prior-epoch actor that the retained worker
@@ -289,11 +328,43 @@ async fn request(
         deleted_actor_session: None,
         method,
         params,
-        deadline: std::time::Instant::now() + REQUEST_TIMEOUT,
+        deadline: (tokio::time::Instant::now() + REQUEST_TIMEOUT).into_std(),
     };
-    let actor = turn.clone();
-    let mut intent = super::retained::ProviderCallIntent::from(&request);
-    let reserved = store
+    let reserved = reserve_request(store, turn.clone(), &request).await;
+    let Ok((root_request_id, admitted_request)) = reserved else {
+        return (Outcome::Unknown, Value::Null);
+    };
+    request.root_request_id = root_request_id;
+    request.admitted_request = Some(admitted_request);
+    let receipt = session.request(request).await;
+    match receipt {
+        Ok(receipt) => match receipt.result {
+            RequestResult::Reply(reply) => (Outcome::Accepted, reply),
+            RequestResult::Rejected(error) => {
+                (Outcome::Rejected, error["data"]["interruptReceipt"].clone())
+            }
+            RequestResult::NotSent => (Outcome::NotSent, Value::Null),
+            RequestResult::Unknown => (Outcome::Unknown, Value::Null),
+        },
+        Err(super::retained::PortError::NotSent(_)) => (Outcome::NotSent, Value::Null),
+        Err(_) => (Outcome::Unknown, Value::Null),
+    }
+}
+
+async fn reserve_request(
+    store: &RuntimeStore,
+    turn: StoppedTurn,
+    request: &SessionRequest,
+) -> Result<
+    (
+        String,
+        studio_runtime_store::request_results::AdmittedRequest,
+    ),
+    super::WorkerError,
+> {
+    let actor = turn;
+    let mut intent = super::retained::ProviderCallIntent::from(request);
+    store
         .transaction_with(move |tx| {
             let (mut agent, raw) = studio_runtime_store::Table::<AgentRecord>::new(tx)
                 .get_with_raw(&AgentId::from(actor.agent.as_str()))?
@@ -415,30 +486,57 @@ async fn request(
             AgentRepository::put(tx, &agent)?;
             Ok((root, admitted))
         })
-        .await;
-    let Ok((root_request_id, admitted_request)) = reserved else {
-        return (Outcome::Unknown, Value::Null);
-    };
-    request.root_request_id = root_request_id;
-    request.admitted_request = Some(admitted_request);
-    let receipt = session.request(request).await;
-    match receipt {
-        Ok(receipt) => match receipt.result {
-            RequestResult::Reply(reply) => (Outcome::Accepted, reply),
-            RequestResult::Rejected(error) => {
-                (Outcome::Rejected, error["data"]["interruptReceipt"].clone())
-            }
-            RequestResult::NotSent => (Outcome::NotSent, Value::Null),
-            RequestResult::Unknown => (Outcome::Unknown, Value::Null),
+        .await
+}
+
+/// Admit the initial stop through the same identity owner used on reattach.
+pub(crate) async fn reserve_initial_stop(
+    store: &RuntimeStore,
+    stop: &crate::lifecycle_effects::InterruptRequest,
+    operation: &str,
+    method: Method,
+    params: Value,
+) -> Result<studio_runtime_store::request_results::AdmittedRequest, super::WorkerError> {
+    let turn = StoppedTurn {
+        agent: stop.agent.clone(),
+        epoch: stop.epoch,
+        thread: stop.thread.clone(),
+        turn: stop.turn.clone(),
+        terminals: None,
+        owner: Owner::Stop {
+            ticket: stop.ticket.clone(),
+            terminals: crate::lifecycle_effects::stop_terminals_operation(&stop.ticket)
+                .unwrap_or_default(),
         },
-        Err(super::retained::PortError::NotSent(_)) => (Outcome::NotSent, Value::Null),
-        Err(_) => (Outcome::Unknown, Value::Null),
-    }
+    };
+    let request = SessionRequest {
+        root_request_id: stop.root_request_id.clone(),
+        admitted_request: None,
+        scope: stop.scope.clone(),
+        expected_scope: Some(stop.scope.clone()),
+        operation: operation.to_owned(),
+        actor: Some(RequestActor {
+            agent: stop.agent.clone(),
+            epoch: stop.epoch,
+        }),
+        transfer: None,
+        deleted_actor_session: None,
+        method,
+        params,
+        deadline: (tokio::time::Instant::now() + REQUEST_TIMEOUT).into_std(),
+    };
+    reserve_request(store, turn, &request)
+        .await
+        .map(|(_, admission)| admission)
 }
 
 /// The disconnect receipt of a turn that a stop ended without a provider
 /// request, on this provider generation, and not yet ended by a worker.
 fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
+    stopped_turn_with_late(agent, generation, false)
+}
+
+fn stopped_turn_with_late(agent: &AgentRecord, generation: u64, late: bool) -> Option<StoppedTurn> {
     let receipt = agent.disconnect_recovery.as_deref()?;
     let turn = receipt.turn_id.as_deref().filter(|turn| !turn.is_empty())?;
     let thread = receipt
@@ -455,14 +553,14 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
                 && interrupt.outcome != Some(studio_runtime_store::InterruptOutcome::Unsent)
         })
     };
-    let ended = matches!(
-        receipt
-            .extra
-            .get("stopInterrupt")
-            .and_then(|v| v.get("outcome"))
-            .and_then(Value::as_str),
-        Some("accepted" | "rejected" | "unknown")
-    ) || receipt.start_attempt.as_deref().is_some_and(staged)
+    let outcome = receipt
+        .extra
+        .get("stopInterrupt")
+        .and_then(|v| v.get("outcome"))
+        .and_then(Value::as_str);
+    let ended = matches!(outcome, Some("accepted" | "rejected"))
+        || (outcome == Some("unknown") && !late)
+        || receipt.start_attempt.as_deref().is_some_and(staged)
         || agent.start_attempt.as_deref().is_some_and(staged);
     let stopped = agent.auto_wake == Some(false)
         && agent.in_flight != Some(true)
@@ -496,6 +594,26 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         terminals,
         owner: Owner::Disconnect { signature },
     })
+}
+
+/// Whether a deleted chat still owns a disconnected turn awaiting a stop.
+pub(crate) fn disconnected_stop_unconfirmed(agent: &AgentRecord) -> bool {
+    let Some(receipt) = agent.disconnect_recovery.as_deref() else {
+        return false;
+    };
+    let outcome = receipt
+        .extra
+        .get("stopInterrupt")
+        .and_then(|v| v.get("outcome"))
+        .and_then(Value::as_str);
+    if matches!(outcome, Some("unknown" | "rejected")) {
+        return true;
+    }
+    receipt
+        .start_attempt
+        .as_deref()
+        .and_then(|attempt| attempt.connection_generation)
+        .is_some_and(|generation| stopped_turn(agent, generation).is_some())
 }
 
 /// The stop's own interrupt of a turn on this provider generation that no
@@ -534,7 +652,6 @@ fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         // A delete tombstone clears the turn id; the epoch still names the stop.
         || agent.turn_id.as_deref().is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
-        || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {
         return None;
     }
@@ -680,7 +797,7 @@ fn owner_matches(agent: &AgentRecord, turn: &StoppedTurn, generation: u64) -> bo
 pub(in crate::account_worker) fn settle_stopped_turn(
     tx: &studio_runtime_store::Transaction<'_>,
     call: &super::retained::ProviderCallIntent,
-    result: &RequestResult,
+    _result: &RequestResult,
 ) -> studio_runtime_store::StoreResult<bool> {
     if call.method != Method::TurnInterrupt {
         return Ok(true);
@@ -691,12 +808,9 @@ pub(in crate::account_worker) fn settle_stopped_turn(
     let Some(agent) = AgentRepository::get(tx, &AgentId::from(actor.agent.as_str()))? else {
         return Ok(true);
     };
-    let (Some(thread), Some(turn)) = (
-        call.params["threadId"].as_str(),
-        call.params["turnId"].as_str(),
-    ) else {
+    if call.params["threadId"].as_str().is_none() || call.params["turnId"].as_str().is_none() {
         return Ok(false);
-    };
+    }
     let owner = if let Some(signature) = call.operation.strip_prefix(INTERRUPT_OPERATION_PREFIX) {
         Owner::Disconnect {
             signature: signature.to_owned(),
@@ -716,28 +830,11 @@ pub(in crate::account_worker) fn settle_stopped_turn(
     } else {
         return Ok(true);
     };
-    let turn = StoppedTurn {
-        agent: actor.agent.clone(),
-        epoch: actor.epoch,
-        thread: thread.to_owned(),
-        turn: turn.to_owned(),
-        terminals: None,
-        owner,
-    };
-    let (outcome, response) = match result {
-        RequestResult::Reply(reply) => (Outcome::Accepted, reply),
-        RequestResult::Rejected(error) => (Outcome::Rejected, &error["data"]["interruptReceipt"]),
-        RequestResult::Unknown => return Ok(false),
-        RequestResult::NotSent => return Ok(true),
-    };
-    record(
-        tx,
-        &turn,
-        &call.scope.account,
-        call.scope.generation,
-        outcome.as_str(),
-        response,
-    )
+    // Neither owner can settle from the interrupt alone: the dispatcher or
+    // reattach path records completion after the required cleanup is accepted.
+    match owner {
+        Owner::Disconnect { .. } | Owner::Stop { .. } => Ok(true),
+    }
 }
 
 #[cfg(test)]
@@ -764,7 +861,7 @@ mod stop_epoch_tests {
         assert!(unsettled_stop(&agent, 3).unwrap().terminals.is_some());
         agent.last_completed_turn =
             studio_runtime_schema::queue_command::Field::Value("turn".into());
-        assert!(unsettled_stop(&agent, 3).is_none());
+        assert!(unsettled_stop(&agent, 3).is_some());
     }
 
     #[test]

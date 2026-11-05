@@ -44,7 +44,7 @@ pub(crate) mod restart_recovery;
 pub mod retained;
 pub mod retained_frame;
 mod steer;
-mod stopped_turns;
+pub(crate) mod stopped_turns;
 pub(crate) mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub use store::attach_provider_stream_for_test;

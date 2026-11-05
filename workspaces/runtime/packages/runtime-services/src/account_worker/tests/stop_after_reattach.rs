@@ -44,6 +44,52 @@ impl RetainedAccountSession for RefusingSession {
     }
 }
 
+struct LostInterruptReply(WorkerSession);
+
+struct TimedOutInterrupt {
+    worker: WorkerSession,
+    timeout: Arc<tokio::sync::Notify>,
+    method: studio_runtime_providers::Method,
+}
+
+impl RetainedAccountSession for TimedOutInterrupt {
+    fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
+        self.worker.current_scope(account)
+    }
+    fn request(&self, request: ProviderRequest) -> SessionFuture {
+        let interrupt = request.method == self.method;
+        let receipt = self.worker.request(request);
+        let timeout = Arc::clone(&self.timeout);
+        Box::pin(async move {
+            if !interrupt {
+                return receipt.await;
+            }
+            let pending = tokio::spawn(receipt);
+            timeout.notified().await;
+            pending.abort();
+            Err(AccountSessionError::Unknown)
+        })
+    }
+}
+
+impl RetainedAccountSession for LostInterruptReply {
+    fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
+        self.0.current_scope(account)
+    }
+    fn request(&self, request: ProviderRequest) -> SessionFuture {
+        let lost = request.method == studio_runtime_providers::Method::TurnInterrupt;
+        let receipt = self.0.request(request);
+        Box::pin(async move {
+            let result = receipt.await?;
+            if lost {
+                Err(AccountSessionError::Unknown)
+            } else {
+                Ok(result)
+            }
+        })
+    }
+}
+
 impl RetainedAccountSession for WorkerSession {
     fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
         (self.port.scope().account == account).then(|| self.port.scope().clone())
@@ -217,7 +263,10 @@ async fn ending_after_worker_reattach_ends_the_turn_work(ending: Ending) {
             sender: None,
             sender_epoch: None,
         },
-        Ending::Delete => Action::Delete { target },
+        Ending::Delete => Action::Delete {
+            target,
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+        },
     };
     let mut stop = tokio::spawn(async move { ports.execute(&action, 20.0).await });
 
@@ -248,7 +297,10 @@ async fn ending_after_worker_reattach_ends_the_turn_work(ending: Ending) {
         duplicate: false,
     });
     peer.reply(&clean.value, json!({})).await;
-    stop.await.unwrap().expect("the action commits");
+    let result = stop.await.unwrap().expect("the action commits");
+    if ending == Ending::Delete {
+        assert_eq!(result["stopped"], "unconfirmed");
+    }
 
     let record = state.record().await;
     // A stop only interrupts the turn; a delete also pauses the chat.
@@ -279,7 +331,6 @@ async fn stop_after_worker_reattach_interrupts_the_turn_and_ends_its_commands() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "known defect: deletion reports success when termination is unconfirmed; see deletion stop-outcome task"]
 async fn delete_after_worker_reattach_interrupts_the_turn_and_ends_its_commands() {
     ending_after_worker_reattach_ends_the_turn_work(Ending::Delete).await;
 }
@@ -312,7 +363,17 @@ async fn deletion_with_refused_stop_work(method: studio_runtime_providers::Metho
         None,
     ));
     let target = state.agent.clone();
-    let delete = tokio::spawn(async move { ports.execute(&Action::Delete { target }, 20.0).await });
+    let mut delete = tokio::spawn(async move {
+        ports
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                },
+                20.0,
+            )
+            .await
+    });
     if method != studio_runtime_providers::Method::TurnInterrupt {
         let interrupt = peer.next_write().await;
         assert_eq!(interrupt.value["method"], "turn/interrupt");
@@ -322,12 +383,15 @@ async fn deletion_with_refused_stop_work(method: studio_runtime_providers::Metho
         });
         peer.reply(&interrupt.value, json!({})).await;
     }
-    // The provider never receives a command-cleanup request, so the fixture's
-    // in-progress command remains running even though deletion reports success.
-    delete
-        .await
-        .unwrap()
-        .expect("deletion currently reports success");
+    let result = if method == studio_runtime_providers::Method::TurnInterrupt {
+        tokio::select! {
+            wire = peer.next_write() => panic!("cleanup before interrupt confirmation: {}", wire.value),
+            result = &mut delete => result.unwrap().expect("deletion commits"),
+        }
+    } else {
+        delete.await.unwrap().expect("deletion commits")
+    };
+    assert_eq!(result["stopped"], "unconfirmed");
     assert!(
         peer.writes.try_recv().is_err(),
         "no command cleanup was sent"
@@ -335,11 +399,69 @@ async fn deletion_with_refused_stop_work(method: studio_runtime_providers::Metho
     assert!(studio_runtime_store::truthy(
         state.record().await.get("deletedAt")
     ));
+    if method == studio_runtime_providers::Method::TurnInterrupt {
+        // The provider can start another command until the interrupt is accepted.
+        let cursor = peer.frame(json!({"method":"item/started","params":{"threadId":"fake-thread-0","turnId":"turn",
+            "item":{"id":"after-refusal","type":"commandExecution","command":"fixture","status":"inProgress","processId":"43"}}})).await;
+        peer.acknowledged(cursor).await;
+    }
+    worker.shutdown().await.unwrap();
+
+    // Reattachment reuses the saved operation IDs: the accepted operation is
+    // replayed, while the request refused before admission is sent once.
+    state
+        .bridge
+        .faults
+        .startup_recovery_done
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let retry = tokio::select! {
+        wire = peer.next_write() => wire,
+        () = worker_barrier(&worker) => panic!("stop recovery did not send the refused operation"),
+    };
+    let expected = if method == studio_runtime_providers::Method::TurnInterrupt {
+        "turn/interrupt"
+    } else {
+        "thread/backgroundTerminals/clean"
+    };
+    assert_eq!(retry.value["method"], expected);
+    let _ignored = retry.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&retry.value, json!({})).await;
+    if method == studio_runtime_providers::Method::TurnInterrupt {
+        let cleanup = peer.next_write().await;
+        assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+        let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+            remote_id: None,
+            duplicate: false,
+        });
+        peer.reply(&cleanup.value, json!({})).await;
+    }
+    worker_barrier(&worker).await;
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/delete-outcome", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Unconfirmed
+    );
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the accepted operation was not resent"
+    );
     worker.shutdown().await.unwrap();
 }
 
 #[tokio::test]
-#[ignore = "known defect: deletion reports success when termination is unconfirmed; see deletion stop-outcome task"]
 async fn deletion_reports_success_when_terminal_cleanup_is_not_sent() {
     deletion_with_refused_stop_work(
         studio_runtime_providers::Method::ThreadBackgroundTerminalsClean,
@@ -348,9 +470,956 @@ async fn deletion_reports_success_when_terminal_cleanup_is_not_sent() {
 }
 
 #[tokio::test]
-#[ignore = "known defect: deletion reports success when termination is unconfirmed; see deletion stop-outcome task"]
 async fn deletion_reports_success_when_interrupt_is_not_sent() {
     deletion_with_refused_stop_work(studio_runtime_providers::Method::TurnInterrupt).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn late_interrupt_confirmation_cleans_without_reattach() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let timeout = Arc::new(tokio::sync::Notify::new());
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session_over(
+            &state,
+            Some(Arc::new(TimedOutInterrupt {
+                worker: WorkerSession {
+                    port: worker.retained_session(),
+                },
+                timeout: Arc::clone(&timeout),
+                method: studio_runtime_providers::Method::TurnInterrupt,
+            })),
+        ),
+        None,
+    ));
+    let target = state.agent.clone();
+    let deletion = tokio::spawn(async move {
+        ports
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                },
+                20.0,
+            )
+            .await
+    });
+    let interrupt = peer.next_write().await;
+    assert_eq!(interrupt.value["method"], "turn/interrupt");
+    let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    timeout.notify_one();
+    assert_eq!(deletion.await.unwrap().unwrap()["stopped"], "unconfirmed");
+    peer.reply(&interrupt.value, json!({})).await;
+    let cleanup = peer.next_write().await;
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    state
+        .wait_record(|record| record["startAttempt"]["interrupt"]["outcome"] == "accepted")
+        .await;
+    assert!(peer.writes.try_recv().is_err());
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/delete-outcome", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn late_cleanup_confirmation_settles_without_reattach() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer.frame(json!({"method":"item/started","params":{"threadId":"fake-thread-0","turnId":"turn",
+        "item":{"id":"late-command","type":"commandExecution","command":"fixture","status":"inProgress","processId":"42"}}})).await;
+    peer.acknowledged(cursor).await;
+    let timeout = Arc::new(tokio::sync::Notify::new());
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session_over(
+            &state,
+            Some(Arc::new(TimedOutInterrupt {
+                worker: WorkerSession {
+                    port: worker.retained_session(),
+                },
+                timeout: Arc::clone(&timeout),
+                method: studio_runtime_providers::Method::ThreadBackgroundTerminalsClean,
+            })),
+        ),
+        None,
+    ));
+    let target = state.agent.clone();
+    let deletion = tokio::spawn(async move {
+        ports
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                },
+                20.0,
+            )
+            .await
+    });
+    let interrupt = peer.next_write().await;
+    assert_eq!(interrupt.value["method"], "turn/interrupt");
+    let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&interrupt.value, json!({})).await;
+    let cleanup = peer.next_write().await;
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    timeout.notify_one();
+    assert_eq!(deletion.await.unwrap().unwrap()["stopped"], "unconfirmed");
+    peer.reply(&cleanup.value, json!({})).await;
+    state
+        .wait_record(|record| record["startAttempt"]["interrupt"]["outcome"] == "accepted")
+        .await;
+    assert!(peer.writes.try_recv().is_err());
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/delete-outcome", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Unconfirmed
+    );
+    let cursor = peer.frame(json!({"method":"item/completed","params":{"threadId":"fake-thread-0","turnId":"turn",
+        "item":{"id":"late-command","type":"commandExecution","command":"fixture","status":"completed","processId":"42","aggregatedOutput":"","exitCode":0}}})).await;
+    peer.acknowledged(cursor).await;
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/delete-outcome", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn disconnected_late_interrupt_confirmation_cleans_without_another_reattach() {
+    let state = State::new().await;
+    let mut first = Peer::new();
+    let mut first_worker = first.worker(state.bridge.clone()).await;
+    let start = state.start(&mut first, &first_worker).await;
+    first.accepted(&start).await;
+    first_worker.shutdown().await.unwrap();
+    state
+        .bridge
+        .run(|store| async move {
+            scheduler::lifecycle_transaction_with(&store, |tx| {
+                store::disconnect_provider_generation(tx, "default", 1, false)?;
+                Ok::<_, WorkerError>(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        detached_account_session(&state),
+        None,
+    ));
+    let result = ports
+        .execute(
+            &Action::Delete {
+                target: state.agent.clone(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+            },
+            20.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stopped"], "unconfirmed");
+    state
+        .bridge
+        .faults
+        .startup_recovery_done
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let interrupt = peer.next_write().await;
+    assert_eq!(interrupt.value["method"], "turn/interrupt");
+    let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(11)).await;
+    tokio::time::resume();
+    worker_barrier(&worker).await;
+    peer.reply(&interrupt.value, json!({})).await;
+    let cleanup = peer.next_write().await;
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    state
+        .wait_record(|record| {
+            record["disconnectRecovery"]["stopInterrupt"]["outcome"] == "accepted"
+        })
+        .await;
+    assert!(peer.writes.try_recv().is_err());
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/delete-outcome", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deletion_lost_interrupt_reply_stays_unconfirmed_without_resending() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let session = LostInterruptReply(WorkerSession {
+        port: worker.retained_session(),
+    });
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session_over(&state, Some(Arc::new(session))),
+        None,
+    ));
+    let target = state.agent.clone();
+    let delete = tokio::spawn(async move {
+        ports
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                },
+                20.0,
+            )
+            .await
+    });
+    let wire = peer.next_write().await;
+    assert_eq!(wire.value["method"], "turn/interrupt");
+    let _ignored = wire.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&wire.value, json!({})).await;
+    assert_eq!(delete.await.unwrap().unwrap()["stopped"], "unconfirmed");
+    assert_eq!(
+        state.record().await["startAttempt"]["interrupt"]["outcome"],
+        "unknown"
+    );
+    worker.shutdown().await.unwrap();
+    state
+        .bridge
+        .faults
+        .startup_recovery_done
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let cleanup = peer.next_write().await;
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    worker_barrier(&worker).await;
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the written interrupt is not resent"
+    );
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/delete-outcome", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_settled_turn_cleans_its_running_background_command() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer
+        .frame(
+            json!({"method":"item/started","params":{"threadId":"fake-thread-0",
+        "turnId":"turn","item":{"id":"exec-1","type":"commandExecution",
+        "command":"fixture command","status":"inProgress","processId":"42"}}}),
+        )
+        .await;
+    peer.acknowledged(cursor).await;
+    let cursor = peer
+        .frame(
+            json!({"method":"turn/completed","params":{"threadId":"fake-thread-0",
+        "turn":{"id":"turn","status":"completed"}}}),
+        )
+        .await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(state.record().await["lastCompletedTurn"], "turn");
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session(&state, worker.retained_session()),
+        None,
+    ));
+    let target = state.agent.clone();
+    let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+    let deleting_ports = ports.clone();
+    let deleting_request = request_id.clone();
+    let mut delete = tokio::spawn(async move {
+        deleting_ports
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: deleting_request,
+                },
+                20.0,
+            )
+            .await
+    });
+    let cleanup = tokio::select! {
+        wire = peer.next_write() => wire,
+        result = &mut delete => panic!("delete returned without ending the background command: {result:?}"),
+    };
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    assert_eq!(delete.await.unwrap().unwrap()["stopped"], "unconfirmed");
+    let epoch = state.record().await["epoch"].clone();
+    let replay = ports
+        .execute(
+            &Action::Delete {
+                target: state.agent.clone(),
+                request_id,
+            },
+            20.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay["stopped"], "unconfirmed");
+    assert_eq!(
+        state.record().await["epoch"],
+        epoch,
+        "same-request replay must not mutate the deletion"
+    );
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the same deletion did not resend cleanup"
+    );
+    let task_id = format!("{}:exec-1", state.agent);
+    let task_record = || {
+        let store = state.bridge.store.clone();
+        let id = task_id.clone();
+        async move {
+            store
+                .read_async("test/deleted-command-record", move |conn| {
+                    let record = conn.query_row(
+                        "SELECT record FROM runtime_tasks WHERE id=?1",
+                        [id],
+                        |row| row.get::<_, String>(0),
+                    )?;
+                    let count =
+                        conn.query_row("SELECT count(*) FROM runtime_tasks", [], |row| {
+                            row.get::<_, i64>(0)
+                        })?;
+                    Ok::<_, studio_runtime_store::StoreError>((record, count))
+                })
+                .await
+                .unwrap()
+        }
+    };
+    let before = task_record().await;
+    let unrelated = json!({"method":"item/completed","params":{"threadId":"fake-thread-0", "turnId":"turn",
+        "item":{"id":"unrelated","type":"commandExecution","command":"other","status":"completed","processId":"99","aggregatedOutput":"","exitCode":0}}});
+    let cursor = peer.frame(unrelated).await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(
+        task_record().await,
+        before,
+        "unrelated events do not change the deleted command"
+    );
+    let completion = json!({"method":"item/completed","params":{"threadId":"fake-thread-0", "turnId":"turn",
+        "item":{"id":"exec-1","type":"commandExecution","command":"fixture command","status":"completed","processId":"42","aggregatedOutput":"","exitCode":0}}});
+    let cursor = peer.frame(completion.clone()).await;
+    peer.acknowledged(cursor).await;
+    let completed = task_record().await;
+    assert_ne!(
+        completed, before,
+        "the matching completion closes the command"
+    );
+    let cursor = peer.frame(completion).await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(
+        task_record().await,
+        completed,
+        "duplicate completion is idempotent"
+    );
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/deleted-command-ended", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deletion_of_unreachable_remote_worker_is_unconfirmed() {
+    struct Unreachable;
+    impl crate::multi_server_orchestration::PairedTransport for Unreachable {
+        fn exchange<'a>(
+            &'a self,
+            _server: &'a str,
+            _envelope: &'a crate::orchestration_wire::OrchestrationRequest,
+            _timeout: std::time::Duration,
+        ) -> futures_util::future::BoxFuture<
+            'a,
+            Result<
+                studio_runtime_store::multi_server_delivery::RemoteReply,
+                crate::multi_server_auth::AccessError,
+            >,
+        > {
+            Box::pin(async {
+                Err(crate::multi_server_auth::refused(
+                    503,
+                    "unreachable",
+                    "fixture",
+                ))
+            })
+        }
+    }
+    let state = State::new().await;
+    state
+        .bridge
+        .store
+        .set_local_server_id(Some("local-server".into()))
+        .unwrap();
+    let id = state.agent.clone();
+    state.bridge.store.transaction(move |tx| {
+        tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES('peer-server',?1)", [r#"{"id":"peer-server","clientId":"peer-server","kind":"server","label":"Peer","created":1,"publicKey":"fixture-key","status":"paired"}"#])?;
+        let mut agent = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
+        agent.auto_wake = Some(true);
+        agent.extra.insert("remoteWorker".into(), json!({"server":"peer-server","link":"fixture-link"}));
+        AgentRepository::put(tx, &agent)?;
+        let old = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let signature = "legacy-signature";
+        let body = json!({"requestId":old,"operation":[],"action":"task","payload":{"actor":"lead"}}).to_string();
+        crate::server_outbox::insert(tx, "peer-server", &old, signature,
+            studio_runtime_schema::persistence::ServerDeliveryState::Running, 0.0,
+            &crate::server_outbox::ServerRequestRecord { body, admission: studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(old.clone(), signature.into(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
+        Ok(())
+    }).await.unwrap();
+    let ports = Arc::new(
+        ProductionLifecyclePorts::new(
+            Arc::clone(&state.bridge.store),
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(tokio::sync::Notify::new()),
+            account_session_over(&state, None),
+            None,
+        )
+        .with_remote_transport(Arc::new(Unreachable)),
+    );
+    let result = ports
+        .execute(
+            &Action::Delete {
+                target: state.agent.clone(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+            },
+            crate::event_write::unix_time().unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stopped"], "unconfirmed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_delete_waits_for_the_remote_provider_stop() {
+    use crate::multi_server_orchestration::{
+        OrchestrationDriver, PairedTransport, RuntimeOrchestrationEffects,
+    };
+    struct Loopback(Arc<OrchestrationDriver>);
+    impl PairedTransport for Loopback {
+        fn exchange<'a>(
+            &'a self,
+            _: &'a str,
+            request: &'a crate::orchestration_wire::OrchestrationRequest,
+            _: std::time::Duration,
+        ) -> futures_util::future::BoxFuture<
+            'a,
+            Result<
+                studio_runtime_store::multi_server_delivery::RemoteReply,
+                crate::multi_server_auth::AccessError,
+            >,
+        > {
+            Box::pin(async move {
+                Ok(self
+                    .0
+                    .receive("home-server", request, chrono::Utc::now().timestamp())
+                    .await?
+                    .to_reply(&request.request_id))
+            })
+        }
+    }
+    struct NoTransport;
+    impl PairedTransport for NoTransport {
+        fn exchange<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a crate::orchestration_wire::OrchestrationRequest,
+            _: std::time::Duration,
+        ) -> futures_util::future::BoxFuture<
+            'a,
+            Result<
+                studio_runtime_store::multi_server_delivery::RemoteReply,
+                crate::multi_server_auth::AccessError,
+            >,
+        > {
+            Box::pin(async { Err(crate::multi_server_auth::refused(503, "unused", "fixture")) })
+        }
+    }
+    let remote = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(remote.bridge.clone()).await;
+    let start = remote.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    remote
+        .bridge
+        .store
+        .set_local_server_id(Some("peer-server".into()))
+        .unwrap();
+    let remote_id = remote.agent.clone();
+    remote.bridge.store.transaction(move |tx| {
+        tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES('home-server',?1)", [r#"{"id":"home-server","clientId":"home-server","kind":"server","label":"Home","created":1,"publicKey":"fixture","status":"paired"}"#])?;
+        tx.execute("INSERT INTO runtime_server_links(id,record) VALUES('remote-link',?1)", [json!({"side":"remote","home":"home-server","workers":[remote_id]}).to_string()])?;
+        let mut agent = AgentRepository::get(tx, &AgentId::from(remote_id.as_str()))?.unwrap();
+        agent.extra.insert("remoteWorker".into(), json!({"server":"home-server","link":"remote-link"}));
+        agent.extra.insert("movedTo".into(), json!("peer-server"));
+        AgentRepository::put(tx, &agent)?;
+        Ok(())
+    }).await.unwrap();
+    let remote_ports: Arc<dyn crate::agent_lifecycle_runtime::LifecyclePorts> =
+        Arc::new(ProductionLifecyclePorts::new(
+            Arc::clone(&remote.bridge.store),
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(tokio::sync::Notify::new()),
+            account_session_over(
+                &remote,
+                Some(Arc::new(RefusingSession {
+                    worker: WorkerSession {
+                        port: worker.retained_session(),
+                    },
+                    method: studio_runtime_providers::Method::TurnInterrupt,
+                })),
+            ),
+            None,
+        ));
+    let remote_driver = Arc::new(OrchestrationDriver::new(
+        Arc::clone(&remote.bridge.store),
+        Arc::new(NoTransport),
+        Arc::new(RuntimeOrchestrationEffects::with_lifecycle_ports(
+            Arc::clone(&remote.bridge.store),
+            remote_ports,
+        )),
+    ));
+    let home = State::new().await;
+    home.bridge
+        .store
+        .set_local_server_id(Some("home-server".into()))
+        .unwrap();
+    let home_id = home.agent.clone();
+    home.bridge.store.transaction(move |tx| {
+        tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES('peer-server',?1)", [r#"{"id":"peer-server","clientId":"peer-server","kind":"server","label":"Peer","created":1,"publicKey":"fixture","status":"paired"}"#])?;
+        let mut agent = AgentRepository::get(tx, &AgentId::from(home_id.as_str()))?.unwrap();
+        agent.extra.insert("remoteWorker".into(), json!({"server":"peer-server","link":"remote-link"}));
+        AgentRepository::put(tx, &agent)?;
+        Ok(())
+    }).await.unwrap();
+    let transport = Arc::new(Loopback(remote_driver));
+    let ports = Arc::new(
+        ProductionLifecyclePorts::new(
+            Arc::clone(&home.bridge.store),
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(tokio::sync::Notify::new()),
+            account_session_over(&home, None),
+            None,
+        )
+        .with_remote_transport(transport.clone()),
+    );
+    let action = Action::Delete {
+        target: home.agent.clone(),
+        request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+    };
+    assert_eq!(
+        ports
+            .execute(&action, crate::event_write::unix_time().unwrap())
+            .await
+            .unwrap()["stopped"],
+        "unconfirmed"
+    );
+    worker.shutdown().await.unwrap();
+    remote
+        .bridge
+        .faults
+        .startup_recovery_done
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(remote.bridge.clone()).await;
+    let interrupt = peer.next_write().await;
+    assert_eq!(interrupt.value["method"], "turn/interrupt");
+    let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&interrupt.value, json!({})).await;
+    let cleanup = peer.next_write().await;
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    worker_barrier(&worker).await;
+    let settled = remote.record().await;
+    assert_eq!(
+        settled["disconnectRecovery"]["stopInterrupt"]["outcome"], "accepted",
+        "{settled}"
+    );
+    let due: f64 = home
+        .bridge
+        .store
+        .read_async("test/remote-stop-due", |db| {
+            db.query_row(
+                "SELECT next_at/1000.0 FROM runtime_outbox WHERE kind='remote_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(studio_runtime_store::StoreError::from)
+        })
+        .await
+        .unwrap();
+    let driver = OrchestrationDriver::new(
+        Arc::clone(&home.bridge.store),
+        transport,
+        Arc::new(RuntimeOrchestrationEffects::new(Arc::clone(
+            &home.bridge.store,
+        ))),
+    );
+    assert_eq!(driver.pump_due(due.ceil() as i64).await.unwrap(), 1);
+    assert_eq!(
+        ports
+            .execute(&action, crate::event_write::unix_time().unwrap())
+            .await
+            .unwrap()["stopped"],
+        "confirmed"
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleted_command_without_process_id_accepts_its_completion() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let item = json!({"id":"no-process","type":"commandExecution","command":"fixture","status":"inProgress"});
+    let cursor = peer.frame(json!({"method":"item/started","params":{"threadId":"fake-thread-0","turnId":"turn","item":item}})).await;
+    peer.acknowledged(cursor).await;
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session(&state, worker.retained_session()),
+        None,
+    ));
+    let target = state.agent.clone();
+    let deletion = tokio::spawn(async move {
+        ports
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                },
+                20.0,
+            )
+            .await
+    });
+    for expected in ["turn/interrupt", "thread/backgroundTerminals/clean"] {
+        let wire = peer.next_write().await;
+        assert_eq!(wire.value["method"], expected);
+        let _ignored = wire.receipt.send(CommandReceipt::Written {
+            remote_id: None,
+            duplicate: false,
+        });
+        peer.reply(&wire.value, json!({})).await;
+    }
+    assert_eq!(deletion.await.unwrap().unwrap()["stopped"], "unconfirmed");
+    let cursor = peer.frame(json!({"method":"item/completed","params":{"threadId":"fake-thread-0","turnId":"turn",
+        "item":{"id":"no-process","type":"commandExecution","command":"fixture","status":"completed","aggregatedOutput":"","exitCode":0}}})).await;
+    peer.acknowledged(cursor).await;
+    let ids = vec![state.agent.clone()];
+    let outcome = state
+        .bridge
+        .store
+        .read_async("test/no-pid-stop", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome,
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completed_interrupted_turn_does_not_send_a_second_cleanup() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer.frame(json!({"method":"item/started","params":{"threadId":"fake-thread-0","turnId":"turn",
+        "item":{"id":"exec-1","type":"commandExecution","command":"fixture","status":"inProgress","processId":"42"}}})).await;
+    peer.acknowledged(cursor).await;
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session(&state, worker.retained_session()),
+        None,
+    ));
+    let target = state.agent.clone();
+    let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+    let actor = ports.clone();
+    let root = request_id.clone();
+    let mut deletion = tokio::spawn(async move {
+        actor
+            .execute(
+                &Action::Delete {
+                    target,
+                    request_id: root,
+                },
+                20.0,
+            )
+            .await
+    });
+    let interrupt = peer.next_write().await;
+    assert_eq!(interrupt.value["method"], "turn/interrupt");
+    let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&interrupt.value, json!({})).await;
+    let cleanup = peer.next_write().await;
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    // Model the turn completing before the cleanup reply is settled.
+    let agent = state.agent.clone();
+    state
+        .bridge
+        .store
+        .transaction(move |tx| {
+            tx.execute(
+                "UPDATE turns SET state='completed' WHERE chat=?1 AND provider_turn='turn'",
+                [agent],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    tokio::select! {
+        wire = peer.next_write() => panic!("the same command cleanup was sent twice: {}", wire.value),
+        result = &mut deletion => { assert_eq!(result.unwrap().unwrap()["stopped"], "unconfirmed"); }
+    }
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn project_delete_stops_settled_background_commands_once() {
+    let state = State::new().await;
+    state
+        .bridge
+        .store
+        .set_local_server_id(Some("owner".into()))
+        .unwrap();
+    let project = state.root.to_string_lossy().into_owned();
+    let project_id = project.clone();
+    let agent_id = state.agent.clone();
+    state.bridge.store.transaction(move |tx| {
+        studio_runtime_store::ProjectsRepository::put_project(tx, &json!({
+            "id":project_id,"path":project_id,"name":"Project","created":1,"peerTeams":[],
+            "homeServerId":"owner","locations":[{"serverId":"owner","path":project_id,"projectId":project_id}]
+        }))?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.projectId',?1,'$.projectServerId','owner','$.cwd',?1) WHERE id=?2", rusqlite::params![project_id,agent_id])?;
+        Ok(())
+    }).await.unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer.frame(json!({"method":"item/started","params":{"threadId":"fake-thread-0","turnId":"turn",
+        "item":{"id":"exec-1","type":"commandExecution","command":"fixture","status":"inProgress","processId":"42"}}})).await;
+    peer.acknowledged(cursor).await;
+    let cursor = peer.frame(json!({"method":"turn/completed","params":{"threadId":"fake-thread-0","turn":{"id":"turn","status":"completed"}}})).await;
+    peer.acknowledged(cursor).await;
+    let (seq, workspace) = state
+        .bridge
+        .store
+        .read_async("test/project-version", {
+            let project = project.clone();
+            move |conn| {
+                Ok::<_, studio_runtime_store::StoreError>((
+                    conn.query_row(
+                        "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1",
+                        [project],
+                        |row| row.get::<_, i64>(0),
+                    )?,
+                    studio_runtime_store::SyncDocumentsRepository::workspace_id(conn)?,
+                ))
+            }
+        })
+        .await
+        .unwrap();
+    let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+    let request = crate::project_deletion::Request {
+        id: project,
+        request_id,
+        expected_workspace_id: workspace,
+        expected_project_seq: seq,
+    };
+    let ports = Arc::new(ProductionLifecyclePorts::new(
+        Arc::clone(&state.bridge.store),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        account_session(&state, worker.retained_session()),
+        None,
+    ));
+    let store = state.bridge.store.clone();
+    let deleting_ports = ports.clone();
+    let deleting_request = request.clone();
+    let mut deletion = tokio::spawn(async move {
+        crate::project_deletion::execute(
+            store,
+            deleting_request,
+            crate::event_write::unix_time().unwrap(),
+            deleting_ports,
+        )
+        .await
+    });
+    let cleanup = tokio::select! {
+        wire = peer.next_write() => wire,
+        result = &mut deletion => match result {
+            Ok(Ok(reply)) => panic!("project delete returned without background cleanup: {}", json!(reply)),
+            Ok(Err(error)) => panic!("project delete fixture failed before cleanup: {error:?}"),
+            Err(error) => panic!("project delete task failed: {error}"),
+        },
+    };
+    assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
+    let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        remote_id: None,
+        duplicate: false,
+    });
+    peer.reply(&cleanup.value, json!({})).await;
+    let reply = deletion.await.unwrap().unwrap();
+    let reply = json!(reply);
+    assert_eq!(reply["stopped"], "unconfirmed");
+    let replay = crate::project_deletion::execute(
+        state.bridge.store.clone(),
+        request,
+        crate::event_write::unix_time().unwrap(),
+        ports,
+    )
+    .await
+    .unwrap();
+    assert_eq!(json!(replay)["stopped"], "unconfirmed");
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the same project deletion does not resend cleanup"
+    );
+    worker.shutdown().await.unwrap();
 }
 
 /// The production account session while no account worker is attached.
@@ -362,7 +1431,7 @@ fn detached_account_session(state: &State) -> Arc<AccountSessionRuntime> {
 /// has reattached yet. The provider process keeps the turn and its command
 /// running. The worker that reattaches to that provider generation must end
 /// them once, and must not continue or restart the stopped agent.
-async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending) {
+async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending, refuse_cleanup: bool) {
     let state = State::new().await;
     let mut first = Peer::new();
     let mut first_worker = first.worker(state.bridge.clone()).await;
@@ -407,12 +1476,18 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending) {
             sender: None,
             sender_epoch: None,
         },
-        Ending::Delete => Action::Delete { target },
+        Ending::Delete => Action::Delete {
+            target,
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+        },
     };
-    ports
+    let result = ports
         .execute(&action, 20.0)
         .await
         .expect("the action commits");
+    if ending == Ending::Delete {
+        assert_eq!(result["stopped"], "unconfirmed");
+    }
     let stopped = state.record().await;
     assert_eq!(stopped["status"], "paused", "{stopped}");
 
@@ -452,6 +1527,30 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending) {
     let clean = peer.next_write().await;
     assert_eq!(clean.value["method"], "thread/backgroundTerminals/clean");
     assert_eq!(clean.value["params"], json!({"threadId":"fake-thread-0"}));
+    if refuse_cleanup {
+        let _ignored = clean.receipt.send(CommandReceipt::NotSent);
+        worker_barrier(&worker).await;
+        let record = state.record().await;
+        assert_ne!(
+            record["disconnectRecovery"]["stopInterrupt"]["outcome"], "accepted",
+            "cleanup was refused: {record}"
+        );
+        let ids = vec![state.agent.clone()];
+        let outcome = state
+            .bridge
+            .store
+            .read_async("test/disconnected-delete-outcome", move |conn| {
+                crate::commands::deletion_stop_outcome(conn, &ids)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            studio_runtime_schema::command::StopOutcome::Unconfirmed
+        );
+        worker.shutdown().await.unwrap();
+        return;
+    }
     let _ignored = clean.receipt.send(CommandReceipt::Written {
         remote_id: None,
         duplicate: false,
@@ -486,12 +1585,17 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_before_worker_reattach_interrupts_the_turn_and_ends_its_commands() {
-    ending_before_worker_reattach_ends_the_turn_work(Ending::Stop).await;
+    ending_before_worker_reattach_ends_the_turn_work(Ending::Stop, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_before_worker_reattach_interrupts_the_turn_and_ends_its_commands() {
-    ending_before_worker_reattach_ends_the_turn_work(Ending::Delete).await;
+    ending_before_worker_reattach_ends_the_turn_work(Ending::Delete, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disconnected_delete_refused_cleanup_remains_unconfirmed() {
+    ending_before_worker_reattach_ends_the_turn_work(Ending::Delete, true).await;
 }
 
 /// The registry broker while the account has no live worker: it has no
@@ -733,6 +1837,7 @@ async fn proven_unsent_interrupt_reuses_stop_identity_after_reattach() {
     });
     peer.reply(&retry.value, json!({})).await;
     let clean = peer.next_write().await;
+    assert_eq!(clean.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = clean.receipt.send(CommandReceipt::Written {
         remote_id: None,
         duplicate: false,
@@ -839,7 +1944,7 @@ async fn stop_interrupt_with_a_lost_reply_is_not_sent_again_after_reattach() {
         }
     }
     assert_eq!(interrupts, 1, "a written interrupt is never sent again");
-    assert_eq!(cleanups, 1, "the command cleanup is sent once");
+    assert_eq!(cleanups, 0, "cleanup waits for a confirmed interrupt");
     let record = state.record().await;
     assert_eq!(record["status"], "paused", "{record}");
     assert_eq!(

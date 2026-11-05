@@ -110,6 +110,16 @@ pub(crate) fn all(db: &Connection) -> Result<Vec<Entry>, AccessError> {
     RemoteOutbox::entries(db, EFFECT, None).map_err(failed)
 }
 
+/// Whether the exact remote stop for this worker is still unsettled.
+pub(crate) fn stop_pending(db: &Connection, request: &str, worker: &str) -> rusqlite::Result<bool> {
+    let sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM runtime_outbox WHERE {FAMILY} AND {ACTION}='stop' \
+         AND json_extract(json_extract(payload,'$.record.body'),'$.requestId')=?1 \
+         AND json_extract(json_extract(payload,'$.record.body'),'$.payload.worker')=?2)"
+    );
+    db.query_row(&sql, params![request, worker], |row| row.get(0))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn insert(
     tx: &Transaction<'_>,

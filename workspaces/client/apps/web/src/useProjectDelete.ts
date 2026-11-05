@@ -1,3 +1,4 @@
+import { StopOutcome } from "./generated/api.ts";
 import { randomUUID } from "./uuid";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { errorText } from "./api";
@@ -166,6 +167,13 @@ export function useProjectDelete(options: {
         return;
       const { intent } = pending;
       if (intent.phase === "deleted" && intent.result) {
+        const notices: Record<StopOutcome, string | undefined> = {
+          [StopOutcome.confirmed]: undefined,
+          [StopOutcome.unconfirmed]:
+            "The project was deleted, but stopping its commands could not be confirmed.",
+        };
+        const notice = notices[intent.result.stopped];
+        if (notice) latest.current.notify(notice);
         if (intent.error) latest.current.notify(intent.error);
         const ids = [
           ...intent.result.deletedAgentIds,

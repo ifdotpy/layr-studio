@@ -10,7 +10,7 @@ const applied = (deleted: string[]) => ({
   seq: 1,
   rows: [],
   kind: "delete" as const,
-  result: { deleted },
+  result: { deleted, stopped: "confirmed" as const },
 });
 
 describe("conversation deletion", () => {
@@ -22,6 +22,22 @@ describe("conversation deletion", () => {
     expect(remove).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith("lead", signal);
     expect(finish).toHaveBeenCalledWith(["lead", "new-worker"]);
+  });
+
+  it("returns the server's unconfirmed stop outcome after removing the chats", async () => {
+    const response = {
+      ...applied(["lead"]),
+      result: { deleted: ["lead"], stopped: "unconfirmed" as const },
+    };
+    const finish = vi.fn();
+    const result = await deleteConversation(
+      vi.fn().mockResolvedValue(response),
+      "lead",
+      finish,
+      new AbortController().signal,
+    );
+    expect(result).toEqual(response);
+    expect(finish).toHaveBeenCalledWith(["lead"]);
   });
 
   it("does not resend a delete when its response is lost", async () => {

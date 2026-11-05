@@ -575,6 +575,7 @@ async fn committed_delete_succeeds_when_post_commit_delivery_fails() {
         store.clone(),
         &Action::Delete {
             target: "lead".into(),
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
         },
         case["now"].as_f64().expect("now"),
         Arc::new(FailedDelivery),
@@ -626,6 +627,7 @@ async fn committed_delete_drains_its_intent_despite_unrelated_cleanup_failure() 
         .execute(
             &Action::Delete {
                 target: "lead".into(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             case["now"].as_f64().expect("now"),
         )
@@ -690,6 +692,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
         .execute(
             &Action::Delete {
                 target: "lead".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             case["now"].as_f64().expect("delete timestamp"),
         )
@@ -1937,6 +1940,7 @@ async fn composed_delete_stages_voice_sessions_before_rows_are_removed_and_stops
         .execute(
             &Action::Delete {
                 target: "lead".into(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             case["now"].as_f64().expect("time"),
         )

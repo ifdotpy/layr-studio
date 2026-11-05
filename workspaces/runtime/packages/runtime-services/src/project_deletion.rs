@@ -18,6 +18,7 @@ use thiserror::Error;
 
 /// Internal command supplied by the generated HTTP request. No caller-supplied
 /// agent lists or paths participate in membership selection.
+#[derive(Clone)]
 pub struct Request {
     pub id: String,
     pub request_id: String,
@@ -25,7 +26,7 @@ pub struct Request {
     pub expected_project_seq: i64,
 }
 #[derive(Serialize, Deserialize)]
-pub struct DeleteReply {
+struct DeleteReceipt {
     id: String,
     request_id: String,
     outcome: DeleteOutcome,
@@ -33,6 +34,12 @@ pub struct DeleteReply {
     deleted_agent_ids: BTreeSet<String>,
     #[serde(rename = "deletedRoomIds")]
     deleted_room_ids: BTreeSet<String>,
+}
+#[derive(Serialize)]
+pub struct DeleteReply {
+    #[serde(flatten)]
+    receipt: DeleteReceipt,
+    stopped: studio_runtime_schema::command::StopOutcome,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,22 +94,33 @@ pub async fn execute(
     ports: Arc<dyn LifecyclePorts>,
 ) -> Result<DeleteReply, Error> {
     let adapter = ports.clone();
-    let (reply, applied) = store
+    let request_id = request.request_id.clone();
+    let (receipt, applied) = store
         .transaction_with(move |tx| delete_in_transaction(tx, &request, now, adapter.as_ref()))
         .await?;
-    if applied && let Err(error) = ports.committed().await {
-        // A failed wake cannot change the committed receipt. Existing durable
-        // lifecycle owners drain the same intents after restart.
-        eprintln!("Project deletion committed; effect delivery remains pending: {error}");
-    }
-    Ok(reply)
+    let ids: Vec<String> = receipt.deleted_agent_ids.iter().cloned().collect();
+    agent_lifecycle_runtime::finish_commit(
+        ports.as_ref(),
+        agent_lifecycle_runtime::LifecycleCommit::Deletion {
+            agents: ids.clone(),
+            request_id,
+            applied,
+        },
+    )
+    .await;
+    let stopped = store
+        .read_async("runtime-services/project-deletion-stop", move |conn| {
+            crate::commands::deletion_stop_outcome(conn, &ids)
+        })
+        .await?;
+    Ok(DeleteReply { receipt, stopped })
 }
 fn delete_in_transaction(
     tx: &Transaction<'_>,
     request: &Request,
     now: f64,
     ports: &dyn LifecyclePorts,
-) -> Result<(DeleteReply, bool), Error> {
+) -> Result<(DeleteReceipt, bool), Error> {
     let workspace = SyncDocumentsRepository::workspace_id(tx)?;
     let server = RuntimeStore::transaction_local_server_id(tx)?
         .filter(|s| !s.is_empty())
@@ -130,7 +148,7 @@ fn delete_in_transaction(
             .raw(&receipt_id)
             .operation(&["delete"]);
     let admitted =
-        match crate::event_write::begin_request::<DeleteReply>(tx, key, &signature, now_ms)? {
+        match crate::event_write::begin_request::<DeleteReceipt>(tx, key, &signature, now_ms)? {
             crate::event_write::CallerAdmission::Replay(reply) => return Ok((reply, false)),
             crate::event_write::CallerAdmission::Fresh(admitted) => admitted,
         };
@@ -186,7 +204,10 @@ fn delete_in_transaction(
     for root in roots {
         agent_lifecycle_runtime::execute_in_transaction_for_scope(
             tx,
-            &Action::Delete { target: root },
+            &Action::Delete {
+                target: root,
+                request_id: request.request_id.clone(),
+            },
             now,
             ports,
             &selected,
@@ -200,7 +221,7 @@ fn delete_in_transaction(
         }
         prune_sidebar(tx, id, &paths, &selected)?;
     }
-    let reply = DeleteReply {
+    let reply = DeleteReceipt {
         id: request.id.clone(),
         request_id: request.request_id.clone(),
         outcome: DeleteOutcome::Deleted,

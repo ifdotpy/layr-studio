@@ -1,4 +1,4 @@
-import { MessageSendStatus } from "./generated/api.ts";
+import { MessageSendStatus, StopOutcome } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
   AgentSource as GeneratedApiAgentSource,
@@ -1762,6 +1762,11 @@ export default function App({ active = true }: { active?: boolean }) {
       throw e;
     }
   };
+  const deletionStopNotice: Record<StopOutcome, string | undefined> = {
+    [StopOutcome.confirmed]: undefined,
+    [StopOutcome.unconfirmed]:
+      "The chat was deleted, but stopping its commands could not be confirmed.",
+  };
   const remove = (id: string, isRoom: boolean, isWorker = false) => {
     setModal({
       title: isWorker ? "Delete?" : "Delete chat?",
@@ -1813,6 +1818,12 @@ export default function App({ active = true }: { active?: boolean }) {
                 finishConversationDelete,
                 controller.signal,
               )
+                .then((result) => {
+                  if (result.kind === "delete") {
+                    const notice = deletionStopNotice[result.result.stopped];
+                    if (notice) notify(notice);
+                  }
+                })
                 .catch((error: unknown) => {
                   if (controller.signal.aborted) return;
                   notify(

@@ -285,11 +285,33 @@ pub(crate) async fn execute_prepared(
     action: &Action,
     now: f64,
     ports: Option<std::sync::Arc<dyn crate::agent_lifecycle_runtime::LifecyclePorts>>,
-) -> Result<Value, ManagementError> {
+) -> Result<(Value, bool), ManagementError> {
     let action = action.clone();
+    let admission_ms = (crate::event_write::unix_time()
+        .map_err(|_| ManagementError::Invalid("Clock unavailable"))?
+        * 1000.0) as i64;
     store
-        .transaction_with_error(move |transaction| {
-            execute_decision(transaction, &action, now, ports.as_deref())
+        .transaction_with_error(move |tx| {
+            let Action::Delete { target, request_id } = &action else {
+                return Ok((execute_decision(tx, &action, now, ports.as_deref())?, true));
+            };
+            let raw = format!("lifecycle-delete:{request_id}");
+            let signature =
+                crate::event_write::request_signature(&studio_json::json!(["delete", target]));
+            let key = crate::event_write::RequestKey::new("lifecycle-delete", &[], request_id)
+                .raw(&raw)
+                .operation(&["delete"]);
+            match crate::event_write::begin_request::<Value>(tx, key, &signature, admission_ms)
+                .map_err(studio_runtime_store::StoreError::from)?
+            {
+                crate::event_write::CallerAdmission::Replay(result) => Ok((result, false)),
+                crate::event_write::CallerAdmission::Fresh(admitted) => {
+                    let result = execute_decision(tx, &action, now, ports.as_deref())?;
+                    crate::event_write::settle_request(tx, &admitted, None, &result)
+                        .map_err(studio_runtime_store::StoreError::from)?;
+                    Ok((result, true))
+                }
+            }
         })
         .await
 }
@@ -692,6 +714,7 @@ mod lifecycle_scope_tests {
             &topology,
             &Action::Delete {
                 target: "missing".into(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
         );
         assert_eq!(owners, ids(&["missing"]));

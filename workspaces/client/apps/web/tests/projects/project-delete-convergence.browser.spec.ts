@@ -1,3 +1,4 @@
+import { StopOutcome } from "../../src/generated/api.ts";
 import { fixturePostBody } from "../misc-fixture.ts";
 import type { PostResult } from "../../src/api.ts";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -54,6 +55,7 @@ test("App keeps confirmed deleted chats unreadable when HTTP wins before SSE", a
           id: request.id,
           request_id: request.request_id,
           outcome: "deleted",
+          stopped: StopOutcome.confirmed,
           deletedAgentIds: ids,
           deletedRoomIds: [],
         } satisfies PostResult<"/api/projects/delete">,
