@@ -166,6 +166,22 @@ pub(crate) fn agent_view_context(
 /// The status is read from the chat row (`domain`), not from the retired agent column.
 pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),''),json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
 
+/// The team counts of a lead as its view shows them, as JSON text; None for a member.
+pub(crate) fn team_counts_text(transaction: &Connection, id: &str) -> StoreResult<Option<String>> {
+    let lead: Option<bool> = transaction
+        .prepare_cached("SELECT json_extract(record,'$.isLead') FROM runtime_agents WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
+        .optional()?
+        .flatten();
+    if lead != Some(true) {
+        return Ok(None);
+    }
+    team_counts(transaction, id, &studio_json::json!({"isLead": true}))?
+        .map(|counts| studio_json::to_string(&counts))
+        .transpose()
+        .map_err(studio_runtime_store::StoreError::from)
+}
+
 fn team_counts(
     transaction: &Connection,
     id: &str,

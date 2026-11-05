@@ -649,6 +649,8 @@ impl CheckedAgentRow {
 #[derive(Clone, Debug, Default)]
 pub struct EntityChanges {
     pub agents: BTreeSet<String>,
+    /// Team leads whose members changed: marked only when their team counts change.
+    pub team_roots: BTreeSet<String>,
     /// Changed work rows. Their documents are built at read time (`entity_scope`); a
     /// change here refreshes only the owner agent's views.
     pub work: BTreeSet<String>,
@@ -809,6 +811,11 @@ pub fn publish_entity_changes(
         project_server_id,
         validate,
     )?;
+    let published = agents
+        .iter()
+        .map(|(id, _)| (*id).to_owned())
+        .collect::<BTreeSet<_>>();
+    publish_team_roots(transaction, &changes.team_roots, &published)?;
     if !room_agents.is_empty() {
         publish_rooms_of(transaction, &room_agents, &changed_roots, validate)?;
     }
@@ -1033,6 +1040,26 @@ fn rows_by_id(
 }
 
 /// Publish agent views; `work` must hold every work item the agents own.
+/// Mark the views of the team leads in `roots` whose team counts changed since their
+/// last publication. A lead in `skip` is published by the caller already.
+fn publish_team_roots(
+    transaction: &Transaction<'_>,
+    roots: &BTreeSet<String>,
+    skip: &BTreeSet<String>,
+) -> StoreResult<()> {
+    for root in roots.difference(skip) {
+        let current = crate::sync_entity_context::team_counts_text(transaction, root)?;
+        let published: Option<Option<String>> = transaction
+            .prepare_cached("SELECT team_counts FROM agent_publication_state WHERE id=?1")?
+            .query_row([root], |row| row.get(0))
+            .optional()?;
+        if published.as_ref() != Some(&current) {
+            publish_agent_projection(transaction, root, false)?;
+        }
+    }
+    Ok(())
+}
+
 fn publish_agents(
     transaction: &Transaction<'_>,
     agents: &[(&str, &Value)],
@@ -1060,17 +1087,18 @@ pub(crate) fn publish_agent_projection(
         studio_runtime_store::durable_seq::AGENT_VIEW_MARK,
         id,
     )?;
+    let team_counts = crate::sync_entity_context::team_counts_text(transaction, id)?;
     transaction
         .prepare_cached(
-            "INSERT INTO agent_publication_state(id,root_id,is_lead,live,in_flight)
+            "INSERT INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
            SELECT ?1,json_extract(record,'$.rootId'),json_extract(record,'$.isLead'),
                   json_extract(record,'$.deletedAt') IS NULL AND NOT ?2,
-                  COALESCE(json_extract(record,'$.inFlight'),0)
+                  COALESCE(json_extract(record,'$.inFlight'),0),?3
            FROM runtime_agents WHERE id=?1
          ON CONFLICT(id) DO UPDATE SET root_id=excluded.root_id,is_lead=excluded.is_lead,
-           live=excluded.live,in_flight=excluded.in_flight",
+           live=excluded.live,in_flight=excluded.in_flight,team_counts=excluded.team_counts",
         )?
-        .execute(rusqlite::params![id, deleted])?;
+        .execute(rusqlite::params![id, deleted, team_counts])?;
     if deleted {
         transaction
             .prepare_cached("UPDATE agent_publication_state SET live=0 WHERE id=?1")?

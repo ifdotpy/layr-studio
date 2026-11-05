@@ -18,6 +18,7 @@ impl EntityPublisher for DefaultPublisher {
     fn publish(&self, transaction: &Transaction<'_>, pending: &PendingEntities) -> StoreResult<()> {
         let changes = crate::sync_policy::EntityChanges {
             agents: pending.agents.clone(),
+            team_roots: pending.team_roots.clone(),
             work: pending.work.clone(),
             ..Default::default()
         };

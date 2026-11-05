@@ -542,6 +542,7 @@ fn execute_decision(
             .into_iter()
             .map(|(_, id, _)| id)
             .collect(),
+        team_roots: Default::default(),
         work: changed_work,
         checked_agents: Vec::new(),
     };

@@ -44,10 +44,13 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     // from the copies before they go, so the first publication sees no false change.
     tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
-             root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL);
-         INSERT OR IGNORE INTO agent_publication_state(id,root_id,is_lead,live,in_flight)
+             root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
+             team_counts TEXT);
+         INSERT OR IGNORE INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
            SELECT id,json_extract(payload,'$.value.rootId'),json_extract(payload,'$.value.isLead'),
-                  deleted=0,COALESCE(json_extract(payload,'$.value.inFlight'),0)
+                  deleted=0,COALESCE(json_extract(payload,'$.value.inFlight'),0),
+                  (SELECT json_extract(summary.payload,'$.value.teamCounts') FROM sync_entities AS summary
+                    WHERE summary.collection='agentSummary' AND summary.id=sync_entities.id)
            FROM sync_entities WHERE collection='agent';",
     )?;
     if copies {
