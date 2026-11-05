@@ -270,9 +270,18 @@ test("composer latency with server history and streaming @performance", async ({
   console.log(
     "IDLE_CONTROL_RENDERS",
     JSON.stringify(
-      metrics.renderProbe.filter((entry) => entry.phase === "idle-control"),
+      metrics.renderProbe.filter(
+        (entry) =>
+          entry.phase === "idle-control" && entry.component !== "history-row",
+      ),
     ),
   );
+  expect(
+    metrics.renderProbe.filter(
+      (entry) =>
+        entry.phase === "stream-only" && entry.component === "history-row",
+    ),
+  ).toHaveLength(1);
   expect(
     metrics.renderProbe.filter(
       (entry) =>
