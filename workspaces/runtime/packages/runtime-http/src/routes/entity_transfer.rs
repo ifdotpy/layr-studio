@@ -355,28 +355,6 @@ mod tests {
             &task_record(id, agent, status),
         )
         .map_err(|_| studio_runtime_store::StoreError::RecordContract("task write"))
-<<<<<<< head
-||||||| base
-    ) -> studio_runtime_schema::process_controls::TaskProjection {
-        use studio_runtime_schema::task_record::{TaskStatus, TaskType};
-        let mut record = studio_runtime_store::TaskRecord::new(
-            agent.into(),
-            id.into(),
-            "turn".into(),
-            studio_json::from_str("1").expect("valid timestamp"),
-            TaskType::CommandExecution,
-            "commandExecution".into(),
-        );
-        record.set_status(match status {
-            "running" => TaskStatus::Running,
-            "completed" => TaskStatus::Completed,
-            _ => panic!("unsupported fixture status"),
-        });
-        let mut projection = studio_runtime_services::sync_views::project_task_record(&record)
-            .expect("task projection");
-        projection.id = id.into();
-        projection
-=======
     }
 
     fn delete_task(
@@ -385,21 +363,8 @@ mod tests {
     ) -> Result<(), studio_runtime_store::StoreError> {
         studio_runtime_services::notification_dispatch::test_delete_task(tx, id)
             .map_err(|_| studio_runtime_store::StoreError::RecordContract("task delete"))
->>>>>>> https/main
     }
 
-<<<<<<< head
-    fn delete_task(
-        tx: &rusqlite::Transaction<'_>,
-        id: &str,
-    ) -> Result<(), studio_runtime_store::StoreError> {
-        studio_runtime_services::notification_dispatch::test_delete_task(tx, id)
-            .map_err(|_| studio_runtime_store::StoreError::RecordContract("task delete"))
-    }
-
-||||||| base
-=======
->>>>>>> https/main
     /// A task row with the given id, owner and status.
     fn task_record(id: &str, agent: &str, status: &str) -> studio_runtime_store::TaskRecord {
         studio_json::from_str(
