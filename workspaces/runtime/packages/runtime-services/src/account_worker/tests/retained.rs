@@ -4761,3 +4761,29 @@ async fn thread_unload_settles_the_attached_start_as_unknown_without_resend() {
         "the start is not sent again"
     );
 }
+
+/// A thread unload while its turn runs ends the turn as interrupted. The chat
+/// does not stay running, and nothing is sent again.
+#[tokio::test]
+async fn thread_unload_ends_a_running_turn_as_interrupted() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer
+        .frame(json!({"method":"turn/started","params":{"threadId":"fake-thread-0","turn":{"id":"turn-a"}}}))
+        .await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(state.record().await["status"], "running");
+    let cursor = peer
+        .frame(json!({"method":"thread/closed","params":{"threadId":"fake-thread-0"}}))
+        .await;
+    peer.acknowledged(cursor).await;
+    let record = state.record().await;
+    assert_eq!(record["status"], "interrupted", "{record}");
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the running turn is not sent again"
+    );
+}

@@ -208,6 +208,29 @@ impl SchedulerRepository {
         Ok(())
     }
 
+    /// A provider unload of a running turn ends it as interrupted, with the same
+    /// disconnect receipt as a lost provider answer. An unbound start is not
+    /// touched. Returns whether the turn was interrupted.
+    pub fn settle_unloaded_turn(
+        transaction: &Transaction<'_>,
+        identity: &TurnAttemptIdentity,
+        at: f64,
+    ) -> StoreResult<bool> {
+        let Some(mut agent) = load_agent(transaction, &identity.agent_id)? else {
+            return Ok(false);
+        };
+        let running = stored_attempt(&agent).is_some_and(|attempt| {
+            attempt.id.as_deref() == Some(identity.attempt_id.as_str())
+                && attempt
+                    .turn_id
+                    .as_deref()
+                    .is_some_and(|turn| !turn.is_empty())
+        });
+        Ok(running
+            && disconnect_agent(transaction, &mut agent, at, false, false)?
+            && agent.status == AgentStatus::Interrupted)
+    }
+
     /// An activity notice is not a receipt for the input batch. It may still require interruption.
     pub fn observe_started(
         transaction: &Transaction<'_>,
