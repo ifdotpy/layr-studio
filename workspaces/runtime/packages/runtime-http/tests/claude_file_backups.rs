@@ -7,7 +7,10 @@ use axum::{
 };
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
@@ -135,12 +138,25 @@ impl ProviderTaskFactory for Factory {
         })
     }
 }
-struct Broker(Arc<dyn ControlSession>);
+struct Broker(Arc<dyn ControlSession>, AtomicBool);
 impl AccountSessionPort for Broker {
+    fn ensure_session<'a>(&'a self, account: &'a str) -> AccountSessionFuture<'a, ConnectionScope> {
+        Box::pin(async move {
+            self.1.store(true, Ordering::SeqCst);
+            Ok(ConnectionScope {
+                account: account.into(),
+                connection: "fixture".into(),
+                generation: 1,
+            })
+        })
+    }
     fn claude_control_session(
         &self,
         _: &str,
-    ) -> Result<Arc<dyn ControlSession>, AccountSessionError> {
+    ) -> Result<Arc<dyn ControlSession>, ClaudeControlSessionError> {
+        if !self.1.load(Ordering::SeqCst) {
+            return Err(ClaudeControlSessionError::Unavailable);
+        }
         Ok(self.0.clone())
     }
 }
@@ -174,6 +190,17 @@ async fn post(app: &axum::Router, path: &str, body: Value) -> (u16, Value) {
     )
 }
 pub(crate) async fn fixture() -> (
+    tempfile::TempDir,
+    Arc<RuntimeStore>,
+    axum::Router,
+    AccountHandle,
+    Arc<Native>,
+) {
+    fixture_with_live_session(Some(true)).await
+}
+async fn fixture_with_live_session(
+    live: Option<bool>,
+) -> (
     tempfile::TempDir,
     Arc<RuntimeStore>,
     axum::Router,
@@ -249,7 +276,12 @@ pub(crate) async fn fixture() -> (
         Some(store.clone()),
         Some(Arc::new(policy)),
     );
-    state.account_session = Some(Arc::new(Broker(Arc::new(worker.claude_session().unwrap()))));
+    state.account_session = live.map(|live| {
+        Arc::new(Broker(
+            Arc::new(worker.claude_session().unwrap()),
+            AtomicBool::new(live),
+        )) as Arc<dyn AccountSessionPort>
+    });
     (root, store, router(state).unwrap(), worker, native)
 }
 fn agent(store: &RuntimeStore) -> Value {
@@ -305,7 +337,7 @@ async fn claude_control_session_reads_and_stop_keep_dispatch() {
 
 #[tokio::test]
 async fn claude_command_preserves_message_request_identity() {
-    let (_root, _store, app, mut worker, _native) = fixture().await;
+    let (_root, _store, app, mut worker, _native) = fixture_with_live_session(Some(false)).await;
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
     let body = json!({"id":"agent","action":"command","command":"/help","request_id":request_id});
     let first = post(&app, "/api/claude/session", body.clone()).await;
@@ -317,7 +349,7 @@ async fn claude_command_preserves_message_request_identity() {
 
 #[tokio::test]
 async fn claude_control_settings_ingress_and_exact_receipt_replay() {
-    let (_root, store, app, mut worker, native) = fixture().await;
+    let (_root, store, app, mut worker, native) = fixture_with_live_session(Some(false)).await;
     for body in [
         json!({"id":"agent","action":"settings","settings":{}}),
         json!({"id":"agent","action":"settings","request_id":null,"settings":{}}),
@@ -367,7 +399,7 @@ async fn claude_control_settings_ingress_and_exact_receipt_replay() {
 
 #[tokio::test]
 async fn claude_file_backups_usage_is_read_through_http() {
-    let (_root, _store, app, mut worker, _native) = fixture().await;
+    let (_root, _store, app, mut worker, _native) = fixture_with_live_session(Some(false)).await;
     let usage = post(
         &app,
         "/api/claude/file-backups",
@@ -376,5 +408,54 @@ async fn claude_file_backups_usage_is_read_through_http() {
     .await;
     assert_eq!(usage.0, 200, "{usage:?}");
     assert_eq!(usage.1["count"], 1);
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn claude_controls_start_missing_account_session() {
+    let (_root, _store, app, mut worker, native) = fixture_with_live_session(Some(false)).await;
+    let result = post(
+        &app,
+        "/api/claude/session",
+        json!({"id":"agent","action":"state"}),
+    )
+    .await;
+    assert_eq!(result.0, 200, "{result:?}");
+    assert_eq!(native.calls.lock().unwrap()[0]["method"], "claude/state");
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn claude_controls_report_unavailable_and_keep_local_paths() {
+    let (_root, store, app, mut worker, native) = fixture_with_live_session(None).await;
+    let result = post(
+        &app,
+        "/api/claude/session",
+        json!({"id":"agent","action":"state"}),
+    )
+    .await;
+    assert_eq!(result.0, 503, "{result:?}");
+    assert_eq!(
+        result.1["error"],
+        "The Claude account session is not running"
+    );
+    let mut record = agent(&store);
+    record["threadId"] = Value::Null;
+    store
+        .transaction(move |tx| {
+            AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(record)?)
+        })
+        .await
+        .unwrap();
+    let state = post(
+        &app,
+        "/api/claude/session",
+        json!({"id":"agent","action":"state"}),
+    )
+    .await;
+    assert_eq!(state.0, 200, "{state:?}");
+    let settings = post(&app, "/api/claude/session", json!({"id":"agent","action":"settings","request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"settings":{"thinking":false}})).await;
+    assert_eq!(settings.0, 200, "{settings:?}");
+    assert!(native.calls.lock().unwrap().is_empty());
     worker.shutdown().await.unwrap();
 }

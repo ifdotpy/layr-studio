@@ -45,6 +45,12 @@ pub enum AccountSessionError {
     Unknown,
 }
 
+#[derive(Debug, Error)]
+pub enum ClaudeControlSessionError {
+    #[error("The Claude account session is not running")]
+    Unavailable,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotSentReason {
     NoLiveAccountWorker,
@@ -161,10 +167,9 @@ pub trait AccountSessionPort: Send + Sync {
     fn claude_control_session(
         &self,
         _account: &str,
-    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, AccountSessionError> {
-        Err(AccountSessionError::Requires(
-            "provider-session/claude-controls",
-        ))
+    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, ClaudeControlSessionError>
+    {
+        Err(ClaudeControlSessionError::Unavailable)
     }
     fn transfer_provider_request<'a>(
         &'a self,
@@ -839,10 +844,9 @@ pub trait RetainedAccountSession: Send + Sync {
     fn claude_control_session(
         &self,
         _account: &str,
-    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, AccountSessionError> {
-        Err(AccountSessionError::Requires(
-            "provider-session/claude-controls",
-        ))
+    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, ClaudeControlSessionError>
+    {
+        Err(ClaudeControlSessionError::Unavailable)
     }
     fn transfer_request(&self, _request: TransferProviderRequest) -> SessionFuture {
         Box::pin(async {
@@ -1451,12 +1455,11 @@ impl AccountSessionPort for AccountSessionRuntime {
     fn claude_control_session(
         &self,
         account: &str,
-    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, AccountSessionError> {
+    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, ClaudeControlSessionError>
+    {
         self.session
             .as_ref()
-            .ok_or(AccountSessionError::Requires(
-                "provider-session/claude-controls",
-            ))?
+            .ok_or(ClaudeControlSessionError::Unavailable)?
             .claude_control_session(account)
     }
 

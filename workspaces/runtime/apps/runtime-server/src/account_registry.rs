@@ -596,7 +596,7 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
         account: &str,
     ) -> Result<
         Arc<dyn studio_runtime_services::claude_controls::service::ControlSession>,
-        studio_runtime_services::account_session_runtime::AccountSessionError,
+        studio_runtime_services::account_session_runtime::ClaudeControlSessionError,
     > {
         let session = self
             .sessions
@@ -605,17 +605,14 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
             .and_then(|sessions| sessions.get(account).cloned())
             .filter(|session| session.is_live())
             .ok_or(
-                studio_runtime_services::account_session_runtime::AccountSessionError::Requires(
-                    "provider-session/claude-controls",
-                ),
+                studio_runtime_services::account_session_runtime::ClaudeControlSessionError::Unavailable,
             )?;
-        let port =
-            studio_runtime_services::account_worker::retained::consumers::ClaudePort::new(session)
-                .map_err(|_| {
-                    studio_runtime_services::account_session_runtime::AccountSessionError::Refused(
-                        "Claude account session is unavailable",
-                    )
-                })?;
+        let port = studio_runtime_services::account_worker::retained::consumers::ClaudePort::new(
+            session,
+        )
+        .map_err(|_| {
+            studio_runtime_services::account_session_runtime::ClaudeControlSessionError::Unavailable
+        })?;
         Ok(Arc::new(
             studio_runtime_services::claude_runtime::RetainedClaudeSession::new(Arc::new(port)),
         ))

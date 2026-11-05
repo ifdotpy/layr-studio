@@ -77,9 +77,7 @@ async fn absent_consumers_are_named_refusals() {
     ));
     assert!(matches!(
         Absent.claude_control_session("fixture-account"),
-        Err(AccountSessionError::Requires(
-            "provider-session/claude-controls"
-        ))
+        Err(studio_runtime_services::account_session_runtime::ClaudeControlSessionError::Unavailable)
     ));
     assert!(matches!(
         limits(&Absent, "fixture", false).await,

@@ -65,12 +65,7 @@ async fn repair_report(
         .and_then(|transfer| transfer.pending())
         .map(|transfer| transfer.source_account_key.as_str())
         .unwrap_or(&agent.account_key);
-    let session = state
-        .account_session
-        .as_ref()
-        .ok_or_else(ApiError::internal)?
-        .claude_control_session(account)
-        .map_err(session_error)?;
+    let session = control_session(&state, account).await?;
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         session.call_scoped(
@@ -265,35 +260,27 @@ async fn session(
     {
         return Err(control_error(ControlError::Request));
     }
-    // Native commands use the message service and need no provider control session.
-    let controls = || -> Result<Controls, ApiError> {
-        let session: Arc<dyn ControlSession> = if local_only {
-            Arc::new(LocalControlSession {
-                binding: ControlBinding::new(account.to_owned(), "local-no-thread".into(), 1)
-                    .map_err(control_error)?,
-            })
-        } else {
-            let broker = state
-                .account_session
-                .as_ref()
-                .ok_or_else(|| ApiError::dependency("provider-session/claude-controls"))?;
-            broker
-                .claude_control_session(account)
-                .map_err(session_error)?
-        };
-        Ok(Controls::new(
-            Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
-            session,
-        ))
+    // Commands use the message service; no-thread state and settings use stored data.
+    let request = match body {
+        SessionRequest::Command(request) => return command(state, request).await,
+        request @ (SessionRequest::Settings(_) | SessionRequest::Read(_)) => request,
     };
-    let result = match body {
-        SessionRequest::Command(request) => {
-            return command(state, request).await;
-        }
-        SessionRequest::Settings(request) => controls()?.execute(request).await,
-        SessionRequest::Read(request) => {
-            controls()?.read_or_stop_snapshot(&snapshot, &request).await
-        }
+    let session: Arc<dyn ControlSession> = if local_only {
+        Arc::new(LocalControlSession {
+            binding: ControlBinding::new(account.to_owned(), "local-no-thread".into(), 1)
+                .map_err(control_error)?,
+        })
+    } else {
+        control_session(&state, account).await?
+    };
+    let controls = Controls::new(
+        Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
+        session,
+    );
+    let result = match request {
+        SessionRequest::Command(_) => unreachable!(),
+        SessionRequest::Settings(request) => controls.execute(request).await,
+        SessionRequest::Read(request) => controls.read_or_stop_snapshot(&snapshot, &request).await,
     };
     state.event_wake.notify_one();
     let result = result.map_err(control_error)?;
@@ -340,12 +327,7 @@ async fn file_backups(
             .filter(|s| !s.is_empty())
             .ok_or_else(|| control_error(ControlError::Request))?;
         let account = &agent.account_key;
-        let session = state
-            .account_session
-            .as_ref()
-            .ok_or_else(ApiError::internal)?
-            .claude_control_session(account)
-            .map_err(session_error)?;
+        let session = control_session(&state, account).await?;
         let result = session
             .call_scoped(
                 ControlScope {
@@ -368,6 +350,41 @@ async fn file_backups(
     })
     .await
     .map_err(|_| ApiError::internal())?
+}
+
+// Threaded controls, command discovery, repair reports and backups use the
+// retained account worker. Starting it does not submit a control request.
+async fn control_session(
+    state: &HttpState,
+    account: &str,
+) -> Result<Arc<dyn ControlSession>, ApiError> {
+    let broker = state
+        .account_session
+        .as_ref()
+        .ok_or_else(session_unavailable)?;
+    broker
+        .ensure_session(account)
+        .await
+        .map_err(|error| match error {
+            studio_runtime_services::account_session_runtime::AccountSessionError::Requires(_) => {
+                session_unavailable()
+            }
+            other @ (studio_runtime_services::account_session_runtime::AccountSessionError::Expired
+            | studio_runtime_services::account_session_runtime::AccountSessionError::Refused(_)
+            | studio_runtime_services::account_session_runtime::AccountSessionError::InvalidResponse(_)
+            | studio_runtime_services::account_session_runtime::AccountSessionError::Persistence
+            | studio_runtime_services::account_session_runtime::AccountSessionError::Unknown) => session_error(other),
+        })?;
+    broker
+        .claude_control_session(account)
+        .map_err(|_| session_unavailable())
+}
+
+fn session_unavailable() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "The Claude account session is not running",
+    )
 }
 
 async fn require_claude_account(
