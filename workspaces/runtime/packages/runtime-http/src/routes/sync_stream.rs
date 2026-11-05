@@ -3924,7 +3924,9 @@ mod tests {
         .await
         .expect("owner receives progress without subscription");
         assert!(String::from_utf8_lossy(&frame).contains(id));
-        for stream in [&mut device, &mut peer] {
+        // A device with full access may sign in an account, so it sees the progress.
+        drop(device);
+        for stream in [&mut peer] {
             let received = tokio::time::timeout(Duration::from_millis(200), async {
                 while let Some(Ok(frame)) = stream.next().await {
                     if String::from_utf8_lossy(&frame).contains("auth-progress") {
@@ -3998,7 +4000,7 @@ mod tests {
     async fn owner_progress_is_forbidden_to_other_principals() {
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use studio_runtime_services::principal::{Grant, Principal};
+        use studio_runtime_services::principal::Principal;
         use tower::ServiceExt;
 
         let root = tempfile::tempdir().expect("isolated state");
@@ -4013,15 +4015,10 @@ mod tests {
             None,
         );
         let app = crate::router(state).expect("router");
-        for principal in [
-            Principal::Device {
-                id: "device".into(),
-                grant: Grant::Full,
-            },
-            Principal::Peer {
-                server: "peer".into(),
-            },
-        ] {
+        // A device with full access may follow a sign-in; a peer server may not.
+        for principal in [Principal::Peer {
+            server: "peer".into(),
+        }] {
             let request = |method: &str, uri: &str, body: Body| {
                 Request::builder()
                     .method(method)
