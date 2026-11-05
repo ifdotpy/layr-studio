@@ -605,7 +605,7 @@ fn remote_owner(agent: &AgentRecord) -> Result<Option<(String, String, bool)>, E
 }
 
 pub fn checked_agent(
-    connection: &Transaction<'_>,
+    connection: &rusqlite::Connection,
     id: &str,
 ) -> Result<AgentRecord, EventWriteError> {
     let agent = AgentRepository::get(connection, &AgentId::from(id))?

@@ -116,6 +116,8 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     // again when it changes.
     DurableTable::record("runtime_tasks"),
     DurableTable::record("runtime_monitors"),
+    // The newest events form the event window, built at read time.
+    DurableTable::new("runtime_events", "status"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -241,6 +243,10 @@ pub const AGENT_VIEW_MARK: &str = "agent_views";
 /// The `durable_rows` table name of the chat views: a chat document reads its group,
 /// its member edges and its messages, so their writers mark the chat.
 pub const CHAT_VIEW_MARK: &str = "chat_views";
+
+/// The `durable_rows` table name of the message receipts: a receipt reads its event,
+/// the event metadata and the transcript items, so their writers mark the event.
+pub const RECEIPT_VIEW_MARK: &str = "receipt_views";
 
 /// The `durable_rows` tables of the window members: a live entry puts the task or
 /// monitor of that id in its client window, a tombstone takes it out. The writer that
@@ -709,7 +715,7 @@ mod tests {
 
     #[test]
     fn an_unknown_table_is_refused() {
-        assert!(changes_since(&canvas(), "runtime_events", None).is_err());
+        assert!(changes_since(&canvas(), "runtime_rooms", None).is_err());
     }
 
     #[test]

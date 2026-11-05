@@ -66,7 +66,7 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
     let sync_entities = {
         let mut statement = db
             .prepare(
-                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor') ORDER BY collection,id",
+                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor','event','messageReceipt') ORDER BY collection,id",
             )
             .expect("prepare projection snapshot");
         let mut rows = statement
@@ -89,17 +89,8 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
         // The agent views and the windows are built at read time; compare them as the
         // old copies.
         rows.extend(
-            studio_runtime_services::entity_scope::agent_snapshot(&db)
-                .expect("agent views")
+            super::agent_view_fixtures::read_time_rows(&db)
                 .into_iter()
-                .filter(|row| row.collection == "agent")
-                .chain(
-                    studio_runtime_services::entity_scope::live_documents(
-                        &db,
-                        r#"["task","monitor"]"#,
-                    )
-                    .expect("window documents"),
-                )
                 .map(|row| {
                     json!({"collection": row.collection, "id": row.id, "deleted": 0,
                         "payload": studio_json::from_str::<Value>(row.payload.as_deref().expect("agent view"))

@@ -564,9 +564,6 @@ pub fn maintain_entity_projections_with_server_id(
     crate::diagnostics::measure_runtime_stage("projection.monitor_window", || {
         maintain_monitor_window(transaction, &validate_projection)
     })?;
-    crate::diagnostics::measure_runtime_stage("projection.event_window", || {
-        maintain_event_window(transaction, &validate_projection)
-    })?;
     transaction.execute(
         "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
         [AGENT_PROJECTIONS_SEED_MARKER],
@@ -881,47 +878,61 @@ pub(crate) fn publish_summary_changes(
         }
     }
     for id in events {
-        let agent = transaction
-            .query_row(
-                "SELECT e.agent FROM runtime_events e JOIN runtime_agents a ON a.id=e.agent \
-             WHERE e.id=?1 AND e.kind='user' AND a.deleted_at IS NULL",
-                [&id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let Some(agent) = agent else {
-            continue;
-        };
-        let response = crate::coordination_reads::delivery_receipts(
+        studio_runtime_store::durable_seq::mark(
             transaction,
-            &agent,
-            std::slice::from_ref(&id),
-        )
-        .map_err(|_| StoreError::RecordContract("message receipt projection failed"))?;
-        for mut receipt in response.items {
-            #[derive(serde::Serialize)]
-            struct ReceiptProjection {
-                agent: String,
-                #[serde(flatten)]
-                receipt: crate::coordination_reads::MessageReceipt,
-            }
-            receipt.id = crate::sync_views::bound_sync_text(&receipt.id, "id");
-            receipt.error = receipt
-                .error
-                .map(|error| crate::sync_views::bound_sync_text(&error, "error"));
-            SyncDocumentsRepository::put_entity(
-                transaction,
-                "messageReceipt",
-                &id,
-                ReceiptProjection {
-                    agent: crate::sync_views::bound_sync_text(&agent, "agent"),
-                    receipt,
-                },
-                false,
-            )?;
-        }
+            studio_runtime_store::durable_seq::RECEIPT_VIEW_MARK,
+            &id,
+        )?;
     }
     Ok(())
+}
+
+/// The `messageReceipt` document of user event `id` at read time; None when the event
+/// is not a user message of a live agent.
+pub(crate) fn receipt_view(connection: &Connection, id: &str) -> StoreResult<Option<RawValue>> {
+    for table in [
+        "runtime_agents",
+        "runtime_events",
+        "runtime_event_meta",
+        "runtime_items",
+    ] {
+        if !table_exists(connection, table)? {
+            return Ok(None);
+        }
+    }
+    let agent = connection
+        .prepare_cached(
+            "SELECT e.agent FROM runtime_events e JOIN runtime_agents a ON a.id=e.agent \
+             WHERE e.id=?1 AND e.kind='user' AND a.deleted_at IS NULL",
+        )?
+        .query_row([id], |row| row.get::<_, String>(0))
+        .optional()?;
+    let Some(agent) = agent else {
+        return Ok(None);
+    };
+    let response = crate::coordination_reads::delivery_receipts(
+        connection,
+        &agent,
+        std::slice::from_ref(&id.to_owned()),
+    )
+    .map_err(|_| StoreError::RecordContract("message receipt projection failed"))?;
+    #[derive(serde::Serialize)]
+    struct ReceiptProjection {
+        agent: String,
+        #[serde(flatten)]
+        receipt: crate::coordination_reads::MessageReceipt,
+    }
+    let Some(mut receipt) = response.items.into_iter().next() else {
+        return Ok(None);
+    };
+    receipt.id = crate::sync_views::bound_sync_text(&receipt.id, "id");
+    receipt.error = receipt
+        .error
+        .map(|error| crate::sync_views::bound_sync_text(&error, "error"));
+    Ok(Some(studio_json::to_raw_value(&ReceiptProjection {
+        agent: crate::sync_views::bound_sync_text(&agent, "agent"),
+        receipt,
+    })?))
 }
 
 /// Seed pre-existing rows once after the summary contract is installed. Normal
@@ -2122,81 +2133,55 @@ fn maintain_monitor_window(
     Ok(())
 }
 
-fn maintain_event_window(
-    transaction: &Transaction<'_>,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
-) -> StoreResult<()> {
-    if !table_exists(transaction, "runtime_events")? {
-        return Ok(());
-    }
-    // The generated runtime_events triggers use the same marker fast path as
-    // Python's sync_event_window(full=False). Avoid reprojecting the entire
-    // window after a trigger has already recorded its current high sequence.
-    let changed = transaction.query_row(
-        "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection='event'",
-        [],
-        |row| row.get::<_, i64>(0),
-    )?;
-    let marker = transaction
-        .query_row(
-            "SELECT value FROM sync_entity_meta WHERE key='event_window_seq'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    if marker
-        .as_deref()
-        .and_then(|value| value.parse::<i64>().ok())
-        == Some(changed)
-    {
-        return Ok(());
-    }
-    #[derive(serde::Serialize)]
-    struct EventProjection {
-        id: String,
-        agent: Option<String>,
-        kind: Option<String>,
-        status: Option<String>,
-        created: Option<f64>,
-        error: Option<String>,
-    }
-    let mut statement = transaction.prepare(
-        &format!("SELECT id,agent,kind,status,created,error FROM runtime_events ORDER BY created DESC,id LIMIT {EVENT_WINDOW_ROWS}"),
-    )?;
-    let events = statement
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let bound = |value: Option<String>, field| {
-                value.map(|text| crate::sync_views::bound_sync_text(&text, field))
-            };
+/// The client view of one event: its bounded id, owner, kind, status, created time
+/// and error. None when the row is gone or has no id.
+pub(crate) fn event_view(connection: &Connection, id: &str) -> StoreResult<Option<Value>> {
+    let bound = |value: Option<String>, field| {
+        value.map(|text| crate::sync_views::bound_sync_text(&text, field))
+    };
+    let row: Option<(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<f64>,
+        Option<String>,
+    )> = connection
+        .prepare_cached("SELECT agent,kind,status,created,error FROM runtime_events WHERE id=?1")?
+        .query_row([id], |row| {
             Ok((
-                id.clone(),
-                EventProjection {
-                    id: crate::sync_views::bound_sync_text(&id, "id"),
-                    agent: bound(row.get(1)?, "agent"),
-                    kind: bound(row.get(2)?, "kind"),
-                    status: bound(row.get(3)?, "status"),
-                    created: row.get(4)?,
-                    error: bound(row.get(5)?, "error"),
-                },
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
             ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    let mut kept = BTreeSet::new();
-    for (id, record) in events {
-        if !id.is_empty() {
-            kept.insert(id.clone());
-            SyncDocumentsRepository::put_entity(transaction, "event", &id, record, false)?;
-        }
+        })
+        .optional()?;
+    Ok(row
+        .filter(|_| !id.is_empty())
+        .map(|(agent, kind, status, created, error)| {
+            json!({"id":crate::sync_views::bound_sync_text(id, "id"),"agent":bound(agent, "agent"),
+            "kind":bound(kind, "kind"),"status":bound(status, "status"),"created":created,
+            "error":bound(error, "error")})
+        }))
+}
+
+/// The ids of the events ranked `offset+1..=offset+limit` by the event window order
+/// (newest first); the window is the first [`EVENT_WINDOW_ROWS`].
+pub(crate) fn event_window_ids(
+    connection: &Connection,
+    offset: usize,
+    limit: usize,
+) -> StoreResult<Vec<String>> {
+    if !table_exists(connection, "runtime_events")? {
+        return Ok(Vec::new());
     }
-    retire_unkept(
-        transaction,
-        "event",
-        &kept,
-        Some("event_window_seq"),
-        validate,
-    )
+    Ok(connection
+        .prepare_cached(
+            "SELECT id FROM runtime_events ORDER BY created DESC,id LIMIT ?1 OFFSET ?2",
+        )?
+        .query_map([limit as i64, offset as i64], |row| row.get(0))?
+        .collect::<Result<_, _>>()?)
 }
 
 pub(crate) fn decode_monitor(
@@ -2944,7 +2929,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_window_publishes_bounded_typed_event() {
+    async fn event_view_is_bounded_and_typed() {
         let root = tempfile::tempdir().unwrap();
         let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
             .await
@@ -2952,11 +2937,9 @@ mod tests {
         store.transaction_with(|tx| {
             let error = "é".repeat(2_100);
             tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,error) VALUES('event','agent','user','text','pending',1,1,?1)", [&error])?;
-            tx.execute("DELETE FROM sync_entity_meta WHERE key='event_window_seq'", [])?;
-            maintain_event_window(tx, &|_, _, _, _| true)?;
-            let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='event' AND id='event'", [], |row| row.get(0))?;
-            let actual: Value = studio_json::from_str(&payload)?;
-            assert_eq!(actual["value"], json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":"é".repeat(2_000)}));
+            let actual = event_view(tx, "event")?.expect("event view");
+            assert_eq!(actual, json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":"é".repeat(2_000)}));
+            assert_eq!(event_window_ids(tx, 0, EVENT_WINDOW_ROWS)?, ["event"]);
             Ok::<_, StoreError>(())
         }).await.unwrap();
     }
@@ -3033,18 +3016,6 @@ mod tests {
             .unwrap();
         let raw = r#"{"id":"a","rootId":"r","epoch":1.0,"status":"idle"}"#;
         assert!(super::CheckedAgentRow::decode(&db, 1, "a", raw).is_err());
-    }
-
-    #[test]
-    fn event_window_triggers_use_the_event_window_owner() {
-        let sql = include_str!("../../runtime-store/src/sync_schema.sql");
-        let limits = sql.match_indices("LIMIT ").count();
-        assert!(limits > 0, "event window triggers declare a bound");
-        assert_eq!(
-            sql.matches(&format!("LIMIT {EVENT_WINDOW_ROWS})")).count(),
-            limits,
-            "every sync_schema.sql LIMIT is EVENT_WINDOW_ROWS"
-        );
     }
 
     use super::*;

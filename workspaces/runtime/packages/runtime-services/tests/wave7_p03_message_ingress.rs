@@ -497,7 +497,7 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
         ),
         (
             "sync_entities",
-            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree') ORDER BY rowid",
+            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor','event','messageReceipt') ORDER BY rowid",
         ),
         (
             "sync_documents",
@@ -510,14 +510,17 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
     ] {
         state.insert(name.into(), json!(json_rows(sql)));
     }
-    let views = studio_runtime_services::entity_scope::agent_snapshot(&db).expect("agent views");
+    let views = crate::agent_view_fixtures::read_time_rows(&db);
     let sync = state
         .get_mut("sync_entities")
         .and_then(Value::as_array_mut)
         .expect("sync rows");
-    for row in views.into_iter().filter(|row| row.collection == "agent") {
-        let payload: Value =
+    for row in views {
+        let mut payload: Value =
             studio_json::from_str(row.payload.as_deref().expect("agent view")).expect("view JSON");
+        if row.collection == "event" {
+            payload["value"]["created"] = json!("generated timestamp");
+        }
         sync.push(
             json!({"collection":row.collection,"id":row.id,"seq":row.sequence,
             "hash":"verified payload hash","payload":payload,"deleted":0}),
@@ -890,8 +893,8 @@ async fn event_projection_failure_returns_error_and_rolls_back_message_admission
     store
         .transaction(move |tx| {
             tx.execute_batch(
-                "CREATE TRIGGER fail_event_projection BEFORE INSERT ON sync_entities
-                 WHEN NEW.collection='event'
+                "CREATE TRIGGER fail_event_projection BEFORE INSERT ON durable_rows
+                 WHEN NEW.tbl='runtime_events'
                  BEGIN SELECT RAISE(ABORT,'injected event projection failure'); END;",
             )?;
             Ok(())

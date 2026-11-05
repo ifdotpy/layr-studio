@@ -786,7 +786,13 @@ fn state(store: &RuntimeStore) -> Value {
     let collections = studio_json::to_string(
         &studio_runtime_store::WORK_COLLECTIONS
             .iter()
-            .chain(&["agent", "agentSummary", "agentDetail"])
+            .chain(&[
+                "agent",
+                "agentSummary",
+                "agentDetail",
+                "event",
+                "messageReceipt",
+            ])
             .collect::<Vec<_>>(),
     )
     .expect("collections");

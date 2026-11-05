@@ -215,27 +215,6 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
         transaction.execute_batch(schema)?;
     }
     transaction.execute_batch("CREATE INDEX IF NOT EXISTS runtime_receipt_transcript_item ON runtime_event_meta(json_extract(record,'$.transcriptItemId'))")?;
-    // A deleted row is no longer readable by the writer journal. Its source
-    // trigger owns the corresponding summary tombstone in the same transaction.
-    for (table, collection) in [
-        ("runtime_events", "messageReceipt"),
-        ("runtime_tasks", "task"),
-    ] {
-        let tombstone =
-            format!("json_object('collection','{collection}','id',OLD.id,'value',json('{{}}'))");
-        transaction.execute_batch(&format!(
-            "CREATE TRIGGER IF NOT EXISTS summary_{collection}_delete AFTER DELETE ON {table} BEGIN
-             INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
-             SELECT '{collection}',OLD.id,(SELECT max(seq)+1 FROM (
-                 SELECT COALESCE(MAX(seq),0) seq FROM sync_entities UNION ALL
-                 SELECT MAX(COALESCE(MAX(seq),0),COALESCE((SELECT value FROM sync_generation WHERE id=1),0)) FROM sync_documents UNION ALL
-                 SELECT COALESCE(MAX(seq),0) FROM durable_rows)),
-                 sync_entity_hash({tombstone}),{tombstone},1
-             WHERE EXISTS(SELECT 1 FROM sync_entities WHERE collection='{collection}' AND id=OLD.id AND deleted=0)
-             ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,hash=excluded.hash,payload=excluded.payload,deleted=1;
-             END;"
-        ))?;
-    }
     // Removing a transcript or its metadata can change materialization even
     // though the event itself is unchanged. Journal that event through its
     // source row; semantic event triggers ignore this value-preserving update.

@@ -380,6 +380,25 @@ pub fn continue_page(
             agent.map(|agent| (agent, include_team_members)),
             fetch,
         )?);
+        // The event window belongs only to the global list.
+        if id.is_none() && agent.is_none() && wanted.contains("event") {
+            units.extend(event_units(
+                transaction,
+                after,
+                through,
+                deletes_after,
+                fetch,
+            )?);
+        }
+        if id.is_none() && agent.is_none() && wanted.contains("messageReceipt") {
+            units.extend(receipt_units(
+                transaction,
+                after,
+                through,
+                deletes_after,
+                fetch,
+            )?);
+        }
     }
     units.sort_by_key(|unit| unit.seq);
     let truncated = units.len() as i64 > limit;
@@ -779,6 +798,132 @@ fn window_units(
             };
             units.push(Unit { seq, rows });
         }
+    }
+    Ok(units)
+}
+
+/// Units of the event window in `(after, through]`: the newest events. A snapshot
+/// sends the window. A delta sends each changed event (a delete when it is not in the
+/// window), and a delete for each event that the changes may have pushed out: one per
+/// changed event, from the ranks just past the window. A reader that never had one of
+/// those ignores its delete.
+fn event_units(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+    deletes_after: i64,
+    fetch: i64,
+) -> StoreResult<Vec<Unit>> {
+    let window_rows = crate::sync_policy::EVENT_WINDOW_ROWS;
+    let mut units = Vec::new();
+    let seq_of = |id: &str| -> StoreResult<Option<i64>> {
+        Ok(connection
+            .prepare_cached(
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_events' AND id=?1 AND deleted=0",
+            )?
+            .query_row([id], |row| row.get(0))
+            .optional()?)
+    };
+    if deletes_after == i64::MAX {
+        for id in crate::sync_policy::event_window_ids(connection, 0, window_rows)? {
+            let Some(seq) = seq_of(&id)?.filter(|seq| *seq > after && *seq <= through) else {
+                continue;
+            };
+            if let Some(view) = crate::sync_policy::event_view(connection, &id)? {
+                units.push(Unit {
+                    seq,
+                    rows: vec![upsert("event", &id, seq, view)?],
+                });
+            }
+        }
+        return Ok(units);
+    }
+    let changed: Vec<(String, i64, bool)> = connection
+        .prepare_cached(
+            "SELECT id,seq,deleted FROM durable_rows WHERE tbl='runtime_events'
+               AND seq>?1 AND seq<=?2 AND (deleted=0 OR seq>?3) ORDER BY seq LIMIT ?4",
+        )?
+        .query_map(params![after, through, deletes_after, fetch], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0))
+        })?
+        .collect::<Result<_, _>>()?;
+    if changed.is_empty() {
+        return Ok(units);
+    }
+    let window: HashSet<String> = crate::sync_policy::event_window_ids(connection, 0, window_rows)?
+        .into_iter()
+        .collect();
+    let wanted = BTreeSet::from(["event"]);
+    let mut last = after;
+    for (id, seq, deleted) in &changed {
+        last = last.max(*seq);
+        let view = if *deleted || !window.contains(id) {
+            None
+        } else {
+            crate::sync_policy::event_view(connection, id)?
+        };
+        let rows = match view {
+            Some(view) => vec![upsert("event", id, *seq, view)?],
+            None => tombstones(&["event"], &wanted, id, *seq),
+        };
+        units.push(Unit { seq: *seq, rows });
+    }
+    let pushed_out = crate::sync_policy::event_window_ids(connection, window_rows, changed.len())?;
+    let rows = pushed_out
+        .iter()
+        .flat_map(|id| tombstones(&["event"], &wanted, id, last))
+        .collect::<Vec<_>>();
+    if !rows.is_empty() {
+        units.push(Unit { seq: last, rows });
+    }
+    Ok(units)
+}
+
+/// Units of the message receipts in `(after, through]`: one per user event change or
+/// receipt mark (`durable_seq::RECEIPT_VIEW_MARK`), at the later number. An event that
+/// is not a user message of a live agent has no receipt: a delete in a delta.
+fn receipt_units(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+    deletes_after: i64,
+    fetch: i64,
+) -> StoreResult<Vec<Unit>> {
+    let changed: Vec<(String, i64)> = connection
+        .prepare_cached(
+            "SELECT d.id,MAX(d.seq) AS last FROM durable_rows d
+               LEFT JOIN runtime_events e ON d.tbl='runtime_events' AND e.id=d.id
+             WHERE d.tbl IN ('runtime_events',?1) AND d.seq>?2 AND d.seq<=?3
+               AND (d.deleted=0 OR d.seq>?4)
+               AND (d.tbl=?1 OR d.deleted=1 OR e.kind='user')
+             GROUP BY d.id ORDER BY last LIMIT ?5",
+        )?
+        .query_map(
+            params![
+                durable_seq::RECEIPT_VIEW_MARK,
+                after,
+                through,
+                deletes_after,
+                fetch
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?
+        .collect::<Result<_, _>>()?;
+    let wanted = BTreeSet::from(["messageReceipt"]);
+    let snapshot = deletes_after == i64::MAX;
+    let mut units = Vec::new();
+    for (id, seq) in changed {
+        let view = crate::sync_policy::receipt_view(connection, &id).or_else(|error| {
+            // One receipt that cannot be built must not stop the stream.
+            eprintln!("receipt {id} is not streamed: {error}");
+            Ok::<_, StoreError>(None)
+        })?;
+        let rows = match view {
+            Some(value) => vec![upsert("messageReceipt", &id, seq, value)?],
+            None if snapshot => continue,
+            None => tombstones(&["messageReceipt"], &wanted, &id, seq),
+        };
+        units.push(Unit { seq, rows });
     }
     Ok(units)
 }

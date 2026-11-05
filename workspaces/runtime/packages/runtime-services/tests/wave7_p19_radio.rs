@@ -545,11 +545,7 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
         let mut rows = rows;
         if table == "sync_entities" {
             // The agent views are built at read time; compare them as the old copies.
-            for row in studio_runtime_services::entity_scope::agent_snapshot(&db)
-                .expect("agent views")
-                .into_iter()
-                .filter(|row| row.collection == "agent")
-            {
+            for row in super::agent_view_fixtures::read_time_rows(&db) {
                 rows.push(
                     json!({"collection":row.collection,"id":row.id,"seq":row.sequence,
                     "hash":"","payload":row.payload,"deleted":0}),

@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::StoreResult;
 use crate::records::{AgentId, QueueEvent, QueueEventId, QueueEventRepository};
-use crate::schema::{SchemaRequirements, TableRequirement, TriggerRequirement};
+use crate::schema::{SchemaRequirements, TableRequirement};
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[TableRequirement {
@@ -15,29 +15,9 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     triggers: &[],
     conditional_triggers: &[],
     connection_functions: &[],
-    bootstrap_tables: &[TableRequirement {
-        name: "sync_entities",
-        columns: &["collection", "id", "seq", "hash", "payload", "deleted"],
-    }],
-    bootstrap_triggers: &[
-        TriggerRequirement {
-            name: "sync_entity_event_INSERT",
-            table: "runtime_events",
-        },
-        TriggerRequirement {
-            name: "sync_entity_event_UPDATE",
-            table: "runtime_events",
-        },
-        TriggerRequirement {
-            name: "sync_entity_event_UPDATE_WINDOW",
-            table: "runtime_events",
-        },
-        TriggerRequirement {
-            name: "sync_entity_event_DELETE",
-            table: "runtime_events",
-        },
-    ],
-    bootstrap_connection_functions: &["sync_entity_payload", "sync_entity_hash"],
+    bootstrap_tables: &[],
+    bootstrap_triggers: &[],
+    bootstrap_connection_functions: &[],
 };
 
 impl QueueEventRepository {

@@ -193,7 +193,8 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
         .expect("cross-runtime test operation succeeds");
     let rust_numeric_rows = {
         let mut statement = reader
-            .prepare("SELECT seq,payload,hash,deleted FROM sync_entities WHERE collection='event' AND id LIKE 'numeric-created-%' ORDER BY id")
+            // The event document is built at read time from these columns.
+            .prepare("SELECT 0,json_object('id',id,'value',json_object('created',created)),'',0 FROM runtime_events WHERE id LIKE 'numeric-created-%' ORDER BY id")
             .expect("cross-runtime test operation succeeds");
         statement
             .query_map([], |row| {

@@ -239,7 +239,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
         let sql = if logical && name == "runtime_agents" {
             "SELECT id,record FROM runtime_agents".to_owned()
         } else if logical && name == "sync_entities" {
-            "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree')".to_owned()
+            "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor','event','messageReceipt')".to_owned()
         } else {
             studio_runtime_store::agent_columns::select_declared_sql(&connection, &name).unwrap()
         };
@@ -265,12 +265,10 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
         }
         if logical && name == "sync_entities" {
             // The agent views are built at read time; compare them as the old copies.
-            for row in studio_runtime_services::entity_scope::agent_snapshot(&connection).unwrap() {
-                if row.collection == "agent" {
-                    let payload: Value =
-                        studio_json::from_str(row.payload.as_deref().unwrap()).unwrap();
-                    rows.push(json!([row.collection, row.id, payload, 0]));
-                }
+            for row in crate::agent_view_fixtures::read_time_rows(&connection) {
+                let payload: Value =
+                    studio_json::from_str(row.payload.as_deref().unwrap()).unwrap();
+                rows.push(json!([row.collection, row.id, payload, 0]));
             }
         }
         result.insert(name, json!(rows));

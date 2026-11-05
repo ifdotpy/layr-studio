@@ -1055,7 +1055,7 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
         vec!["upgrade-receipt".into(), CHAT.into()],
     ).await;
     store.transaction(|tx| {
-        tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.status','pending') WHERE collection='messageReceipt' AND id='upgrade-receipt'", [])?;
+        tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.items[0].status','pending') WHERE collection='queue' AND id=?1", [CHAT])?;
         Ok(())
     }).await.expect("install legacy projection");
     let before = store
@@ -1093,12 +1093,9 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
             .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
             .expect("seed complete")
     );
-    for collection in ["queue", "messageReceipt"] {
-        let id = if collection == "queue" {
-            CHAT
-        } else {
-            "upgrade-receipt"
-        };
+    // Receipts are built at read time; only the queue keeps a copy.
+    for collection in ["queue"] {
+        let id = CHAT;
         let (sequence, payload) = store
             .test_read_transaction(|tx| {
                 tx.query_row(

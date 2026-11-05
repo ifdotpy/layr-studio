@@ -518,10 +518,10 @@ async fn result_write_boundaries_roll_back_then_recover_the_first_receipt() {
             "runtime_event_meta",
             "runtime_agents",
             "runtime_monitors",
-            "sync_entities",
+            "durable_rows",
         ]
     } else {
-        vec!["runtime_events", "sync_entities"]
+        vec!["runtime_events", "durable_rows"]
     };
     for table in tables {
         for boundary in ["BEFORE", "AFTER"] {

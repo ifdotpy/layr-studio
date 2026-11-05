@@ -139,3 +139,22 @@ pub(crate) fn assert_agent_view_projections(db: &rusqlite::Connection) {
 pub(crate) fn is_agent_view_collection(collection: &Value) -> bool {
     collection == "agentSummary" || collection == "agentDetail"
 }
+
+/// The documents that readers build at read time and the frozen corpora kept as
+/// `sync_entities` copies: the legacy `agent` view, the task and monitor windows, the
+/// event window and the message receipts.
+#[allow(dead_code)]
+pub(crate) fn read_time_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_store::EntityRow> {
+    studio_runtime_services::entity_scope::agent_snapshot(db)
+        .expect("agent views")
+        .into_iter()
+        .filter(|row| row.collection == "agent")
+        .chain(
+            studio_runtime_services::entity_scope::live_documents(
+                db,
+                r#"["task","monitor","event","messageReceipt"]"#,
+            )
+            .expect("window documents"),
+        )
+        .collect()
+}

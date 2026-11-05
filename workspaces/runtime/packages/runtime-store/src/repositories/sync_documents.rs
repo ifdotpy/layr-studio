@@ -130,8 +130,9 @@ pub const AGENT_VIEW_COLLECTIONS: &[&str] =
     &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
 
 /// Window collections: a document per member of a window in `durable_rows`
-/// (`durable_seq::TASK_WINDOW`, `durable_seq::MONITOR_WINDOW`), built at read time.
-pub const WINDOW_COLLECTIONS: &[&str] = &["task", "monitor"];
+/// (`durable_seq::TASK_WINDOW`, `durable_seq::MONITOR_WINDOW`), the newest events and
+/// the message receipts of user events, built at read time.
+pub const WINDOW_COLLECTIONS: &[&str] = &["task", "monitor", "event", "messageReceipt"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncDocument {
@@ -1023,14 +1024,14 @@ mod tests {
         crate::feature_schema::prepare(&tx).unwrap();
         assert!(!crate::schema::table_exists(&tx, "sync_versions").unwrap());
         assert!(super::next_sequence(&tx).unwrap() > 900);
-        let sql: String = tx
+        let left: i64 = tx
             .query_row(
-                "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='summary_task_delete'",
+                "SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%sync_versions%'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(!sql.contains("sync_versions"));
+        assert_eq!(left, 0, "no trigger reads the retired version table");
         crate::bootstrap::prepare_sync_schema(&tx).unwrap();
         assert!(super::next_sequence(&tx).unwrap() > 900);
         tx.rollback().unwrap();

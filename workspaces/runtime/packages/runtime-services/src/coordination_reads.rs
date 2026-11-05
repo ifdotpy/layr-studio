@@ -26,7 +26,7 @@ pub struct MessageReceipts {
 }
 
 pub fn delivery_receipts(
-    connection: &Transaction<'_>,
+    connection: &rusqlite::Connection,
     agent: &str,
     ids: &[String],
 ) -> Result<MessageReceipts, CoordinationError> {
