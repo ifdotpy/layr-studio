@@ -42,6 +42,9 @@ pub struct DurableTable {
     /// True for a table whose only data is `id` and the payload column: an update that
     /// leaves both unchanged takes no new number.
     pub record_only: bool,
+    /// True for `runtime_agents`: a change of an agent's team (root or liveness) moves
+    /// the scope visibility fence of the team, with this change's number.
+    pub team_fence: bool,
 }
 
 impl DurableTable {
@@ -51,6 +54,18 @@ impl DurableTable {
             payload,
             online_backfill: false,
             record_only: false,
+            team_fence: false,
+        }
+    }
+
+    /// The agent table; see [`DurableTable::team_fence`].
+    pub const fn agents() -> Self {
+        Self {
+            name: "runtime_agents",
+            payload: "record",
+            online_backfill: false,
+            record_only: false,
+            team_fence: true,
         }
     }
 
@@ -61,6 +76,7 @@ impl DurableTable {
             payload: "record",
             online_backfill: false,
             record_only: true,
+            team_fence: false,
         }
     }
 
@@ -70,13 +86,14 @@ impl DurableTable {
             payload,
             online_backfill: true,
             record_only: false,
+            team_fence: false,
         }
     }
 }
 
 /// Opt-in list. Add one line to publish another table.
 pub const DURABLE_TABLES: &[DurableTable] = &[
-    DurableTable::new("runtime_agents", "record"),
+    DurableTable::agents(),
     DurableTable::new("runtime_requests", "record"),
     DurableTable::new("runtime_work", "record"),
     // The owner of conversation items; transcript pages are built from it at read time.
@@ -92,6 +109,9 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_annotations"),
     DurableTable::record("runtime_rules"),
     DurableTable::new("approvals", "request"),
+    DurableTable::record("runtime_complaints"),
+    // Chat membership edges: an `edge` document per chat edge, built at read time.
+    DurableTable::new("graph_edges", "target"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -102,45 +122,8 @@ const NEXT: &str = "(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+
     (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),
     (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows))";
 
-/// Derived view collections that the publisher builds from `runtime_agents`. Owner of the list. `durable_view_log` mirrors
-/// their `sync_entities` rows (collection, id, seq, deleted) without the payload, so a
-/// reader can learn which views changed after a cursor from the same cursor space.
-pub const VIEW_COLLECTIONS: &[&str] = &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
-
-/// `VIEW_COLLECTIONS` as an SQL list: `'agent','agentSummary',...`.
-pub(crate) fn view_collection_list() -> String {
-    VIEW_COLLECTIONS
-        .iter()
-        .map(|collection| format!("'{collection}'"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// DDL, backfill and mirror triggers of `durable_view_log`; needs `sync_entities`.
-pub(crate) fn view_log_sql() -> String {
-    let list = view_collection_list();
-    let mirror = "INSERT INTO durable_view_log(collection,id,seq,deleted)
-         VALUES(NEW.collection,NEW.id,NEW.seq,NEW.deleted)
-         ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted;";
-    format!(
-        "CREATE TABLE IF NOT EXISTS durable_view_log(
-             collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,
-             deleted INTEGER NOT NULL, PRIMARY KEY(collection,id));
-         CREATE INDEX IF NOT EXISTS durable_view_log_seq ON durable_view_log(seq);
-         INSERT OR IGNORE INTO durable_view_log(collection,id,seq,deleted)
-             SELECT collection,id,seq,deleted FROM sync_entities WHERE collection IN ({list});
-         CREATE TRIGGER IF NOT EXISTS durable_view_log_insert AFTER INSERT ON sync_entities
-         WHEN NEW.collection IN ({list}) BEGIN {mirror} END;
-         CREATE TRIGGER IF NOT EXISTS durable_view_log_update AFTER UPDATE ON sync_entities
-         WHEN NEW.collection IN ({list}) BEGIN {mirror} END;
-         CREATE TRIGGER IF NOT EXISTS durable_view_log_delete AFTER DELETE ON sync_entities
-         WHEN OLD.collection IN ({list}) BEGIN
-             DELETE FROM durable_view_log WHERE collection=OLD.collection AND id=OLD.id; END;"
-    )
-}
-
 /// The generator: SQL for the three triggers of one table.
-fn trigger_sql(table: &str, record_only: bool) -> String {
+fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> String {
     let now = "CAST(strftime('%s','now') AS INTEGER)";
     let cutoff = format!("{now}-{TOMBSTONE_RETENTION_SECONDS}");
     let put = |id: &str, deleted: u8, at: &str| {
@@ -151,6 +134,36 @@ fn trigger_sql(table: &str, record_only: bool) -> String {
     };
     let live = put("NEW.id", 0, "0");
     let tombstone = put("OLD.id", 1, now);
+    // The scope visibility fence of a team (owner: sync_documents
+    // ENTITY_SCOPE_VISIBILITY_KEY_PREFIX) at the number this change just took.
+    let fence = |roots: &str, id: &str| {
+        if !team_fence {
+            return String::new();
+        }
+        format!(
+            "INSERT INTO sync_entity_meta(key,value)
+               SELECT 'entity_scope_visibility:' || json_array('*',root),
+                      CAST((SELECT seq FROM durable_rows WHERE tbl='{table}' AND id={id}) AS TEXT)
+               FROM ({roots}) WHERE root IS NOT NULL
+             ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT);"
+        )
+    };
+    let live_root = |row: &str| {
+        format!(
+            "SELECT json_extract({row}.record,'$.rootId') AS root WHERE json_extract({row}.record,'$.deletedAt') IS NULL"
+        )
+    };
+    let insert_fence = fence(&live_root("NEW"), "NEW.id");
+    let update_fence = fence(
+        &format!(
+            "SELECT root FROM ({} UNION {}) WHERE json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId')
+               OR (json_extract(OLD.record,'$.deletedAt') IS NULL) IS NOT (json_extract(NEW.record,'$.deletedAt') IS NULL)",
+            live_root("OLD"),
+            live_root("NEW")
+        ),
+        "NEW.id",
+    );
+    let delete_fence = fence(&live_root("OLD"), "OLD.id");
     let changed = if record_only {
         " WHEN OLD.id IS NOT NEW.id OR OLD.record IS NOT NEW.record"
     } else {
@@ -160,12 +173,14 @@ fn trigger_sql(table: &str, record_only: bool) -> String {
         "
 CREATE TRIGGER IF NOT EXISTS durable_{table}_insert AFTER INSERT ON {table} BEGIN
   {live}
+  {insert_fence}
 END;
 CREATE TRIGGER IF NOT EXISTS durable_{table}_update AFTER UPDATE ON {table}{changed} BEGIN
   {live}
   INSERT INTO durable_rows(tbl,id,seq,deleted,at)
     SELECT '{table}',OLD.id,{NEXT},1,{now} WHERE OLD.id IS NOT NEW.id
     ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=1,at=excluded.at;
+  {update_fence}
 END;
 CREATE TRIGGER IF NOT EXISTS durable_{table}_delete AFTER DELETE ON {table} BEGIN
   UPDATE durable_floor SET floor=MAX(floor,
@@ -173,6 +188,7 @@ CREATE TRIGGER IF NOT EXISTS durable_{table}_delete AFTER DELETE ON {table} BEGI
   WHERE id=1 AND EXISTS(SELECT 1 FROM durable_rows WHERE deleted=1 AND at<{cutoff});
   DELETE FROM durable_rows WHERE deleted=1 AND at<{cutoff};
   {tombstone}
+  {delete_fence}
 END;
 "
     )
@@ -181,7 +197,6 @@ END;
 /// Number the rows of every opted-in table that have no entry yet (rows that predate
 /// the source) and install the triggers. Runs as a migration and on a fresh state.
 pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
-    tx.execute_batch(&view_log_sql())?;
     for table in DURABLE_TABLES {
         let name = table.name;
         // A table created later by its own migration is numbered when it exists.
@@ -196,7 +211,7 @@ pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
                    WHERE NOT EXISTS (SELECT 1 FROM durable_rows d WHERE d.tbl='{name}' AND d.id=t.id);"
             ))?;
         }
-        tx.execute_batch(&trigger_sql(name, table.record_only))?;
+        tx.execute_batch(&trigger_sql(name, table.record_only, table.team_fence))?;
     }
     Ok(())
 }
@@ -210,6 +225,28 @@ pub fn keep_counter(tx: &Transaction<'_>) -> StoreResult<()> {
     tx.execute(
         &format!("UPDATE sync_generation SET value=MAX(value,{NEXT}-1) WHERE id=1"),
         [],
+    )?;
+    Ok(())
+}
+
+/// Name of the change marks of the agent views in `durable_rows`. The views are built
+/// at read time; a mark asks readers to build them again (owner: `entity_scope` in
+/// runtime-services).
+pub const AGENT_VIEW_MARK: &str = "agent_views";
+
+/// The `durable_rows` table name of the chat views: a chat document reads its group,
+/// its member edges and its messages, so their writers mark the chat.
+pub const CHAT_VIEW_MARK: &str = "chat_views";
+
+/// Give `(tbl, id)` a new number without a row write: a derived document of `id`
+/// changed. A mark is never a tombstone.
+pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
+    connection.execute(
+        &format!(
+            "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
+             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0"
+        ),
+        rusqlite::params![tbl, id],
     )?;
     Ok(())
 }
@@ -335,34 +372,6 @@ pub fn changes_since(
         tombstones,
         seq: high,
     })
-}
-
-/// A view that changed after a cursor. The payload stays in `sync_entities` until the
-/// stream builds views at read time.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ViewChange {
-    pub collection: String,
-    pub id: String,
-    pub seq: i64,
-    pub deleted: bool,
-}
-
-/// Views of [`VIEW_COLLECTIONS`] with `seq` above `cursor`, in `seq` order.
-pub fn view_changes_since(connection: &Connection, cursor: i64) -> StoreResult<Vec<ViewChange>> {
-    let changes = connection
-        .prepare(
-            "SELECT collection,id,seq,deleted FROM durable_view_log WHERE seq>?1 ORDER BY seq",
-        )?
-        .query_map([cursor], |row| {
-            Ok(ViewChange {
-                collection: row.get(0)?,
-                id: row.get(1)?,
-                seq: row.get(2)?,
-                deleted: row.get::<_, i64>(3)? != 0,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(changes)
 }
 
 /// Data-loss check for removing the transcript copy in `sync_entities`: ids of live
@@ -618,41 +627,6 @@ mod tests {
     }
 
     #[test]
-    fn the_view_log_mirrors_view_collections_in_sync_entities() {
-        let db = canvas();
-        let entity = |collection: &str, id: &str, deleted: i64| {
-            db.execute(
-                "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
-                 VALUES(?1,?2,(SELECT MAX(entity_seq,document_seq,generation)+1 FROM (
-                    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),
-                    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),
-                    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1)),
-                    'h','{}',?3)
-                 ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted",
-                rusqlite::params![collection, id, deleted],
-            )
-            .expect("entity");
-        };
-        entity("agentSummary", "a", 0);
-        entity("event", "e", 0);
-        entity("work", "w", 0);
-        entity("agentSummary", "a", 1);
-        let log = view_changes_since(&db, 0).expect("log");
-        assert_eq!(
-            log.iter()
-                .map(|c| (c.collection.as_str(), c.id.as_str(), c.deleted))
-                .collect::<Vec<_>>(),
-            vec![("work", "w", false), ("agentSummary", "a", true)],
-            "other collections are not logged; an update keeps one row at the new seq"
-        );
-        let cursor = log[0].seq;
-        assert_eq!(view_changes_since(&db, cursor).expect("log").len(), 1);
-        db.execute("DELETE FROM sync_entities WHERE collection='work'", [])
-            .expect("prune");
-        assert_eq!(view_changes_since(&db, 0).expect("log").len(), 1);
-    }
-
-    #[test]
     fn an_unchanged_record_only_row_keeps_its_number() {
         let db = canvas();
         db.execute(
@@ -678,23 +652,6 @@ mod tests {
         )
         .expect("real update");
         assert!(seq() > first, "a real update takes a new number");
-    }
-
-    #[test]
-    fn install_backfills_the_view_log() {
-        let mut db = canvas();
-        db.execute_batch(
-            "DROP TRIGGER durable_view_log_insert; DROP TABLE durable_view_log;
-             INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
-             VALUES('agent','r',900,'h','{}',0),('event','e',901,'h','{}',0);",
-        )
-        .expect("old state");
-        let tx = db.transaction().expect("transaction");
-        install(&tx).expect("install");
-        tx.commit().expect("commit");
-        let log = view_changes_since(&db, 0).expect("log");
-        assert_eq!(log.len(), 1);
-        assert_eq!((log[0].collection.as_str(), log[0].seq), ("agent", 900));
     }
 
     #[test]

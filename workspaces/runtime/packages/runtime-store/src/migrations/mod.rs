@@ -89,6 +89,8 @@ mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;
 mod m2026_11_03_drop_completed_turns;
 mod m2026_11_03_request_signature_digest;
+mod m2026_11_04_agent_views_read_time;
+mod m2026_11_04_chat_read_time;
 mod m2026_11_04_direct_read_time;
 mod m2026_11_04_work_read_time;
 
@@ -1533,6 +1535,26 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_04_direct_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-agent-views-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with agent view copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_agent_views_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-chat-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with complaint, edge or chat copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_chat_read_time::apply(c.transaction),
     },
 ];
 

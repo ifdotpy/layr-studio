@@ -230,7 +230,11 @@ async fn pending_selection_matches_python_and_claims_rust_event_write_events() {
         )
         .expect("delivered");
     assert_eq!(delivered, 4);
-    let projected:(String,bool,String)=reader.query_row("SELECT json_extract(payload,'$.value.status'),json_extract(payload,'$.value.inFlight'),json_extract(payload,'$.value.turnId') FROM sync_entities WHERE collection='agent' AND id=?1",[&agent],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).expect("projection");
+    let payload = studio_runtime_services::entity_scope::direct_document(&reader, "agent", &agent)
+        .expect("projection")
+        .and_then(|row| row.payload)
+        .expect("live projection");
+    let projected:(String,bool,String)=reader.query_row("SELECT json_extract(?1,'$.value.status'),json_extract(?1,'$.value.inFlight'),json_extract(?1,'$.value.turnId')",[&payload],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).expect("projection");
     assert_eq!(projected, ("running".into(), true, "turn-1".into()));
 }
 #[tokio::test]
@@ -470,7 +474,11 @@ async fn proven_not_submitted_preserves_failed_projection_and_pending_input() {
         .await
         .expect("unsent");
     let reader = store.test_reader().expect("read");
-    let projected:(String,bool,Option<String>)=reader.query_row("SELECT json_extract(payload,'$.value.status'),json_extract(payload,'$.value.inFlight'),json_extract(payload,'$.value.turnId') FROM sync_entities WHERE collection='agent' AND id=?1",[&agent],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).expect("projection");
+    let payload = studio_runtime_services::entity_scope::direct_document(&reader, "agent", &agent)
+        .expect("projection")
+        .and_then(|row| row.payload)
+        .expect("live projection");
+    let projected:(String,bool,Option<String>)=reader.query_row("SELECT json_extract(?1,'$.value.status'),json_extract(?1,'$.value.inFlight'),json_extract(?1,'$.value.turnId')",[&payload],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).expect("projection");
     assert_eq!(projected, ("failed".into(), false, None));
     let pending: i64 = reader
         .query_row(
