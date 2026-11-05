@@ -445,10 +445,19 @@ test(
         );
         assert.ok(pid);
         assert.ok(result.code !== 0 || result.signal);
-        // An exited orphan may briefly be a zombie until init reaps it; it cannot run.
-        const state = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
-          encoding: "utf8",
-        }).stdout.trim();
+        // A signal reaches the child asynchronously, and an exited orphan may briefly be
+        // a zombie until init reaps it; neither can run. Wait a bounded time for the exit.
+        const stateOf = () =>
+          spawnSync("ps", ["-o", "stat=", "-p", String(pid)], {
+            encoding: "utf8",
+          }).stdout.trim();
+        let state = stateOf();
+        for (
+          const end = Date.now() + 5_000;
+          state && !state.startsWith("Z") && Date.now() < end;
+          state = stateOf()
+        )
+          await new Promise((done) => setTimeout(done, 50));
         assert.ok(
           !state || state.startsWith("Z"),
           `nested child ${pid} survived: ${state}`,
