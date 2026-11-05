@@ -3,7 +3,7 @@
 //! a visible `startWait`, and starts exactly once when a slot frees, the
 //! settings change, or after a restart. A waiting start is an in-flight
 //! preparation, so the worker barrier is used only once nothing waits.
-use super::auth_hold::{Account, agents, record_of, wake_agent};
+use super::auth_hold::{Account, agent_rows, agents, record_of, wake_agent};
 use super::*;
 use crate::account_start_gate::StartThrottle;
 use studio_runtime_providers::ProviderKind;
@@ -135,16 +135,13 @@ async fn legacy_disk_wait_clears_on_a_healthy_disk_before_account_admission() {
         state.root.clone(),
         Arc::new(|_| Some(10 * 1024 * 1024 * 1024)),
     )));
-    let agents = agents(&state, ProviderKind::Codex, 1).await;
+    let agents = agent_rows(&state, ProviderKind::Codex, 1).await;
     let account = Account::new(&state, ProviderKind::Codex);
     account
         .driver
         .set_start_throttle("default", throttle(8, 0, 1))
         .unwrap();
-    let (mut peer, mut worker) = open(&state, state.bridge.clone(), &account).await;
-    wake_agent(&state, &worker, &agents[0]).await;
-    let (started, _) = serve_start(&mut peer, &agents).await;
-    assert_eq!(started, agents[0]);
+    // Seed the legacy wait before the second agent has input or a worker.
     let legacy = agents[1].clone();
     state
         .bridge
@@ -154,22 +151,33 @@ async fn legacy_disk_wait_clears_on_a_healthy_disk_before_account_admission() {
             agent.start_wait = Some(
                 studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: agent.epoch },
             );
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(
+                    "legacy disk error".into(),
+                ),
+            );
             AgentRepository::put(tx, &agent)
         })
         .await
         .unwrap();
+    let (mut peer, mut worker) = open(&state, state.bridge.clone(), &account).await;
+    wake_agent(&state, &worker, &agents[0]).await;
+    let (started, _) = serve_start(&mut peer, &agents).await;
+    assert_eq!(started, agents[0]);
+    state.enqueue_for(&agents[1], &agents[1]).await;
+    assert_eq!(
+        record_of(&state, &agents[1]).await["error"],
+        "legacy disk error"
+    );
     let mut changes = state.bridge.agent_changes();
     wake_agent(&state, &worker, &agents[1]).await;
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            if record_of(&state, &agents[1]).await["startWait"].is_null() {
-                break;
-            }
-            changes.changed().await.unwrap();
+    loop {
+        if record_of(&state, &agents[1]).await["startWait"]["reason"] == "slot" {
+            break;
         }
-    })
-    .await
-    .expect("legacy disk wait clears on a healthy disk");
+        changes.changed().await.unwrap();
+    }
+    assert!(record_of(&state, &agents[1]).await["error"].is_null());
     assert_ne!(state.event_status(&agents[1]).await, "failed");
     worker.shutdown().await.unwrap();
 }
