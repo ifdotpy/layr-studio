@@ -1,4 +1,5 @@
 import ClaudeOrganization from "./ClaudeOrganization";
+import DirectoryField from "./DirectoryField";
 import Disclosure from "./ui/Disclosure";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { Button, NumberInput, Stack, Textarea, TextInput } from "@mantine/core";
@@ -120,11 +121,11 @@ export default function ClaudeProfile({
             readOnly={!!account}
             disabled={busy}
           />
-          <TextInput
+          <DirectoryField
             label="Claude configuration directory"
             placeholder="Default Claude configuration"
             value={configDir}
-            onChange={(event) => setConfigDir(event.currentTarget.value)}
+            onChange={setConfigDir}
             readOnly={!!account}
             disabled={busy}
           />

@@ -18,6 +18,10 @@ import {
 } from "../servers/projectLocations";
 import "./project-directory-picker.css";
 
+/** The parent of an absolute path, by its text; the root is its own parent. */
+export const parentPath = (path: string) =>
+  path.replace(/\/+$/, "").replace(/\/[^/]*$/, "") || "/";
+
 type Directory =
   paths["/api/directories"]["get"]["responses"][200]["content"]["application/json"];
 
@@ -230,6 +234,12 @@ export default function ProjectDirectoryPicker({
             {directory && directory.path !== path && (
               <Button onClick={() => navigate(directory.path)}>
                 Back to previous folder
+              </Button>
+            )}
+            {/* A saved path that does not exist yet opens from its parent. */}
+            {path && parentPath(path) !== path && (
+              <Button onClick={() => navigate(parentPath(path))}>
+                Open parent folder
               </Button>
             )}
           </div>

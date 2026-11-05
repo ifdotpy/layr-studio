@@ -4,24 +4,26 @@
 //! new route without a class.
 
 use studio_runtime_services::principal::CommandClass::{
-    self, ChatControl, Federation, Host, OwnerOnly, Read, Spawn,
+    self, AccountSignIn, ChatControl, Federation, Host, OwnerOnly, Read, Spawn,
 };
 use studio_runtime_services::principal::Scope;
 
 /// `(method, OpenAPI path template, class)` of every non-safe operation.
+/// A device with full access may sign in a provider account of a paired server.
+/// A peer server may not, and pairing, grants, deletion and settings stay owner only.
 const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/accounts/claude/add", OwnerOnly),
-    ("POST", "/api/accounts/claude/login", OwnerOnly),
-    ("POST", "/api/accounts/claude/login/cancel", OwnerOnly),
-    ("POST", "/api/accounts/claude/login/code", OwnerOnly),
+    ("POST", "/api/accounts/claude/login", AccountSignIn),
+    ("POST", "/api/accounts/claude/login/cancel", AccountSignIn),
+    ("POST", "/api/accounts/claude/login/code", AccountSignIn),
     ("POST", "/api/accounts/default", OwnerOnly),
     ("POST", "/api/accounts/default-groups", OwnerOnly),
     ("POST", "/api/accounts/delete", OwnerOnly),
     ("POST", "/api/accounts/disconnect", OwnerOnly),
     ("POST", "/api/accounts/discover", OwnerOnly),
     ("POST", "/api/accounts/group", OwnerOnly),
-    ("POST", "/api/accounts/login", OwnerOnly),
-    ("POST", "/api/accounts/login/cancel", OwnerOnly),
+    ("POST", "/api/accounts/login", AccountSignIn),
+    ("POST", "/api/accounts/login/cancel", AccountSignIn),
     ("POST", "/api/accounts/name", OwnerOnly),
     ("POST", "/api/accounts/reconnect", OwnerOnly),
     ("POST", "/api/accounts/register", OwnerOnly),
@@ -157,6 +159,32 @@ mod tests {
             missing.is_empty(),
             "classify these routes in route_class.rs: {missing:?}"
         );
+    }
+
+    #[test]
+    fn a_full_device_may_sign_in_a_provider_account_but_not_pair() {
+        use studio_runtime_services::principal::{Access, Grant, Principal, access};
+        let device = Principal::Device {
+            id: "phone".into(),
+            grant: Grant::Full,
+        };
+        for route in [
+            "/api/accounts/login",
+            "/api/accounts/login/cancel",
+            "/api/accounts/claude/login",
+            "/api/accounts/claude/login/code",
+            "/api/accounts/claude/login/cancel",
+        ] {
+            let class = class_of("POST", route).expect("classified");
+            assert_eq!(access(&device, class), Access::Allow, "{route}");
+        }
+        let delete = class_of("POST", "/api/accounts/delete").expect("classified");
+        assert_eq!(access(&device, delete), Access::Deny);
+        let peer = Principal::Peer {
+            server: "peer".into(),
+        };
+        let login = class_of("POST", "/api/accounts/login").expect("classified");
+        assert_eq!(access(&peer, login), Access::Deny);
     }
 
     #[test]
