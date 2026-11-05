@@ -64,6 +64,12 @@ pub(super) async fn switch_chat_with(
                 match key.as_str() {
                     "cwd" => current.cwd = value.as_str().map(str::to_owned),
                     "layrProjectId" => current.layr_project_id = value.as_str().map(Into::into),
+                    "layrLine" => current.layr_line = <studio_runtime_schema::queue_command::Field<
+                        String,
+                    > as serde::Deserialize>::deserialize(
+                        value.clone()
+                    )
+                    .map_err(|error| NativeLayrError::Refused(error.to_string()))?,
                     "layrReadCwd" => current.layr_read_cwd = value.as_str().map(Into::into),
                     "layrStoreRoot" => current.layr_store_root = value.as_str().map(str::to_owned),
                     "layrReady" => current.layr_ready = value.as_bool(),

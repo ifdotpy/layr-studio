@@ -385,6 +385,11 @@ pub struct AgentRecord {
     pub layr_store_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layr_project_id: Option<Box<str>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub layr_line: studio_runtime_schema::queue_command::Field<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layr_read_cwd: Option<Box<str>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1215,6 +1220,7 @@ impl AgentRecord {
             subagent_concurrency_version: None,
             layr_store_root: None,
             layr_project_id: None,
+            layr_line: Default::default(),
             layr_read_cwd: None,
             layr_subpath: None,
             layr_base_state: None,
@@ -3379,6 +3385,21 @@ mod tests {
                 crate::schema::truthy(parsed.get("movedFrom"))
             );
         }
+    }
+
+    #[test]
+    fn native_layr_line_preserves_presence_and_rejects_invalid_type() {
+        for suffix in ["", r#","layrLine":null"#, r#","layrLine":"main""#] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{suffix}}}"#
+            );
+            let original: studio_json::Value = studio_json::from_str(&raw).unwrap();
+            let record: super::AgentRecord = studio_json::from_str(&raw).unwrap();
+            assert_eq!(record.value()["layrLine"], original["layrLine"]);
+            assert_eq!(record.value().get("layrLine"), original.get("layrLine"));
+        }
+        let invalid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"layrLine":42}"#;
+        assert!(studio_json::from_str::<super::AgentRecord>(invalid).is_err());
     }
 
     #[test]

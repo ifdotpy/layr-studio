@@ -477,7 +477,7 @@ impl ServerTools {
             return refuse("Select a paired server");
         }
         if action == "fetch" {
-            return self.fetch(actor, args, key, server).await;
+            return Box::pin(self.fetch(actor, args, key, server)).await;
         }
         if !matches!(action, "projects" | "folders" | "git" | "receipt") {
             return refuse("Select list, projects, folders, git, fetch, or receipt");
