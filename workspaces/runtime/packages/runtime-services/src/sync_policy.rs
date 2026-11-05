@@ -2140,13 +2140,15 @@ pub(crate) fn event_view(connection: &Connection, id: &str) -> StoreResult<Optio
     let bound = |value: Option<String>, field| {
         value.map(|text| crate::sync_views::bound_sync_text(&text, field))
     };
-    let row: Option<(
+    /// Owner, kind, status, created time and error of an event row.
+    type EventRow = (
         Option<String>,
         Option<String>,
         Option<String>,
         Option<f64>,
         Option<String>,
-    )> = connection
+    );
+    let row: Option<EventRow> = connection
         .prepare_cached("SELECT agent,kind,status,created,error FROM runtime_events WHERE id=?1")?
         .query_row([id], |row| {
             Ok((

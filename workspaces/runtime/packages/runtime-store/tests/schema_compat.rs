@@ -5,9 +5,7 @@ use studio_json::{Value, json};
 use studio_runtime_schema::studio_errors::{
     MigrationPhase, MigrationRollbackOutcome, MigrationTarget,
 };
-use studio_runtime_store::{
-    AgentId, QueueEvent, QueueEventId, QueueEventRepository, RuntimeStore, StoreError,
-};
+use studio_runtime_store::{RuntimeStore, StoreError};
 
 const LIVE_SCHEMA: &str = include_str!("fixtures/live-state-schema.json");
 
@@ -415,21 +413,6 @@ fn drop_sync_family(path: &Path) {
         db.execute_batch(&format!("DROP {kind} \"{quote}\""))
             .expect("sync family object drops in dependency order");
     }
-}
-
-fn sync_seed_rows(path: &Path) -> Vec<String> {
-    let db = Connection::open(path).expect("fixture DB opens");
-    db.prepare(
-        "SELECT json_array('identity',id) FROM sync_identity
-         UNION ALL SELECT json_array('generation',id,value) FROM sync_generation
-         UNION ALL SELECT json_array('meta',key,value) FROM sync_entity_meta WHERE key != 'migration_catalog'
-         UNION ALL SELECT json_array('document',seq,scope,id,payload,deleted) FROM sync_documents
-         UNION ALL SELECT json_array('entity',collection,id,seq,hash,payload,deleted) FROM sync_entities
-         UNION ALL SELECT json_array('event',id,agent,kind,text,status,created,epoch,turn_id,error) FROM runtime_events
-         ORDER BY 1",
-    ).expect("sync snapshot prepares")
-        .query_map([], |row| row.get(0)).expect("sync snapshot reads")
-        .collect::<Result<Vec<_>, _>>().expect("sync snapshot rows")
 }
 
 #[tokio::test]

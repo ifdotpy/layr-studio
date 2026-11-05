@@ -1094,8 +1094,8 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
             .expect("seed complete")
     );
     // Receipts are built at read time; only the queue keeps a copy.
-    for collection in ["queue"] {
-        let id = CHAT;
+    {
+        let (collection, id) = ("queue", CHAT);
         let (sequence, payload) = store
             .test_read_transaction(|tx| {
                 tx.query_row(
