@@ -7,8 +7,10 @@ export type PromptComposerRenderProbe = (
     | "team-row"
     | "prompt-composer"
     | "turn-history"
+    | "history-window-row"
     | "history-row",
   id?: string,
+  text?: string,
 ) => void;
 
 declare global {
@@ -21,7 +23,8 @@ declare global {
 export function reportPromptComposerRender(
   component: Parameters<PromptComposerRenderProbe>[0],
   id?: string,
+  text?: string,
 ) {
   if (typeof window !== "undefined")
-    window.__studioPromptComposerRenderProbe?.(component, id);
+    window.__studioPromptComposerRenderProbe?.(component, id, text);
 }

@@ -17,13 +17,23 @@ export function installResponsivenessFixture({
     input: [],
     renderProbe: [],
   };
-  window.__studioPromptComposerRenderProbe = (component) =>
+  window.__studioPromptComposerRenderProbe = (component, id, text) => {
+    if (
+      component === "history-window-row" &&
+      window.metrics.phase !== "stream-only"
+    )
+      return;
     window.metrics.renderProbe.push({
       component,
+      id,
+      text,
       phase: window.metrics.phase,
       inputSequence: window.metrics.inputSequence,
       inputAgeMs: performance.now() - window.metrics.lastInputAt,
     });
+    if (component === "history-row" && text?.includes("stream-only-marker"))
+      window.metrics.phase = "after-stream-only";
+  };
   document.addEventListener(
     "input",
     (event) => {
@@ -56,6 +66,8 @@ declare global {
       input: { phase: string; duration: number; value: string }[];
       renderProbe: {
         component: string;
+        id?: string | undefined;
+        text?: string | undefined;
         phase: string;
         inputSequence: number;
         inputAgeMs: number;

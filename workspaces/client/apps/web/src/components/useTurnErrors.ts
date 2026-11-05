@@ -235,10 +235,12 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     },
     [scope],
   );
+  const loading = useMemo(() => new Set(current.loading), [current.loading]);
+  const failed = useMemo(() => new Set(current.failed), [current.failed]);
   return {
     items: enriched,
-    loading: new Set(current.loading),
-    failed: new Set(current.failed),
+    loading,
+    failed,
     retry,
   };
 }
