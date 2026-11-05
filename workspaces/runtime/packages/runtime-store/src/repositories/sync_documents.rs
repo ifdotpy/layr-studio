@@ -26,14 +26,13 @@ const ENTITY_SCOPE_TEAM_PREDICATE: &str = "team";
 const ENTITY_SCOPE_TOMBSTONE_KEY_PREFIX: &str = "entity_scope_tombstone:";
 
 const ENTITY_SCOPE_AGENT_PREDICATE: &str = "(:agent IS NULL OR (:include_team_members AND (json_extract(payload,'$.value.agent')=:agent \
-          OR EXISTS (SELECT 1 FROM sync_entities AS member WHERE member.collection='agentSummary' AND member.id=json_extract(entity.payload,'$.value.agent') AND member.deleted=0 AND json_extract(member.payload,'$.value.rootId')=:agent))) \
+          OR EXISTS (SELECT 1 FROM runtime_agents AS member WHERE member.id=json_extract(entity.payload,'$.value.agent') AND member.deleted_at IS NULL AND member.root_id=:agent))) \
           OR json_extract(payload,'$.value.rootId')=:agent OR deleted=1)";
 
-/// Selection and initial list ordering shared by the page reader.
+/// Selection shared by the page reader.
 #[derive(Clone, Copy)]
 struct EntityPageScope<'a> {
     collections: Option<&'a str>,
-    priority_id: Option<&'a str>,
 }
 
 const BOOTSTRAP_TABLES: &[TableRequirement] = &[
@@ -69,10 +68,6 @@ const BOOTSTRAP_TRIGGERS: &[TriggerRequirement] = &[
     },
     TriggerRequirement {
         name: "sync_entity_scope_tombstone_delete",
-        table: "sync_entities",
-    },
-    TriggerRequirement {
-        name: "sync_entity_scope_visibility_insert",
         table: "sync_entities",
     },
     TriggerRequirement {
@@ -119,6 +114,11 @@ pub const WORK_COLLECTIONS: &[&str] = &[
 /// are built at read time and have no copy in `sync_entities`.
 pub const DIRECT_COLLECTIONS: &[&str] =
     &["plan", "annotation", "rule", "request", "questionHistory"];
+
+/// The views of one agent, built at read time from `runtime_agents` and the rows its
+/// view reads. They have no copy in `sync_entities`.
+pub const AGENT_VIEW_COLLECTIONS: &[&str] =
+    &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncDocument {
@@ -224,7 +224,6 @@ impl SyncDocumentsRepository {
         fresh: bool,
         initial_high: i64,
         reset_support: bool,
-        priority_id: Option<&str>,
     ) -> StoreResult<EntityPage> {
         Self::pull_entity_view(
             transaction,
@@ -233,36 +232,7 @@ impl SyncDocumentsRepository {
             fresh,
             initial_high,
             reset_support,
-            EntityPageScope {
-                collections: None,
-                priority_id,
-            },
-        )
-    }
-
-    /// The global list view; panels enter the cache only through scoped subscriptions.
-    pub fn pull_global_entities(
-        transaction: &Transaction<'_>,
-        after: i64,
-        limit: i64,
-        fresh: bool,
-        initial_high: i64,
-        reset_support: bool,
-        priority_id: Option<&str>,
-    ) -> StoreResult<EntityPage> {
-        Self::pull_entity_view(
-            transaction,
-            after,
-            limit,
-            fresh,
-            initial_high,
-            reset_support,
-            EntityPageScope {
-                collections: Some(
-                    studio_runtime_schema::sync_protocol::global_entity_collections_json(),
-                ),
-                priority_id,
-            },
+            EntityPageScope { collections: None },
         )
     }
 
@@ -305,10 +275,6 @@ impl SyncDocumentsRepository {
         }
 
         let limit = limit.clamp(1, SYNC_ENTITY_PAGE_LIMIT);
-        let scope = EntityPageScope {
-            priority_id: (after == 0 && fresh).then_some(scope.priority_id).flatten(),
-            ..scope
-        };
         let rows = read_entity_page(
             transaction,
             after,
@@ -876,14 +842,13 @@ impl SyncDocumentsRepository {
 impl SyncDocumentsRepository {
     /// Rows of a fresh global pull from `sync_entities`, without the read-time collections:
     /// live rows above `after`, and deletes above both `tombstone_floor` and
-    /// `initial_high`. The summary of `priority_id` comes first.
+    /// `initial_high`.
     pub fn global_rows(
         connection: &Connection,
         after: i64,
         tombstone_floor: i64,
         initial_high: i64,
         collections_json: &str,
-        priority_id: Option<&str>,
         limit: i64,
     ) -> StoreResult<Vec<EntityRow>> {
         read_entity_page(
@@ -895,18 +860,18 @@ impl SyncDocumentsRepository {
             limit,
             EntityPageScope {
                 collections: Some(collections_json),
-                priority_id,
             },
         )
     }
 }
 
-/// [`WORK_COLLECTIONS`] and [`DIRECT_COLLECTIONS`] as an SQL list. The readers here
+/// [`WORK_COLLECTIONS`], [`DIRECT_COLLECTIONS`] and [`AGENT_VIEW_COLLECTIONS`] as an SQL list. The readers here
 /// skip them; `entity_scope` in runtime-services builds them.
 pub(crate) fn read_time_collection_list() -> String {
     WORK_COLLECTIONS
         .iter()
         .chain(DIRECT_COLLECTIONS)
+        .chain(AGENT_VIEW_COLLECTIONS)
         .map(|collection| format!("'{collection}'"))
         .collect::<Vec<_>>()
         .join(",")
@@ -921,17 +886,12 @@ fn read_entity_page(
     limit: i64,
     scope: EntityPageScope<'_>,
 ) -> StoreResult<Vec<EntityRow>> {
-    let order = if scope.priority_id.is_some() {
-        "CASE WHEN collection='agentSummary' AND id=?5 THEN 0 ELSE 1 END,seq"
-    } else {
-        "seq"
-    };
     let mut statement = transaction.prepare_cached(&format!(
         "SELECT collection,id,seq,payload,deleted FROM sync_entities \
          WHERE collection NOT LIKE 'transcript:%' AND collection NOT IN ({work}) \
-           AND (?7 IS NULL OR collection IN (SELECT value FROM json_each(?7))) AND seq>?1 \
+           AND (?6 IS NULL OR collection IN (SELECT value FROM json_each(?6))) AND seq>?1 \
            AND (deleted=0 OR seq>?2) AND (?3=0 OR deleted=0 OR seq>?4) \
-         ORDER BY {order} LIMIT ?6",
+         ORDER BY seq LIMIT ?5",
         work = read_time_collection_list(),
     ))?;
     statement
@@ -941,7 +901,6 @@ fn read_entity_page(
                 tombstone_floor,
                 i64::from(fresh),
                 initial_high,
-                scope.priority_id,
                 limit,
                 scope.collections
             ],
@@ -1044,9 +1003,10 @@ mod tests {
             CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
             CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
             CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER);
+            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
             CREATE INDEX durable_rows_seq ON durable_rows(seq);
             CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0);
+            CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,root_id TEXT,deleted_at INTEGER);
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
             INSERT INTO sync_entities SELECT 'other',printf('other-%d',x),x,'{}',0 FROM n;
             INSERT INTO sync_entities VALUES('task','selected',2001,'{}',0);").expect("page fixture");
@@ -1065,8 +1025,8 @@ mod tests {
         tx.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
             INSERT INTO sync_entities SELECT 'task',printf('old-%d',x),x,'{}',0 FROM n;
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
-            INSERT INTO sync_entities SELECT 'agentSummary',printf('other-%d',x),x,'{\"value\":{\"rootId\":\"other\"}}',0 FROM n;
-            INSERT INTO sync_entities VALUES('agentSummary','worker',2001,'{\"value\":{\"rootId\":\"lead\"}}',0);
+            INSERT INTO runtime_agents(id,root_id) SELECT printf('other-%d',x),'other' FROM n;
+            INSERT INTO runtime_agents(id,root_id) VALUES('worker','lead');
             UPDATE sync_entities SET seq=seq+2001 WHERE collection='other';
             INSERT INTO sync_entities VALUES('task','changed',4002,'{\"value\":{\"agent\":\"worker\"}}',0),('task','deleted',4003,NULL,1);").expect("incremental fixture");
         let steps = Arc::new(AtomicUsize::new(0));
@@ -1169,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn pull_page_without_priority_stops_at_limit() {
+    fn pull_page_stops_at_limit() {
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -1193,10 +1153,7 @@ mod tests {
             false,
             0,
             10,
-            super::EntityPageScope {
-                collections: None,
-                priority_id: None,
-            },
+            super::EntityPageScope { collections: None },
         )
         .expect("page");
         tx.progress_handler(0, None::<fn() -> bool>)
@@ -1204,51 +1161,27 @@ mod tests {
         assert_eq!(rows.len(), 10);
         assert!(
             steps.load(Ordering::Relaxed) < 1000,
-            "unprioritized page sorts all rows"
+            "the page sorts all rows"
         );
+    }
+
+    /// A live agent of team `root`.
+    fn member(tx: &rusqlite::Transaction<'_>, id: &str, root: &str) {
         tx.execute(
-            "INSERT INTO sync_entities VALUES('agentSummary','priority',2002,'{}',0)",
-            [],
+            "INSERT INTO runtime_agents(id,record) VALUES(?1,json_object('id',?1,'rootId',?2,\
+             'provider','codex','accountKey','default','epoch',0,'compactions',0,'status','idle'))",
+            [id, root],
         )
-        .expect("priority row");
-        let prioritized = super::read_entity_page(
-            &tx,
-            0,
-            0,
-            true,
-            2002,
-            10,
-            super::EntityPageScope {
-                collections: None,
-                priority_id: Some("priority"),
-            },
-        )
-        .expect("priority page");
-        assert_eq!(prioritized[0].id, "priority");
+        .expect("member");
     }
 
     #[test]
     fn scope_visibility_tracks_predicate_moves_atomically_without_replaying_appends() {
         use studio_json::json;
-        let mut connection = Connection::open_in_memory().expect("memory SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common schema"),
-            )
-            .expect("bootstrap owner");
+        let mut connection = crate::fresh_state::test_canvas();
         let tx = connection.transaction().expect("transaction");
         for (id, root) in [("a", "alpha"), ("b", "beta")] {
-            SyncDocumentsRepository::put_entity(
-                &tx,
-                "agentSummary",
-                id,
-                json!({"id":id,"rootId":root}),
-                false,
-            )
-            .expect("member");
+            member(&tx, id, root);
         }
         SyncDocumentsRepository::put_entity(
             &tx,
@@ -1281,14 +1214,7 @@ mod tests {
             .expect("append");
         SyncDocumentsRepository::put_entity(&tx, "task", "append", json!({}), true)
             .expect("ordinary tombstone");
-        SyncDocumentsRepository::put_entity(
-            &tx,
-            "agentSummary",
-            "other",
-            json!({"id":"other","rootId":"unrelated"}),
-            false,
-        )
-        .expect("unrelated member");
+        member(&tx, "other", "unrelated");
         assert_eq!(fence("alpha"), alpha);
         assert_eq!(fence("beta"), beta);
         tx.execute_batch("SAVEPOINT visibility_move;")
@@ -1302,36 +1228,29 @@ mod tests {
             .expect("rollback source and fence together");
         assert_eq!(fence("alpha"), alpha);
         assert_eq!(fence("beta"), beta);
-        tx.execute("UPDATE sync_entities SET payload='{}',deleted=1,seq=seq+2000 WHERE collection='agentSummary' AND id='a'",[]).expect("retired member");
+        tx.execute(
+            "UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='a'",
+            [],
+        )
+        .expect("retired member");
         let retired = fence("alpha");
         assert!(retired > alpha);
         assert_eq!(fence("beta"), beta);
-        tx.execute("UPDATE sync_entities SET payload=json_object('value',json_object('rootId','alpha')),deleted=0,seq=seq+2000 WHERE collection='agentSummary' AND id='a'",[]).expect("restored member");
+        tx.execute(
+            "UPDATE runtime_agents SET record=json_remove(record,'$.deletedAt') WHERE id='a'",
+            [],
+        )
+        .expect("restored member");
         assert!(fence("alpha") > retired);
     }
 
     #[test]
     fn scope_visibility_retains_deleted_owner_until_restore() {
         use studio_json::json;
-        let mut connection = Connection::open_in_memory().expect("SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common sync schema section"),
-            )
-            .expect("bootstrap scope fixture schema");
+        let mut connection = crate::fresh_state::test_canvas();
         let tx = connection.transaction().expect("scope fixture transaction");
         for (id, root) in [("a", "alpha"), ("b", "beta")] {
-            SyncDocumentsRepository::put_entity(
-                &tx,
-                "agentSummary",
-                id,
-                json!({"id":id,"rootId":root}),
-                false,
-            )
-            .expect("publish team membership");
+            member(&tx, id, root);
         }
         SyncDocumentsRepository::put_entity(&tx, "task", "moved", json!({"agent":"a"}), false)
             .expect("publish original task owner");
@@ -1419,8 +1338,11 @@ mod tests {
         assert_eq!(
             schema
                 .matches(super::ENTITY_SCOPE_VISIBILITY_KEY_PREFIX)
-                .count(),
-            4,
+                .count()
+                + include_str!("../durable_seq.rs")
+                    .matches(super::ENTITY_SCOPE_VISIBILITY_KEY_PREFIX)
+                    .count(),
+            3,
             "sync_documents::ENTITY_SCOPE_VISIBILITY_KEY_PREFIX owns every bootstrap fence key"
         );
     }
@@ -1432,10 +1354,11 @@ mod tests {
             "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
              CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER);
+             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
              CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0);
+             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,root_id TEXT,deleted_at INTEGER);
              CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
-             INSERT INTO sync_entities VALUES('agent','a',2,'a','{}',0),('agent','b',4,'b','{}',0),('agent','gone',5,'g','{}',1),('transcript:a','item:x',6,'x',NULL,0);
+             INSERT INTO sync_entities VALUES('task','a',2,'a','{}',0),('task','b',4,'b','{}',0),('task','gone',5,'g','{}',1),('transcript:a','item:x',6,'x',NULL,0);
              INSERT INTO sync_entity_meta VALUES('entity_tombstone_floor','1');",
         ).expect("fixture");
         let transaction = connection.transaction().expect("snapshot");
@@ -1491,7 +1414,7 @@ mod tests {
         connection.execute_batch(
             "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-             CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);",
+             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);",
         ).expect("sync fixture creates");
         let transaction = connection.transaction().expect("transaction begins");
         let value = studio_json::json!({"b":2,"a":1});
@@ -1581,7 +1504,7 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
                  INSERT INTO sync_documents VALUES(9,'drafts','d','{}',0);",
             )
             .expect("sync fixture creates");

@@ -43,6 +43,13 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_tool_request_actor
                 ON runtime_tool_requests(json_extract(record,'$.agent'), json_extract(record,'$.updated') DESC);
             CREATE TABLE IF NOT EXISTS runtime_rules (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+            -- What the last publication of each agent's views saw: the publisher compares
+            -- it with the new row to find team, room and liveness changes, and keeps a
+            -- lead's team counts so a member change marks the lead only when they
+            -- change. The views themselves are built at read time.
+            CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
+                root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
+                team_counts TEXT);
             CREATE INDEX IF NOT EXISTS runtime_rule_ready_tick
                 ON runtime_rules(json_extract(record,'$.status'))
                 WHERE NOT COALESCE(json_extract(record,'$.inFlight'),0);
@@ -207,7 +214,6 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     for (table, collection) in [
         ("runtime_events", "messageReceipt"),
         ("runtime_tasks", "task"),
-        ("runtime_agents", "retainedWorktree"),
     ] {
         let tombstone =
             format!("json_object('collection','{collection}','id',OLD.id,'value',json('{{}}'))");

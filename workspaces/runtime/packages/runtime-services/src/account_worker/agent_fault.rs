@@ -220,7 +220,6 @@ pub(super) fn in_savepoint<T>(
 /// error, and one that names no agent, is returned unchanged.
 pub(super) fn isolate<T>(
     tx: &studio_runtime_store::Transaction<'_>,
-    server_id: Option<&str>,
     stage: FaultStage,
     subject: &mut Option<String>,
     apply: impl FnOnce(&mut Option<String>) -> Result<T, WorkerError>,
@@ -239,7 +238,7 @@ pub(super) fn isolate<T>(
     };
     settle_failed()?;
     let detail = error.to_string();
-    let hold = hold_agent(tx, server_id, &agent_id, stage, &detail)?;
+    let hold = hold_agent(tx, &agent_id, stage, &detail)?;
     Ok(Err(AgentFault {
         agent_id,
         stage,
@@ -344,7 +343,6 @@ pub(super) fn hold_message(stage: FaultStage, detail: &str) -> String {
 /// reached the provider, and a reserved event would block every later claim.
 pub(super) fn hold_agent(
     tx: &studio_runtime_store::Transaction<'_>,
-    server_id: Option<&str>,
     agent_id: &str,
     stage: FaultStage,
     detail: &str,
@@ -459,14 +457,7 @@ pub(super) fn hold_agent(
                     reason: reason.clone(),
                 }
                 .to_string();
-                store::hold_invalid_agent_record_in(
-                    tx,
-                    server_id,
-                    agent_id,
-                    &pointer,
-                    &reason,
-                    &diagnostic,
-                )?;
+                store::hold_invalid_agent_record_in(tx, agent_id, &pointer, &reason, &diagnostic)?;
                 Ok(HoldResult::Placed)
             }
             Err(error) => Err(error.into()),
@@ -501,14 +492,13 @@ pub(super) async fn hold_after(
     record: (String, String),
     detail: String,
 ) -> Result<Option<AgentFault>, WorkerError> {
-    let server_id = store.local_server_id()?;
     let hold_detail = detail.clone();
     let held = scheduler::lifecycle_transaction_with(store, move |tx| {
         let (scope, id) = record;
         let Some(agent_id) = fault_agent(tx, &scope, &id, Some(&subject))? else {
             return Ok(None);
         };
-        let hold = hold_agent(tx, server_id.as_deref(), &agent_id, stage, &hold_detail)?;
+        let hold = hold_agent(tx, &agent_id, stage, &hold_detail)?;
         Ok::<_, WorkerError>(Some((agent_id, hold)))
     })
     .await?;

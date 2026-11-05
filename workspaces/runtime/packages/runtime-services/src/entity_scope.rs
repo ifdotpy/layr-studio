@@ -9,6 +9,11 @@
 //!   (`runtime_plans`), `annotation` (`runtime_annotations`), `rule` (`runtime_rules`),
 //!   and `request` and `questionHistory` (`approvals`).
 //!
+//! - [`AGENT_VIEW_COLLECTIONS`] (`agent`, `agentSummary`, `agentDetail`,
+//!   `retainedWorktree`), from `runtime_agents`. A change of the agent row, or a mark
+//!   (`durable_seq::AGENT_VIEW_MARK`) that the publisher writes when a row the view
+//!   reads changes, gives the views that change's number.
+//!
 //! The other collections still come from `sync_entities`. One merge by change number keeps
 //! the paging rules of `SyncDocumentsRepository`: a page is cut at a whole unit, and
 //! `checkpoint` is the last unit taken.
@@ -20,8 +25,9 @@ use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
-    DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult, SyncDocumentsRepository,
-    WORK_COLLECTIONS, WorkItemRecord, WorkItemsRepository, WorkStatus, durable_seq, work_history,
+    AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult,
+    SyncDocumentsRepository, WORK_COLLECTIONS, WorkItemRecord, WorkItemsRepository, WorkStatus,
+    durable_seq, work_history,
 };
 
 use crate::work_write::{WorkWriteError, current_submission_refusal};
@@ -114,7 +120,7 @@ pub fn live_documents(
 }
 
 /// Non-fresh REST pull of the global list. Same reset rule as
-/// `SyncDocumentsRepository::pull_global_entities`: a cursor above zero that is
+/// `SyncDocumentsRepository::pull_entities`: a cursor above zero that is
 /// outside the range gets an empty reset page; zero reads from the beginning.
 pub fn pull_global(
     transaction: &Connection,
@@ -161,7 +167,7 @@ pub fn pull_global(
 
 /// Fresh REST pull of the global list: every live row, and the deletes above
 /// `initial_high` (zero takes the current high). On the first page the summary of
-/// `priority_id` comes first. Same rules as `SyncDocumentsRepository::pull_global_entities`.
+/// `priority_id` comes first. Same rules as `SyncDocumentsRepository::pull_entities`.
 pub fn pull_global_fresh(
     transaction: &Connection,
     after: i64,
@@ -185,22 +191,24 @@ pub fn pull_global_fresh(
     );
     let collections = studio_runtime_schema::sync_protocol::global_entity_collections_json();
     let priority_id = if after == 0 { priority_id } else { None };
-    let mut rows = SyncDocumentsRepository::global_rows(
+    let rows = SyncDocumentsRepository::global_rows(
         transaction,
         after,
         floor,
         initial_high,
         collections,
-        priority_id,
         limit + 1,
     )?;
-    let head = match (priority_id, rows.first()) {
-        (Some(priority), Some(first))
-            if first.collection == "agentSummary" && first.id == priority =>
-        {
-            vec![rows.remove(0)]
-        }
-        _ => Vec::new(),
+    // The summary of the open chat comes first, so the list can show it at once.
+    let head = match priority_id {
+        Some(priority) => agent_docs(
+            transaction,
+            priority,
+            None,
+            &BTreeSet::from(["agentSummary"]),
+            true,
+        )?,
+        None => Vec::new(),
     };
     let mut units: Vec<Unit> = rows
         .into_iter()
@@ -221,6 +229,16 @@ pub fn pull_global_fresh(
             limit + 1,
         )?);
         units.extend(direct_units(
+            transaction,
+            after,
+            max_sequence,
+            initial_high,
+            &wanted,
+            None,
+            None,
+            limit + 1,
+        )?);
+        units.extend(agent_units(
             transaction,
             after,
             max_sequence,
@@ -342,6 +360,16 @@ pub fn continue_page(
             agent,
             fetch,
         )?);
+        units.extend(agent_units(
+            transaction,
+            after,
+            through,
+            deletes_after,
+            &wanted,
+            id,
+            agent,
+            fetch,
+        )?);
     }
     units.sort_by_key(|unit| unit.seq);
     let truncated = units.len() as i64 > limit;
@@ -364,7 +392,11 @@ pub fn continue_page(
 
 /// Read-time collections the reader selected. None selects all of them.
 fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>> {
-    let all = WORK_COLLECTIONS.iter().chain(DIRECT_COLLECTIONS).copied();
+    let all = WORK_COLLECTIONS
+        .iter()
+        .chain(DIRECT_COLLECTIONS)
+        .chain(AGENT_VIEW_COLLECTIONS)
+        .copied();
     let Some(raw) = collections_json else {
         return Ok(all.collect());
     };
@@ -511,13 +543,146 @@ fn direct_docs(
     Ok(rows)
 }
 
-/// The current document of a direct collection, as a reader at the current high mark
-/// sees it; None when the row is gone or hidden.
+/// Units of the agent views in `(after, through]`: one per agent row change or view
+/// mark, at most `fetch`, with the delete rule of [`work_units`]. `id` selects one
+/// agent. These collections belong to the global list and the id-scoped detail, so an
+/// agent-scoped reader gets none of them.
+#[allow(clippy::too_many_arguments)]
+fn agent_units(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+    deletes_after: i64,
+    wanted: &BTreeSet<&'static str>,
+    id: Option<&str>,
+    agent: Option<&str>,
+    fetch: i64,
+) -> StoreResult<Vec<Unit>> {
+    let mut units = Vec::new();
+    if agent.is_some() || !AGENT_VIEW_COLLECTIONS.iter().any(|c| wanted.contains(c)) {
+        return Ok(units);
+    }
+    // The agent row and its view mark both name the agent: one unit at the later one.
+    let changed: Vec<(String, i64)> = connection
+        .prepare_cached(
+            "SELECT id,MAX(seq) AS last FROM durable_rows
+             WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
+               AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
+             GROUP BY id ORDER BY last LIMIT ?6",
+        )?
+        .query_map(
+            params![
+                durable_seq::AGENT_VIEW_MARK,
+                after,
+                through,
+                deletes_after,
+                id,
+                fetch
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?
+        .collect::<Result<_, _>>()?;
+    let snapshot = deletes_after == i64::MAX;
+    for (agent_id, seq) in changed {
+        // A gone agent reads as no views: deletes in a delta, nothing in a snapshot.
+        let rows =
+            agent_docs(connection, &agent_id, Some(seq), wanted, snapshot).or_else(|error| {
+                // One agent whose view cannot be built must not stop the stream.
+                eprintln!("agent {agent_id} views are not streamed: {error}");
+                Ok::<_, StoreError>(Vec::new())
+            })?;
+        if !rows.is_empty() {
+            units.push(Unit { seq, rows });
+        }
+    }
+    Ok(units)
+}
+
+/// The view documents of one agent at `seq` (its current number when None). A
+/// snapshot leaves out the views that are deleted; a delta sends them as deletes.
+fn agent_docs(
+    connection: &Connection,
+    id: &str,
+    seq: Option<i64>,
+    wanted: &BTreeSet<&'static str>,
+    snapshot: bool,
+) -> StoreResult<Vec<EntityRow>> {
+    let seq = match seq {
+        Some(seq) => seq,
+        None => {
+            let current: Option<i64> = connection
+                .prepare_cached(
+                    "SELECT MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents',?1) AND id=?2",
+                )?
+                .query_row(params![durable_seq::AGENT_VIEW_MARK, id], |row| row.get(0))?;
+            let Some(current) = current else {
+                return Ok(Vec::new());
+            };
+            current
+        }
+    };
+    let server = server_id(connection)?;
+    let Some(documents) =
+        crate::sync_policy::agent_view_documents(connection, id, server.as_deref())?
+    else {
+        return Ok(if snapshot {
+            Vec::new()
+        } else {
+            tombstones(AGENT_VIEW_COLLECTIONS, wanted, id, seq)
+        });
+    };
+    let mut rows = Vec::new();
+    for (collection, value) in [
+        ("agentSummary", documents.summary),
+        ("agentDetail", documents.detail),
+        ("agent", documents.agent),
+        ("retainedWorktree", documents.retained_worktree),
+    ] {
+        if !wanted.contains(collection) {
+            continue;
+        }
+        match value {
+            Some(value) => rows.push(upsert(collection, id, seq, value)?),
+            None if !snapshot => rows.extend(tombstones(&[collection], wanted, id, seq)),
+            None => {}
+        }
+    }
+    Ok(rows)
+}
+
+/// The view documents of every live agent, as a fresh pull sends them.
+pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
+    let wanted = AGENT_VIEW_COLLECTIONS.iter().copied().collect();
+    let high = durable_seq::high(connection)?;
+    Ok(
+        agent_units(connection, 0, high, i64::MAX, &wanted, None, None, i64::MAX)?
+            .into_iter()
+            .flat_map(|unit| unit.rows)
+            .collect(),
+    )
+}
+
+/// This server's id, for the views that name a project's home server.
+fn server_id(connection: &Connection) -> StoreResult<Option<String>> {
+    studio_runtime_store::RuntimeStore::transaction_local_server_id(connection)
+}
+
+/// The current document of a direct or agent view collection, as a reader at the
+/// current high mark sees it; None when the row is gone or hidden.
 pub fn direct_document(
     connection: &Connection,
     collection: &str,
     id: &str,
 ) -> StoreResult<Option<EntityRow>> {
+    if let Some(name) = AGENT_VIEW_COLLECTIONS
+        .iter()
+        .find(|name| **name == collection)
+    {
+        let wanted = BTreeSet::from([*name]);
+        return Ok(agent_docs(connection, id, None, &wanted, true)?
+            .into_iter()
+            .next());
+    }
     let source = DIRECT_SOURCES
         .iter()
         .find(|source| source.collections.contains(&collection))

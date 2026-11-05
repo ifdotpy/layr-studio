@@ -649,6 +649,8 @@ impl CheckedAgentRow {
 #[derive(Clone, Debug, Default)]
 pub struct EntityChanges {
     pub agents: BTreeSet<String>,
+    /// Team leads whose members changed: marked only when their team counts change.
+    pub team_roots: BTreeSet<String>,
     /// Changed work rows. Their documents are built at read time (`entity_scope`); a
     /// change here refreshes only the owner agent's views.
     pub work: BTreeSet<String>,
@@ -708,7 +710,7 @@ pub fn publish_entity_changes(
             continue;
         };
         let was_in_flight: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0 AND json_extract(payload,'$.value.inFlight')=1)",
+            "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1 AND in_flight=1)",
             [&row.id], |row| row.get(0),
         )?;
         if !was_in_flight || !table_exists(transaction, "runtime_account_transfers")? {
@@ -748,10 +750,13 @@ pub fn publish_entity_changes(
     let mut room_agents = BTreeSet::new();
     let mut changed_roots = BTreeSet::new();
     for &(id, record) in &agents {
-        let previous: Option<(Option<String>, Option<bool>)> = transaction.query_row(
-            "SELECT json_extract(payload,'$.value.rootId'),json_extract(payload,'$.value.isLead') FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0",
-            [id], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?;
+        let previous: Option<(Option<String>, Option<bool>)> = transaction
+            .query_row(
+                "SELECT root_id,is_lead FROM agent_publication_state WHERE id=?1 AND live=1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
         if let Some((old_root, old_lead)) = previous {
             let new_root = record.get("rootId").and_then(Value::as_str);
             let new_lead = record.get("isLead").and_then(Value::as_bool);
@@ -762,7 +767,7 @@ pub fn publish_entity_changes(
             }
         }
         let projected_live: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0)",
+            "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1)",
             [id],
             |row| row.get(0),
         )?;
@@ -806,6 +811,11 @@ pub fn publish_entity_changes(
         project_server_id,
         validate,
     )?;
+    let published = agents
+        .iter()
+        .map(|(id, _)| (*id).to_owned())
+        .collect::<BTreeSet<_>>();
+    publish_team_roots(transaction, &changes.team_roots, &published)?;
     if !room_agents.is_empty() {
         publish_rooms_of(transaction, &room_agents, &changed_roots, validate)?;
     }
@@ -1030,71 +1040,152 @@ fn rows_by_id(
 }
 
 /// Publish agent views; `work` must hold every work item the agents own.
-fn publish_agents(
+/// Mark the views of the team leads in `roots` whose team counts changed since their
+/// last publication. A lead in `skip` is published by the caller already.
+fn publish_team_roots(
     transaction: &Transaction<'_>,
-    agents: &[(&str, &Value)],
-    work: &[studio_runtime_store::WorkItemRecord],
-    project_server_id: Option<&str>,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
+    roots: &BTreeSet<String>,
+    skip: &BTreeSet<String>,
 ) -> StoreResult<()> {
-    let contexts = crate::sync_entity_context::agent_view_contexts(
-        transaction,
-        agents,
-        work,
-        project_server_id,
-    )?
-    .0;
-    for &(id, record) in agents {
-        match crate::sync_views::retained_worktree_entity(record) {
-            Some(value) => {
-                put_projection(transaction, "retainedWorktree", id, value, false, validate)?
-            }
-            None => retire_if_live(transaction, "retainedWorktree", id, validate)?,
-        }
-        if truthy(record.get("deletedAt")) {
-            for collection in ["agentSummary", "agentDetail", "agent"] {
-                retire_if_live(transaction, collection, id, validate)?;
-            }
-            continue;
-        }
-        let context = contexts.get(id).ok_or(StoreError::RecordContract(
-            "agent projection context snapshot is incomplete",
-        ))?;
-        if let Some(projected) = agent_entity_view(record, context) {
-            publish_agent_projection(transaction, id, projected, false, validate)?;
+    for root in roots.difference(skip) {
+        let current = crate::sync_entity_context::team_counts_text(transaction, root)?;
+        let published: Option<Option<String>> = transaction
+            .prepare_cached("SELECT team_counts FROM agent_publication_state WHERE id=?1")?
+            .query_row([root], |row| row.get(0))
+            .optional()?;
+        if published.as_ref() != Some(&current) {
+            publish_agent_projection(transaction, root, false)?;
         }
     }
     Ok(())
 }
 
-/// The single publication owner for the list and open-chat projections. Both
-/// writes share the source transaction. The legacy DTO remains for explicit
-/// mutation envelopes until their consumers migrate; view-scoped streams exclude it.
+fn publish_agents(
+    transaction: &Transaction<'_>,
+    agents: &[(&str, &Value)],
+    _work: &[studio_runtime_store::WorkItemRecord],
+    _project_server_id: Option<&str>,
+    _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
+) -> StoreResult<()> {
+    for &(id, record) in agents {
+        publish_agent_projection(transaction, id, truthy(record.get("deletedAt")))?;
+    }
+    Ok(())
+}
+
+/// The single publication owner of the agent views. The views are built at read time
+/// (`entity_scope`); a publication marks them, so readers build them again, and
+/// records what it saw for the next publication's comparison.
 pub(crate) fn publish_agent_projection(
     transaction: &Transaction<'_>,
     id: &str,
-    view: Value,
     deleted: bool,
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     crate::account_session_runtime::limits::publish_agent_change(transaction, id, deleted)?;
-    for collection in ["agentSummary", "agentDetail"] {
-        let projected = if deleted {
-            json!({})
-        } else {
-            project_persisted_record(collection, &view)
-                .ok_or(StoreError::RecordContract("agent projection has no id"))?
-        };
-        put_projection(transaction, collection, id, projected, deleted, validate)?;
+    studio_runtime_store::durable_seq::mark(
+        transaction,
+        studio_runtime_store::durable_seq::AGENT_VIEW_MARK,
+        id,
+    )?;
+    let team_counts = crate::sync_entity_context::team_counts_text(transaction, id)?;
+    transaction
+        .prepare_cached(
+            "INSERT INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
+           SELECT ?1,json_extract(record,'$.rootId'),json_extract(record,'$.isLead'),
+                  json_extract(record,'$.deletedAt') IS NULL AND NOT ?2,
+                  COALESCE(json_extract(record,'$.inFlight'),0),?3
+           FROM runtime_agents WHERE id=?1
+         ON CONFLICT(id) DO UPDATE SET root_id=excluded.root_id,is_lead=excluded.is_lead,
+           live=excluded.live,in_flight=excluded.in_flight,team_counts=excluded.team_counts",
+        )?
+        .execute(rusqlite::params![id, deleted, team_counts])?;
+    if deleted {
+        transaction
+            .prepare_cached("UPDATE agent_publication_state SET live=0 WHERE id=?1")?
+            .execute([id])?;
     }
-    let mut compatibility = view;
-    if let Some(fields) = compatibility.as_object_mut() {
+    Ok(())
+}
+
+/// The documents of one agent at read time: `agentSummary`, `agentDetail`, the legacy
+/// `agent` DTO and `retainedWorktree`, each a value or None for a delete. None when the
+/// agent row is gone.
+pub(crate) struct AgentViewDocuments {
+    pub summary: Option<Value>,
+    pub detail: Option<Value>,
+    pub agent: Option<Value>,
+    pub retained_worktree: Option<Value>,
+}
+
+pub(crate) fn agent_view_documents(
+    connection: &Connection,
+    id: &str,
+    project_server_id: Option<&str>,
+) -> StoreResult<Option<AgentViewDocuments>> {
+    let row: Option<(String, Option<String>)> = connection
+        .prepare_cached("SELECT record,hold_incident FROM runtime_agents WHERE id=?1")?
+        .query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()?;
+    let Some((raw, incident)) = row else {
+        return Ok(None);
+    };
+    let raw = agent_volatile::merged_text(connection, id, raw)?;
+    let (record, view) = match studio_runtime_store::decode_agent_record(connection, id, &raw) {
+        Ok(record) => {
+            let record = record.into_value();
+            let context = crate::sync_entity_context::agent_view_context(
+                connection,
+                &record,
+                project_server_id,
+            )?;
+            let view = crate::sync_views::agent_entity_view(&record, &context);
+            (record, view)
+        }
+        // A row that does not decode is held for repair; readers see a minimal safe view.
+        Err(error) => {
+            let parsed: Value = studio_json::from_str(&raw).unwrap_or_else(|_| json!({"id": id}));
+            let diagnostic = incident
+                .or_else(|| {
+                    parsed
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| error.to_string());
+            let public = crate::sync_views::invalid_agent_view(id, &parsed, &diagnostic);
+            let context = crate::sync_views::AgentViewContext {
+                project_server_id: project_server_id.map(str::to_owned),
+                ..Default::default()
+            };
+            let view = crate::sync_views::agent_entity_view(&public, &context);
+            (parsed, view)
+        }
+    };
+    let retained_worktree = crate::sync_views::retained_worktree_entity(&record);
+    let view = view.filter(|_| !truthy(record.get("deletedAt")));
+    let Some(view) = view else {
+        return Ok(Some(AgentViewDocuments {
+            summary: None,
+            detail: None,
+            agent: None,
+            retained_worktree,
+        }));
+    };
+    let summary = project_persisted_record("agentSummary", &view);
+    let detail = project_persisted_record("agentDetail", &view);
+    let mut agent = view;
+    if let Some(fields) = agent.as_object_mut() {
         fields.remove("teamCounts");
         for field in crate::sync_views::AGENT_SUMMARY_ATTENTION_FIELDS {
             fields.remove(field);
         }
     }
-    put_projection(transaction, "agent", id, compatibility, deleted, validate)
+    Ok(Some(AgentViewDocuments {
+        summary,
+        detail,
+        agent: Some(agent),
+        retained_worktree,
+    }))
 }
 
 /// The client view of a plan row; None for a row without an id.
@@ -3086,7 +3177,7 @@ mod tests {
                      hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,
                      PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
                  CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                  INSERT INTO runtime_agents VALUES
                      ('active','{\"id\":\"active\",\"provider\":\"codex\",\"deletedAt\":null}'),
@@ -3247,7 +3338,7 @@ mod tests {
                      hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,
                      PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
                  CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                  INSERT INTO runtime_agents VALUES
                      ('active','{\"id\":\"active\",\"provider\":\"codex\",\"deletedAt\":null}'),

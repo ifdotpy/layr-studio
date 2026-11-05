@@ -375,7 +375,7 @@ async fn failed_store_calls_roll_back_card_outbox_and_publication_before_handoff
         ("approvals", "INSERT", "admit"),
         ("runtime_agents", "UPDATE", "admit"),
         ("runtime_tool_requests", "INSERT", "admit"),
-        ("sync_entities", "INSERT", "admit"),
+        ("durable_rows", "UPDATE", "admit"),
         ("approvals", "UPDATE", "answer"),
         ("runtime_outbox", "INSERT", "answer"),
         ("runtime_outbox", "UPDATE", "answer"),

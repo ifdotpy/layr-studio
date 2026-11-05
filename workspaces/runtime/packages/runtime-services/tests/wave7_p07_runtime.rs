@@ -339,7 +339,7 @@ async fn completion_failpoints_roll_back_all_rows_and_restart_is_replay_safe() {
         ("turns", "INSERT"),
         ("runtime_items", "INSERT"),
         ("runtime_agents", "UPDATE"),
-        ("sync_entities", "INSERT"),
+        ("durable_rows", "UPDATE"),
     ] {
         for timing in ["BEFORE", "AFTER"] {
             let root = fixture();
@@ -1005,7 +1005,7 @@ async fn accepted_start_failpoints_never_deliver_input_without_its_attempt_recei
         ("runtime_events", "UPDATE"),
         ("runtime_agents", "UPDATE"),
         ("runtime_execution_attempts", "INSERT"),
-        ("sync_entities", "INSERT"),
+        ("durable_rows", "UPDATE"),
     ] {
         for timing in ["BEFORE", "AFTER"] {
             let root = fixture();

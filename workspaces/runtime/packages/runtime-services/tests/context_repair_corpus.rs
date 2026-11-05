@@ -682,7 +682,7 @@ fn memory_fixture(case: &Value) -> rusqlite::Connection {
         CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT);
         CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
         CREATE TABLE sync_documents(seq INTEGER);
-        CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")).expect("fixture schema");
+        CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")).expect("fixture schema");
     db.execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
         .expect("volatile agent table creates");
     ContextRepairRepository::put_agent(&db, &case["agent"]).expect("record stores");
@@ -735,13 +735,14 @@ fn context_repair_transaction_failpoints_and_replay_fast_witness() {
             db.execute("UPDATE runtime_events SET text='changed'", [])
                 .expect("interleaved event edit");
         }
-        if let Some(table) = match cut {
-            "before-event" => Some("runtime_events"),
-            "before-agent" => Some("runtime_agents"),
-            "before-sync" => Some("sync_entities"),
+        if let Some((table, event)) = match cut {
+            "before-event" => Some(("runtime_events", "UPDATE")),
+            "before-agent" => Some(("runtime_agents", "UPDATE")),
+            // The agent views mark: an upsert, so the insert trigger always fires.
+            "before-sync" => Some(("durable_rows", "INSERT")),
             _ => None,
         } {
-            db.execute_batch(&format!("CREATE TRIGGER fixture_fail BEFORE UPDATE ON {table} BEGIN SELECT RAISE(ABORT,'fixture-cut'); END")).expect("failpoint");
+            db.execute_batch(&format!("CREATE TRIGGER fixture_fail BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT,'fixture-cut'); END")).expect("failpoint");
         }
         let history = history(&case);
         let tx = db.transaction().expect("reconcile transaction");

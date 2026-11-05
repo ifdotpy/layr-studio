@@ -18,6 +18,7 @@ impl EntityPublisher for DefaultPublisher {
     fn publish(&self, transaction: &Transaction<'_>, pending: &PendingEntities) -> StoreResult<()> {
         let changes = crate::sync_policy::EntityChanges {
             agents: pending.agents.clone(),
+            team_roots: pending.team_roots.clone(),
             work: pending.work.clone(),
             ..Default::default()
         };
@@ -105,6 +106,7 @@ pub(crate) mod test_support {
                 if studio_runtime_store::WORK_COLLECTIONS
                     .iter()
                     .chain(studio_runtime_store::DIRECT_COLLECTIONS)
+                    .chain(studio_runtime_store::AGENT_VIEW_COLLECTIONS)
                     .any(|name| *name == collection)
                 {
                     return built_entity(tx, &collection, &id);
