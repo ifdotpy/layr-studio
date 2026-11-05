@@ -260,7 +260,7 @@ pub enum ObservedTable {
 /// Maximum rowid occurrences recorded per observed table for one writer transaction.
 /// Unit: occurrences, so a row written twice counts twice. Overflow drops that
 /// table's row precision for the commit and reports [`TableChange::Full`].
-const CHANGED_ROW_HINT_LIMIT: usize = 1024;
+pub const CHANGED_ROW_HINT_LIMIT: usize = 1024;
 
 /// What one known commit changed in an observed table.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,7 +297,7 @@ const ENTITY_RESOURCE_TABLES: [&str; 5] = [
 ];
 
 type ResourceChangeObserver = Arc<dyn Fn(ResourceChange) + Send + Sync>;
-type TableChangeObserver = Arc<dyn for<'a> Fn(TableChange<'a>) + Send + Sync>;
+type TableChangeObserver = Arc<dyn for<'a> Fn(TableChange<'a>, bool) + Send + Sync>;
 type TableChangeObserverRegistry = Mutex<HashMap<ObservedTable, Vec<TableChangeObserver>>>;
 
 /// Rowids written by the current writer transaction, grouped by observed table bit.
@@ -306,6 +306,7 @@ struct ChangedRowHints {
     /// Tables whose rowids are recorded for the whole transaction.
     complete: u32,
     rows: [Vec<i64>; u32::BITS as usize],
+    outbox_kinds: Vec<studio_runtime_schema::persistence::OutboxKind>,
 }
 
 thread_local! {
@@ -327,6 +328,25 @@ impl ChangedRowHints {
             rows.clear();
         }
     }
+}
+
+// A typed put classifies only the single update-hook occurrence it caused.
+fn outbox_hint_position() -> Option<usize> {
+    CHANGED_ROWS.with_borrow(|rows| {
+        let bit = ObservedTable::RuntimeOutbox.change_bit();
+        (rows.complete & bit != 0).then(|| rows.rows[bit.trailing_zeros() as usize].len())
+    })
+}
+
+fn record_outbox_kind(before: Option<usize>, kind: studio_runtime_schema::persistence::OutboxKind) {
+    CHANGED_ROWS.with_borrow_mut(|rows| {
+        let bit = ObservedTable::RuntimeOutbox.change_bit();
+        if rows.complete & bit != 0
+            && before.is_some_and(|n| rows.rows[bit.trailing_zeros() as usize].len() == n + 1)
+        {
+            rows.outbox_kinds.push(kind);
+        }
+    });
 }
 
 impl ObservedTable {
@@ -550,6 +570,20 @@ fn fire_table_change_observers(
             }
             _ => TableChange::Full,
         };
+        let local_outbox_only = table == ObservedTable::RuntimeOutbox
+            && changed_rows.is_some_and(|rows| {
+                let kinds = &rows.outbox_kinds;
+                rows.complete & bit != 0
+                    && !kinds.is_empty()
+                    && kinds.len() == rows.rows[bit.trailing_zeros() as usize].len()
+                    && kinds.iter().all(|kind| {
+                        matches!(
+                            kind,
+                            studio_runtime_schema::persistence::OutboxKind::JournalEntry
+                                | studio_runtime_schema::persistence::OutboxKind::Publication
+                        )
+                    })
+            });
         let callbacks = observers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -558,7 +592,9 @@ fn fire_table_change_observers(
             .unwrap_or_default();
         for callback in callbacks {
             if let Err(_panic_payload) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(change)))
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    callback(change, local_outbox_only)
+                }))
             {
                 // A table observer panic must not interrupt other invalidations.
             }
@@ -1559,7 +1595,7 @@ impl RuntimeStore {
         table: ObservedTable,
         observer: impl Fn() + Send + Sync + 'static,
     ) {
-        self.add_table_observer(table, move |_change| observer());
+        self.add_table_observer(table, move |_change, _local| observer());
     }
 
     /// Like [`Self::add_table_change_observer`], but a known commit passes the
@@ -1573,13 +1609,23 @@ impl RuntimeStore {
     ) {
         self.table_row_interest
             .fetch_or(table.change_bit(), Ordering::Release);
-        self.add_table_observer(table, observer);
+        self.add_table_observer(table, move |change, _local| observer(change));
+    }
+
+    /// Observe outbox commits, with a true hint only when every write is a typed
+    /// journal or publication put. False includes raw, mixed, overflow and unknown.
+    pub fn add_outbox_change_observer(&self, observer: impl Fn(bool) + Send + Sync + 'static) {
+        self.table_row_interest
+            .fetch_or(ObservedTable::RuntimeOutbox.change_bit(), Ordering::Release);
+        self.add_table_observer(ObservedTable::RuntimeOutbox, move |_change, local| {
+            observer(local)
+        });
     }
 
     fn add_table_observer(
         &self,
         table: ObservedTable,
-        observer: impl for<'a> Fn(TableChange<'a>) + Send + Sync + 'static,
+        observer: impl for<'a> Fn(TableChange<'a>, bool) + Send + Sync + 'static,
     ) {
         self.table_commit_observers
             .lock()
@@ -4074,6 +4120,45 @@ mod commit_notification_tests {
             .expect("second usage write succeeds");
         assert_eq!(first_calls.load(Ordering::Acquire), 2);
         assert_eq!(second_calls.load(Ordering::Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn ambiguous_typed_outbox_commit_has_no_local_only_hint() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let hints = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&hints);
+        store.add_outbox_change_observer(move |local| captured.lock().unwrap().push(local));
+        store
+            .simulate_unknown_commit_after_success
+            .store(true, Ordering::Release);
+        let result = store
+            .transaction(|tx| {
+                outbox::Outbox::put(
+                    tx,
+                    &outbox::OutboxRow {
+                        id: "unknown-outbox".into(),
+                        kind: OutboxKind::JournalEntry,
+                        owner_kind: OwnerKind::Account,
+                        owner_id: "account".into(),
+                        request_id: None,
+                        signature: "sig".into(),
+                        status: OutboxStatus::Pending,
+                        account: None,
+                        stream_id: None,
+                        generation: None,
+                        ordinal: None,
+                        next_at: None,
+                        payload: studio_test_deps::EmptyObject {},
+                        created: 1,
+                    },
+                )?;
+                Ok(())
+            })
+            .await;
+        assert!(matches!(result, Err(StoreError::CommitOutcomeUnknown(_))));
+        assert_eq!(*hints.lock().unwrap(), vec![false]);
     }
 
     #[tokio::test]
