@@ -1267,10 +1267,7 @@ pub(crate) fn window_view(
     }
     let record = decode_monitor(id, &raw)?;
     let view = project_monitor_record(&record)?;
-    Ok(Some((
-        record.agent.clone(),
-        studio_json::to_raw_value(&view)?,
-    )))
+    Ok(Some((record.agent, studio_json::to_raw_value(&view)?)))
 }
 
 /// The client view of a rule row: its id, agent and name.
@@ -1633,11 +1630,23 @@ fn join_task_window(
     transaction: &Transaction<'_>,
     task: &studio_runtime_store::TaskRecord,
 ) -> StoreResult<()> {
+    let id = task.id().as_ref();
     studio_runtime_store::durable_seq::join_window(
         transaction,
         studio_runtime_store::durable_seq::TASK_WINDOW,
-        task.id().as_ref(),
+        id,
     )?;
+    // The state of a task that left is kept, so a return under another owner is seen.
+    let previous: Option<String> = transaction
+        .prepare_cached("SELECT agent FROM task_window_state WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
+        .optional()?;
+    if let Some(previous) = previous.filter(|previous| previous != task.agent()) {
+        // The task moved: the scoped readers of both owners start from a snapshot.
+        for owner in [previous.as_str(), task.agent()] {
+            SyncDocumentsRepository::move_scope_visibility(transaction, "task", owner)?;
+        }
+    }
     transaction
         .prepare_cached(
             "INSERT INTO task_window_state(id,agent,created,running) VALUES(?1,?2,?3,?4)
@@ -1659,9 +1668,6 @@ fn leave_task_window(transaction: &Transaction<'_>, id: &str) -> StoreResult<()>
         studio_runtime_store::durable_seq::TASK_WINDOW,
         id,
     )?;
-    transaction
-        .prepare_cached("DELETE FROM task_window_state WHERE id=?1")?
-        .execute([id])?;
     Ok(())
 }
 
@@ -1669,7 +1675,11 @@ fn leave_task_window(transaction: &Transaction<'_>, id: &str) -> StoreResult<()>
 /// `agent` and `created`. None when the task is not in the window.
 fn task_window_prior(transaction: &Transaction<'_>, id: &str) -> StoreResult<Option<Value>> {
     let row: Option<(String, Option<f64>, bool)> = transaction
-        .prepare_cached("SELECT agent,created,running FROM task_window_state WHERE id=?1")?
+        .prepare_cached(
+            "SELECT s.agent,s.created,s.running FROM task_window_state s
+             JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
+             WHERE s.id=?1",
+        )?
         .query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .optional()?;
     Ok(row.map(|(agent, created, running)| {
@@ -1797,21 +1807,12 @@ pub(crate) fn maintain_task_window_after_write(
         }
         let _ = projected;
         join_task_window(transaction, task)?;
-        if let Some(previous) = previous
-            .and_then(|previous| previous.get("agent"))
-            .and_then(Value::as_str)
-            .filter(|previous| *previous != agent_id)
-        {
-            // The task moved: its old and new owners' readers start from a snapshot.
-            for owner in [previous, agent_id] {
-                SyncDocumentsRepository::move_scope_visibility(transaction, "task", owner)?;
-            }
-        }
         if !task_running {
             let evicted: Option<String> = transaction
                 .query_row(
-                    "SELECT id FROM task_window_state WHERE NOT running \
-                     ORDER BY created DESC LIMIT 1 OFFSET ?1",
+                    "SELECT s.id FROM task_window_state s \
+                     JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 \
+                     WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
                     [TASK_WINDOW_HISTORY_ROWS as i64],
                     |row| row.get(0),
                 )

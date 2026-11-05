@@ -1051,7 +1051,7 @@ mod tests {
             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,root_id TEXT,deleted_at INTEGER);
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
             INSERT INTO sync_entities SELECT 'other',printf('other-%d',x),x,'{}',0 FROM n;
-            INSERT INTO sync_entities VALUES('task','selected',2001,'{}',0);").expect("page fixture");
+            INSERT INTO sync_entities VALUES('fixture','selected',2001,'{}',0);").expect("page fixture");
         db
     }
 
@@ -1065,12 +1065,12 @@ mod tests {
         let tx = db.transaction().expect("snapshot");
         // Old selected rows and newer unrelated rows must both stay outside the range.
         tx.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
-            INSERT INTO sync_entities SELECT 'task',printf('old-%d',x),x,'{}',0 FROM n;
+            INSERT INTO sync_entities SELECT 'fixture',printf('old-%d',x),x,'{}',0 FROM n;
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000)
             INSERT INTO runtime_agents(id,root_id) SELECT printf('other-%d',x),'other' FROM n;
             INSERT INTO runtime_agents(id,root_id) VALUES('worker','lead');
             UPDATE sync_entities SET seq=seq+2001 WHERE collection='other';
-            INSERT INTO sync_entities VALUES('task','changed',4002,'{\"value\":{\"agent\":\"worker\"}}',0),('task','deleted',4003,NULL,1);").expect("incremental fixture");
+            INSERT INTO sync_entities VALUES('fixture','changed',4002,'{\"value\":{\"agent\":\"worker\"}}',0),('fixture','deleted',4003,NULL,1);").expect("incremental fixture");
         let steps = Arc::new(AtomicUsize::new(0));
         let counter = steps.clone();
         tx.progress_handler(
@@ -1084,7 +1084,7 @@ mod tests {
         let delta = SyncDocumentsRepository::resume_entity_scope(
             &tx,
             Some(2001),
-            Some(r#"["task"]"#),
+            Some(r#"["fixture"]"#),
             None,
             Some("lead"),
             true,
@@ -1154,7 +1154,7 @@ mod tests {
         let page = SyncDocumentsRepository::resume_entity_scope(
             &tx,
             Some(0),
-            Some(r#"["task"]"#),
+            Some(r#"["fixture"]"#),
             Some("selected"),
             None,
             true,
@@ -1400,7 +1400,7 @@ mod tests {
              CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0);
              CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,root_id TEXT,deleted_at INTEGER);
              CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
-             INSERT INTO sync_entities VALUES('task','a',2,'a','{}',0),('task','b',4,'b','{}',0),('task','gone',5,'g','{}',1),('transcript:a','item:x',6,'x',NULL,0);
+             INSERT INTO sync_entities VALUES('fixture','a',2,'a','{}',0),('fixture','b',4,'b','{}',0),('fixture','gone',5,'g','{}',1),('transcript:a','item:x',6,'x',NULL,0);
              INSERT INTO sync_entity_meta VALUES('entity_tombstone_floor','1');",
         ).expect("fixture");
         let transaction = connection.transaction().expect("snapshot");
