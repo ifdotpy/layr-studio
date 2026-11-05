@@ -241,3 +241,105 @@ fn to_raw_value_matches_serde_bytes() {
         assert_eq!(actual.as_str(), expected.get());
     }
 }
+
+#[cfg(feature = "serde-backend")]
+#[test]
+fn serde_raw_marker_matches_backend() {
+    use serde::ser::{Error as _, Impossible, Serializer};
+
+    struct Capture;
+    macro_rules! unsupported {
+        ($($name:ident($($arg:ident: $ty:ty),*)),* $(,)?) => {
+            $(fn $name(self, $(_: $ty),*) -> Result<Self::Ok, Self::Error> {
+                unreachable!("raw JSON serializes as a struct")
+            })*
+        };
+    }
+    impl Serializer for Capture {
+        type Ok = ();
+        type Error = serde_json::Error;
+        type SerializeSeq = Impossible<(), Self::Error>;
+        type SerializeTuple = Impossible<(), Self::Error>;
+        type SerializeTupleStruct = Impossible<(), Self::Error>;
+        type SerializeTupleVariant = Impossible<(), Self::Error>;
+        type SerializeMap = Impossible<(), Self::Error>;
+        type SerializeStruct = Impossible<(), Self::Error>;
+        type SerializeStructVariant = Impossible<(), Self::Error>;
+
+        unsupported! {
+            serialize_bool(v: bool), serialize_i8(v: i8), serialize_i16(v: i16),
+            serialize_i32(v: i32), serialize_i64(v: i64), serialize_u8(v: u8),
+            serialize_u16(v: u16), serialize_u32(v: u32), serialize_u64(v: u64),
+            serialize_f32(v: f32), serialize_f64(v: f64), serialize_char(v: char),
+            serialize_str(v: &str), serialize_bytes(v: &[u8]), serialize_none(),
+            serialize_unit(), serialize_unit_struct(name: &'static str),
+            serialize_unit_variant(name: &'static str, index: u32, variant: &'static str)
+        }
+        fn serialize_some<T: Serialize + ?Sized>(self, _: &T) -> Result<(), Self::Error> {
+            unreachable!()
+        }
+        fn serialize_newtype_struct<T: Serialize + ?Sized>(
+            self,
+            _: &'static str,
+            _: &T,
+        ) -> Result<(), Self::Error> {
+            unreachable!()
+        }
+        fn serialize_newtype_variant<T: Serialize + ?Sized>(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: &T,
+        ) -> Result<(), Self::Error> {
+            unreachable!()
+        }
+        fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+            unreachable!()
+        }
+        fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Self::Error> {
+            unreachable!()
+        }
+        fn serialize_tuple_struct(
+            self,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+            unreachable!()
+        }
+        fn serialize_tuple_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+            unreachable!()
+        }
+        fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+            unreachable!()
+        }
+        fn serialize_struct(
+            self,
+            name: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeStruct, Self::Error> {
+            Err(Self::Error::custom(name))
+        }
+        fn serialize_struct_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeStructVariant, Self::Error> {
+            unreachable!()
+        }
+    }
+
+    let raw = serde_json::value::RawValue::from_string("{}".into()).unwrap();
+    assert_eq!(
+        raw.serialize(Capture).unwrap_err().to_string(),
+        studio_json::RAW_VALUE_TOKEN
+    );
+}

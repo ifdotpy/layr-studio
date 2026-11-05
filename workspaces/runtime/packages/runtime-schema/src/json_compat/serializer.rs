@@ -188,7 +188,7 @@ impl<'a> ser::Serializer for Serializer<'a> {
         name: &'static str,
         v: &T,
     ) -> Result<String> {
-        if name == "$studio_json::private::RawValue" {
+        if name == studio_json::RAW_VALUE_TOKEN {
             return Err(ser::Error::custom(
                 "raw JSON cannot be canonicalized without decoding",
             ));
@@ -229,7 +229,7 @@ impl<'a> ser::Serializer for Serializer<'a> {
         self.object(None)
     }
     fn serialize_struct(self, name: &'static str, _: usize) -> Result<Object<'a>> {
-        if name == "$studio_json::private::RawValue" {
+        if name == studio_json::RAW_VALUE_TOKEN {
             return Err(ser::Error::custom(
                 "raw JSON cannot be canonicalized without decoding",
             ));

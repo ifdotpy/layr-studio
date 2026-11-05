@@ -1686,7 +1686,11 @@ mod tests {
         .expect("request schemas compile");
 
         let magic_key: Value = crate::json_body::parse_bounded(
-            br#"{"prompt":"x","concurrency":{"$studio_json::private::Number":"1"}}"#,
+            format!(
+                r#"{{"prompt":"x","concurrency":{{"{}":"1"}}}}"#,
+                studio_json::NUMBER_TOKEN
+            )
+            .as_bytes(),
             1024,
         )
         .expect("magic key is valid JSON");
@@ -1705,7 +1709,7 @@ mod tests {
         );
 
         let object: Value = crate::json_body::parse_bounded(
-            br#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{"answers":{"$studio_json::private::Number":"1"}}}"#,
+            format!(r#"{{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{{"answers":{{"{}":"1"}}}}}}"#, studio_json::NUMBER_TOKEN).as_bytes(),
             1024,
         )
         .expect("magic key object parses");
@@ -1722,10 +1726,7 @@ mod tests {
                 .is_ok(),
             "the same key remains ordinary object data where objects are allowed"
         );
-        assert_eq!(
-            object["body"]["answers"]["$studio_json::private::Number"],
-            "1"
-        );
+        assert_eq!(object["body"]["answers"][studio_json::NUMBER_TOKEN], "1");
 
         let almost_integer: Value =
             studio_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)

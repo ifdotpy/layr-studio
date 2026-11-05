@@ -1548,7 +1548,7 @@ esac
     fn native_layr_receipt_encoding_preserves_opaque_json_values() {
         for raw in [
             "null",
-            r#"{"$studio_json::private::Number":"1"}"#,
+            &format!(r#"{{"{}":"1"}}"#, studio_json::NUMBER_TOKEN),
             r#"{"nested":[1,null,{"x":true}]}"#,
         ] {
             let value: Value = studio_json::from_str(raw).unwrap();
@@ -1659,13 +1659,14 @@ esac
             replay("duplicate", &intent).unwrap(),
             json!({"opaque":[1,null]})
         );
-        let special: Value = studio_json::from_str(
-            r#"{"kind":"inspect","data":{"$studio_json::private::Number":"1"}}"#,
-        )
+        let special: Value = studio_json::from_str(&format!(
+            r#"{{"kind":"inspect","data":{{"{}":"1"}}}}"#,
+            studio_json::NUMBER_TOKEN
+        ))
         .unwrap();
-        write("number_key", br#"{"intent":{"kind":"inspect","data":{"$studio_json::private::Number":"1"}},"status":"completed","result":{"$studio_json::private::Number":"1"}}"#);
+        write("number_key", format!(r#"{{"intent":{{"kind":"inspect","data":{{"{0}":"1"}}}},"status":"completed","result":{{"{0}":"1"}}}}"#, studio_json::NUMBER_TOKEN).as_bytes());
         let expected: Value =
-            studio_json::from_str(r#"{"$studio_json::private::Number":"1"}"#).unwrap();
+            studio_json::from_str(&format!(r#"{{"{}":"1"}}"#, studio_json::NUMBER_TOKEN)).unwrap();
         assert_eq!(replay("number_key", &special).unwrap(), expected);
         for (id, raw) in [
             (
