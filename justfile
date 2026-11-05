@@ -216,6 +216,14 @@ smoke-installed *args:
 upgrade-canary *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/upgrade-canary/canary.ts")}} "$@"
 
+[doc("Regenerate the web client large entity transfer fixture from the Rust server.")]
+regenerate-entity-server-frames:
+    @STUDIO_REGENERATE_ENTITY_FRAMES=1 cargo test -j 4 -p studio-runtime-http --lib cold_entity_client_fixture_matches_server_frames
+
+[doc("Manual heavy check: replay a real large entity SSE snapshot after a failed write.")]
+test-entity-server-heavy:
+    @STUDIO_ENTITY_SERVER_HEAVY=1 pnpm --filter codex-agents-web exec vitest run --config vitest.unit.config.ts src/sync/client.entityServer.test.ts -t "stages a cold" --maxWorkers=1
+
 [doc("Run the full browser project as a manual heavy check.")]
 test-heavy:
     @node {{quote(facade)}} test-heavy
