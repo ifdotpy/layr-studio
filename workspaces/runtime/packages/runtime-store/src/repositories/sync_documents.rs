@@ -129,6 +129,10 @@ pub const DIRECT_COLLECTIONS: &[&str] = &[
 pub const AGENT_VIEW_COLLECTIONS: &[&str] =
     &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
 
+/// Window collections: a document per member of a window in `durable_rows`
+/// (`durable_seq::TASK_WINDOW`, `durable_seq::MONITOR_WINDOW`), built at read time.
+pub const WINDOW_COLLECTIONS: &[&str] = &["task", "monitor"];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncDocument {
     pub id: String,
@@ -468,6 +472,34 @@ impl SyncDocumentsRepository {
     /// Latest relevant predicate movement; this is a bounded indexed metadata
     /// lookup, independent of selected history size. The SQL trigger owner records
     /// old/new direct selectors and resolved roots in the same source transaction.
+    /// Make the readers of `collection` scoped to `agent` (alone or as a team root)
+    /// read it again from a snapshot: its document moved between owners.
+    pub fn move_scope_visibility(
+        transaction: &Connection,
+        collection: &str,
+        agent: &str,
+    ) -> StoreResult<()> {
+        let root: Option<String> = transaction
+            .query_row_cached(
+                "SELECT root_id FROM runtime_agents WHERE id=?1",
+                [agent],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let seq = crate::durable_seq::high(transaction)?;
+        transaction.execute(
+            &format!(
+                "INSERT INTO sync_entity_meta(key,value)
+                   SELECT '{ENTITY_SCOPE_VISIBILITY_KEY_PREFIX}' || key, ?4 FROM (
+                     SELECT json_array(?1,?2) AS key
+                     UNION SELECT json_array(?1,?3,'{ENTITY_SCOPE_TEAM_PREDICATE}') WHERE ?3 IS NOT NULL)
+                 WHERE true ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT)"
+            ),
+            params![collection, agent, root, seq.to_string()],
+        )?;
+        Ok(())
+    }
+
     pub fn entity_scope_visibility_revision(
         transaction: &Transaction<'_>,
         collections_json: &str,
@@ -881,6 +913,7 @@ pub(crate) fn read_time_collection_list() -> String {
         .iter()
         .chain(DIRECT_COLLECTIONS)
         .chain(AGENT_VIEW_COLLECTIONS)
+        .chain(WINDOW_COLLECTIONS)
         .map(|collection| format!("'{collection}'"))
         .collect::<Vec<_>>()
         .join(",")
