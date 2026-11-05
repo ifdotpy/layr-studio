@@ -119,7 +119,7 @@ macro_rules! stored_string_enum {
         }
 
         impl $name {
-            fn parse(value: &str) -> Self {
+            pub fn parse(value: &str) -> Self {
                 match value {
                     $($value => Self::$variant,)+
                     _ => Self::Other(UnknownAgentStatus(value.to_owned())),

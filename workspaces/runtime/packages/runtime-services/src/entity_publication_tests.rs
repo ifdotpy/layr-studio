@@ -350,6 +350,59 @@ async fn worker_rowid_reuse_refreshes_both_teams() {
 }
 
 #[tokio::test]
+async fn team_counts_follow_agent_status_and_publish_changes() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    seed_chat(&store, chat(json!({"id":"worker", "rootId":CHAT, "parentId":CHAT, "isLead":false, "status":"completed"}))).await;
+    let sequence = || {
+        store
+            .test_read_transaction(|tx| {
+                Ok(
+                    crate::entity_scope::direct_document(tx, "agentSummary", CHAT)?
+                        .expect("lead")
+                        .sequence,
+                )
+            })
+            .unwrap()
+    };
+    for (status, working) in [
+        ("running", 1),
+        ("completed", 0),
+        ("starting", 1),
+        ("failed", 0),
+        ("waiting_on_monitor", 1),
+        ("paused", 0),
+        ("queued", 0),
+    ] {
+        let before = sequence();
+        write(
+            &store,
+            "UPDATE runtime_agents SET record=json_set(record,'$.status',?1) WHERE id='worker'",
+            vec![status.into()],
+        )
+        .await;
+        assert_eq!(
+            client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+            json!({"working":working,"total":1}),
+            "{status}"
+        );
+        if status != "queued" {
+            assert!(sequence() > before, "lead revision for {status}");
+        }
+    }
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='worker'",
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":0})
+    );
+}
+
+#[tokio::test]
 async fn worker_status_changes_publish_lead_team_counts() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
@@ -358,7 +411,7 @@ async fn worker_status_changes_publish_lead_team_counts() {
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":1,"total":1})
     );
-    // The status lives on the chat row. The record write after it publishes the change.
+    // The agent record write publishes the change.
     write(
         &store,
         "UPDATE chats SET status='completed' WHERE id=?1",
@@ -405,7 +458,7 @@ async fn worker_status_changes_publish_lead_team_counts() {
     seed_chat(&store, chat(json!({"id":"nested", "rootId":CHAT, "parentId":"worker", "isLead":false, "status":"paused", "autoWake":true}))).await;
     assert_eq!(
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
-        json!({"working":1,"total":2})
+        json!({"working":0,"total":2})
     );
     let before = client_entity(&store, "agentSummary", CHAT).expect("lead").1;
     let sequence = || {
