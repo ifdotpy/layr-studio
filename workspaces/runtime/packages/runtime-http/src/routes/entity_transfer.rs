@@ -858,6 +858,12 @@ mod tests {
     async fn cold_entity_client_fixture_matches_server_frames() {
         use studio_runtime_store::{AgentRecord, AgentRepository};
         let (_directory, state) = fixture().await;
+        // The store names its folder by the canonical path: on macOS the temporary
+        // folder /var/folders is /private/var/folders.
+        let state_dir = std::fs::canonicalize(_directory.path())
+            .expect("canonical state folder")
+            .display()
+            .to_string();
         let store = state.store.as_ref().expect("store");
         studio_runtime_services::entity_publication::install(store)
             .await
@@ -908,14 +914,11 @@ mod tests {
             let batch: Value = studio_json::from_str(data).expect("batch");
             for row in batch["documents"].as_array().expect("documents") {
                 if row["collection"] == "workspace" && row["id"] == "current" {
-                    assert_eq!(
-                        row["value"]["stateDir"],
-                        _directory.path().display().to_string()
-                    );
+                    assert_eq!(row["value"]["stateDir"], state_dir);
                     workspace_rows += 1;
                 }
             }
-            let data = data.replace(&*_directory.path().display().to_string(), "/fixture-state");
+            let data = data.replace(&state_dir, "/fixture-state");
             value["data"] = json!(data);
             value["workspaceId"] = json!("00000000000000000000000000000000");
             value["cursor"]["workspaceId"] = json!("00000000000000000000000000000000");
