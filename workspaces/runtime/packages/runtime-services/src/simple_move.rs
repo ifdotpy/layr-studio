@@ -171,7 +171,7 @@ pub async fn move_claude_chat(
                     "The chat changed during the account move",
                 ));
             }
-            let mut value = current;
+            let mut value = release_source_holds(tx, &id, current, now)?;
             value["accountKey"] = json!(target_key);
             value["executionSettingsAccountKey"] = json!(target_key);
             if let Some(object) = value.as_object_mut() {
@@ -205,6 +205,38 @@ pub async fn move_claude_chat(
         "completed": 1,
         "moved": 1,
     })))
+}
+
+/// Holds that belong to the source account end with the move: its automatic
+/// usage resume and its failure hold. Otherwise the chat waits for the old
+/// account's limit after it moved to an account that has allowance.
+fn release_source_holds(
+    tx: &studio_runtime_store::Transaction<'_>,
+    id: &str,
+    mut value: Value,
+    now: f64,
+) -> Result<Value, TransferError> {
+    if let Some(resume) = value.pointer("/usageResume/id").and_then(Value::as_str)
+        && matches!(
+            value.pointer("/usageResume/status").and_then(Value::as_str),
+            Some("scheduled" | "started")
+        )
+    {
+        let resume = resume.to_owned();
+        value["usageResume"] = studio_runtime_store::cancel_usage_resume(
+            tx,
+            id,
+            &resume,
+            "The chat moved to another account.",
+            now,
+        )
+        .map_err(|_| TransferError::Refused("Could not cancel automatic resume"))?;
+    }
+    if let Some(object) = value.as_object_mut() {
+        object.remove("nativeFailureHold");
+    }
+    value["error"] = Value::Null;
+    Ok(value)
 }
 
 /// The facts a simple move depends on; equal before the copy and at commit.
@@ -408,7 +440,7 @@ pub async fn move_across_providers(
     let source_epoch = agent["epoch"].clone();
     store
         .transaction_with_error(move |tx| {
-            let mut value = AgentRepository::get(tx, &AgentId::from(id.as_str()))?
+            let value = AgentRepository::get(tx, &AgentId::from(id.as_str()))?
                 .ok_or(TransferError::Refused("Unknown managed agent"))?
                 .value();
             if value["epoch"] != source_epoch
@@ -419,6 +451,7 @@ pub async fn move_across_providers(
                     "The chat changed during the account move",
                 ));
             }
+            let mut value = release_source_holds(tx, &id, value, now)?;
             value["accountKey"] = json!(target_key);
             value["executionSettingsAccountKey"] = json!(target_key);
             value["provider"] = json!(target_provider.key());
@@ -468,6 +501,22 @@ pub async fn move_across_providers(
 #[cfg(test)]
 mod cross_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_move_releases_the_failure_hold_of_the_source_account() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        let released = store
+            .transaction_with_error(|tx| {
+                let value = json!({"id":"a","nativeFailureHold":true,
+                    "error":"You've hit your weekly limit"});
+                release_source_holds(tx, "a", value, 1.0)
+            })
+            .await
+            .unwrap();
+        assert!(released.get("nativeFailureHold").is_none());
+        assert!(released["error"].is_null());
+    }
 
     #[test]
     fn the_transcript_keeps_user_and_assistant_text_in_order() {
