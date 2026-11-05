@@ -711,6 +711,8 @@ test("Mobile composer 320px setup renders the settled action row", async ({
           queueInTools:
             child.classList.contains("composer-queue-primary") &&
             getComputedStyle(child).display === "none",
+          // The reserved Stop slot is a hidden spacer, not a control.
+          spacer: child.getAttribute("aria-hidden") === "true",
           width: rect.width,
           height: rect.height,
         };
@@ -719,7 +721,9 @@ test("Mobile composer 320px setup renders the settled action row", async ({
     assert.ok(rendered.length > 0, "Composer action row has rendered controls");
     assert.ok(
       rendered
-        .filter((item) => !item.timingHint && !item.queueInTools)
+        .filter(
+          (item) => !item.timingHint && !item.queueInTools && !item.spacer,
+        )
         .every((item) => item.width > 0 && item.height > 0),
       `Every action row child is laid out: ${JSON.stringify(rendered)}`,
     );
