@@ -92,6 +92,7 @@ is excluded by the root Cargo workspace.
 | Cargo dependency bans                                 | `just deny-bans`                         |
 | Browser smoke                                         | `just test-browser-smoke`                |
 | Layout shifts across UI states, manual                | `just layout-shift-matrix`               |
+| Real entity stream, manual heavy                      | `just test-entity-server-heavy`          |
 | Full browser project, manual heavy                    | `just test-browser` or `just test-heavy` |
 | Multi-server browser recovery, manual heavy           | `just test-browser-multi-server`         |
 | Full deterministic Rust corpora, manual heavy         | `just test-rust-runtime-corpora`         |
@@ -108,6 +109,8 @@ is excluded by the root Cargo workspace.
 | Continuation corpus and store faults, manual heavy    | `just test-rust-usage-resume-corpora`    |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
+
+Refresh the captured entity transfer fixture with `just regenerate-entity-server-frames`.
 
 Eight Rust tests failed only under load and are `#[ignore]` until
 [issue #616](https://github.com/ifdotpy/layr-studio/issues/616) is fixed; `just test-quarantine`
