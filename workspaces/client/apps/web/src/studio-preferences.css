@@ -191,8 +191,10 @@
 .studio-shortcut-control {
   position: relative;
 }
-.studio-shortcut-input input {
+/* The tokens below draw the value; the field text stays invisible. */
+.studio-shortcut-input input.mantine-Input-input {
   color: transparent;
+  caret-color: transparent;
 }
 .studio-shortcut-tokens {
   display: flex;
@@ -203,11 +205,15 @@
   pointer-events: none;
 }
 .studio-shortcut-tokens kbd {
-  background: var(--mantine-color-default-hover);
-  border: 1px solid var(--line);
+  min-width: 1.5rem;
+  padding: 0.125rem 0.375rem;
+  border: var(--studio-border-width) solid var(--line-strong);
+  border-bottom-width: calc(2 * var(--studio-border-width));
   border-radius: var(--studio-radius-control);
-  padding: 2px 6px;
+  background: var(--surface);
+  color: var(--text);
   font-size: var(--studio-text-meta);
+  text-align: center;
 }
 .federation-invitation {
   display: grid;

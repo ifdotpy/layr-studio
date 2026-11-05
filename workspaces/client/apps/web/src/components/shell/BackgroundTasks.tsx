@@ -541,6 +541,7 @@ export default function BackgroundTasks({
             disabled={controlPending || !!pendingControl}
           />
           <Button
+            variant="light"
             size="xs"
             color="red"
             leftSection={<Square size={12} />}
@@ -877,6 +878,7 @@ export function TaskDetail({
     >
       <div className="task-detail-top">
         <Button
+          variant="subtle"
           className="task-back"
           size="compact-xs"
           leftSection={<ArrowLeft size={14} />}
@@ -895,6 +897,7 @@ export function TaskDetail({
           {taskName(task)}
         </h2>
         <Button
+          variant="subtle"
           size="compact-xs"
           className="task-owner"
           rightSection={<ArrowUpRight size={13} />}
@@ -1037,6 +1040,7 @@ export function TaskDetail({
             {outputSupported && (
               <div>
                 <Button
+                  variant="subtle"
                   size="compact-xs"
                   aria-pressed={follow}
                   onClick={() => setFollow(!follow)}
@@ -1148,6 +1152,7 @@ export function TaskDetail({
           )}
         {canStop && (
           <Button
+            variant="light"
             size="xs"
             color="red"
             leftSection={<Square size={12} />}

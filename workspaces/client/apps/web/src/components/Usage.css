@@ -300,8 +300,8 @@
   font-variant-numeric: tabular-nums;
 }
 .account-cost-values strong.account-cost-missing {
-  font-size: var(--studio-text-body);
-  font-weight: 500;
+  font-size: var(--studio-text-meta);
+  font-weight: 400;
   color: var(--muted);
 }
 .account-costs p {
@@ -396,7 +396,7 @@
 }
 
 /* The composer footer keeps context, estimate and allowance in one row. */
-.account-cost-values strong {
+.account-cost-values strong:not(.account-cost-missing) {
   font-size: var(--studio-text-body);
 }
 .account-limits-panel small,
@@ -429,8 +429,8 @@
   color: var(--text);
 }
 .account-limits-tiles .setup-account[data-selected] {
-  border-color: var(--line);
-  background: var(--mantine-color-default-hover);
+  border-color: transparent;
+  background: var(--selected);
 }
 .account-limits-tile-name {
   line-height: 1.4;

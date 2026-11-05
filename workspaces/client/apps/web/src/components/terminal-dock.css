@@ -118,7 +118,7 @@
 }
 .terminal-session.is-selected {
   background: var(--raised);
-  border-left-color: var(--accent);
+  border-left-color: var(--text);
 }
 .terminal-session-dot {
   width: 6px;

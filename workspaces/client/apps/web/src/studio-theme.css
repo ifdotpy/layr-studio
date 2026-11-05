@@ -66,6 +66,7 @@
   --studio-warning: var(--mantine-color-yellow-4);
   --studio-warning-hover: var(--mantine-color-yellow-3);
   --studio-backdrop: rgb(0 0 0 / 80%);
+  --studio-switch-thumb: var(--muted);
   /* Diff lines: added and removed text, and their row tint over the panel. */
   --studio-diff-add: var(--mantine-color-green-4);
   --studio-diff-delete: var(--mantine-color-red-4);
@@ -96,6 +97,7 @@
   --studio-warning: var(--mantine-color-yellow-7);
   --studio-warning-hover: var(--mantine-color-yellow-8);
   --studio-backdrop: rgb(0 0 0 / 30%);
+  --studio-switch-thumb: #ffffff;
   --studio-diff-add: var(--mantine-color-green-7);
   --studio-diff-delete: var(--mantine-color-red-7);
   --studio-diff-tint: 9%;

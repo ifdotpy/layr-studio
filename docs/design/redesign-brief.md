@@ -14,10 +14,12 @@ what broke, what it costs", then steer the agent that needs it.
 
 ## Concept
 
-Every chat and every agent is a strip on a dispatch board. The leading edge of
-a strip is a state rail. Strips are ordered by what needs the operator. The
-state rail and the "Needs you" lane are the one bold element. Everything around
-them stays quiet: hierarchy comes from type weight and spacing, not from boxes.
+Every chat and every agent is a strip on a dispatch board. A strip shows its
+state with a status icon or dot in a fixed leading slot, never with a tinted
+fill or a colored rail. Strips are ordered by what needs the operator. The
+status marks and the "Needs you" lane are the one bold element. Everything
+around them stays quiet: hierarchy comes from type weight and spacing, not
+from boxes.
 
 ## Palette
 
@@ -52,10 +54,14 @@ maps the tokens onto shared Mantine parts. The table records reviewed values;
 consume the owners, not copied hex values. `src/design/contrast.test.ts`
 requires 4.5:1 for text and state colors on page and panel in both schemes.
 Soft state backgrounds use `--studio-state-tint`: 5% in light and 14% in dark.
+They are for small chips and inline alerts only, never for a whole strip.
 
 Ink is a virtual Mantine color: shade 7 of `inkLight` fills primary actions in
 light and shade 4 of `inkDark` in dark. Its foreground is the page color.
-Focus rings use the blue accent everywhere.
+A button without a variant is secondary: a surface with a strong hairline.
+Toolbar and composer chrome opt into the subtle variant. Blue is for links,
+focus rings and the working state only; a request that waits for the
+operator takes the answer color.
 
 ## Type
 
@@ -107,7 +113,8 @@ Alignment: text left aligned; numbers right aligned in their column.
 
 - Near-black with one acid accent: rejected. The black base carries a state
   scale where each color has a meaning; the primary action is ink.
-- Identical rounded cards with shadows: rejected for strips with a rail.
+- Identical rounded cards with shadows: rejected for strips with a status
+  slot.
 - Middle-dot meta strings: replaced with columns and separate elements.
 - Monospace body labels: rejected; tabular Geist numerals instead. Geist Mono
   is for code and technical captions only.
@@ -116,9 +123,10 @@ Alignment: text left aligned; numbers right aligned in their column.
 
 - Tokens: `src/design/state.css` (state colors, rail size) and the Mantine
   theme in `src/theme.ts`. Only the foundation workstream edits them.
-- A state rail: any element with `data-studio-state="<ChatIndicatorKind>"`
-  gets a leading rail in that state's color. An inline marker is
-  `<span class="studio-state-dot" data-studio-state="...">`. No JS.
+- State: any element with `data-studio-state="<ChatIndicatorKind>"` gets
+  `--studio-state` for its own marker (an icon, a dot, or status text). An
+  inline marker is `<span class="studio-state-dot" data-studio-state="...">`.
+  No JS.
 - State colors: `var(--studio-state-<kind>)`; soft backgrounds:
   `var(--studio-state-<kind>-soft)`.
 

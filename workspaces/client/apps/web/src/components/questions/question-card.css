@@ -16,9 +16,14 @@
   flex-wrap: wrap;
   gap: 4px 8px;
 }
+/* A request that waits for the user takes the answer state, never the
+   working blue. */
 .question-card-icon {
-  color: var(--accent);
+  color: var(--muted);
   flex: none;
+}
+.question-card[data-question-state="waiting"] .question-card-icon {
+  color: var(--studio-state-answer);
 }
 .question-card-state {
   color: var(--muted);
@@ -118,7 +123,7 @@
 .question-card-own p {
   margin: 0;
   padding: 6px 10px;
-  border-left: 2px solid var(--accent);
+  border-left: calc(2 * var(--studio-border-width)) solid var(--line-strong);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

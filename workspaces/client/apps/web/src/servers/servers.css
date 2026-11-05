@@ -99,8 +99,7 @@
   font-size: var(--studio-text-meta);
 }
 .account-provider-choice.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--text);
 }
 .account-add-dialog-actions {
   display: flex;
@@ -117,6 +116,28 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.server-sidebar-skeleton {
+  display: grid;
+  gap: var(--mantine-spacing-md);
+  margin-top: var(--mantine-spacing-lg);
+  padding-inline: var(--mantine-spacing-xs);
+}
+.server-sidebar-skeleton > span {
+  height: 0.625rem;
+  border-radius: var(--studio-radius-pill);
+  background: var(--raised);
+  animation: server-sidebar-pulse 1.6s ease-in-out infinite;
+}
+@keyframes server-sidebar-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .server-sidebar-skeleton > span {
+    animation: none;
+  }
 }
 .server-sidebar section {
   margin-top: 16px;

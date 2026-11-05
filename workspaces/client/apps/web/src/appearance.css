@@ -33,9 +33,9 @@
 }
 .settings-group h2 {
   margin: 0;
-  font-size: var(--studio-text-meta);
-  font-weight: 600;
-  color: var(--muted);
+  font-size: var(--studio-text-body);
+  font-weight: var(--studio-weight-strong);
+  color: var(--text);
 }
 .settings-field {
   display: grid;

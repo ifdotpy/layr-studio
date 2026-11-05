@@ -94,7 +94,7 @@
   overflow-wrap: anywhere;
 }
 .prompt-history-entry[aria-current] > :first-child {
-  color: var(--accent);
+  color: var(--text);
 }
 .prompt-history-empty {
   color: var(--muted);

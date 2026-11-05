@@ -420,6 +420,7 @@ export default function TerminalDock({
           </Button>
         )}
         <Button
+          variant="subtle"
           size="compact-xs"
           aria-label="New terminal"
           title="New terminal"
@@ -596,6 +597,7 @@ export default function TerminalDock({
                       Keep session
                     </Button>
                     <Button
+                      variant="filled"
                       size="compact-xs"
                       color="red"
                       loading={pending}

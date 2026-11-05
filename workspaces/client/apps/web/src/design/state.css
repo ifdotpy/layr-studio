@@ -2,7 +2,7 @@
    States are ChatIndicatorKind values (chat-status/chatStatusModel.ts).
    See docs/design/redesign-brief.md. */
 :root {
-  /* Width of the leading state rail on a strip. */
+  /* Width of a selection rail and of the focus ring offset. */
   --studio-rail-size: 0.1875rem;
   /* Diameter of an inline state marker. */
   --studio-dot-size: 0.5rem;
@@ -78,10 +78,8 @@
   --studio-state: var(--studio-state-paused);
 }
 
-/* Other surfaces retain rails; fleet and Team use their inline state indicators. */
-[data-studio-state]:not(.studio-state-dot, .fleet-strip, .worker-entry) {
-  box-shadow: inset var(--studio-rail-size) 0 0 var(--studio-state);
-}
+/* State reads from a dot, an icon, or colored status text, never from a
+   tinted fill or a leading rail. Each surface owns its marker. */
 
 .studio-state-dot {
   display: inline-block;

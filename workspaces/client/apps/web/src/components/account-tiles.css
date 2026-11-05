@@ -71,7 +71,7 @@
    the accent outline. */
 .setup-account {
   background: var(--mantine-color-default-hover);
-  border-radius: 0;
+  border-radius: var(--studio-radius-control);
 }
 .setup-account:hover:not(:disabled) {
   background: var(--mantine-color-default-hover);
@@ -123,6 +123,11 @@
   border: none;
   background: transparent;
 }
+/* A read-only account reads as a caption above the choices. */
+.setup-account-status .setup-account-name {
+  color: var(--muted);
+  font-size: var(--studio-text-meta);
+}
 .setup-account-status .setup-limit {
   left: 0;
   right: 0;
@@ -145,11 +150,12 @@
   cursor: pointer;
 }
 .setup-account-automatic:has(:focus-visible) {
-  outline: auto;
+  outline: calc(2 * var(--studio-border-width)) solid var(--accent);
+  outline-offset: calc(2 * var(--studio-border-width));
 }
 
 .setup-account-automatic:not(:has(input:disabled)) {
-  border-color: var(--mantine-primary-color-light-color);
+  border-color: var(--line-strong);
 }
 .setup-account-automatic:has(input:checked) {
   border-color: var(--mantine-primary-color-filled);

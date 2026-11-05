@@ -1,7 +1,7 @@
 /* The sign-in request card (docs/vm-browser-bridge.md, section 6.2). It follows the
    question card, and it is one column at phone width. */
 #requests .request-card.request-sign-in {
-  border-color: var(--accent);
+  border-color: var(--studio-state-answer);
 }
 .sign-in-card {
   min-width: 0;
@@ -15,7 +15,7 @@
   gap: 4px 8px;
 }
 .sign-in-card-icon {
-  color: var(--accent);
+  color: var(--studio-state-answer);
   flex: none;
 }
 .sign-in-card-chat {
@@ -23,7 +23,7 @@
   overflow-wrap: anywhere;
 }
 .sign-in-card-state {
-  color: var(--accent);
+  color: var(--studio-state-answer);
   font-size: var(--studio-text-meta);
 }
 .sign-in-card-host {

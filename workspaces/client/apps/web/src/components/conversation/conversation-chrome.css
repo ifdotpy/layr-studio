@@ -65,9 +65,15 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+/* The server alias is an identifier, drawn like the workspace badge. */
 .conversation-server .chat-server-line {
   margin: 0;
+  padding: 0.0625rem 0.375rem;
+  border: var(--studio-border-width) solid var(--line);
+  border-radius: var(--studio-radius-pill);
+  font-family: var(--studio-font-mono);
   font-size: var(--studio-text-meta);
+  line-height: 1.4;
   white-space: nowrap;
 }
 .conversation-server .chat-server-line > svg {
@@ -175,7 +181,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--studio-state);
   font-size: var(--studio-text-meta);
 }
 .conversation-composer-footer {

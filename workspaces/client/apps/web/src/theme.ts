@@ -13,6 +13,7 @@ import {
   Combobox,
   Drawer,
   Badge,
+  SegmentedControl,
 } from "@mantine/core";
 
 import { layoutValues, layerZIndex } from "./layout/layout-contract.generated";
@@ -27,7 +28,7 @@ export const theme = createTheme({
   // Mantine's component resolver chooses text using the light primary shade.
   // The generated contrast variable follows both primaryShade schemes.
   variantColorResolver: (input) => {
-    // Uncolored filled actions use Signal; the default subtle action stays neutral.
+    // Uncolored filled actions use ink; an uncolored subtle action stays neutral.
     const colors = defaultVariantColorsResolver(
       input.variant === "subtle" && input.color === input.theme.primaryColor
         ? { ...input, color: "gray" }
@@ -201,7 +202,9 @@ export const theme = createTheme({
         label: { textBoxTrim: "none", height: "auto", lineHeight: 1.4 },
         inner: { transform: "none", transition: "opacity 100ms ease" },
       },
-      defaultProps: { size: "sm", variant: "subtle", fw: 500 },
+      // Actions are secondary buttons by default: a surface with a hairline.
+      // Toolbar and composer chrome opts into "subtle".
+      defaultProps: { size: "sm", variant: "default", fw: 500 },
     }),
     ActionIcon: ActionIcon.extend({
       defaultProps: {
@@ -234,6 +237,8 @@ export const theme = createTheme({
     Combobox: Combobox.extend({
       defaultProps: { shadow: "lg", radius: "md" },
     }),
+    // One compact height for every segmented choice.
+    SegmentedControl: SegmentedControl.extend({ defaultProps: { size: "xs" } }),
     Badge: Badge.extend({ defaultProps: { radius: "xl", variant: "light" } }),
     Tooltip: Tooltip.extend({
       defaultProps: { openDelay: 500, withArrow: true, radius: "sm" },

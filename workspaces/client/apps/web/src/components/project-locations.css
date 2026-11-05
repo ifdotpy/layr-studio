@@ -28,10 +28,14 @@
 }
 .project-server-card:has(> button[aria-pressed="true"]) {
   border-color: var(--text);
-  box-shadow: 0 0 0 var(--studio-border-width) var(--text);
 }
 .project-server-card > button[aria-pressed="true"] {
   background: var(--selected);
+}
+.project-server-path {
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
+  color: var(--muted);
 }
 .project-server-card > button:disabled {
   opacity: 0.5;

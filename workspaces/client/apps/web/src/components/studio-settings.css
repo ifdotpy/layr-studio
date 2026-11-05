@@ -15,6 +15,13 @@
   min-height: 0;
   overflow: hidden;
 }
+/* On wide screens the dialog keeps one height across sections; the detail
+   column scrolls. */
+@media (min-width: 47.5rem) {
+  .studio-settings-tabs {
+    height: min(40rem, calc(100dvh - var(--mantine-spacing-xl) * 5));
+  }
+}
 
 .studio-settings-navigation {
   min-width: 0;
@@ -23,26 +30,29 @@
 
 .studio-settings-navigation .mantine-Tabs-list {
   border: 0;
-  gap: var(--mantine-spacing-xs);
+  gap: 0.125rem;
 }
 .studio-settings-navigation .mantine-Tabs-tabLabel {
   text-align: start;
 }
 
+/* Section navigation: quiet rows, the active one on a neutral fill. */
 .studio-settings-navigation .mantine-Tabs-tab {
   justify-content: flex-start;
-  min-height: var(--studio-action-size);
-  padding: var(--mantine-spacing-sm);
+  min-height: var(--studio-control-size);
+  padding: 0 var(--mantine-spacing-sm);
   border: 0;
-  border-radius: 0;
+  border-radius: var(--studio-radius-control);
   color: var(--muted);
   font-size: var(--studio-text-body);
+}
+.studio-settings-navigation .mantine-Tabs-tab:hover {
+  background: var(--hover);
 }
 
 .studio-settings-navigation .mantine-Tabs-tab[data-active] {
   color: var(--text);
-  background: var(--mantine-color-default-hover);
-  box-shadow: inset var(--studio-rail-size) 0 0 var(--text);
+  background: var(--selected);
 }
 
 .studio-settings-content {
@@ -65,6 +75,10 @@
 
 .studio-settings-panel .settings-group {
   gap: var(--mantine-spacing-sm);
+}
+/* A form's submit button sits at the end of the form, at its own width. */
+.studio-settings-panel .settings-group > .mantine-Button-root {
+  justify-self: end;
 }
 
 .studio-settings-panel .settings-field > .mantine-NativeSelect-root {
@@ -126,4 +140,16 @@
   padding: var(--mantine-spacing-xs) 0;
   color: var(--muted);
   font-size: var(--studio-text-body);
+}
+
+/* Paths and runtime diagnostics read as code. */
+.layr-store-input,
+.layr-settings-detail {
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-code);
+}
+.layr-settings-detail {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }

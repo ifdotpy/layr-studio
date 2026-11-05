@@ -123,8 +123,31 @@ p {
 .startup {
   display: grid;
   place-content: center;
+  justify-items: center;
+  gap: var(--mantine-spacing-sm);
   width: 100%;
   color: var(--muted);
+  font-size: var(--studio-text-meta);
+}
+/* The same spinner as the first paint in index.html. */
+.startup[data-connecting]::before {
+  content: "";
+  width: 1rem;
+  height: 1rem;
+  border: 0.09375rem solid var(--line-strong);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: studio-startup-spin 0.8s linear infinite;
+}
+@keyframes studio-startup-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .startup[data-connecting]::before {
+    animation: none;
+  }
 }
 #lead-row .mantine-Button-inner,
 .picker .mantine-Button-inner {
@@ -244,7 +267,7 @@ p {
   margin-left: auto;
   background: var(--raised);
   padding: 12px 17px;
-  border-radius: 17px 17px 5px 17px;
+  border-radius: var(--studio-radius-dialog);
 }
 .ai-conversation .message.user .message-bottom {
   display: none;
@@ -517,7 +540,7 @@ p {
   border-radius: 13px 13px 3px 13px;
 }
 .agent-conversation .message-label {
-  color: var(--accent);
+  color: var(--text);
   font-size: var(--studio-text-meta);
   font-weight: 500;
 }
@@ -700,7 +723,7 @@ p {
   font-size: var(--studio-text-meta);
 }
 .request-icon {
-  color: var(--accent);
+  color: var(--studio-state-answer);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -1129,7 +1152,7 @@ p {
   font-size: var(--studio-text-title);
 }
 .tasks-title > svg {
-  color: var(--accent);
+  color: var(--muted);
 }
 .tasks-drawer-body {
   flex: 1;
@@ -1206,7 +1229,7 @@ p {
   display: flex;
 }
 .task-kind-icon.active {
-  color: var(--accent);
+  color: var(--studio-state-working);
 }
 .task-row-kind {
   font-size: var(--studio-text-meta);
@@ -1682,13 +1705,13 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   margin-bottom: 14px;
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 16px 16px 16px 4px;
+  border-radius: var(--studio-radius-dialog);
 }
 .ai-conversation .message.user,
 .agent-conversation .message.bubble.outgoing {
   margin-left: auto;
   background: var(--raised);
-  border-radius: 16px 16px 4px 16px;
+  border-radius: var(--studio-radius-dialog);
 }
 
 /* Inline error detail toggles read as quiet text actions. */
@@ -1706,8 +1729,16 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   color: var(--mantine-color-text);
 }
 
-/* Assistant answers keep their card for emphasis within the shared column. */
-.ai-conversation .message.assistant,
+/* Assistant answers are plain prose across the column; only the user's
+   own messages sit in a bubble. Agent-to-agent rooms keep their bubbles. */
+.ai-conversation .message.assistant {
+  width: auto;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
 .agent-conversation .message.bubble:not(.outgoing) {
   max-width: 100%;
 }

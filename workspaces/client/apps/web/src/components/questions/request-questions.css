@@ -24,7 +24,7 @@
   font-size: var(--studio-text-meta);
 }
 .request-async .request-status {
-  color: var(--accent);
+  color: var(--studio-state-answer);
 }
 .request-card .request-copy .request-prompt {
   color: var(--text);
