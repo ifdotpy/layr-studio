@@ -408,12 +408,13 @@ fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>>
 
 /// A main table with one document per row in each of `collections`.
 struct DirectSource {
+    /// The `durable_rows` table: a main table, or a mark name for a view of several.
     table: &'static str,
     collections: &'static [&'static str],
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 4] = [
+const DIRECT_SOURCES: [DirectSource; 7] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -429,6 +430,18 @@ const DIRECT_SOURCES: [DirectSource; 4] = [
     DirectSource {
         table: "approvals",
         collections: &["request", "questionHistory"],
+    },
+    DirectSource {
+        table: "runtime_complaints",
+        collections: &["complaint"],
+    },
+    DirectSource {
+        table: "graph_edges",
+        collections: &["edge"],
+    },
+    DirectSource {
+        table: durable_seq::CHAT_VIEW_MARK,
+        collections: &["chat"],
     },
 ];
 
@@ -452,7 +465,8 @@ fn direct_units(
     }
     for source in &DIRECT_SOURCES {
         if !source.collections.iter().any(|c| wanted.contains(c))
-            || !crate::sync_policy::table_exists(connection, source.table)?
+            || source.table != durable_seq::CHAT_VIEW_MARK
+                && !crate::sync_policy::table_exists(connection, source.table)?
         {
             continue;
         }
@@ -515,6 +529,25 @@ fn direct_docs(
         }
         return Ok(rows);
     }
+    if table == durable_seq::CHAT_VIEW_MARK || table == "graph_edges" {
+        let (collection, view) = if table == "graph_edges" {
+            ("edge", edge_view(connection, id)?)
+        } else {
+            (
+                "chat",
+                studio_runtime_store::CoordinationRepository::chat_view(connection, id)?,
+            )
+        };
+        match view {
+            Some(value) if wanted.contains(collection) => {
+                rows.push(upsert(collection, id, seq, value)?)
+            }
+            Some(_) => {}
+            None if !snapshot => rows.extend(tombstones(&[collection], wanted, id, seq)),
+            None => {}
+        }
+        return Ok(rows);
+    }
     let raw: Option<String> = connection
         .prepare_cached(&format!("SELECT record FROM {table} WHERE id=?1"))?
         .query_row([id], |row| row.get(0))
@@ -526,6 +559,10 @@ fn direct_docs(
         "runtime_plans" => ("plan", crate::sync_policy::plan_view(id, &raw)),
         "runtime_annotations" => ("annotation", crate::sync_policy::annotation_view(id, &raw)),
         "runtime_rules" => ("rule", crate::sync_policy::rule_view(id, &raw).map(Some)),
+        "runtime_complaints" => (
+            "complaint",
+            crate::sync_policy::complaint_view(connection, id, &raw),
+        ),
         _ => return Err(StoreError::RecordContract("unknown direct source")),
     };
     // A row that does not decode has no document: the stream skips it and reports it here.
@@ -660,6 +697,16 @@ pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
             .flat_map(|unit| unit.rows)
             .collect(),
     )
+}
+
+/// The `edge` document of a chat membership edge; None for another kind.
+fn edge_view(connection: &Connection, id: &str) -> StoreResult<Option<Value>> {
+    Ok(connection
+        .prepare_cached("SELECT source,target FROM graph_edges WHERE id=?1 AND kind='chat'")?
+        .query_row([id], |row| {
+            Ok(json!({"id":id,"source":row.get::<_, String>(0)?,"target":row.get::<_, String>(1)?,"kind":"chat"}))
+        })
+        .optional()?)
 }
 
 /// This server's id, for the views that name a project's home server.

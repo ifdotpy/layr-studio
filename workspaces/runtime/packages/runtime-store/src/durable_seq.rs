@@ -109,6 +109,9 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_annotations"),
     DurableTable::record("runtime_rules"),
     DurableTable::new("approvals", "request"),
+    DurableTable::record("runtime_complaints"),
+    // Chat membership edges: an `edge` document per chat edge, built at read time.
+    DurableTable::new("graph_edges", "target"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -230,6 +233,10 @@ pub fn keep_counter(tx: &Transaction<'_>) -> StoreResult<()> {
 /// at read time; a mark asks readers to build them again (owner: `entity_scope` in
 /// runtime-services).
 pub const AGENT_VIEW_MARK: &str = "agent_views";
+
+/// The `durable_rows` table name of the chat views: a chat document reads its group,
+/// its member edges and its messages, so their writers mark the chat.
+pub const CHAT_VIEW_MARK: &str = "chat_views";
 
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.

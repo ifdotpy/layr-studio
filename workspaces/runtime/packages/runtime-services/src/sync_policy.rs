@@ -1220,6 +1220,39 @@ pub(crate) fn annotation_view(id: &str, raw: &str) -> StoreResult<Option<RawValu
     Ok(Some(studio_json::to_raw_value(&view)?))
 }
 
+/// The client view of a complaint row, with the current names of its author and lead.
+pub(crate) fn complaint_view(
+    connection: &Connection,
+    id: &str,
+    raw: &str,
+) -> StoreResult<Option<RawValue>> {
+    let record: studio_runtime_schema::complaint_record::ComplaintRecord =
+        studio_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+            object: "complaints",
+            id: id.to_owned(),
+        })?;
+    let mut agents = Vec::new();
+    for agent in [record.author.as_deref(), record.lead_id.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        let raw: Option<String> = connection
+            .prepare_cached("SELECT record FROM runtime_agents WHERE id=?1")?
+            .query_row([agent], |row| row.get(0))
+            .optional()?;
+        if let Some(raw) = raw {
+            agents.push(studio_json::from_str::<
+                crate::submit_gates::AgentAuthorityRow,
+            >(&raw)?);
+        }
+    }
+    let context = crate::sync_views::ComplaintViewContext { agents: &agents };
+    crate::sync_views::project_complaint_record(&record, &context)
+        .map(|view| studio_json::to_raw_value(&view))
+        .transpose()
+        .map_err(StoreError::from)
+}
+
 /// The client view of a rule row: its id, agent and name.
 pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<RawValue> {
     let invalid = || StoreError::InvalidStoredRecord {
