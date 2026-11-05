@@ -101,3 +101,9 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* Lead, Workers and Review switch inside one popover height, so the
+   popover never grows or jumps while the user compares roles. */
+.mantine-Popover-dropdown.execution-dropdown {
+  min-height: 23rem;
+}

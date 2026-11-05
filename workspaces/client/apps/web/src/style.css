@@ -1848,6 +1848,11 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 /* Delivery status and message actions both sit under a user bubble. Stack
    them so the status never covers the action buttons. */
 @media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  /* The hover actions hang under the bubble: the gap below it holds them,
+     so they never cover the next answer. */
+  #conversation.ai-conversation .message.user {
+    margin-bottom: 2.5rem;
+  }
   .ai-conversation
     .message.user:has(
       .message-delivery-heading:not(:has(> .sr-only:only-child)),
