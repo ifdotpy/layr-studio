@@ -592,6 +592,33 @@ fn auth_wait_ids(
         .map_err(|error| ContinuationError::Store(studio_runtime_store::StoreError::from(error)))
 }
 
+/// A successful sign-in is proof for the auth waits of its account, like a
+/// completed turn: each wait becomes due now. Only the first 32 waits advance;
+/// the others keep their timer. Returns whether a wait changed.
+pub fn stage_sign_in_proof(tx: &Transaction<'_>, account_key: &str, now: f64) -> Result<bool> {
+    let mut changed = false;
+    for (resume_id, resume_agent) in auth_wait_ids(tx, account_key, 32)? {
+        let mut staged = empty_stage(tx, &resume_agent)?;
+        let snapshot = load(
+            tx,
+            &resume_agent,
+            ContinuationTable::Usage,
+            Some(&resume_id),
+        )?;
+        let decision = usage_resume::completed_proof(&snapshot, account_key, now)?;
+        collect_apply(
+            tx,
+            &mut staged,
+            ContinuationTable::Usage,
+            &snapshot,
+            decision,
+            now,
+        )?;
+        changed |= staged.changed;
+    }
+    Ok(changed)
+}
+
 /// Reconcile one due usage wait under the caller's transaction. The host bounds
 /// the scan to a fixed batch and fetches `limits` before opening this transaction.
 pub fn stage_tick(

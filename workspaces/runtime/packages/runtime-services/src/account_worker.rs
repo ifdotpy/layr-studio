@@ -4364,7 +4364,12 @@ impl Worker {
         )
         .await;
         match result {
-            Ok(Ok(changed)) if !changed.is_empty() => self.bridge.event_wake().notify_one(),
+            Ok(Ok(changed)) if !changed.is_empty() => {
+                self.bridge.event_wake().notify_one();
+                if changed.iter().any(|receipt| receipt["status"] == "ready") {
+                    self.sign_in_proof().await;
+                }
+            }
             Ok(Ok(_)) => {}
             Ok(Err(error)) => crate::diagnostics::log_stderr(format_args!(
                 "account {} sign-in completion was not applied: {error}",
@@ -4372,6 +4377,27 @@ impl Worker {
             )),
             Err(_) => crate::diagnostics::log_stderr(format_args!(
                 "account {} sign-in completion task failed",
+                self.account
+            )),
+        }
+    }
+
+    /// Make the auth waits of this account due now after a successful sign-in,
+    /// so their chats do not wait for the auth backoff timer.
+    async fn sign_in_proof(&self) {
+        let account = self.account.clone();
+        let result = self
+            .bridge
+            .store
+            .transaction_with(move |tx| {
+                crate::continuation_runtime::stage_sign_in_proof(tx, &account, now())
+            })
+            .await;
+        match result {
+            Ok(true) => self.bridge.continuation_wake().notify_one(),
+            Ok(false) => {}
+            Err(error) => crate::diagnostics::log_stderr(format_args!(
+                "account {} sign-in did not wake its auth waits: {error}",
                 self.account
             )),
         }
