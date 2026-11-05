@@ -84,13 +84,15 @@
   --studio-page: var(--mantine-color-gray-0);
   --surface: #ffffff;
   --sidebar: var(--studio-page);
-  --raised: var(--mantine-color-gray-1);
+  /* Structure is stronger than the gray ramp: on #fafafa the ramp's hairline
+     and fill fall to 1.07 to 1.14:1, against 1.2 to 1.4:1 in dark. */
+  --raised: #e8e8e8;
   --inset: var(--mantine-color-gray-0);
   --overlay: #ffffff;
   --hover: color-mix(in srgb, var(--text) 4%, transparent);
   --selected: color-mix(in srgb, var(--text) 7%, transparent);
-  --line: var(--mantine-color-gray-2);
-  --line-strong: var(--mantine-color-gray-4);
+  --line: #e0e0e0;
+  --line-strong: #c4c4c4;
   --muted: var(--mantine-color-gray-7);
   --text: var(--mantine-color-gray-9);
   --accent: var(--mantine-color-blue-7);
@@ -101,7 +103,7 @@
   --studio-diff-add: var(--mantine-color-green-7);
   --studio-diff-delete: var(--mantine-color-red-7);
   --studio-diff-tint: 9%;
-  --studio-shadow-xs: 0 0 0 var(--studio-border-width) rgb(0 0 0 / 8%);
+  --studio-shadow-xs: 0 0 0 var(--studio-border-width) rgb(0 0 0 / 12%);
   --studio-shadow-sm:
     var(--studio-shadow-xs), 0 0.0625rem 0.0625rem rgb(0 0 0 / 2%),
     0 0.125rem 0.125rem rgb(0 0 0 / 4%);

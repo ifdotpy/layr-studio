@@ -204,6 +204,10 @@ benchmark-client-interactions baseline output:
 test-browser-smoke *args:
     @node {{quote(facade)}} test-browser-smoke {{args}}
 
+[doc("Manual: drive agent turns through every layout configuration and device profile (desktop, phone, Duo, with and without the keyboard) and report layout shifts. Needs the renderer build and a debug server. Flags: --profile NAME,... --out DIR --chromium PATH.")]
+layout-shift-matrix *args:
+    @node workspaces/client/apps/web/scripts/layout-shift-matrix.ts {{args}}
+
 [doc("Check the main user scenarios on the app installed on this Mac, with its own test chats. See docs/testing.md, Installed scenario smoke.")]
 smoke-installed *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/installed-smoke/smoke.ts")}} "$@"

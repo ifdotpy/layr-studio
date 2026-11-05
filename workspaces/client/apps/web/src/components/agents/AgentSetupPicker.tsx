@@ -95,7 +95,7 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
         automatic={p.automaticAccount}
         automaticDescription={
           p.role === "review"
-            ? "Uses the caller account for native review and the worker default for reviewer tasks."
+            ? "Native reviews use the caller account; review tasks use the Workers default."
             : undefined
         }
       />

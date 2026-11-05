@@ -603,6 +603,70 @@ async fn auth_proof_cursors_survive_two_accounts_and_wake_errors_do_not_drop_lat
 }
 
 #[tokio::test]
+async fn a_sign_in_makes_the_auth_waits_of_its_account_due_now() {
+    let template = template();
+    let root = clone_template(template.path());
+    let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+    let changed = store
+        .transaction_with(|tx| -> std::result::Result<_, ContinuationError> {
+            let base_agent: String = tx
+                .query_row(
+                    "SELECT record FROM runtime_agents WHERE id='a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)?;
+            let base_agent: Value = studio_json::from_str(&base_agent).map_err(StoreError::from)?;
+            let base_resume: String = tx
+                .query_row(
+                    "SELECT record FROM runtime_usage_resumes WHERE id='resume'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)?;
+            let base_resume: Value =
+                studio_json::from_str(&base_resume).map_err(StoreError::from)?;
+            for (agent_id, account_key) in [("signed", "default"), ("foreign", "other")] {
+                let mut agent = base_agent.clone();
+                agent["id"] = json!(agent_id);
+                agent["rootId"] = json!(agent_id);
+                agent["accountKey"] = json!(account_key);
+                tx.execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    rusqlite::params![agent_id, agent.to_string()],
+                )
+                .map_err(StoreError::from)?;
+                let id = format!("{agent_id}-wait");
+                let mut record = base_resume.clone();
+                record["id"] = json!(id);
+                record["accountKey"] = json!(account_key);
+                record["cause"] = json!("auth");
+                record["status"] = json!("scheduled");
+                record["failedAt"] = json!(900.0);
+                record["dueAt"] = json!(1180.0);
+                if let Some(object) = record.as_object_mut() {
+                    object.remove("proofAt");
+                }
+                tx.execute(
+                    "INSERT INTO runtime_usage_resumes(id,agent,record) VALUES(?1,?2,?3)",
+                    rusqlite::params![id, agent_id, record.to_string()],
+                )
+                .map_err(StoreError::from)?;
+            }
+            continuation_runtime::stage_sign_in_proof(tx, "default", 1000.0)
+        })
+        .await
+        .expect("sign-in proof");
+    assert!(changed);
+    let rows = all_usage_rows(&store);
+    let wait = |id: &str| rows.iter().find(|r| r["id"] == id).expect("wait").clone();
+    assert_eq!(wait("signed-wait")["dueAt"], json!(1000.0));
+    assert_eq!(wait("signed-wait")["proofAt"], json!(1000.0));
+    assert_eq!(wait("foreign-wait")["dueAt"], json!(1180.0));
+    assert!(wait("foreign-wait").get("proofAt").is_none());
+}
+
+#[tokio::test]
 async fn production_classifier_matches_python_word_boundaries_and_bounded_evidence() {
     use studio_runtime_services::provider_adapter::adapter;
     let cases = vec![

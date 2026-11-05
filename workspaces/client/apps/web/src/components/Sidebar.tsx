@@ -1388,6 +1388,13 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
               <Menu.Item onClick={() => setArchive(!archive)}>
                 {archive ? "Show active chats" : "Show archived chats"}
               </Menu.Item>
+              {/* A narrow sidebar hides these two buttons; the menu keeps them. */}
+              {p.newSharedChat && (
+                <Menu.Item onClick={() => p.newSharedChat?.()}>
+                  New shared chat
+                </Menu.Item>
+              )}
+              <Menu.Item onClick={p.addProject}>Add project</Menu.Item>
             </Menu.Dropdown>
           </Menu>
           <ActionIcon
@@ -1409,11 +1416,13 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
               <Users size={16} />
             </ActionIcon>
           )}
-          {
-            <ActionIcon aria-label="Add project" onClick={p.addProject}>
-              <Plus size={18} />
-            </ActionIcon>
-          }
+          <ActionIcon
+            className="sidebar-add-project"
+            aria-label="Add project"
+            onClick={p.addProject}
+          >
+            <Plus size={18} />
+          </ActionIcon>
         </div>
         {projectGroups.map((group) => {
           const oldChatCount = Math.max(

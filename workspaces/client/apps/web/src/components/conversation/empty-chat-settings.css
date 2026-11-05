@@ -64,14 +64,16 @@
   overflow: visible;
   white-space: normal;
 }
-/* Reserve the active Stop slot so dictation and Send do not jump on turn start. */
-@media (pointer: fine) {
-  @container composer (min-width: 35em) {
-    .composer-submit-actions:not(:has(#stop))::before {
-      content: "";
-      flex: 0 0 var(--studio-control-size);
-      height: var(--studio-control-size);
-    }
+/* Reserve the active Stop slot at Stop's own position, so the model summary,
+   dictation and Send do not jump on turn start. The narrowest composer moves
+   Stop into the input corner instead (below) and needs no slot. */
+.composer-stop-slot {
+  flex: 0 0 var(--studio-action-size);
+  height: var(--studio-action-size);
+}
+@container composer (max-width: 20em) {
+  .composer-stop-slot {
+    display: none;
   }
 }
 /* Queue remains available through the existing tools disclosure on phones. */
