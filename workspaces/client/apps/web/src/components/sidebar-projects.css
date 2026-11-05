@@ -244,7 +244,7 @@
 .row-copy > .fleet-chat-heading {
   display: contents;
 }
-.row-copy:has(> .fleet-chat-heading) > :not(.fleet-chat-heading),
+.row-copy > .fleet-chat-heading ~ *,
 .row-copy > .fleet-chat-heading > strong {
   grid-column: 2;
 }
