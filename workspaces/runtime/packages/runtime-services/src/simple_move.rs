@@ -4,8 +4,8 @@
 //! turn. Chats that are busy, or that change provider, use the transfer flow.
 
 use crate::account_transfer::TransferError;
-use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentId, AgentRepository, RuntimeStore, StoreError};
 
 /// The files of one Claude session under an account home and the server state.
@@ -34,7 +34,7 @@ fn session_files(
     let snapshot = sessions.join(format!("{thread}.json"));
     let native_id = std::fs::read(&snapshot)
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|bytes| studio_json::from_slice::<Value>(&bytes).ok())
         .and_then(|value| value["session"]["nativeId"].as_str().map(str::to_owned))
         .unwrap_or_else(|| thread.to_owned());
     let mut native = Vec::new();
