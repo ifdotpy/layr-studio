@@ -2169,7 +2169,6 @@ mod tests {
         crate::account_worker::store::attach_provider_stream_for_test(
             &store,
             "account",
-            None,
             7,
             "voice-connection",
         )
@@ -2820,7 +2819,6 @@ mod tests {
         crate::account_worker::store::attach_provider_stream_for_test(
             &store,
             "default",
-            None,
             1,
             "scripted-connection",
         )

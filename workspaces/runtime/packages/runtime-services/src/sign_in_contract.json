@@ -1,5 +1,5 @@
 {
-  "about": "The owner of the orchestration_sign_in tool and its result texts (docs/vm-browser-bridge.md, section 7). The Python server reads this file. The Rust catalog (runtime-services account_worker/preparation-resources.json) and the Rust results (runtime-services sign_in.rs) are checked against it.",
+  "about": "The owner of the orchestration_sign_in tool and its result texts. The bundled catalog and runtime results are checked against it.",
   "tool": {
     "type": "function",
     "name": "orchestration_sign_in",
@@ -28,7 +28,7 @@
     "declined": "The person declined to open {host}. Do not give this link again unless the person asks for it.",
     "closed": "The sign-in request for {host} has ended. Run the sign-in command again if it still needs a sign-in.",
     "refused": "Studio cannot show this link: {reason}",
-    "unsupported": "The browser bridge of this chat is older than this tool. Run \"$BROWSER\" with the link in the chat's shell instead; in the Linux VM, run studio-browser with the link."
+    "unsupported": "The browser bridge of this chat is older than this tool. Run \"$BROWSER\" with the link in the chat's shell instead."
   },
   "unsupportedMessage": "The browser method is not supported",
   "unsupportedMessageAbout": "The refusal of a bridge from before browser.submit (browser_bridge.py and browser_host.rs, method call)."

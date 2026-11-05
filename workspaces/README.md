@@ -6,8 +6,7 @@ real caller and focused checks justify them.
 
 ## Domains
 
-- [Runtime](runtime/README.md): `apps/server` and `apps/vm-guest`; Python server
-  and guest service. Focused check: `pnpm run test:server:python -- --filter <name>`.
+- [Runtime](runtime/README.md): the server, command tools and shared runtime packages.
 - [Providers](providers/README.md): `apps/claude-bridge`; Node provider bridge.
   Focused check: `pnpm --filter studio-claude-bridge run test`.
 - [Client](client/README.md): `apps/web` and `apps/desktop`; React renderer and

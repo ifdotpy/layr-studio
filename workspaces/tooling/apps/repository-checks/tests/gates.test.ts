@@ -500,7 +500,6 @@ test("Cargo compilation is confined to the fixed Rust lane and both tiers use on
       "--profile",
     ]);
     assert.ok(!JSON.stringify(steps).includes("--release"));
-    assert.equal(steps.find((s) => s.id === "guest")!.requires, "workspace");
     assert.equal(
       steps.find((s) => s.id === "web unit tests")!.requires,
       "workspace",

@@ -396,7 +396,6 @@ State IDs travel through Layr remotes; use full IDs for review.
 When a Git mirror push is authorized, use `layr git push <remote> <branch>`
 (or `layr git push --squash -m "<message>" <remote> <branch>`).
 Read configured Git remotes with `layr git remote -v`.
-In a Studio VM project with host sync, use the host bridge policy in the workspace reference.
 A Git folder made by the line owner stays under that owner's control.
 Git sync requires the line's Git mirror. A line made before Git setup can have no mirror.
 Use layr for source changes. Tools can read the Git mirror.

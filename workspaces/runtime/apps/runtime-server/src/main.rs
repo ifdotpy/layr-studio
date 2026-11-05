@@ -38,7 +38,7 @@ use studio_runtime_store::path_identity::CanonicalPath;
 
 use axum::Extension;
 use rusqlite::OptionalExtension;
-use studio_runtime_http::{HttpState, VaultJobOwner, router};
+use studio_runtime_http::{HttpState, router};
 use studio_runtime_server::handover;
 use studio_runtime_services::account_driver::{
     AccountDriver, create_default_registry, resolve_codex_home,
@@ -130,16 +130,6 @@ fn main() -> std::process::ExitCode {
     // The launcher of agent sign-in links runs this binary (`browser_host::write_launcher`).
     #[cfg(unix)]
     if let Some(code) = studio_runtime_services::browser_host::shim_main(env::args_os()) {
-        std::process::exit(code);
-    }
-    // The Linux VM helper in its own session (`linux_vm_runtime::TrampolineLauncher`).
-    #[cfg(unix)]
-    if let Some(code) = studio_runtime_services::linux_vm_runtime::helper_main(env::args_os()) {
-        std::process::exit(code);
-    }
-    // The Mac host_exec service of a VM state folder (`host_exec_service::lifecycle`).
-    #[cfg(unix)]
-    if let Some(code) = studio_runtime_services::host_exec_service::main(env::args_os()) {
         std::process::exit(code);
     }
     // The standby copy of a live handover holds the socket and no state (src/handover.rs).
@@ -362,20 +352,6 @@ fn panic_observed_log(location: Option<&std::panic::Location<'_>>) -> String {
     format!("runtime server observed panic{location} (payload redacted)")
 }
 
-/// The vault writer layr-desk runs: configure the VM writer from the configuration on standard input.
-#[cfg(unix)]
-fn vault_configure(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let [vm_state_dir, source] = args else {
-        return Err("vault-configure requires a VM state directory and a project folder".into());
-    };
-    let given: studio_json::Value = studio_json::from_reader(std::io::stdin())?;
-    let guest = studio_runtime_services::linux_vm_guest::UnixGuestRpc::new(vm_state_dir);
-    let result =
-        studio_runtime_services::vault::configure(&guest, Path::new(vm_state_dir), source, &given)?;
-    println!("{}", studio_json::to_string_pretty(&result)?);
-    Ok(())
-}
-
 async fn run(
     shutdown_requested: Sender<()>,
 ) -> Result<Option<handover::Handed>, Box<dyn std::error::Error>> {
@@ -390,10 +366,6 @@ async fn run(
         .any(|argument| argument == handover::TAKEOVER_ARG);
     let resume = args.iter().any(|argument| argument == handover::RESUME_ARG);
     args.retain(|argument| argument != handover::TAKEOVER_ARG && argument != handover::RESUME_ARG);
-    #[cfg(unix)]
-    if args.first().map(String::as_str) == Some(studio_runtime_services::vault::WRITER_SUBCOMMAND) {
-        return vault_configure(&args[1..]).map(|()| None);
-    }
     if args.first().map(String::as_str) == Some("state-check") {
         let state_dir = args
             .get(1)
@@ -750,13 +722,6 @@ async fn run(
             .with_peer_link_advert(Arc::clone(&peer_link_advert))
             .with_peer_link_token(&peer_link_token);
     }
-    #[cfg(unix)]
-    {
-        let guest = studio_runtime_services::linux_vm_guest::UnixGuestRpc::for_runtime_state(
-            &PathBuf::from(&state_dir),
-        );
-        state = state.with_project_secrets_guest_rpc(Arc::new(guest));
-    }
     account_driver.recover_codex_logins()?;
     state = state.with_native_runtime(Arc::clone(&native_runtime));
     state.account_session = Some(Arc::clone(&account_session));
@@ -931,11 +896,6 @@ async fn run(
     }
     let sync_changes = state.sync_changes_handle();
     let cost_scan_cancelled = state.cost_scan_cancellation_handle();
-    let vault_job_owner = VaultJobOwner::start(
-        Arc::clone(&sync_changes),
-        state.resource_notifications_handle(),
-    );
-    state = state.with_vault_job_client(vault_job_owner.client());
     state.initialize_bounded_entities().await?;
     let app = match router(state.clone()) {
         Ok(app) => {
@@ -957,17 +917,13 @@ async fn run(
             {
                 let terminal_cleanup = shutdown_io_runtime(Arc::clone(&io_runtime)).await;
                 let runtime_cleanup = runtime_shutdown::close(runtime, &state).await;
-                let vault_jobs_cleanup = vault_job_owner.shutdown().await;
                 terminal_cleanup?;
                 runtime_cleanup?;
-                vault_jobs_cleanup?;
             }
             #[cfg(not(unix))]
             {
                 let services_cleanup = state.shutdown_services().await;
-                let vault_jobs_cleanup = vault_job_owner.shutdown().await;
                 services_cleanup?;
-                vault_jobs_cleanup?;
             }
             return Err(error);
         }
@@ -1036,7 +992,7 @@ async fn run(
         monitor_runtime,
         monitor_shutdown.subscribe(),
     );
-    // Sign-in links of agents (docs/vm-browser-bridge.md): the host bridge of native chats
+    // Sign-in links of agents: the host bridge of native chats
     // serves the launcher and control sockets; one poll for each source writes the cards.
     #[cfg(unix)]
     let browser_host = match studio_runtime_services::browser_host::HostBridgeService::start(
@@ -1070,7 +1026,7 @@ async fn run(
     let approval_expiry_task = state
         .callback_runtime()
         .map(|runtime| tokio::spawn(runtime.run_expiry(monitor_shutdown.subscribe())));
-    // Links that agents give for a sign-in (docs/vm-browser-bridge.md, section 7): the
+    // Links that agents give for a sign-in: the
     // `orchestration_sign_in` tool and sign-in links in completed messages reach the same
     // bridges and cards.
     let sign_in_sources =
@@ -1461,9 +1417,6 @@ async fn run(
             peer_link.shutdown().await;
         }
         federation_cancelled.store(true, std::sync::atomic::Ordering::Release);
-        let vault_jobs_cleanup =
-            shutdown_join("vault job owner", vault_job_owner.shutdown()).await?;
-        vault_jobs_cleanup?;
         #[cfg(unix)]
         let history_cleanup = shutdown_join("history runtime task", history_task).await?;
         #[cfg(unix)]

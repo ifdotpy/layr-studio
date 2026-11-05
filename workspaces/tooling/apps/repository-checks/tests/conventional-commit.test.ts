@@ -22,6 +22,7 @@ test("rejects other subjects", () => {
     "Add the release gate",
     "feature: Add x",
     "fix(unknown): Add x",
+    "fix(vm): Remove old mode",
     "fix:Add x",
     "fix: ",
     "Fix: Add x",

@@ -203,7 +203,6 @@ async fn attach_voice_scope(store: &RuntimeStore) {
     studio_runtime_services::account_worker::attach_provider_stream_for_test(
         store,
         "voice-account",
-        None,
         6,
         "6",
     )

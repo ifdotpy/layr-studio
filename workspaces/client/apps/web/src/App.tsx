@@ -103,7 +103,6 @@ import { useMediaQuery } from "@mantine/hooks";
 import {
   Activity,
   ArrowLeft,
-  HardDriveDownload,
   Layers,
   Terminal,
   BookOpen,
@@ -209,7 +208,6 @@ import ProjectFolderDialog from "./components/ProjectFolderDialog";
 import SessionActivity from "./components/agents/SessionActivity";
 import { useWorkerModels } from "./components/agents/WorkerModelPicker";
 import { FederationSettings } from "./components/FederationSettings";
-import { LinuxVMSettings } from "./components/LinuxVMSettings";
 import { LayrWorktreesSettings } from "./components/LayrWorktreesSettings";
 import { SignInPushSettings } from "./components/SignInPushSettings";
 import { OrchestrationSettings } from "./components/OrchestrationSettings";
@@ -2360,28 +2358,6 @@ export default function App({ active = true }: { active?: boolean }) {
                 </small>
               </Menu.Item>
             )}
-          {agent.executionMode === "vm" && (
-            <Menu.Item
-              data-action="move-to-device"
-              leftSection={<HardDriveDownload size={14} />}
-              disabled={busy.has(agent.status ?? "") || !!agent.inFlight}
-              onClick={() => {
-                void run(() =>
-                  post(
-                    "/api/agents/move-to-host",
-                    { id: agent.id, request_id: randomUUID() },
-                    { timeoutMs: 3600000 },
-                  ),
-                );
-              }}
-            >
-              Move to this device
-              <small className="menu-action-help">
-                Keeps this chat and its history. Moves the project files and the
-                chat history from the virtual machine to this device.
-              </small>
-            </Menu.Item>
-          )}
           <Menu.Divider />
           <Menu.Label>Model actions</Menu.Label>
           {(
@@ -3432,9 +3408,6 @@ export default function App({ active = true }: { active?: boolean }) {
               <OrchestrationSettings
                 active={studioSettingsOpen && studioSettingsTab === "agents"}
               />
-            </Tabs.Panel>
-            <Tabs.Panel value="linux-vm" pt="md">
-              <LinuxVMSettings active={studioSettingsOpen} />
             </Tabs.Panel>
             <Tabs.Panel value="layr-worktrees" pt="md">
               <LayrWorktreesSettings active={studioSettingsOpen} />

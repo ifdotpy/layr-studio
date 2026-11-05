@@ -58,7 +58,6 @@ pub mod supervisor_journal;
 pub mod terminal_output;
 pub mod text_blobs;
 pub mod transfer_record;
-pub mod vm_work_intent;
 pub mod wal_backup;
 pub mod work_history;
 mod write_alert;
@@ -2373,7 +2372,10 @@ impl RuntimeStore {
     }
 
     /// Whether projection maintenance has not observed the current commit generation and vault signature.
-    pub fn entity_projections_need_maintenance(&self, vault_signature: &str) -> StoreResult<bool> {
+    pub fn entity_projections_need_maintenance(
+        &self,
+        project_signature: &str,
+    ) -> StoreResult<bool> {
         let last = self
             .last_entity_projection_state
             .lock()
@@ -2381,7 +2383,7 @@ impl RuntimeStore {
         let current_generation = self.committed_change_generation();
         Ok(match last.as_ref() {
             Some((generation, signature)) => {
-                *generation != current_generation || signature != vault_signature
+                *generation != current_generation || signature != project_signature
             }
             None => true,
         })
@@ -2398,7 +2400,7 @@ impl RuntimeStore {
     pub fn mark_entity_projections_maintained(
         &self,
         generation: u64,
-        vault_signature: String,
+        project_signature: String,
     ) -> StoreResult<()> {
         if generation > self.committed_change_generation() {
             return Err(StoreError::RecordContract(
@@ -2408,7 +2410,7 @@ impl RuntimeStore {
         *self
             .last_entity_projection_state
             .lock()
-            .map_err(|_| StoreError::WriterPoisoned)? = Some((generation, vault_signature));
+            .map_err(|_| StoreError::WriterPoisoned)? = Some((generation, project_signature));
         Ok(())
     }
 
@@ -5350,3 +5352,5 @@ impl From<studio_json::error::Error> for StoreError {
         Self::Json(value.into())
     }
 }
+
+pub mod work_intent;

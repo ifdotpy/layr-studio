@@ -31,7 +31,7 @@ exclusive process lease. `--wait-for-lease` waits for that
 lease without connecting to or signaling the current owner. Service installation and production
 cutover remain separate operator actions.
 
-All clients, including the retained VM guest and operator tools, request the
+All clients, including operator tools, request the
 version owned by [`supervisor_protocol.rs`](../../packages/runtime-providers/src/supervisor_protocol.rs)
 and require the daemon to echo it. Other versions are refused before backend admission. V2 `nextBatch`
 waits for a committed event or terminal reader completion on a separate

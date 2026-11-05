@@ -1467,7 +1467,6 @@ async fn ready_voice_session(store: &RuntimeStore, lead: &Value) {
     crate::account_worker::store::attach_provider_stream_for_test(
         store,
         "default",
-        None,
         7,
         "connection",
     )
@@ -1487,7 +1486,7 @@ async fn ready_voice_session(store: &RuntimeStore, lead: &Value) {
         .unwrap();
 }
 
-/// `orchestration_sign_in` (docs/vm-browser-bridge.md, section 7) through the managed-tool
+/// `orchestration_sign_in` through the managed-tool
 /// dispatcher: the host bridge queues the link and the card is written at once; a second call
 /// with the same link returns the same card; without the attached bridges the tool refuses.
 #[cfg(unix)]
@@ -1504,11 +1503,10 @@ async fn sign_in_shows_one_card_through_the_chat_bridge() {
         None,
     )
     .unwrap();
-    let guest: Arc<dyn crate::linux_vm_guest::GuestRpc> = Arc::new(
-        crate::linux_vm_guest::UnixSocketGuestRpc::new(service.control_socket.clone()),
+    let guest: Arc<dyn crate::browser_rpc::BrowserRpc> = Arc::new(
+        crate::browser_rpc::UnixSocketBrowserRpc::new(service.control_socket.clone()),
     );
     let sources = crate::sign_in::SignInSources::new(vec![crate::browser_cards::CardSource {
-        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),

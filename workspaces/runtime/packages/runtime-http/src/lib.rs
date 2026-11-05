@@ -20,10 +20,7 @@ pub mod schema;
 mod validation;
 
 pub use router::{HttpState, router};
-pub use routes::{
-    NativeContextRepairPort, VaultJobClient, VaultJobOwner, backend_build_identity,
-    initialize_backend_identity,
-};
+pub use routes::{NativeContextRepairPort, backend_build_identity, initialize_backend_identity};
 pub use schema::{API_SCHEMA_HASH_HEADER, API_SCHEMA_MISMATCH_HEADER, api_schema_hash, operations};
 
 // Generated HTTP types follow the schema, including nested optional fields.

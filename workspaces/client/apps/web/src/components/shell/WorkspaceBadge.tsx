@@ -2,7 +2,7 @@ import { AgentRole as GeneratedApiAgentRole } from "../../generated/api.ts";
 import type { Agent } from "../../types";
 
 export type WorkspaceBadgeInfo = {
-  label: "Layr" | "Layr VM" | "WT" | "SHARED";
+  label: "Layr" | "WT" | "SHARED";
   title: string;
 };
 
@@ -21,16 +21,18 @@ export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
           ? "shared"
           : undefined);
   // A chat lead never shows the shared mode of its own folder.
-  if (!mode || mode === "image" || (agent.isLead && mode === "shared"))
+  if (
+    !mode ||
+    !["layr-native", "worktree", "shared"].includes(mode) ||
+    (agent.isLead && mode === "shared")
+  )
     return null;
   const info: WorkspaceBadgeInfo =
     mode === "layr-native"
       ? { label: "Layr", title: "Native Layr workspace" }
-      : mode === "layr"
-        ? { label: "Layr VM", title: "Virtual machine with Layr" }
-        : mode === "worktree"
-          ? { label: "WT", title: "Git worktree" }
-          : { label: "SHARED", title: "Shared folder" };
+      : mode === "worktree"
+        ? { label: "WT", title: "Git worktree" }
+        : { label: "SHARED", title: "Shared folder" };
   if (!agent.isLead && agent.cwd) info.title += ` · ${agent.cwd}`;
   return info;
 }

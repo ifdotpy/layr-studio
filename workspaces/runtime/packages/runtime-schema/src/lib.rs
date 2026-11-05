@@ -843,7 +843,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "SubscriptionCursor",
         "SubscriptionReplyKind",
         "ResourceProgressEvent",
-        "VaultPullOutcome",
         "ResourceEntityTransferEvent",
         "EntityChangeBatch",
         "RoomEntityDto",

@@ -1,9 +1,5 @@
 import { errorDetails } from "./errorPresentation.ts";
-import {
-  DISK_FULL_ERROR_PATTERN,
-  LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-  VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-} from "./generated/sharedValues.ts";
+import { DISK_FULL_ERROR_PATTERN } from "./generated/sharedValues.ts";
 import type { Agent } from "./types";
 import type { KnownCodexErrorKind } from "studio-claude-bridge/provider-errors.generated.ts";
 import {
@@ -110,12 +106,6 @@ export function isDiskFullError(value: unknown): boolean {
 
 export function nativeErrorView(value: unknown, planType?: string) {
   const view = codexErrorView(value, planType);
-  if (view.message === LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR)
-    return {
-      ...view,
-      message: VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-      details: view.details || view.message,
-    };
   if (!isDiskFullError(value)) {
     const record = objectRecord(value);
     const claude = objectRecord(record?.claudeFailure);

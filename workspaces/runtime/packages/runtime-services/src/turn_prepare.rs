@@ -173,18 +173,6 @@ pub struct Asset {
     /// Additional public metadata; typed identity fields override conflicting entries.
     pub view: Map<String, Value>,
 }
-/// Guest path and exact source evidence produced by VM attachment preparation.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AssetPath {
-    pub source_fingerprint: String,
-    pub path: String,
-}
-/// Fingerprint every source field before a transport path can replace it.
-pub(crate) fn asset_fingerprint(asset: &Asset) -> Result<String, PrepareError> {
-    studio_json::to_vec(asset)
-        .map(|value| sha256_hex(&value))
-        .map_err(|_| PrepareError::InvalidAssetProjection)
-}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EventMetadata {
     pub assets: Vec<String>,
@@ -223,9 +211,6 @@ pub struct PreparationSnapshot {
     pub team_state: Option<Value>,
     pub delivered_reminders: BTreeSet<String>,
     pub assets: Vec<Asset>,
-    /// Verified transport paths. Stored asset paths remain unchanged.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub asset_paths: BTreeMap<String, AssetPath>,
     pub guidance: GuidanceBundle,
     /// Verified paths returned by the adapter after materializing artifact intents.
     pub artifact_paths: BTreeMap<String, String>,
@@ -321,8 +306,6 @@ pub enum PrepareError {
     UnknownAttachment,
     #[error("Attachment belongs to another conversation")]
     AttachmentOwnership,
-    #[error("The verified attachment transport path no longer matches its source")]
-    InvalidAssetProjection,
     #[error("Invalid stored event evidence metadata")]
     InvalidEvidence,
     #[error("Invalid stored JSON evidence at {location}")]
@@ -1301,14 +1284,7 @@ pub fn compile(
             {
                 return Err(PrepareError::AttachmentOwnership);
             }
-            let path = if let Some(projected) = s.asset_paths.get(&a.id) {
-                if projected.source_fingerprint != asset_fingerprint(a)? {
-                    return Err(PrepareError::InvalidAssetProjection);
-                }
-                &projected.path
-            } else {
-                &a.path
-            };
+            let path = &a.path;
             provider_assets.push(if a.image {
                 ProviderInput::LocalImage {
                     path: path.clone(),

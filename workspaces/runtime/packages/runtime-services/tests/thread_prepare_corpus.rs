@@ -104,7 +104,6 @@ fn every_hold_releases_and_accepts_without_consuming_input() {
 fn named_refusals_have_no_intents_and_preserve_snapshot() {
     for refusal in [
         Refusal::ImageWorkspace,
-        Refusal::VmWorkspace,
         Refusal::NativeCatalogMutation,
         Refusal::PortableHistoryImport,
         Refusal::FrozenImport,
@@ -114,7 +113,6 @@ fn named_refusals_have_no_intents_and_preserve_snapshot() {
         let mut s = snapshot(&baseline());
         match refusal {
             Refusal::ImageWorkspace => s.workspace = WorkspaceReadiness::Image,
-            Refusal::VmWorkspace => s.workspace = WorkspaceReadiness::Vm,
             Refusal::NativeCatalogMutation
             | Refusal::PortableHistoryImport
             | Refusal::FrozenImport

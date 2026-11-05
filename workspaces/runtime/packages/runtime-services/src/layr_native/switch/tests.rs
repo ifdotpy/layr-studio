@@ -205,7 +205,7 @@ async fn a_switched_lead_records_layr_fields_keeps_its_thread_and_workers_inheri
         result
     );
     assert_eq!(
-        crate::managed_child_create::default_workspace("implementer", false, &lead),
+        crate::managed_child_create::default_workspace("implementer", &lead),
         "layr-native"
     );
     let parent = fixture_native_parent(&lead);

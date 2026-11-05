@@ -26,5 +26,3 @@ mod tls;
 pub mod views;
 pub mod voice;
 pub mod voice_audio;
-
-mod vault_keys;

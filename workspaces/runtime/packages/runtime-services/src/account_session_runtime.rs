@@ -146,22 +146,7 @@ pub trait AccountSessionPort: Send + Sync {
             ))
         })
     }
-    /// Durably deliver a VM provider notification through the retained account
-    /// worker before the guest event cursor is acknowledged.
-    fn deliver_vm_notification<'a>(
-        &'a self,
-        _account: &'a str,
-        _agent_id: &'a str,
-        _epoch: u64,
-        _sequence: u64,
-        _frame: studio_runtime_providers::Frame,
-    ) -> AccountSessionFuture<'a, ()> {
-        Box::pin(async {
-            Err(AccountSessionError::Requires(
-                "account-worker/vm-notification",
-            ))
-        })
-    }
+
     /// Return the retained Claude control session for an account. The returned
     /// handle is bound to the live account connection and rejects stale receipts.
     fn claude_control_session(
@@ -827,20 +812,7 @@ pub trait RetainedAccountSession: Send + Sync {
         })
     }
     fn request(&self, request: ProviderRequest) -> SessionFuture;
-    fn deliver_vm_notification(
-        &self,
-        _account: String,
-        _agent_id: String,
-        _epoch: u64,
-        _sequence: u64,
-        _frame: studio_runtime_providers::Frame,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AccountSessionError>> + Send>> {
-        Box::pin(async {
-            Err(AccountSessionError::Requires(
-                "account-worker/vm-notification",
-            ))
-        })
-    }
+
     fn claude_control_session(
         &self,
         _account: &str,
@@ -1559,39 +1531,6 @@ impl AccountSessionPort for AccountSessionRuntime {
         })
     }
 
-    fn deliver_vm_notification<'a>(
-        &'a self,
-        account: &'a str,
-        agent_id: &'a str,
-        epoch: u64,
-        sequence: u64,
-        frame: studio_runtime_providers::Frame,
-    ) -> AccountSessionFuture<'a, ()> {
-        Box::pin(async move {
-            let session = self.session.as_ref().ok_or(AccountSessionError::Requires(
-                "account-worker/vm-notification",
-            ))?;
-            let scope = session
-                .current_scope(account)
-                .ok_or(AccountSessionError::Unknown)?;
-            session
-                .deliver_vm_notification(
-                    account.to_owned(),
-                    agent_id.to_owned(),
-                    epoch,
-                    sequence,
-                    frame,
-                )
-                .await?;
-            {
-                if session.current_scope(account).as_ref() == Some(&scope) {
-                    Ok(())
-                } else {
-                    Err(AccountSessionError::Unknown)
-                }
-            }
-        })
-    }
     fn transfer_provider_request<'a>(
         &'a self,
         request: TransferProviderRequest,

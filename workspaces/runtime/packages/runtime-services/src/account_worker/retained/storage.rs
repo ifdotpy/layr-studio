@@ -85,13 +85,17 @@ fn monitor_account_sql(agent_param: usize) -> String {
     )
 }
 
-/// Whether `agent` runs its provider in a VM. Only such an actor has its own
-/// session and journal lane. Every other authorized actor's request is sent
-/// and answered on the host session.
+/// Identify legacy VM workspaces that cannot use the host provider session.
 pub fn vm_actor(connection: &rusqlite::Connection, agent: &str) -> Result<bool, WorkerError> {
     let record = AgentRepository::get(connection, &AgentId::from(agent))?;
     Ok(record.is_some_and(|record| {
-        record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+        let value = record.value();
+        crate::workspace_ready::vm_workspace_unsupported(
+            value["executionMode"].as_str(),
+            value["workspaceMode"].as_str(),
+            record.layr_ready == Some(true),
+            value["layrLine"].as_str().is_some(),
+        )
     }))
 }
 
@@ -756,7 +760,7 @@ pub(super) fn reserve(
     };
     let stream = actor_id.map_or_else(
         || call.scope.account.clone(),
-        |actor| super::super::vm_journal_scope(&call.scope.account, actor),
+        |actor| super::super::historical_actor_journal_scope(&call.scope.account, actor),
     );
     let row = OutboxRow {
         id: call.key(),

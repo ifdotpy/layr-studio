@@ -476,14 +476,12 @@ class StartupDeliveryTests(unittest.TestCase):
                         contract.write_bytes(original_contract)
                         helper.write_bytes(original_helper)
 
-    def test_existing_install_and_maintenance_locks_fence_startup_recovery(self):
-        maintenance = self.state / 'linux-vm' / 'maintenance.lock'
-        maintenance.parent.mkdir()
-        for path in [self.state / 'update-install.lock', maintenance]:
-            with self.subTest(path=path), path.open('a') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self.run_once()
-                self.assertEqual(self.calls, [])
+    def test_existing_install_lock_fences_startup_recovery(self):
+        path = self.state / 'update-install.lock'
+        with path.open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.run_once()
+            self.assertEqual(self.calls, [])
 
     def test_old_completion_cannot_unlink_a_new_startup_publication(self):
         following = copy.deepcopy(self.record)

@@ -8,7 +8,6 @@
 //! provide the authoritative value once that change is merged.
 mod operations;
 pub(crate) use operations::DEFAULT_LEAD_MODEL;
-pub(crate) use operations::set_vm_workspace_fields;
 pub use operations::*;
 
 use rusqlite::{Connection, OptionalExtension};

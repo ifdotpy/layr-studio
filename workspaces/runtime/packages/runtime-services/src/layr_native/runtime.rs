@@ -1220,7 +1220,7 @@ pub fn merge(
                 &["merge", text(worker, "layrLine")?, "--expect", revision],
             )?;
             Ok(
-                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                json!({"merge":studio_runtime_store::work_intent::MergeReceipt {
                     from_state: Some(from_state),
                     to_state: run(state_dir, &main, &["rev-parse", "head"])?
                 }}),
@@ -1251,7 +1251,7 @@ pub fn merge(
                 return Ok(None);
             }
             Ok(Some(
-                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                json!({"merge":studio_runtime_store::work_intent::MergeReceipt {
                     from_state: None,
                     to_state: head
                 }}),

@@ -2,9 +2,6 @@
 use crate::sync_views::{SYNC_ARRAY_ITEMS, bound_sync_text};
 use serde::Serialize;
 use std::collections::BTreeSet;
-use studio_runtime_schema::project_projection::{
-    ProjectReadiness, ProjectSync, ProjectVault, ReadinessState,
-};
 use studio_runtime_schema::project_record::{
     PeerLead, ProjectAlias, ProjectFolder, ProjectLive, ProjectLocation, ProjectPeerTeam,
 };
@@ -57,12 +54,6 @@ pub struct ProjectProjection {
     worker_environment: Field<String>,
     #[serde(skip_serializing_if = "Field::is_missing")]
     worker_environment_revision: Field<u64>,
-    #[serde(skip_serializing_if = "Field::is_missing")]
-    layr_readiness: Field<ProjectReadiness>,
-    #[serde(skip_serializing_if = "Field::is_missing")]
-    layr_sync: Field<ProjectSync>,
-    #[serde(skip_serializing_if = "Field::is_missing")]
-    vault: Field<ProjectVault>,
 }
 
 fn text(field: &mut Field<String>, name: &str) {
@@ -109,14 +100,8 @@ pub fn peer_leads_of(
 
 pub fn project_record(
     mut project: ProjectLive,
-    mut readiness: Field<ProjectReadiness>,
-    mut sync: Field<ProjectSync>,
-    mut vault: Field<ProjectVault>,
     peer_leads: &[PeerLead],
 ) -> Option<ProjectProjection> {
-    if matches!(readiness, Field::Null) {
-        readiness = Field::Missing;
-    }
     if project.id.is_empty() {
         return None;
     }
@@ -171,39 +156,6 @@ pub fn project_record(
             text(&mut folder.parent_id, "parentId");
         }
     }
-    if let Field::Value(value) = &mut readiness {
-        text(&mut value.project_id, "projectId");
-        text(&mut value.error, "error");
-    }
-    if !matches!(&readiness, Field::Value(value) if value.state == ReadinessState::Ready) {
-        sync = Field::Missing;
-        vault = Field::Missing;
-    }
-    if let Field::Value(value) = &mut sync {
-        value.project_id = bound_sync_text(&value.project_id, "projectId");
-        for values in [
-            &mut value.conflicts,
-            &mut value.choices,
-            &mut value.with_agent,
-        ] {
-            values.truncate(SYNC_ARRAY_ITEMS);
-            for item in values {
-                *item = bound_sync_text(item, "");
-            }
-        }
-        text(&mut value.reason, "reason");
-    }
-    if let Field::Value(value) = &mut vault {
-        value.project_id = bound_sync_text(&value.project_id, "projectId");
-        for (field, name) in [
-            (&mut value.disk, "disk"),
-            (&mut value.prefix, "prefix"),
-            (&mut value.reason, "reason"),
-            (&mut value.site, "site"),
-        ] {
-            text(field, name);
-        }
-    }
     Some(ProjectProjection {
         id: project.id,
         path: project.path,
@@ -227,9 +179,6 @@ pub fn project_record(
         worker_base_revision: project.worker_base_revision,
         worker_environment: project.worker_environment,
         worker_environment_revision: project.worker_environment_revision,
-        layr_readiness: readiness,
-        layr_sync: sync,
-        vault,
     })
 }
 
@@ -244,8 +193,7 @@ mod tests {
         let ProjectRecord::Live(project) = studio_json::from_str(r#"{"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":[],"sidebarHidden":false,"workspacePolicy":"isolated"}"#).unwrap() else { panic!("live") };
         let mut project = *project;
         project.account_groups = Field::Value(vec!["x".repeat(12_001); 201]);
-        let projection =
-            project_record(project, Field::Null, Field::Missing, Field::Missing, &[]).unwrap();
+        let projection = project_record(project, &[]).unwrap();
         let encoded = studio_json::to_string(&projection).unwrap();
         let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
         assert_eq!(actual["name"], json!(null));
@@ -293,14 +241,7 @@ mod tests {
                 label: "Laptop".into(),
             }]
         );
-        let projection = project_record(
-            team_project(),
-            Field::Null,
-            Field::Missing,
-            Field::Missing,
-            &leads,
-        )
-        .unwrap();
+        let projection = project_record(team_project(), &leads).unwrap();
         let encoded = studio_json::to_string(&projection).unwrap();
         assert!(
             encoded.contains(
@@ -314,14 +255,7 @@ mod tests {
     fn revoked_grant_gives_no_peer_lead() {
         let grants = [grant("g1", "LeadMessages", Some(20))];
         assert!(active_peer_leads("proj-a", &grants).is_empty());
-        let projection = project_record(
-            team_project(),
-            Field::Null,
-            Field::Missing,
-            Field::Missing,
-            &[],
-        )
-        .unwrap();
+        let projection = project_record(team_project(), &[]).unwrap();
         let encoded = studio_json::to_string(&projection).unwrap();
         assert!(!encoded.contains("peerLeads"), "{encoded}");
         assert!(

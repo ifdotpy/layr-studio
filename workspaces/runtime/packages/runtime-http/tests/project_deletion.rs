@@ -495,17 +495,15 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
         .read_async("project-deletion/rebuild", |tx| {
             Ok::<_, studio_runtime_store::StoreError>((
                 studio_runtime_services::sync_entity_context::RoomSources::read_for_sync(tx)?,
-                studio_runtime_services::sync_policy::ProjectVaultSnapshot::stored_projects(tx)?,
+                studio_runtime_services::sync_policy::ProjectSnapshot::stored_projects(tx)?,
             ))
         })
         .await
         .expect("sources");
     let directory = studio_runtime_services::sync_entity_context::RoomDirectory::prepare(sources)
         .expect("directory");
-    let vault = studio_runtime_services::sync_policy::ProjectVaultSnapshot::capture(
-        f.store.root(),
-        &projects,
-    );
+    let vault =
+        studio_runtime_services::sync_policy::ProjectSnapshot::capture(f.store.root(), &projects);
     let root = f.store.root().to_string_lossy().into_owned();
     f.store
         .transaction(move |tx| {

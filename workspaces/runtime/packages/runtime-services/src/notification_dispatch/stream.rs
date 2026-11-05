@@ -1263,7 +1263,7 @@ mod tests {
     /// value with each entry's pending text, count and params blanked, plus a
     /// copy of every entry with pending deltas.
     #[test]
-    fn host_and_vm_lanes_keep_same_native_tuple_separate() {
+    fn agent_lanes_keep_same_native_tuple_separate() {
         let host_key = StreamKey {
             agent_id: "host".into(),
             account: "default".into(),
@@ -1273,8 +1273,8 @@ mod tests {
             item: "same-item".into(),
             method: "item/agentMessage/delta".into(),
         };
-        let mut vm_key = host_key.clone();
-        vm_key.agent_id = "vm".into();
+        let mut other_key = host_key.clone();
+        other_key.agent_id = "other".into();
         let mut streams = NotificationStreamBuffer {
             publication_sequence: 17,
             ..NotificationStreamBuffer::default()
@@ -1284,32 +1284,32 @@ mod tests {
             EnqueueResult::Buffered
         ));
         assert!(matches!(
-            streams.enqueue_delta(vm_key.clone(), "vm", &Value::Null, 0),
+            streams.enqueue_delta(other_key.clone(), "other", &Value::Null, 0),
             EnqueueResult::Buffered
         ));
         assert_eq!(streams.selected(None).len(), 2);
-        assert_eq!(streams.selected(Some(&vm_key)), vec![vm_key.clone()]);
-        streams.flush(&vm_key, "").expect("VM flush");
-        assert!(streams.preserve_base(&vm_key, "VM base".into()));
+        assert_eq!(streams.selected(Some(&other_key)), vec![other_key.clone()]);
+        streams.flush(&other_key, "").expect("other flush");
+        assert!(streams.preserve_base(&other_key, "other base".into()));
         assert!(matches!(
-            streams.enqueue_delta(vm_key.clone(), "pending", &Value::Null, 0),
+            streams.enqueue_delta(other_key.clone(), "pending", &Value::Null, 0),
             EnqueueResult::Buffered
         ));
         let before = streams.clone();
-        let vm = streams.take_owner("vm");
+        let other = streams.take_owner("other");
         assert_eq!(streams.selected(None), vec![host_key.clone()]);
-        assert_eq!(vm.selected(None), vec![vm_key.clone()]);
+        assert_eq!(other.selected(None), vec![other_key.clone()]);
         assert_eq!(streams.publication_sequence, 17);
-        assert_eq!(vm.publication_sequence, 0);
-        let (metadata, pending) = vm.persisted_parts();
+        assert_eq!(other.publication_sequence, 0);
+        let (metadata, pending) = other.persisted_parts();
         let mut restored = metadata;
         restored.rebuild_runtime_state();
         restored
-            .restore_pending(&pending.expect("VM flush obligation"))
-            .expect("VM pending restored");
+            .restore_pending(&pending.expect("other flush obligation"))
+            .expect("other pending restored");
         streams
             .merge_owner(restored.clone())
-            .expect("host and VM restored together");
+            .expect("both agents restored together");
         assert_eq!(streams, before);
         assert!(
             streams.merge_owner(restored).is_err(),
@@ -1317,8 +1317,8 @@ mod tests {
         );
         assert_eq!(streams, before);
         streams.close(&host_key);
-        streams.close(&vm_key);
-        streams.settle_turn("vm", "default", "same-thread", "same-turn");
+        streams.close(&other_key);
+        streams.settle_turn("other", "default", "same-thread", "same-turn");
         assert_eq!(streams.closed.len(), 1);
         assert_eq!(streams.closed[0].agent_id, "host");
     }

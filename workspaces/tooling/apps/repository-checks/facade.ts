@@ -157,10 +157,6 @@ const UNSAFE_RUST_ALLOWLIST: [string, string][] = [
     "Read-only macOS libproc and sysctl process identity queries.",
   ],
   [
-    "workspaces/runtime/packages/runtime-services/src/host_exec_service/clone_ffi.rs",
-    "APFS clonefile(2) for host_exec slot clones.",
-  ],
-  [
     "workspaces/runtime/packages/runtime-services/src/shell_pressure/macos.rs",
     "Apple dispatch memory-pressure source FFI and its raw callback context.",
   ],
@@ -844,7 +840,7 @@ function browserPlan(root: string, smoke = false) {
 }
 
 // Bounded lanes share preparation milestones. Only Rust compiles Cargo targets;
-// types wait for WASM, web and guest tests wait for the workspace, tools start immediately.
+// types wait for WASM, web tests wait for the workspace, tools start immediately.
 // `layr retest run` takes the nextest arguments that follow "nextest run".
 function isRetest(bin: string, args: string[]): boolean {
   return bin === "layr" && args[0] === "retest";
@@ -1136,10 +1132,6 @@ export function gateSteps(root: string, name: string): GateStep[] {
       nodeTest("retained-helpers", "retained Python helper boundaries", [
         "workspaces/client/apps/desktop/retained-helper-witness.test.ts",
       ]),
-      nodeTest("mac-sync", "Mac sync chunk read witness", [
-        "workspaces/runtime/apps/vm-guest/mac-sync-witness.test.mts",
-        "workspaces/runtime/apps/vm-guest/install-layr-store.test.mts",
-      ]),
       nodeTest("profile-contract", "native profile contract parity", [
         "workspaces/client/apps/native/src-tauri/src/profile-contract.test.ts",
       ]),
@@ -1212,25 +1204,6 @@ export function gateSteps(root: string, name: string): GateStep[] {
         requires: "wasm",
         item: tooling,
         options: { script: "lint:all", allowZeroTests: true },
-      },
-      {
-        id: "guest",
-        label: "VM guest Python suite",
-        lane: "guest",
-        // The guest suite and the Rust supervisor binary it starts.
-        inputs: ["workspaces/runtime"],
-        requires: "workspace",
-        item: tooling,
-        commands: [
-          [
-            "node",
-            [
-              "--test",
-              "workspaces/runtime/apps/vm-guest/run-guest-suite.test.mts",
-            ],
-          ],
-          ["node", ["workspaces/runtime/apps/vm-guest/run-guest-suite.mts"]],
-        ],
       },
       ...(name === "test-comprehensive"
         ? [
@@ -1311,12 +1284,12 @@ export function recipePlan(root: string, name: string) {
         : `Frozen pnpm dependencies; pinned Rust, wasm-bindgen and nextest; one WASM and renderer preparation${name === "test-comprehensive" || name === "test-heavy" ? "; browser binaries" : "; no browser or model provider"}`,
     reason: fast
       ? name === "test-fast"
-        ? "Run selected deterministic safety witnesses and read-only contract guards in five bounded concurrent lanes with one Cargo build universe."
+        ? "Run selected deterministic safety witnesses and read-only contract guards in bounded concurrent lanes with one Cargo build universe."
         : name === "test-comprehensive"
-          ? "Run the broad local regression recipe in five bounded concurrent lanes with one Cargo build universe."
+          ? "Run the broad local regression recipe in bounded concurrent lanes with one Cargo build universe."
           : name === "test-fast-rest-non-rust"
-            ? "Run type, web, independent check and guest lanes against the workspace build artifacts without Rust compilation."
-            : "Run the comprehensive remainder in five bounded concurrent lanes with one Cargo build universe."
+            ? "Run type, web, independent check lanes against the workspace build artifacts without Rust compilation."
+            : "Run the comprehensive remainder in bounded concurrent lanes with one Cargo build universe."
       : "Run the full browser project as an announced manual check.",
     notStarted: "Electron, provider-dependent opt-in suites, load-class suites",
     costCategory: fast
@@ -2122,11 +2095,7 @@ function workspaceRustFiles(root: string) {
       if (entry.isDirectory() && SOURCE_SKIP.has(entry.name)) continue;
       const full = path.join(directory, entry.name);
       const relative = path.relative(root, full).split(path.sep).join("/");
-      if (
-        entry.isDirectory() &&
-        (relative === "workspaces/runtime/apps/layr" ||
-          relative === "workspaces/runtime/apps/layr-desk")
-      )
+      if (entry.isDirectory() && relative === "workspaces/runtime/apps/layr")
         continue;
       if (entry.isDirectory()) visit(full);
       else if (entry.isFile() && entry.name.endsWith(".rs")) files.push(full);

@@ -41,15 +41,6 @@ pub const FORWARD_PATH_MAX_CHARS: usize = 2048;
 pub const FORWARD_BRIDGE_ID_BYTES: usize = 32;
 /// Smallest forwarding port, in TCP port numbers.
 pub const FORWARD_PORT_MIN: u16 = 1024;
-/// VM memory bounds, in bytes.
-pub const VM_MEMORY_MIN_BYTES: i64 = 1_073_741_824;
-pub const VM_MEMORY_MAX_BYTES: u64 = 68_719_476_736;
-/// VM system disk bounds, in bytes.
-pub const VM_SYSTEM_DISK_MIN_BYTES: i64 = 8_589_934_592;
-pub const VM_SYSTEM_DISK_MAX_BYTES: u64 = 137_438_953_472;
-/// VM data disk bounds, in bytes.
-pub const VM_DATA_DISK_MIN_BYTES: i64 = 8_589_934_592;
-pub const VM_DATA_DISK_MAX_BYTES: u64 = 1_099_511_627_776;
 
 #[cfg(test)]
 mod tests {
@@ -149,30 +140,6 @@ mod tests {
                 FORWARD_PORT_MIN as u64,
             ),
             (
-                "LinuxVMSettings/properties/memoryBytes/minimum",
-                VM_MEMORY_MIN_BYTES as u64,
-            ),
-            (
-                "LinuxVMSettings/properties/memoryBytes/maximum",
-                VM_MEMORY_MAX_BYTES,
-            ),
-            (
-                "LinuxVMSettings/properties/systemDiskBytes/minimum",
-                VM_SYSTEM_DISK_MIN_BYTES as u64,
-            ),
-            (
-                "LinuxVMSettings/properties/systemDiskBytes/maximum",
-                VM_SYSTEM_DISK_MAX_BYTES,
-            ),
-            (
-                "LinuxVMSettings/properties/dataDiskBytes/minimum",
-                VM_DATA_DISK_MIN_BYTES as u64,
-            ),
-            (
-                "LinuxVMSettings/properties/dataDiskBytes/maximum",
-                VM_DATA_DISK_MAX_BYTES,
-            ),
-            (
                 "AccountStartThrottleRequest/properties/burst/maximum",
                 crate::shared_values::ACCOUNT_START_BURST_MAX,
             ),
@@ -217,10 +184,6 @@ mod tests {
             (
                 "AccountStartThrottleRequest/properties/maxRunningTurns/minimum",
                 crate::shared_values::ACCOUNT_RUNNING_TURNS_MIN,
-            ),
-            (
-                "LinuxVMSettings/properties/cpus/maximum",
-                crate::shared_values::MAX_SAFE_INTEGER as u64,
             ),
             ("BrowserForward/properties/port/maximum", u16::MAX as u64),
         ];

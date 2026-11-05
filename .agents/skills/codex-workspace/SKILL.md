@@ -24,8 +24,7 @@ The older bundled Layr CLI does not implement these 0.3.0 recipes; check the sel
 
 In a managed session, use the advertised `orchestration_*` tools. The application
 owns their queue, permissions, state, and worker lifecycle.
-From a terminal, `studio-runtime-server --help` lists the server, user service and
-Linux VM commands, and `codex-diagnostics` reads a diagnostics snapshot. No terminal
+From a terminal, `studio-runtime-server --help` lists the server and user service commands, and `codex-diagnostics` reads a diagnostics snapshot. No terminal
 command controls agents: `codex-control` and the other Python commands were removed.
 Do not start another server to control the same state.
 
@@ -56,14 +55,13 @@ When ready, Linux defaults to Layr. An explicit native choice requires a ready p
 | Mode          | UI label | Agent environment                | Worker workspace         |
 | ------------- | -------- | -------------------------------- | ------------------------ |
 | `layr-native` | Layr     | Native macOS APFS or Linux btrfs | Separate owned host line |
-| `layr`        | Layr VM  | Studio Linux VM                  | Separate owned VM line   |
 | `worktree`    | WT       | Native host                      | Git worktree             |
 
 Workers inherit the chat mode. Use deliberate `shared` edits only within an assigned file boundary.
 Worktrees require Git and use a committed base. Submit their results on a named Git branch.
-Both layr modes use exact state IDs for submission and review.
+Layr uses exact state IDs for submission and review.
 
-Read [native Layr](references/layr-native.md) or [Layr VM](references/layr.md) for readiness, tools, and acceptance.
+Read [native Layr](references/layr-native.md) for readiness, tools, and acceptance.
 Use only workspace choices that the current tool schema exposes.
 Use `server` with an absolute remote `cwd` for native work on a paired machine.
 After a lost reply, use `orchestration_request` to recover the saved result.
@@ -370,20 +368,13 @@ When Studio tells you that nobody answered a sign-in card, the command got no re
 Do not wait for that card. The lead tells the person in one short message; a worker tells the lead.
 Start the sign-in again when the person can answer.
 
-In a VM chat, run sign-in commands through `host_exec`.
-Also run the cloud commands that use that sign-in session through `host_exec`.
-The Mac command gets `BROWSER`, so the person sees the card in your chat.
-The session stays in the store of the Mac, which all agents of the person share.
-Do not sign in again inside the VM.
-
 ## Layr chats
 
 | Mode                 | Reference                                | Source of truth             |
 | -------------------- | ---------------------------------------- | --------------------------- |
 | `layr-native` (Layr) | [Native Layr](references/layr-native.md) | Main in the host layr store |
-| `layr` (Layr VM)     | [Layr VM](references/layr.md)            | Main in the Studio VM       |
 
-Use [the layr task recipes](../layr/SKILL.md) in both modes.
+Use [the layr task recipes](../layr/SKILL.md) for Layr.
 The lead owns main. Each implementer changes only its assigned line.
 Review exact states before acceptance. Acceptance uses merge with expect.
 Implementers save a named task result before submission.

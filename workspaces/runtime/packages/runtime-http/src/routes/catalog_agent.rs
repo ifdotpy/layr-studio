@@ -88,17 +88,9 @@ async fn finder_view(
         })
         .await?;
     let record = agent.value();
-    let state_dir = state.vm_state_dir.clone();
-    let view = studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-http/routes/catalog_agent",
-        move || {
-            Ok::<_, ApiError>(host_finder_view(&record).unwrap_or_else(|| {
-                studio_runtime_services::catalog_reads::vm_finder_view(&state_dir, &record)
-            }))
-        },
-    )
-    .await
-    .map_err(|_| ApiError::internal())??;
+    let view = host_finder_view(&record).ok_or_else(|| {
+        ApiError::new(StatusCode::NOT_IMPLEMENTED, "The workspace is unavailable")
+    })?;
     Ok(Json(super::generated_json::<
         crate::generated::FinderViewApiAgentsFinderViewGetResponse,
     >(view)?))

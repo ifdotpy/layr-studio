@@ -10,7 +10,7 @@ use studio_json::Value;
 /// Port of `codex_shell.monitor_command` (codex_shell.py:41-91): command/exec applies account shell
 /// environment policy but accepts argv and does not perform the native exec
 /// shell startup. Apply Codex's login/rc startup inside the command sandbox.
-pub fn monitor_command(command: &str, config: &Value, guest: bool) -> Result<Vec<String>, String> {
+pub fn monitor_command(command: &str, config: &Value) -> Result<Vec<String>, String> {
     let login = config["allow_login_shell"].as_bool().unwrap_or(true);
     let snapshot = config["features"]["shell_snapshot"]
         .as_bool()
@@ -23,7 +23,7 @@ pub fn monitor_command(command: &str, config: &Value, guest: bool) -> Result<Vec
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    shell_command(command, guest, login, snapshot, &environment)
+    shell_command(command, login, snapshot, &environment)
 }
 
 pub(crate) fn exec_command(
@@ -34,22 +34,17 @@ pub(crate) fn exec_command(
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<Vec<_>>();
-    shell_command(command, false, true, true, &environment)
+    shell_command(command, true, true, &environment)
 }
 
 fn shell_command(
     command: &str,
-    guest: bool,
     login: bool,
     snapshot: bool,
     environment: &[(String, String)],
 ) -> Result<Vec<String>, String> {
-    let shell = if guest {
-        PathBuf::from("/bin/bash")
-    } else {
-        default_shell()
-            .ok_or_else(|| "No supported shell is available for the command".to_owned())?
-    };
+    let shell = default_shell()
+        .ok_or_else(|| "No supported shell is available for the command".to_owned())?;
     let name = shell
         .file_stem()
         .and_then(|name| name.to_str())

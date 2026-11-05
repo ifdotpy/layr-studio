@@ -22,8 +22,6 @@ const redirect: BrowserOpenDetails = {
   url: "https://accounts.example.com/authorize?state=s",
   port: 8000,
   redirectPath: "/",
-  source: "vm",
-  linuxUser: "studio-a-1",
   expiresAt: 1000,
 };
 const device: BrowserOpenDetails = {
@@ -53,9 +51,7 @@ describe("sign-in card model", () => {
   });
 
   it("says where the result goes", () => {
-    expect(resultTarget(redirect, "igor-mbp")).toBe(
-      "The VM on igor-mbp, user studio-a-1, port 8000",
-    );
+    expect(resultTarget(redirect, "igor-mbp")).toBe("igor-mbp, port 8000");
     expect(resultTarget({ ...redirect, source: "host" }, undefined)).toBe(
       "the chat's server, port 8000",
     );

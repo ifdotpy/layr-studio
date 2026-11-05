@@ -25,7 +25,6 @@ export const commitScopes = [
   "desktop",
   "providers",
   "tooling",
-  "vm",
   "layr",
   "release",
   "deps",

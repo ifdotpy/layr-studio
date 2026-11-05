@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 // Owner of the signing configuration location. Read it at call time so a test
 // can set HOME.
@@ -137,20 +137,6 @@ export function signCode(
     { stdio: "inherit" },
   );
 }
-export function signLinuxVM(target: string, identity = signingIdentity()) {
-  signCode(target, identity, [
-    "--identifier",
-    "local.codex.agents.linux-vm",
-    "--entitlements",
-    fileURLToPath(
-      new URL("./native/linux-vm/entitlements.plist", import.meta.url),
-    ),
-  ]);
-  execFileSync("codesign", ["--verify", "--strict", target], {
-    stdio: "inherit",
-    timeout: 10_000,
-  });
-}
 // Every folder with Python modules gets an empty read-only __pycache__.
 function guardBytecode(directory: string) {
   const entries = readdirSync(directory, { withFileTypes: true });
@@ -172,7 +158,7 @@ export function signApplication(
   application: string,
   identity = signingIdentity(),
 ) {
-  // External Python callers (a VM helper child, the host_exec service) can import
+  // External Python callers can import
   // these modules without -B. Cache writes would add unsealed resources after
   // installation, invalidate the bundle, and fail the update of a paired Mac.
   const workspace = path.join(application, "Contents/Resources/workspace");
