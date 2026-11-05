@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use thiserror::Error;
 
 /// Maximum size of one newline-delimited guest protocol frame, in bytes.
@@ -377,7 +377,7 @@ fn stream_socket(
         },
     );
     let mut frame =
-        serde_json::to_vec(&Value::Object(request)).map_err(|_| GuestError::InvalidRequest)?;
+        studio_json::to_vec(&Value::Object(request)).map_err(|_| GuestError::InvalidRequest)?;
     frame.push(b'\n');
     if frame.len() > GUEST_FRAME_LIMIT_BYTES {
         return Err(GuestError::Protocol {
@@ -424,7 +424,7 @@ fn stream_socket(
     let mut bytes = Vec::with_capacity(BUFFER_READ_BYTES);
     loop {
         let next = read_line(&mut channel, deadline, &mut bytes)?;
-        let response: Value = serde_json::from_slice(&next).map_err(|_| GuestError::Protocol {
+        let response: Value = studio_json::from_slice(&next).map_err(|_| GuestError::Protocol {
             message: "response is not valid JSON",
             uncertain: true,
         })?;
@@ -601,7 +601,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     use super::{GuestError, GuestRpc, UnixGuestRpc, UnixVmControlRpc};
 
@@ -674,11 +674,11 @@ mod tests {
             BufReader::new(&mut connection)
                 .read_line(&mut line)
                 .expect("fake guest reads one frame");
-            let request: Value = serde_json::from_str(&line).expect("request frame parses");
+            let request: Value = studio_json::from_str(&line).expect("request frame parses");
             sender
                 .send(request.clone())
                 .expect("request witness delivered");
-            let mut response = serde_json::to_vec(&response).expect("response serializes");
+            let mut response = studio_json::to_vec(&response).expect("response serializes");
             response.push(b'\n');
             connection
                 .write_all(&response)
@@ -755,7 +755,7 @@ mod tests {
             BufReader::new(&mut connection)
                 .read_line(&mut line)
                 .expect("fake control endpoint reads frame");
-            let value: Value = serde_json::from_str(&line).expect("request frame parses");
+            let value: Value = studio_json::from_str(&line).expect("request frame parses");
             sender.send(value).expect("request witness delivered");
             connection
                 .write_all(br#"{"id":"host-status","result":{"state":"stopped"}}"#)

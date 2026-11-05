@@ -399,7 +399,7 @@ impl crate::managed_host_tools::ContextPort for ProductionPorts {
             }
             let content = snapshot.record();
             let bytes =
-                serde_json::to_vec(content).map_err(studio_runtime_store::StoreError::from)?;
+                studio_json::to_vec(content).map_err(studio_runtime_store::StoreError::from)?;
             let version = studio_runtime_store::sha256_hex(&bytes)[..24].to_owned();
             #[derive(serde::Serialize)]
             struct Context<'a> {
@@ -434,7 +434,7 @@ impl crate::managed_host_tools::ComplaintPort for ProductionPorts {
         request_id: &str,
         now: f64,
     ) -> Result<crate::managed_host_tools::OperationResult, crate::managed_host_tools::Error> {
-        let actor = serde_json::to_value(actor.record())
+        let actor = studio_json::to_value(actor.record())
             .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid complaint actor"))?;
         let value =
             crate::notification_dispatch::agent_complaint_action(tx, &actor, args, request_id, now)
@@ -585,7 +585,7 @@ impl crate::managed_host_tools::ReviewPort for ProductionPorts {
             .unwrap_or(request_id)
             .to_owned();
         let plan = crate::native_review::ReviewPlan::from_records(
-            serde_json::to_value(actor.record())
+            studio_json::to_value(actor.record())
                 .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid reviewer"))?,
             root,
             args.clone(),
@@ -828,7 +828,7 @@ pub(super) fn read_only(
         <serde::de::IgnoredAny as serde::Deserialize>::deserialize(deserializer)?;
         Ok(true)
     }
-    let Ok(args) = serde_json::from_str::<Arguments>(args) else {
+    let Ok(args) = studio_json::from_str::<Arguments>(args) else {
         return false;
     };
     let action = args.action.as_deref().unwrap_or("list");
@@ -1295,7 +1295,7 @@ fn paginate(
             .map_err(|_| invalid())?;
         let studio_runtime_schema::json_object::JsonObject(cursor):
             studio_runtime_schema::json_object::JsonObject<PageCursor> =
-            serde_json::from_slice(&raw).map_err(|_| invalid())?;
+            studio_json::from_slice(&raw).map_err(|_| invalid())?;
         let offset = cursor.offset as usize;
         if offset > rows.len() || cursor.revision != revision {
             return Err(invalid());
@@ -1472,7 +1472,7 @@ mod read_only_tests {
         ] {
             let watch_action = if name == "orchestration_watch" {
                 Some(
-                    serde_json::from_str::<crate::managed_status_watch::WatchActionInput>(args)
+                    studio_json::from_str::<crate::managed_status_watch::WatchActionInput>(args)
                         .unwrap()
                         .action,
                 )
@@ -1486,7 +1486,7 @@ mod read_only_tests {
             );
         }
         assert!(
-            serde_json::from_str::<crate::managed_status_watch::WatchActionInput>(
+            studio_json::from_str::<crate::managed_status_watch::WatchActionInput>(
                 r#"{"action":"unexpected"}"#
             )
             .is_err()

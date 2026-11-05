@@ -1,6 +1,6 @@
 //! On-demand, value-free GNU allocator summary for memory diagnosis.
 
-use serde_json::json;
+use studio_json::json;
 
 use super::startup::{current_rss_bytes, startup_memory_enabled, startup_memory_marks};
 

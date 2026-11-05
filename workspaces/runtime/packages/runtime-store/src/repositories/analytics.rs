@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension, params_from_iter, types::Value as SqlValue,
 };
-use serde_json::Value;
+use studio_json::Value;
 use thiserror::Error;
 
 use super::cost_aggregate::CostMember;
@@ -186,6 +186,8 @@ impl AnalyticsRepository {
         let path = self.state_root.join("canvas.sqlite3");
         let uri = read_only_uri(&path)?;
         connection.execute("ATTACH DATABASE ?1 AS canvas", [uri])?;
+        crate::configure_read_pages(&connection, "main")?;
+        crate::configure_read_pages(&connection, "canvas")?;
         #[cfg(any(test, feature = "test-support"))]
         COST_READ_WITNESS.update(|mut counts| {
             counts.attaches += 1;
@@ -231,7 +233,7 @@ pub enum AnalyticsError {
     #[error("SQLite read failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("analytics response serialization failed: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(#[from] studio_json::Error),
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize)]
@@ -325,7 +327,7 @@ pub fn rollup<'a>(
     let tracking: f64 = metadata(db, "trackingSince")?.unwrap_or(0.0);
     let capture: CaptureErrors = metadata(db, "captureErrors")?.unwrap_or_default();
     let selected = ScopeFilter::new(db).members("agent", selected_ids.iter().cloned());
-    let selected_json = serde_json::to_string(&selected_ids)?;
+    let selected_json = studio_json::to_string(&selected_ids)?;
     let history_filter = ScopeFilter::new(db).and("(COALESCE(NULLIF(json_extract(record,'$.agent'),''),NULLIF(json_extract(record,'$.agentId'),'')) IS NULL OR json_extract(record,'$.agent') IN (SELECT value FROM json_each(?1)) OR json_extract(record,'$.agentId') IN (SELECT value FROM json_each(?1)))",[SqlValue::Text(selected_json)]);
     let history = history_filter.optional_page("analytics_history", "rowid")?;
     let monitors = ScopeFilter::new(db)
@@ -1057,7 +1059,7 @@ fn metadata<T: serde::de::DeserializeOwned>(
         })
         .optional()?;
     raw.map(|raw| {
-        serde_json::from_str(&raw).map_err(|_| AnalyticsError::InvalidStoredRow {
+        studio_json::from_str(&raw).map_err(|_| AnalyticsError::InvalidStoredRow {
             table: "analytics_meta",
             id: key.into(),
         })
@@ -1158,7 +1160,7 @@ impl<'a> ScopeFilter<'a> {
         self.and(
             &format!("{column} IN (SELECT value FROM json_each(?))"),
             [SqlValue::Text(
-                serde_json::to_string(&values).expect("strings serialize"),
+                studio_json::to_string(&values).expect("strings serialize"),
             )],
         )
     }
@@ -1261,7 +1263,7 @@ impl<'a> ScopeFilter<'a> {
         })?;
         rows.map(|row| {
             let (account, at, raw) = row?;
-            let data: Value = serde_json::from_str(&raw)
+            let data: Value = studio_json::from_str(&raw)
                 .map_err(|_| AnalyticsError::InvalidStoredObject("analytics_limits"))?;
             Ok(RateLimit {
                 account_key: account,
@@ -1370,7 +1372,7 @@ fn read_runtime_agent(db: &Connection, id: &str) -> Result<Option<Value>, Analyt
         )
         .optional()?;
     raw.map(|s| {
-        serde_json::from_str(&s).map_err(|_| AnalyticsError::InvalidStoredObject("runtime_agents"))
+        studio_json::from_str(&s).map_err(|_| AnalyticsError::InvalidStoredObject("runtime_agents"))
     })
     .transpose()
 }
@@ -1436,12 +1438,12 @@ pub fn detail(
             pagination,
         }
     };
-    Ok(serde_json::to_value(page)?)
+    Ok(studio_json::to_value(page)?)
 }
 
 fn parse_object(raw: &str, table: &'static str) -> Result<Value, AnalyticsError> {
     let value: Value =
-        serde_json::from_str(raw).map_err(|_| AnalyticsError::InvalidStoredObject(table))?;
+        studio_json::from_str(raw).map_err(|_| AnalyticsError::InvalidStoredObject(table))?;
     if !value.is_object() {
         return Err(AnalyticsError::InvalidStoredObject(table));
     }
@@ -1452,7 +1454,7 @@ pub struct MessageItem {
     pub kind: Option<String>,
     pub thread_id: Option<String>,
     pub turn_id: Option<String>,
-    pub at: Option<serde_json::Number>,
+    pub at: Option<studio_json::Number>,
 }
 
 /// Historical turns may be partial; fields retain the reader's old fallbacks.
@@ -1461,7 +1463,7 @@ pub struct MessageTurn {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub account_key: Option<String>,
-    pub duration_ms: Option<serde_json::Number>,
+    pub duration_ms: Option<studio_json::Number>,
     pub status: Option<String>,
 }
 
@@ -1594,7 +1596,7 @@ pub fn cost_agents(
     let decode = |raw: &str, table| {
         #[cfg(any(test, feature = "test-support"))]
         record_cost_decode();
-        serde_json::from_str::<CostMember>(raw)
+        studio_json::from_str::<CostMember>(raw)
             .map_err(|_| SessionCostError::InvalidStoredObject(table))
     };
     let mut statement = db.prepare_cached(
@@ -1690,7 +1692,7 @@ pub fn turn_errors(db: &Connection, keys: Vec<String>) -> Result<Value, Analytic
 #[cfg(test)]
 mod turn_errors_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn projects_only_requested_turn_error_fields() {
@@ -1716,13 +1718,13 @@ mod capture_error_tests {
     #[test]
     fn current_capture_error_rejects_string_timestamp() {
         let raw = r#"{"count":2,"last":{"at":"1792320464","operation":"analytics_capture_queue","code":"queueOverflow","error":"Publication queue limit reached"}}"#;
-        assert!(serde_json::from_str::<CaptureErrors>(raw).is_err());
+        assert!(studio_json::from_str::<CaptureErrors>(raw).is_err());
     }
 
     #[test]
     fn numeric_capture_error_time_is_served_as_a_number() {
         let stored = r#"{"count":2,"last":{"at":1792320464,"operation":"analytics_capture_queue","code":"queueOverflow","error":"Publication queue limit reached"}}"#;
-        let read: CaptureErrors = serde_json::from_str(stored).expect("stored capture errors");
+        let read: CaptureErrors = studio_json::from_str(stored).expect("stored capture errors");
         assert_eq!(read.count, 2);
         let last = read.last.expect("last error");
         assert_eq!(last.at, 1_792_320_464.0);

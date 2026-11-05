@@ -354,7 +354,7 @@ pub fn resolve_npm_launcher(
     if metadata.len() > MAX_PACKAGE_METADATA_BYTES {
         return Err(BinaryResolutionError::InvalidPackageMetadata);
     }
-    let record: NpmPackageMetadata = serde_json::from_slice(metadata)
+    let record: NpmPackageMetadata = studio_json::from_slice(metadata)
         .map_err(|_| BinaryResolutionError::InvalidPackageMetadata)?;
     if record.name.as_deref() != Some("@openai/codex") {
         return Err(BinaryResolutionError::UnexpectedPackageName);
@@ -482,12 +482,12 @@ pub fn companion_identities(
 }
 
 /// Hash a bundle's name-to-SHA256 map in canonical key order.
-pub fn bundle_digest(hashes: &[(String, String)]) -> Result<String, serde_json::Error> {
+pub fn bundle_digest(hashes: &[(String, String)]) -> Result<String, studio_json::Error> {
     let sorted = hashes
         .iter()
         .map(|(name, hash)| (name.as_str(), hash.as_str()))
         .collect::<std::collections::BTreeMap<_, _>>();
-    let encoded = serde_json::to_vec(&sorted)?;
+    let encoded = studio_json::to_vec(&sorted)?;
     Ok(data_encoding::HEXLOWER.encode(&Sha256::digest(encoded)))
 }
 

@@ -2,7 +2,7 @@
 //! on retry. Workspace/catalog checks stay with the ordinary creation owner.
 use crate::native_actions::{NativeError, Result, bounded, checked_agent, decode};
 use rusqlite::Transaction;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::creation_intent::EffortSelection;
 use studio_runtime_schema::start_attempt::ReviewTarget as Target;
@@ -121,6 +121,23 @@ impl ReviewPlan {
         bounded(&actor, "review.actor")?;
         let checked = checked_agent(&actor)?;
         let checked_root = checked_agent(&root)?;
+        let mut plan = Self::from_checked_records(&checked, &checked_root, args, key, directory)?;
+        // Reservation compares the original missing/null shape at this boundary.
+        plan.actor = actor;
+        plan.root = root;
+        Ok(plan)
+    }
+
+    /// The caller validates both persisted records before entering this planner.
+    pub fn from_checked_records(
+        checked: &AgentRecord,
+        checked_root: &AgentRecord,
+        args: Value,
+        key: String,
+        directory: String,
+    ) -> Result<Self> {
+        let actor = checked.value();
+        let root = checked_root.value();
         if checked.root_id != checked_root.id {
             return Err(NativeError::Changed);
         }
@@ -150,7 +167,7 @@ impl ReviewPlan {
                 EffortSelection::Set(value.to_owned())
             });
         let (model, effort, fast_mode) =
-            execution_settings(&checked, &checked_root, &requested_model, &requested_effort);
+            execution_settings(checked, checked_root, &requested_model, &requested_effort);
         let fast_mode = fast_mode
             .or_else(|| actor.get("fastMode").and_then(Value::as_bool))
             .unwrap_or(false);
@@ -320,7 +337,7 @@ pub fn reserve(
     let brief = ["id", "name", "status", "model", "effort", "fastMode"]
         .into_iter()
         .map(|k| (k.to_owned(), child.get(k).cloned().unwrap_or(Value::Null)))
-        .collect::<serde_json::Map<_, _>>();
+        .collect::<studio_json::Map<_, _>>();
     let response = json!({"requestId":plan.key,"agentId":id,"status":"queued","reviewModel":child["model"],
         "reviewEffort":child.get("nativeEffort").unwrap_or(&child["effort"]),"agents":[brief],"delivery":DELIVERY});
     child["nativeReview"] = json!({"target":plan.target,"requestId":plan.key,"actorId":actor_id,

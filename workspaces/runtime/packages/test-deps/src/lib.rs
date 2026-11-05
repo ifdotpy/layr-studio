@@ -19,9 +19,9 @@ extern crate process_wrap;
 extern crate regex;
 extern crate rustix;
 extern crate serde;
-extern crate serde_json;
 extern crate serde_path_to_error;
 extern crate sha2;
+extern crate studio_json;
 extern crate sysinfo;
 extern crate tar;
 extern crate tempfile;
@@ -33,3 +33,7 @@ extern crate tower;
 extern crate tower_http;
 extern crate url;
 extern crate uuid;
+
+/// Empty object payload shared by typed outbox test fixtures.
+#[derive(serde::Serialize)]
+pub struct EmptyObject {}

@@ -1,6 +1,6 @@
 //! Acceptance gate input contract. This module owns its timeout and text bounds.
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 /// Default acceptance gate deadline, in milliseconds.
 pub const DEFAULT_TIMEOUT_MS: u64 = 600_000;
@@ -60,7 +60,7 @@ fn default_timeout() -> u64 {
 
 pub fn parse(value: &Value) -> Result<Option<Gate>, &'static str> {
     let input: Option<GateInput> =
-        serde_json::from_value(value.clone()).map_err(|_| "Invalid acceptance gate")?;
+        studio_json::from_value(value.clone()).map_err(|_| "Invalid acceptance gate")?;
     input.map(GateInput::normalize).transpose()
 }
 
@@ -72,7 +72,7 @@ pub fn input_schema() -> Value {
         "description":"Acceptance command. Runs in the clean submitter workspace at the full submitted Git commit. Null disables the gate. Omit on create to inherit the lead default."})
 }
 
-pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value>) {
+pub fn apply_tool_contract(name: &str, input: &mut studio_json::Map<String, Value>) {
     if name != "orchestration_task" {
         return;
     }
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn typed_gate_normalization_preserves_formats_and_bounds() {
         for value in [json!(" echo ok "), json!({"command":" echo ok "})] {
-            let input: GateInput = serde_json::from_value(value).expect("gate decodes");
+            let input: GateInput = studio_json::from_value(value).expect("gate decodes");
             assert_eq!(
                 input.normalize().expect("gate normalizes"),
                 Gate {
@@ -211,7 +211,7 @@ mod tests {
             json!({"command":"true","timeout_ms":MAX_TIMEOUT_MS + 1}),
             json!("x".repeat(MAX_TEXT_CODEPOINTS + 1)),
         ] {
-            let input: GateInput = serde_json::from_value(value).expect("gate decodes");
+            let input: GateInput = studio_json::from_value(value).expect("gate decodes");
             assert!(input.normalize().is_err());
         }
     }

@@ -168,6 +168,8 @@ pub enum ResourceRef {
     LimitsResource(AccountResource),
     #[serde(rename = "models")]
     ModelsResource(EmptyResource),
+    #[serde(rename = "native-layr-settings")]
+    NativeLayrSettingsResource(EmptyResource),
     #[serde(rename = "multi-server")]
     MultiServerResource(EmptyResource),
     #[serde(rename = "queue")]
@@ -244,6 +246,7 @@ impl Serialize for ResourceRef {
             }
             Self::ModelsResource(_) => kind!("models"),
             Self::MultiServerResource(_) => kind!("multi-server"),
+            Self::NativeLayrSettingsResource(_) => kind!("native-layr-settings"),
             Self::QueueResource(v) => agent!(v, "queue"),
             Self::ReceiptsResource(v) => agent!(v, "receipts"),
             Self::RoomResource(v) => {
@@ -322,22 +325,25 @@ impl Serialize for ResourceRef {
 #[cfg(test)]
 mod tests {
     use super::ResourceRef;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn notification_tail_refuses_integral_float_spelling() {
         use crate::resource_notification::ResourceNotifyRequest;
         let body =
             r#"{"requestId":"r","resources":[{"kind":"transcript","agentId":"a","tail":40.0}]}"#;
-        assert!(serde_json::from_str::<ResourceNotifyRequest>(body).is_err());
-        assert!(serde_json::from_str::<ResourceNotifyRequest>(&body.replace("40.0", "40")).is_ok());
+        assert!(studio_json::from_str::<ResourceNotifyRequest>(body).is_err());
+        assert!(
+            studio_json::from_str::<ResourceNotifyRequest>(&body.replace("40.0", "40")).is_ok()
+        );
     }
 
     #[test]
     fn resource_ref_matches_schema_and_preserves_canonical_key() {
         let validator = crate::compiled_validator("ResourceRef").expect("resource schema");
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
         for (path, limit) in [
             (
                 "/components/schemas/AuthProgressResource/properties/requestId/maxLength",
@@ -399,11 +405,11 @@ mod tests {
             json!({"kind":"transcript","agentId":"agent","tail":513}),
             json!({"kind":"vault-readiness","prefix":"bad/path"}),
         ] {
-            let typed = serde_json::from_str::<ResourceRef>(&value.to_string());
+            let typed = studio_json::from_str::<ResourceRef>(&value.to_string());
             assert_eq!(typed.is_ok(), validator.is_valid(&value), "{value}");
             if let Ok(typed) = typed {
                 assert_eq!(
-                    serde_json::to_string(&typed).expect("serialize"),
+                    studio_json::to_string(&typed).expect("serialize"),
                     value.to_string()
                 );
             }

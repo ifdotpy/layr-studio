@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::Transaction;
 use tokio::sync::Notify;
 

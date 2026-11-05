@@ -1,10 +1,10 @@
 //! Analytics policy over one repository snapshot; generated wire DTOs stay at the HTTP edge.
 use crate::event_write::python_json_compact;
 pub use repo::{AnalyticsError, AnalyticsOptions, SessionCostError};
-use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
+use studio_json::Value;
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_store::analytics::{self as repo};
 use studio_runtime_store::sha256_hex;
@@ -47,7 +47,7 @@ fn read_on_reader(
         None => {
             let mut report = repo::rollup(&transaction, options, scope)?;
             report.chart_buckets = compact_chart(report.chart_buckets, options.export);
-            serde_json::to_value(report)?
+            studio_json::to_value(report)?
         }
     };
     transaction.commit()?;
@@ -144,7 +144,7 @@ pub(crate) fn catalog_signature(catalog: &Value) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 struct MessageInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
-    at: Option<serde_json::Number>,
+    at: Option<studio_json::Number>,
     #[serde(skip_serializing_if = "Option::is_none")]
     run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -160,7 +160,7 @@ struct MessageInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     provider: Option<ProviderKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    turn_duration_ms: Option<serde_json::Number>,
+    turn_duration_ms: Option<studio_json::Number>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tokens: Option<Value>,
 }
@@ -208,7 +208,7 @@ fn message_info(
         result.account_key = turn.account_key.clone().filter(|s| !s.is_empty());
         if let Some(key) = &result.account_key
             && let Ok(raw) = fs::read(root.join("accounts/registry.json"))
-            && let Ok(registry) = serde_json::from_slice::<Value>(&raw)
+            && let Ok(registry) = studio_json::from_slice::<Value>(&raw)
             && let Some(account) = registry.pointer(&format!("/accounts/{key}"))
         {
             result.account_label = text(account, "label");
@@ -261,19 +261,19 @@ fn message_info(
             }
         }
     }
-    Ok(serde_json::to_value(result)?)
+    Ok(studio_json::to_value(result)?)
 }
 
-fn signature(value: impl serde::Serialize) -> Result<String, serde_json::Error> {
+fn signature(value: impl serde::Serialize) -> Result<String, studio_json::Error> {
     Ok(sha256_hex(
-        python_json_compact(&serde_json::to_value(value)?).as_bytes(),
+        python_json_compact(&studio_json::to_value(value)?).as_bytes(),
     ))
 }
 
 #[cfg(test)]
 mod provider_identity_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn analytics_requests_reuse_the_store_reader_connection() {

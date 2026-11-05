@@ -13,7 +13,7 @@ use studio_runtime_store::StoreError;
 
 /// The view of one approval and whether each collection shows it.
 pub(crate) struct ApprovalView {
-    pub value: serde_json::Value,
+    pub value: studio_json::Value,
     /// Shown in `request`.
     pub open: bool,
     /// Shown in `questionHistory`.
@@ -32,7 +32,7 @@ pub(crate) fn view(row: &Approval) -> Result<ApprovalView, StoreError> {
             row.request,
             Request::Question { .. } | Request::AgentQuestion { .. }
         );
-    let mut value = serde::Serialize::serialize(row, serde_json::value::Serializer)?;
+    let mut value = serde::Serialize::serialize(row, studio_json::value::Serializer)?;
     // The transcript item that an asynchronous question belongs to is part of its id.
     if matches!(row.request, Request::AgentQuestion { .. })
         && let Some(item) =
@@ -41,7 +41,7 @@ pub(crate) fn view(row: &Approval) -> Result<ApprovalView, StoreError> {
     {
         params
             .entry("itemId")
-            .or_insert_with(|| serde_json::Value::String(item.to_owned()));
+            .or_insert_with(|| studio_json::Value::String(item.to_owned()));
     }
     Ok(ApprovalView { value, open, asked })
 }

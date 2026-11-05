@@ -37,8 +37,8 @@ fn store_patterns(state_dir: &Path) -> Result<String, NativeLayrError> {
             if path.extension().is_none_or(|extension| extension != "json") || !path.is_file() {
                 continue;
             }
-            let record: serde_json::Value =
-                serde_json::from_slice(&fs::read(&path)?).map_err(|error| {
+            let record: studio_json::Value =
+                studio_json::from_slice(&fs::read(&path)?).map_err(|error| {
                     NativeLayrError::Refused(format!(
                         "Invalid native Layr receipt {}: {error}",
                         path.display()
@@ -167,13 +167,13 @@ pub(super) fn ensure(state_dir: &Path, executable: &Path) -> Result<(), NativeLa
     fs::create_dir_all(&bin)?;
     let config = real_git_path(&state_dir);
     let real_git: PathBuf = if config.exists() {
-        serde_json::from_slice(&fs::read(&config)?)
+        studio_json::from_slice(&fs::read(&config)?)
             .map_err(|error| NativeLayrError::Refused(format!("Invalid Git guard path: {error}")))?
     } else {
         let real_git = find_real_git()?;
         crate::atomic_file::replace(
             &config,
-            serde_json::to_string(&real_git)
+            studio_json::to_string(&real_git)
                 .map_err(|error| NativeLayrError::Refused(error.to_string()))?
                 .as_bytes(),
             Some(0o600),
@@ -259,7 +259,7 @@ pub(super) fn install_hook(state_dir: &Path, line: &Path) -> Result<(), NativeLa
         Some(0o755),
         true,
     )?;
-    let real_git: PathBuf = serde_json::from_slice(&fs::read(real_git_path(state_dir))?)
+    let real_git: PathBuf = studio_json::from_slice(&fs::read(real_git_path(state_dir))?)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     crate::bounded_child::run_without_git_environment(crate::bounded_child::Request {
         program: real_git.as_os_str(),
@@ -452,12 +452,12 @@ mod tests {
         for root in [&selected, &bound, &imported] {
             fs::create_dir_all(root.join("projects/project/lines/main")).expect("line");
         }
-        super::super::settings::configure(&state, Some(&selected)).expect("selected store");
+        super::super::settings::fixture_select(&state, &selected);
         for (root, receipt) in [
-            (&bound, serde_json::json!({"storeRoot":bound})),
+            (&bound, studio_json::json!({"storeRoot":bound})),
             (
                 &imported,
-                serde_json::json!({"mainPath":imported.join("projects/project/lines/main")}),
+                studio_json::json!({"mainPath":imported.join("projects/project/lines/main")}),
             ),
         ] {
             let metadata = super::super::settings::metadata(&state, root);
@@ -533,7 +533,7 @@ mod tests {
         .expect("real Git fixture");
         fs::write(
             real_git_path(&state),
-            serde_json::to_vec(&real.join("git")).expect("path JSON"),
+            studio_json::to_vec(&real.join("git")).expect("path JSON"),
         )
         .expect("saved Git path");
         let executable = root.path().join("installed-layr");

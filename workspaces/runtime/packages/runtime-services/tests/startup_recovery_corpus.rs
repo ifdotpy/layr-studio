@@ -1,5 +1,5 @@
-use serde_json::{Value, json};
 use std::path::PathBuf;
+use studio_json::{Value, json};
 use studio_runtime_services::{monitor_runtime, scheduler};
 use studio_runtime_store::RuntimeStore;
 
@@ -26,7 +26,7 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
             .expect("query startup records")
             .map(|row| {
                 let mut record: Value =
-                    serde_json::from_str(&row.expect("startup row")).expect("startup record JSON");
+                    studio_json::from_str(&row.expect("startup row")).expect("startup record JSON");
                 let id = record["id"].as_str().unwrap_or_default().to_owned();
                 studio_runtime_store::agent_volatile::merge_if_agent(&db, table, &id, &mut record)
                     .expect("volatile agent fields");
@@ -56,7 +56,7 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
                 let event = row.expect("event row");
                 let text = event["text"].as_str().expect("event text");
                 let text =
-                    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()));
+                    studio_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()));
                 let mut event = event;
                 event["text"] = text;
                 event
@@ -79,7 +79,7 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
             .expect("query projections")
             .map(|row| {
                 let mut projection = row.expect("projection row");
-                projection["payload"] = serde_json::from_str(
+                projection["payload"] = studio_json::from_str(
                     projection["payload"].as_str().expect("projection payload"),
                 )
                 .expect("projection JSON");
@@ -227,7 +227,7 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
         )
         .expect("private identity file");
     }
-    let python: Value = serde_json::from_str(include_str!("startup_recovery/oracle.json"))
+    let python: Value = studio_json::from_str(include_str!("startup_recovery/oracle.json"))
         .expect("frozen startup snapshot");
 
     let store = RuntimeStore::open(Some(&rust_state))
@@ -319,7 +319,7 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
     );
     let deviations_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/turn_lifecycle/deviations.json");
-    let deviations: Value = serde_json::from_slice(
+    let deviations: Value = studio_json::from_slice(
         &std::fs::read(deviations_path).expect("read registered differences"),
     )
     .expect("deviation registry JSON");

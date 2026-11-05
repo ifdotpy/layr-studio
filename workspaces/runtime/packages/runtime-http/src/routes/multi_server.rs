@@ -7,8 +7,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rusqlite::OptionalExtension;
-use serde_json::Value;
 use std::{sync::Arc, time::Duration};
+use studio_json::Value;
 use studio_runtime_services::federation_credentials::CredentialError;
 use studio_runtime_services::multi_server::{self, MultiServerError};
 use studio_runtime_services::multi_server_auth::SessionAction;
@@ -161,13 +161,13 @@ pub(super) fn notify_snapshot_change(
 
 fn semantic_snapshot(
     snapshot: &studio_runtime_schema::multi_server_access::AccessSnapshot,
-) -> Result<Vec<u8>, serde_json::Error> {
+) -> Result<Vec<u8>, studio_json::Error> {
     let mut semantic = snapshot.clone();
     for record in semantic.clients.iter_mut().chain(&mut semantic.servers) {
         record.last_access = None;
         record.last_seen = studio_runtime_schema::queue_command::Field::Missing;
     }
-    serde_json::to_vec(&semantic)
+    studio_json::to_vec(&semantic)
 }
 
 async fn manage(
@@ -461,7 +461,7 @@ async fn accept_invite(
     let signing_identity = load_signing_identity(Arc::clone(&store)).await?;
     let local_id = local["serverId"].as_str().unwrap_or_default();
     let local_label = local["label"].as_str().unwrap_or("Studio server");
-    let request_body = serde_json::json!({
+    let request_body = studio_json::json!({
         "protocol": studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,
         "inviteId": invitation.invite_id.as_str(), "token": invitation.token.as_str(),
         "clientId": local_id, "label": local_label, "kind": "server",
@@ -567,7 +567,7 @@ async fn accept_invite(
             tailscale_user: Field::Value(owner),
             status: AccessClientStatus::Paired,
             created: NonNegativeNumber::try_from(
-                serde_json::Number::from_f64(now).ok_or_else(invalid)?,
+                studio_json::Number::from_f64(now).ok_or_else(invalid)?,
             )
             .map_err(|_| invalid())?,
             last_access: Field::Null,
@@ -587,7 +587,7 @@ async fn accept_invite(
             .transaction_with(move |tx| {
                 tx.execute(
                     "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
-                    rusqlite::params![server_id_for_save, serde_json::to_string(&record)?],
+                    rusqlite::params![server_id_for_save, studio_json::to_string(&record)?],
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,'local','accept_invite',?2)",
@@ -644,7 +644,7 @@ async fn ui_invite(
         format!("studio-ui-invite:{local_id}:{server_id}:{request_id}").as_bytes(),
     )
     .to_string();
-    let request_body = serde_json::json!({"action":"create_invite","requestId":key});
+    let request_body = studio_json::json!({"action":"create_invite","requestId":key});
     let raw = remote_transport::canonical_json(&request_body)
         .map_err(|_| ApiError::internal())?
         .into_bytes();
@@ -798,7 +798,7 @@ async fn remote_set_server_name(
         .map_err(|_| ApiError::internal())?
         .as_secs() as i64;
     let url = format!("{origin}/api/multi-server/v1/name");
-    let raw = remote_transport::canonical_json(&serde_json::json!({
+    let raw = remote_transport::canonical_json(&studio_json::json!({
         "label": label,
         "requestId": request_id
     }))
@@ -895,7 +895,7 @@ async fn remote_set_server_name(
             })?;
             tx.execute(
                 "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
-                rusqlite::params![serde_json::to_string(&record)?, target_for_finish],
+                rusqlite::params![studio_json::to_string(&record)?, target_for_finish],
             )?;
             Ok(true)
         })
@@ -919,7 +919,7 @@ async fn auto_pair(
 async fn identity() -> Response {
     (
         StatusCode::FORBIDDEN,
-        Json(serde_json::json!({
+        Json(studio_json::json!({
             "error": "The identity endpoint requires owner proof through Serve",
             "code": "serve_required",
         })),
@@ -1010,7 +1010,7 @@ fn map_discovery_error(error: studio_runtime_services::multi_server_auth::Access
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn remote_name_rejects_partial_peer_before_outbound_reservation() {
@@ -1168,7 +1168,7 @@ mod tests {
             multi_server_access::{AccessSnapshot, Reachability},
             queue_command::Field,
         };
-        let before: AccessSnapshot = serde_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":null,"lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
+        let before: AccessSnapshot = studio_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":null,"lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
         let mut after = before.clone();
         after.clients[0].last_access = Some(20.into());
         after.servers[0].last_seen = Field::Value(20.into());
@@ -1250,8 +1250,8 @@ mod tests {
             .await
             .expect("small refusal body");
         assert_eq!(
-            serde_json::from_slice::<Value>(&body).expect("error envelope"),
-            serde_json::json!({
+            studio_json::from_slice::<Value>(&body).expect("error envelope"),
+            studio_json::json!({
                 "error": "The identity endpoint requires owner proof through Serve",
                 "code": "serve_required",
             })
@@ -1266,8 +1266,8 @@ mod tests {
             .await
             .expect("small refusal body");
         assert_eq!(
-            serde_json::from_slice::<Value>(&body).expect("error envelope"),
-            serde_json::json!({"error":"Not implemented: requires server-credentials/platform-support"})
+            studio_json::from_slice::<Value>(&body).expect("error envelope"),
+            studio_json::json!({"error":"Not implemented: requires server-credentials/platform-support"})
         );
     }
 
@@ -1294,7 +1294,7 @@ mod tests {
             State(state),
             HeaderMap::new(),
             ApiJson(
-                serde_json::from_str(r#"{"action":"discover","requestId":"discovery-fixture"}"#)
+                studio_json::from_str(r#"{"action":"discover","requestId":"discovery-fixture"}"#)
                     .unwrap(),
             ),
         )
@@ -1305,7 +1305,7 @@ mod tests {
             .await
             .expect("small snapshot body");
         assert_eq!(
-            serde_json::from_slice::<Value>(&body).expect("snapshot JSON")["settings"]["autoPair"],
+            studio_json::from_slice::<Value>(&body).expect("snapshot JSON")["settings"]["autoPair"],
             true
         );
     }
@@ -1320,28 +1320,28 @@ mod tests {
                 .expect("runtime store opens"),
         );
         let records = [
-            serde_json::json!({
+            studio_json::json!({
                 "id":"lostlocal","clientId":"lostlocal","serverId":"lostlocal",
                 "label":"Studio server (previous identity)","kind":"server",
                 "origin":"https://local.example","publicKey":"","tailscaleUser":null,
                 "status":"revoked","created":1.5,"lastAccess":null,"revoked":1.5,"alias":"MAC",
                 "replacedBy":"current"
             }),
-            serde_json::json!({
+            studio_json::json!({
                 "id":"newpeer","clientId":"newpeer","serverId":"newpeer","label":"Peer",
                 "kind":"server","origin":"https://peer.example","publicKey":"key",
                 "tailscaleUser":"owner@example.test","status":"paired","created":2.0,
                 "lastAccess":null,"revoked":null,"alias":"NEW"
             }),
             // No alias yet: the read saves a default alias and keeps every stored field.
-            serde_json::json!({
+            studio_json::json!({
                 "id":"lostpeer","clientId":"lostpeer","serverId":"lostpeer","label":"Gone",
                 "kind":"server","origin":"https://gone.example","publicKey":"key",
                 "tailscaleUser":"owner@example.test","status":"revoked","created":3.0,
                 "lastAccess":null,"revoked":3.0,"replacedBy":"newpeer"
             }),
         ];
-        let discovered = serde_json::json!({
+        let discovered = studio_json::json!({
             "id":"oldpeer","clientId":"oldpeer","serverId":"oldpeer","label":"Peer before",
             "kind":"server","origin":"https://peer.example","publicKey":"old",
             "tailscaleUser":"owner@example.test","status":"unreachable","created":1.0,
@@ -1364,7 +1364,7 @@ mod tests {
                         "INSERT INTO runtime_projects VALUES(?1,?2)",
                         rusqlite::params![
                             id,
-                            serde_json::json!({"homeServerId": home}).to_string()
+                            studio_json::json!({"homeServerId": home}).to_string()
                         ],
                     )?;
                 }
@@ -1393,7 +1393,7 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
             .await
             .expect("small snapshot body");
-        let body: Value = serde_json::from_slice(&body).expect("snapshot JSON");
+        let body: Value = studio_json::from_slice(&body).expect("snapshot JSON");
         let local = body["identity"]["serverId"]
             .as_str()
             .expect("local server ID");
@@ -1427,7 +1427,7 @@ mod tests {
         );
         assert_eq!(
             body["identityAlerts"],
-            serde_json::json!([
+            studio_json::json!([
                 {
                     "code":"peer_identity_changed","oldServerId":"oldpeer","newServerId":"newpeer",
                     "origin":"https://peer.example",
@@ -1448,7 +1448,7 @@ mod tests {
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .map(|raw| serde_json::from_str(&raw).expect("stored JSON"))
+            .map(|raw| studio_json::from_str(&raw).expect("stored JSON"))
             .expect("stored record");
         assert_eq!(saved["alias"], "GON");
         assert_eq!(saved["replacedBy"], "newpeer");
@@ -1476,14 +1476,14 @@ mod tests {
         .with_credentials(credentials)
         .with_tailscale_whoami(Arc::new(|| {
             Box::pin(async {
-                Some(serde_json::json!({"status":"verified","user":"owner@example.test"}))
+                Some(studio_json::json!({"status":"verified","user":"owner@example.test"}))
             })
         }));
         let response = manage(
             State(state),
             HeaderMap::new(),
             ApiJson(
-                serde_json::from_str(r#"{"action":"create_invite","requestId":"fake-owner-invite","label":"Fixture server"}"#)
+                studio_json::from_str(r#"{"action":"create_invite","requestId":"fake-owner-invite","label":"Fixture server"}"#)
                 .unwrap(),
             ),
         )
@@ -1493,7 +1493,7 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
             .await
             .expect("small invitation response");
-        let body: Value = serde_json::from_slice(&body).expect("invitation JSON");
+        let body: Value = studio_json::from_slice(&body).expect("invitation JSON");
         assert_eq!(body["invitation"]["tailscaleUser"], "owner@example.test");
         assert_eq!(body["invitation"]["label"], "Fixture server");
         assert!(

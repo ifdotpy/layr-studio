@@ -17,9 +17,9 @@
 //!   the owner.
 use rusqlite::OptionalExtension;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, SchedulerRepository, StoreError, Transaction,
 };
@@ -258,7 +258,7 @@ fn session_start_failure(
         )
         .optional()?
         .flatten();
-    raw.map(|raw| serde_json::from_str(&raw).map_err(StoreError::from))
+    raw.map(|raw| studio_json::from_str(&raw).map_err(StoreError::from))
         .transpose()
 }
 
@@ -335,7 +335,7 @@ fn merged_agent(tx: &Transaction<'_>, id: &str) -> Result<Option<Value>, StoreEr
     let Some(record) = AgentRepository::get(tx, &AgentId::from(id))? else {
         return Ok(None);
     };
-    let mut value = serde_json::to_value(record)?;
+    let mut value = studio_json::to_value(record)?;
     studio_runtime_store::agent_volatile::merge(tx, id, &mut value)?;
     Ok(Some(value))
 }
@@ -586,7 +586,7 @@ fn stalled_schedules(
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for (kind, agent, raw) in rows {
-        let Ok(record) = serde_json::from_str::<ScheduleObservation>(&raw) else {
+        let Ok(record) = studio_json::from_str::<ScheduleObservation>(&raw) else {
             continue;
         };
         let Some(owner) = merged_agent(tx, &agent)? else {
@@ -639,7 +639,7 @@ fn stalled_schedules(
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for (id, raw) in rows {
-        let Ok(transfer) = serde_json::from_str::<TransferObservation>(&raw) else {
+        let Ok(transfer) = studio_json::from_str::<TransferObservation>(&raw) else {
             continue;
         };
         let mut stuck = Vec::new();
@@ -721,17 +721,17 @@ mod observation_tests {
             r#"{"id":null,"id":"last","dueAt":1,"claimedAt":1.5,"attempt":3.0,"maxAttempts":18446744073709551615,"reason":false}"#,
             r#"{"members":{"z":{"phase":"ready","name":null},"a":4,"z":{"phase":"blocked","error":"last"}},"created":-1,"updated":null}"#,
         ] {
-            let old: Value = serde_json::from_str(raw).unwrap();
-            let schedule: ScheduleObservation = serde_json::from_str(raw).unwrap();
+            let old: Value = studio_json::from_str(raw).unwrap();
+            let schedule: ScheduleObservation = studio_json::from_str(raw).unwrap();
             assert_eq!(schedule.id.as_deref(), old["id"].as_str());
             assert_eq!(schedule.due_at, old["dueAt"].as_f64());
             assert_eq!(schedule.claimed_at, old["claimedAt"].as_f64());
             assert_eq!(schedule.attempt, old["attempt"].as_u64());
             assert_eq!(schedule.max_attempts, old["maxAttempts"].as_u64());
             assert_eq!(schedule.reason.as_deref(), old["reason"].as_str());
-            let session: SessionFailure = serde_json::from_str(raw).unwrap();
+            let session: SessionFailure = studio_json::from_str(raw).unwrap();
             assert_eq!(session.reason.as_deref(), old["reason"].as_str());
-            let transfer: TransferObservation = serde_json::from_str(raw).unwrap();
+            let transfer: TransferObservation = studio_json::from_str(raw).unwrap();
             assert_eq!(transfer.lead_id.as_deref(), old["leadId"].as_str());
             assert_eq!(transfer.updated, old["updated"].as_f64());
             assert_eq!(transfer.created, old["created"].as_f64());
@@ -749,8 +749,8 @@ mod observation_tests {
         }
         for raw in ["{", r#"{"future":1e400}"#, "[1e400]"] {
             assert_eq!(
-                serde_json::from_str::<SessionFailure>(raw).is_ok(),
-                serde_json::from_str::<Value>(raw).is_ok()
+                studio_json::from_str::<SessionFailure>(raw).is_ok(),
+                studio_json::from_str::<Value>(raw).is_ok()
             );
         }
     }

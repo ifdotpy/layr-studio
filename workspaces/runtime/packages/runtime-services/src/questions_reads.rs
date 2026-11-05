@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, CheckpointRecord, ComplaintRecord};
 use thiserror::Error;
 
@@ -80,7 +80,7 @@ pub fn async_question_item<'a>(agent: &str, id: &'a str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::{QuestionsReadsError, checkpoint_list, complaint_detail};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::{AgentRecord, CheckpointRecord};
 
     fn agent(id: &str, root: &str, deleted_at: Option<f64>) -> AgentRecord {

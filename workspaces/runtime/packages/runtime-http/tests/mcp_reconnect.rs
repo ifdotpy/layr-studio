@@ -6,8 +6,8 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use studio_runtime_services::{account_policy::AccountPolicyState, account_session_runtime::*};
@@ -203,7 +203,7 @@ async fn request_from(
     let status = response.status().as_u16();
     (
         status,
-        serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+        studio_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
             .unwrap(),
     )
 }
@@ -262,8 +262,8 @@ async fn mcp_reconnect_replays_lost_success_without_second_provider_call() {
     )
     .unwrap();
     let db = store.test_reader().unwrap();
-    let signature = serde_json::to_value(
-        serde_json::from_value::<studio_runtime_http::generated::McpReconnectRequest>(body())
+    let signature = studio_json::to_value(
+        studio_json::from_value::<studio_runtime_http::generated::McpReconnectRequest>(body())
             .unwrap(),
     )
     .unwrap()
@@ -460,8 +460,8 @@ async fn mcp_reconnect_concurrent_replay_and_crash_receipt_never_resend() {
     let pending_root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
     pending["request_id"] = json!(pending_root);
     let canonical: studio_runtime_http::generated::McpReconnectRequest =
-        serde_json::from_value(pending.clone()).unwrap();
-    let signature = serde_json::to_value(canonical).unwrap().to_string();
+        studio_json::from_value(pending.clone()).unwrap();
+    let signature = studio_json::to_value(canonical).unwrap().to_string();
     store.transaction_with_error(move |tx| -> Result<(), studio_runtime_store::StoreError> {
         use studio_runtime_services::event_write::{begin_request, CallerAdmission, RequestKey};
         let request = match begin_request::<studio_runtime_http::generated::McpReconnectResponse>(tx, RequestKey::new("mcp-reconnect", &["agent"], &pending_root).operation(&["reconnect"]), &signature, (studio_runtime_services::event_write::unix_time().unwrap() * 1000.0) as i64)? {
@@ -494,8 +494,8 @@ async fn mcp_reconnect_migrated_raw_v4_key_replays_after_authorization() {
     let mut original = body();
     original["request_id"] = json!("f43c1885-f4fc-485b-bf99-8b4f31e7e7c4");
     let typed: studio_runtime_http::generated::McpReconnectRequest =
-        serde_json::from_value(original.clone()).unwrap();
-    let signature = serde_json::to_value(typed).unwrap().to_string();
+        studio_json::from_value(original.clone()).unwrap();
+    let signature = studio_json::to_value(typed).unwrap().to_string();
     let reply = json!({"status":"completed","message":"Saved original reconnect reply."});
     let envelope = json!({"actor":"agent","reply":reply,"references":[]}).to_string();
     store

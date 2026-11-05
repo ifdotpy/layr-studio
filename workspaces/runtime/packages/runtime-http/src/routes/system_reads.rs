@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::system_reads::{self, SystemReadError};
 
 use super::extractors::TypedQuery;
@@ -99,9 +99,10 @@ async fn directories(
                         status: String,
                         revoked: Option<f64>,
                     }
-                    let client: AccessSelection = serde_json::from_value(client).map_err(|_| {
-                        ApiError::stored(records::invalid("runtime_access_clients", &server_id))
-                    })?;
+                    let client: AccessSelection =
+                        studio_json::from_value(client).map_err(|_| {
+                            ApiError::stored(records::invalid("runtime_access_clients", &server_id))
+                        })?;
                     return Ok::<bool, ApiError>(
                         client.kind == "server"
                             && client.status == "paired"
@@ -177,7 +178,7 @@ async fn directories(
                 ));
             }
         };
-        return serde_json::from_str::<system_reads::DirectoryListing>(value.value.get())
+        return studio_json::from_str::<system_reads::DirectoryListing>(value.value.as_str())
             .map(Json)
             .map_err(ApiError::json);
     }
@@ -265,20 +266,20 @@ async fn diagnostics(
         let mut queues = provider.queues;
         queues.insert(
             "durableInputPending".to_owned(),
-            serde_json::json!(durable_input_pending),
+            studio_json::json!(durable_input_pending),
         );
         queues.insert(
             "claudeLogLinesSkipped".to_owned(),
-            serde_json::json!(studio_runtime_services::costs::claude_log_lines_skipped()),
+            studio_json::json!(studio_runtime_services::costs::claude_log_lines_skipped()),
         );
-        let mut attribution = vec![serde_json::json!({
+        let mut attribution = vec![studio_json::json!({
             "component": "process",
             "operation": "ps",
             "count": process_tree["processes"].as_array().map_or(0, Vec::len),
         })];
         if let Some(kinds) = process_tree["kinds"].as_object() {
             for (kind, totals) in kinds {
-                attribution.push(serde_json::json!({
+                attribution.push(studio_json::json!({
                     "component": kind,
                     "operation": "resident",
                     "count": totals["count"],
@@ -286,7 +287,7 @@ async fn diagnostics(
                 }));
             }
         }
-        let supervisor = serde_json::json!({
+        let supervisor = studio_json::json!({
             "mode": supervisor.mode,
             "fallback": supervisor.fallback,
             "notice": supervisor.notice,
@@ -294,12 +295,12 @@ async fn diagnostics(
         });
         let blocking_pool_metrics = {
             let snapshot = studio_runtime_process::blocking_pool::snapshot();
-            serde_json::json!({
+            studio_json::json!({
                 "enabled": snapshot.enabled,
                 "queued": snapshot.queued,
                 "running": snapshot.running,
                 "peakOccupancy": snapshot.peak_occupancy,
-                "groups": snapshot.groups.into_iter().map(|group| serde_json::json!({
+                "groups": snapshot.groups.into_iter().map(|group| studio_json::json!({
                     "group": group.group,
                     "count": group.count,
                     "queueWaitAvgMs": group.queue_wait_avg_ms,
@@ -313,7 +314,7 @@ async fn diagnostics(
                 })).collect::<Vec<_>>(),
             })
         };
-        let value = serde_json::json!({
+        let value = studio_json::json!({
             "at": studio_runtime_services::diagnostics::now_rfc3339(),
             "processTree": process_tree,
             "hostResources": host_resources,
@@ -626,9 +627,9 @@ mod diagnostics_http_tests {
     use axum::extract::ConnectInfo;
     use axum::http::{Request, StatusCode};
     use rusqlite::Connection;
-    use serde_json::{Value, json};
     use std::path::Path;
     use std::time::SystemTime;
+    use studio_json::{Value, json};
     use studio_runtime_services::diagnostics::{
         ProviderDiagnosticsPort, ProviderDiagnosticsSnapshot, SupervisorDiagnosticsPort,
         SupervisorDiagnosticsSnapshot,
@@ -818,9 +819,10 @@ mod diagnostics_http_tests {
         let executions = response["executions"].clone();
         assert!(registry.validate_stored("ExecutionLedger", &executions));
         let typed: crate::generated::ExecutionLedger =
-            serde_json::from_value(executions.clone()).expect("typed execution ledger");
+            studio_json::from_value(executions.clone()).expect("typed execution ledger");
         assert_eq!(
-            serde_json::to_value(typed).expect("ledger serializes")["runs"][0]["restartRecovery"]["supervisor"],
+            studio_json::to_value(typed).expect("ledger serializes")["runs"][0]["restartRecovery"]
+                ["supervisor"],
             json!({"generation": 96})
         );
 
@@ -886,7 +888,7 @@ mod diagnostics_http_tests {
                         "account3": {"error": "ProviderDiagnosticsUnavailable"}
                     }),
                     studio_loaded_threads: 3,
-                    queues: serde_json::Map::new(),
+                    queues: studio_json::Map::new(),
                     // One busy and one idle worker, shaped like the worker's diagnostics.
                     account_workers: json!({
                         "account1": {
@@ -984,7 +986,7 @@ mod diagnostics_http_tests {
             .await
             .expect("bounded diagnostics response");
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let value: Value = serde_json::from_slice(&body).expect("JSON diagnostics response");
+        let value: Value = studio_json::from_slice(&body).expect("JSON diagnostics response");
         assert_eq!(
             value.as_object().map(|fields| fields.len()),
             Some(DIAGNOSTICS_RESPONSE_FIELDS.len())
@@ -1061,7 +1063,7 @@ mod diagnostics_http_tests {
             "unexpected diagnostics response: {}",
             String::from_utf8_lossy(&body)
         );
-        let value: Value = serde_json::from_slice(&body).expect("JSON error response");
+        let value: Value = studio_json::from_slice(&body).expect("JSON error response");
         assert!(
             Registry::compile(&[("GET".to_owned(), "/api/diagnostics".to_owned())])
                 .expect("OpenAPI response schema")

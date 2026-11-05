@@ -7,7 +7,6 @@ use crate::account_registry::{
 #[cfg(unix)]
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -18,6 +17,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_http::HttpState;
 use studio_runtime_process::{
     BackendId, BackendIdentity, Generation, OperationId, ProviderHandle, ProviderLaunchSpec,
@@ -955,12 +955,12 @@ async fn resolve_vm_launch_inputs(
             .remove("binaryPath");
         let explicit_host_config = options
             .get("configDir")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .is_some_and(|value| !value.is_empty())
             || env::var_os("CLAUDE_CONFIG_DIR").is_some();
         let host_config = options
             .get("configDir")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .or_else(|| env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
@@ -1224,7 +1224,7 @@ async fn read_vm_codex_bootstrap(
                     expected_scope: Some(scope),
                     deleted_actor_session: None,
                     method: studio_runtime_providers::Method::AccountRead,
-                    params: serde_json::json!({"refreshToken":true}),
+                    params: studio_json::json!({"refreshToken":true}),
                     deadline: std::time::Instant::now() + std::time::Duration::from_secs(45),
                 },
             )
@@ -1376,7 +1376,7 @@ async fn refresh_vm_codex_token(
             "vm-auth/actor-changed".into(),
         ));
     }
-    Ok(serde_json::json!({
+    Ok(studio_json::json!({
         "accessToken":payload["accessToken"],
         "chatgptAccountId":payload["chatgptAccountId"],
     }))
@@ -1506,7 +1506,7 @@ fn read_vm_claude_credentials<R: ProviderAuthReader>(
 #[serde(rename_all = "camelCase")]
 struct VmClaudeCredential {
     access_token: String,
-    expires_at: serde_json::Number,
+    expires_at: studio_json::Number,
     #[serde(skip_serializing_if = "Option::is_none")]
     rate_limit_tier: Option<Value>,
     scopes: Vec<Value>,
@@ -1587,7 +1587,7 @@ struct VmClaudeGuestCredential<'a> {
     claude_ai_oauth: &'a VmClaudeCredential,
 }
 fn encode_vm_claude_credentials(access: &VmClaudeCredential) -> Result<Vec<u8>, WorkerError> {
-    serde_json::to_vec(&VmClaudeGuestCredential {
+    studio_json::to_vec(&VmClaudeGuestCredential {
         claude_ai_oauth: access,
     })
     .map_err(|_| WorkerError::TaskFailed)
@@ -1635,7 +1635,7 @@ fn read_vm_claude_oauth(
             bytes
         }
     };
-    let JsonObject(file): JsonObject<VmClaudeCredentialFile> = serde_json::from_slice(&bytes)
+    let JsonObject(file): JsonObject<VmClaudeCredentialFile> = studio_json::from_slice(&bytes)
         .map_err(|_| WorkerError::PreparationRefused("vm-credentials/invalid".into()))?;
     Ok(file.claude_ai_oauth.0)
 }
@@ -1946,7 +1946,7 @@ fn run_vm_claude_refresh_helper(
             }
         }
     };
-    let ready = serde_json::from_str::<JsonObject<RefreshReady>>(ready_line.trim())
+    let ready = studio_json::from_str::<JsonObject<RefreshReady>>(ready_line.trim())
         .is_ok_and(|ready| ready.0.ready);
     if !ready || ready_line.len() > CLAUDE_REFRESH_READINESS_LINE_LIMIT {
         stop_vm_claude_refresh_child(&mut *child)?;
@@ -2305,7 +2305,7 @@ mod install_root_tests {
             .expect("account registry directory creates");
         fs::write(
             &registry_path,
-            serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{},"logins":{},"deleteReceipts":{}}).to_string().as_bytes(),
+            studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{},"logins":{},"deleteReceipts":{}}).to_string().as_bytes(),
         )
         .expect("empty account registry writes");
         let registry_bytes = fs::read(&registry_path).expect("account registry reads");
@@ -2314,7 +2314,7 @@ mod install_root_tests {
         let account_policy = Arc::new(
             studio_runtime_services::account_policy::AccountPolicyState::from_startup(
                 Some(&registry_bytes),
-                std::iter::empty::<(String, serde_json::Value)>(),
+                std::iter::empty::<(String, studio_json::Value)>(),
             )
             .expect("empty account policy loads"),
         );
@@ -2345,7 +2345,7 @@ mod install_root_tests {
         .expect("composed host runtime starts");
 
         let app = studio_runtime_http::router(state).expect("HTTP routes compose");
-        async fn get(app: &axum::Router, path: &str) -> (u16, serde_json::Value) {
+        async fn get(app: &axum::Router, path: &str) -> (u16, studio_json::Value) {
             let response = app
                 .clone()
                 .oneshot(
@@ -2367,7 +2367,7 @@ mod install_root_tests {
                 .expect("JSON body");
             (
                 status,
-                serde_json::from_slice(&body).expect("response JSON"),
+                studio_json::from_slice(&body).expect("response JSON"),
             )
         }
 
@@ -2394,7 +2394,6 @@ mod voice_composition_tests {
         extract::ConnectInfo,
         http::{Request, StatusCode},
     };
-    use serde_json::{Value, json};
     use std::{
         collections::BTreeMap,
         fs,
@@ -2404,6 +2403,7 @@ mod voice_composition_tests {
             atomic::{AtomicUsize, Ordering},
         },
     };
+    use studio_json::{Value, json};
     use studio_runtime_http::{HttpState, router};
     use studio_runtime_process::{
         EventCursor, Generation, OperationId, ProviderHandle, ProviderLaunchSpec,
@@ -2681,7 +2681,7 @@ mod voice_composition_tests {
                             let Some(id) = message
                                 .get("id")
                                 .cloned()
-                                .and_then(|id| serde_json::from_value::<RequestId>(id).ok())
+                                .and_then(|id| studio_json::from_value::<RequestId>(id).ok())
                             else {
                                 continue;
                             };
@@ -3079,8 +3079,8 @@ mod voice_composition_tests {
                 disposition: VoiceEffectDisposition::Active,
                 authority: VoiceEffectAuthority::Held { scope: CapturedScope::Known(scope.clone()) },
             };
-            tx.execute("INSERT INTO voice_sessions(id,agent,created,native_thread,account_key,connection_id,provider_scope,state) VALUES(?1,'legacy-agent',1,'voice-thread','voice-account','legacy-connection',?2,'ready')", rusqlite::params![session_for_seed, serde_json::to_string(&scope)?])?;
-            tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES('held-stop','voice_stop','agent','legacy-agent','lifecycle.voice-stop.v1','unknown',?1,1)", [serde_json::to_string(&effect)?])?;
+            tx.execute("INSERT INTO voice_sessions(id,agent,created,native_thread,account_key,connection_id,provider_scope,state) VALUES(?1,'legacy-agent',1,'voice-thread','voice-account','legacy-connection',?2,'ready')", rusqlite::params![session_for_seed, studio_json::to_string(&scope)?])?;
+            tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES('held-stop','voice_stop','agent','legacy-agent','lifecycle.voice-stop.v1','unknown',?1,1)", [studio_json::to_string(&effect)?])?;
             Ok(())
         }).await.unwrap();
         let factory = Arc::new(VoiceFactory::default());
@@ -3172,7 +3172,7 @@ mod voice_composition_tests {
         let status = response.status();
         let body = to_bytes(response.into_body(), 100_000).await.unwrap();
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let response: Value = serde_json::from_slice(&body).unwrap();
+        let response: Value = studio_json::from_slice(&body).unwrap();
         assert_eq!(response["session_id"], session_id);
         assert_eq!(response["state"], "connecting");
         // The HTTP acceptance boundary persists the connecting session before
@@ -3456,7 +3456,7 @@ mod codex_vm_auth_tests {
         );
         let call = |account: Value| {
             let account: studio_runtime_services::account_policy::PublicAccount =
-                serde_json::from_value(account).expect("account fixture");
+                studio_json::from_value(account).expect("account fixture");
             let accounts = accounts.clone();
             let store = &store;
             let owner = &owner;
@@ -3569,7 +3569,7 @@ mod codex_vm_auth_tests {
             &store,
             VmCodexAuthSource {
                 account_key: "fake",
-                account: &serde_json::from_value(account.clone()).expect("account fixture"),
+                account: &studio_json::from_value(account.clone()).expect("account fixture"),
                 root_request_id: "fake",
                 owner: VmAuthOwner::Callback { source: &owner },
             },
@@ -3770,7 +3770,7 @@ mod launch_profile_tests {
         std::fs::create_dir_all(&home).expect("home");
         let registry = root.path().join("registry.json");
         let write = |status: &str| {
-            std::fs::write(&registry, serde_json::json!({
+            std::fs::write(&registry, studio_json::json!({
                 "version": studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
                 "defaultAccountKey":"default", "accounts": {
                     "default":{"provider":"codex","id":"default","home":"","label":"Default","source":"CLI","status":"signedOut"},
@@ -3796,8 +3796,8 @@ mod vm_claude_refresh_tests {
         CLAUDE_ACCESS_REFRESH_WINDOW_MS, WorkerError, encode_vm_claude_credentials,
         read_vm_claude_oauth, run_vm_claude_refresh_helper, unix_time_ms, verify_vm_claude_account,
     };
-    use serde_json::{Value, json};
     use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt};
+    use studio_json::{Value, json};
 
     #[test]
     fn synthetic_credential_read_and_encode_preserve_legacy_values() {
@@ -3818,9 +3818,9 @@ mod vm_claude_refresh_tests {
             let bytes = encode_vm_claude_credentials(&access).unwrap();
             assert_eq!(
                 bytes,
-                serde_json::to_vec(&json!({"claudeAiOauth":expected})).unwrap()
+                studio_json::to_vec(&json!({"claudeAiOauth":expected})).unwrap()
             );
-            let encoded: Value = serde_json::from_slice(&bytes).unwrap();
+            let encoded: Value = studio_json::from_slice(&bytes).unwrap();
             assert_eq!(encoded["claudeAiOauth"], expected);
         }
         for raw in [
@@ -3878,7 +3878,7 @@ mod vm_claude_refresh_tests {
         )
         .unwrap();
         assert!(reads.load(Ordering::SeqCst) > 0);
-        let copied: Value = serde_json::from_slice(&copied).unwrap();
+        let copied: Value = studio_json::from_slice(&copied).unwrap();
         assert_eq!(copied["claudeAiOauth"]["accessToken"], "fake");
         assert!(copied["claudeAiOauth"].get("refreshToken").is_none());
     }
@@ -3892,7 +3892,7 @@ mod vm_claude_refresh_tests {
         let now_ms = unix_time_ms().unwrap();
         fs::write(
             &credential_path,
-            serde_json::to_vec(&json!({"claudeAiOauth": {
+            studio_json::to_vec(&json!({"claudeAiOauth": {
                 "accessToken":"expired-fake-token",
                 "expiresAt":now_ms + 1000.0,
                 "scopes":["user:inference"]
@@ -4077,7 +4077,7 @@ IFS= read -r release
         fs::write(&path, json!({"claudeAiOauth":access}).to_string()).unwrap();
         let access = read_vm_claude_oauth(&path, true).unwrap();
         let copied: Value =
-            serde_json::from_slice(&encode_vm_claude_credentials(&access).unwrap()).unwrap();
+            studio_json::from_slice(&encode_vm_claude_credentials(&access).unwrap()).unwrap();
         assert_eq!(
             copied,
             json!({"claudeAiOauth": {

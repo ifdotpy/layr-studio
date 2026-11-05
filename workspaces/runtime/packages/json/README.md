@@ -54,3 +54,8 @@ and 507 additional instructions per process over 100 calls, invariant across
 fixture sizes; the measurement includes argument and operation dispatch. The
 alternatives offer material instruction savings on these fixtures but cannot be
 the default because of the compatibility failures above.
+
+Outside this facade, the remaining `serde_json::` text is intentional: the
+HTTP build generator replaces upstream output paths with `studio_json::`, and
+private-marker strings in compatibility code and fixtures must retain their
+literal bytes. They are not Rust dependency paths.

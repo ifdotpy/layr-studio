@@ -1,7 +1,7 @@
 use crate::{StoreResult, SyncDocumentsRepository};
 use rusqlite::Transaction;
 use serde::Deserialize;
-use serde_json::value::RawValue;
+use studio_json::RawJson;
 use studio_runtime_schema::usage_limits::{AccountLimitsProjection, RateLimitView};
 
 #[derive(Deserialize)]
@@ -10,14 +10,14 @@ struct Entity<'a> {
     collection: &'a str,
     id: &'a str,
     #[serde(borrow)]
-    value: &'a RawValue,
+    value: RawJson<'a>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Current<'a> {
     #[serde(borrow)]
-    observation: &'a RawValue,
+    observation: RawJson<'a>,
     projection: AccountLimitsProjection,
 }
 
@@ -52,17 +52,17 @@ pub(super) fn apply(tx: &Transaction<'_>, now: f64) -> StoreResult<()> {
                         length <= crate::account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64
                     })
             })
-            .and_then(|bytes| serde_json::from_slice::<Entity<'_>>(bytes).ok());
+            .and_then(|bytes| studio_json::from_slice::<Entity<'_>>(bytes).ok());
         let valid = entity
             .as_ref()
             .filter(|entity| entity.collection == "rateLimit" && entity.id == id);
         if let Some(entity) = valid {
-            if let Ok(current) = serde_json::from_str::<Current<'_>>(entity.value.get()) {
-                if RateLimitView::read(current.observation, &id, now).is_ok() {
+            if let Ok(current) = studio_json::from_str::<Current<'_>>(entity.value.as_str()) {
+                if RateLimitView::read(current.observation.as_str(), &id, now).is_ok() {
                     let _projection = current.projection;
                     continue;
                 }
-            } else if let Ok(view) = RateLimitView::read(entity.value, &id, now) {
+            } else if let Ok(view) = RateLimitView::read(entity.value.as_str(), &id, now) {
                 SyncDocumentsRepository::put_entity(tx, "rateLimit", &id, view, false)?;
                 continue;
             }
@@ -93,7 +93,7 @@ mod tests {
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
         for id in ["bad", "wrong"] {
             let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [id], |row| row.get(0)).unwrap();
-            let entity: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let entity: studio_json::Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(entity["value"]["observation"]["accountKey"], id);
             assert!(entity["value"]["observation"].get("data").is_none());
         }
@@ -109,7 +109,7 @@ mod tests {
         let stamp = crate::account_state::limits_observation(&tx, "a")
             .unwrap()
             .unwrap();
-        let stamp: serde_json::Value = serde_json::from_str(&stamp).unwrap();
+        let stamp: studio_json::Value = studio_json::from_str(&stamp).unwrap();
         assert!(stamp.get("at").is_none());
         assert_eq!(stamp["checkedAt"].as_f64(), Some(123.0));
         let snapshot = crate::account_state::latest_limits_snapshot(&tx, "a")
@@ -126,7 +126,7 @@ mod tests {
         let tx = db.transaction().unwrap();
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
         let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='a' AND deleted=0", [], |row| row.get(0)).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let value: studio_json::Value = studio_json::from_str(&payload).unwrap();
         let data = &value["value"]["observation"]["data"];
         assert_eq!(data["rateLimits"]["primary"]["usedPercent"], 80.0);
         assert!(data["rateLimits"]["primary"].get("vendor").is_none());
@@ -142,7 +142,7 @@ mod tests {
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
         super::apply(&tx, 100.0).unwrap();
         let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='a' AND deleted=0", [], |row| row.get(0)).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let value: studio_json::Value = studio_json::from_str(&payload).unwrap();
         assert_eq!(
             value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"],
             80.0
@@ -254,7 +254,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let envelope: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let envelope: studio_json::Value = studio_json::from_str(&raw).unwrap();
         assert!(seq > 1);
         assert_eq!(
             envelope["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"]

@@ -12,7 +12,6 @@ use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RtpCodecKind,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::{
     sync::{
         Arc,
@@ -22,6 +21,7 @@ use std::{
 };
 use studio_client_domain::json_object::JsonObject;
 use studio_client_domain::protocol::NativeVoiceEvent;
+use studio_json::{Value, json};
 use tokio::{sync::mpsc, task::JoinHandle};
 use webrtc::{
     data_channel::DataChannelEvent,

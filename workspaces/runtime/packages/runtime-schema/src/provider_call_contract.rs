@@ -1,7 +1,7 @@
 //! Exact retained-provider payload and fingerprint contract shared by runtime and migration.
 use crate::provider_input::RequestId;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

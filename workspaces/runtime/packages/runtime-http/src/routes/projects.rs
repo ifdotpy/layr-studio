@@ -6,9 +6,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 use studio_runtime_schema::model_catalog::ModelCatalog;
 use studio_runtime_schema::peer_team_ingress::{
@@ -647,7 +647,7 @@ async fn local_project_registration(
         request_id: operation_id.clone(),
         outcome: LocationOutcome::Applied,
         project_id: Some(project_id.clone()),
-        value: Some(serde_json::from_value(value).map_err(ApiError::json)?),
+        value: Some(studio_json::from_value(value).map_err(ApiError::json)?),
         error: None,
     };
     let result_for_write = result.clone();
@@ -881,7 +881,7 @@ async fn remote_project_write(
             path: path.map(str::to_owned),
         };
         let signature = studio_runtime_store::sha256_hex(
-            &serde_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
+            &studio_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
         );
         let early_store = store.clone();
         let early_root = request_id.to_owned();
@@ -964,7 +964,7 @@ async fn remote_project_write(
         ));
     };
     let signature = studio_runtime_store::sha256_hex(
-        &serde_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
+        &studio_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
     );
     payload.signature = Field::Value(signature.clone());
     let admission_store = store.clone();
@@ -1073,7 +1073,7 @@ async fn remote_project_write(
         ExchangeOutcome::Applied(value) => {
             if action != "remove_location" {
                 let remote: studio_runtime_services::project_locations::LocationValue =
-                    serde_json::from_str(value.value.get()).map_err(|_| {
+                    studio_json::from_str(value.value.as_str()).map_err(|_| {
                         ApiError::new(
                             StatusCode::BAD_GATEWAY,
                             "The paired server returned a different project location",
@@ -1186,8 +1186,8 @@ async fn project_locations(
                 ));
             }
         };
-        return serde_json::from_str::<crate::generated::ProjectLocationQueryResponse>(
-            value.value.get(),
+        return studio_json::from_str::<crate::generated::ProjectLocationQueryResponse>(
+            value.value.as_str(),
         )
         .map(Json)
         .map_err(ApiError::json);
@@ -1500,7 +1500,7 @@ mod local_registration_tests {
             json!({"action":"reorder","request_id":"r","expected_revision":-1,"groups":{}}),
         ] {
             let valid = validator.is_valid(&body);
-            let decoded = serde_json::from_value::<super::ProjectRequest>(body.clone()).is_ok();
+            let decoded = studio_json::from_value::<super::ProjectRequest>(body.clone()).is_ok();
             assert_eq!(decoded, valid, "{body}");
         }
     }
@@ -1531,7 +1531,7 @@ mod local_registration_tests {
             json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","extra":true}),
         ] {
             let valid = validator.is_valid(&body);
-            let decoded = serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok();
+            let decoded = studio_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok();
             assert_eq!(decoded, valid, "{body}");
         }
     }
@@ -1675,9 +1675,9 @@ mod local_registration_tests {
             }
             for body in cases {
                 let decoded = if route == "project" {
-                    serde_json::from_value::<super::ProjectRequest>(body.clone()).is_ok()
+                    studio_json::from_value::<super::ProjectRequest>(body.clone()).is_ok()
                 } else {
-                    serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok()
+                    studio_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok()
                 };
                 assert_eq!(decoded, validator.is_valid(&body), "{name}: {body}");
             }
@@ -1744,7 +1744,7 @@ mod local_registration_tests {
 
     #[test]
     fn remote_location_uses_typed_project_location() {
-        let project = serde_json::from_str::<studio_runtime_schema::project_record::ProjectLive>(
+        let project = studio_json::from_str::<studio_runtime_schema::project_record::ProjectLive>(
             r#"{"id":"project","path":"project:id","peerTeams":[],"locations":[{"serverId":"server","path":"/folder","projectId":"id","gitOrigin":"origin"}]}"#,
         ).unwrap();
         let (_, command) = super::remote_location_action(
@@ -1793,7 +1793,7 @@ mod local_registration_tests {
     fn project_record_refuses_malformed_locations() {
         let raw = r#"{"recordKind":"live","id":"project","path":"/project","peerTeams":[],"locations":[{"serverId":42}]}"#;
         assert!(
-            serde_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(raw)
+            studio_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(raw)
                 .is_err()
         );
         let db = rusqlite::Connection::open_in_memory().unwrap();
@@ -1807,7 +1807,7 @@ mod local_registration_tests {
         assert!(studio_runtime_store::ProjectsRepository::get_record(&db, "project").is_err());
         let unknown = r#"{"recordKind":"live","id":"project","path":"/project","peerTeams":[],"locations":[{"serverId":"server","path":"/folder","projectId":"id","vendor":{"n":1}}]}"#;
         assert!(
-            serde_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(unknown)
+            studio_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(unknown)
                 .is_err()
         );
         let valid = r#"{"recordKind":"live","id":"project","path":"/project","peerTeams":[],"locations":[{"serverId":"server","path":"/folder","projectId":"id"}]}"#;
@@ -1830,16 +1830,16 @@ mod local_registration_tests {
             r#"{"recordKind":"live","id":"project","path":"/project","peerTeams":[],"locationsRevision":"bad"}"#,
         ] {
             assert!(
-                serde_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(raw)
+                studio_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(raw)
                     .is_err()
             );
         }
     }
-    use serde_json::json;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use studio_json::json;
     use studio_runtime_services::account_policy::AccountPolicyState;
     use studio_runtime_services::{
         multi_server_auth::AccessError,
@@ -1864,16 +1864,16 @@ mod local_registration_tests {
 
     async fn post_project(
         app: &axum::Router,
-        body: &serde_json::Value,
-    ) -> (axum::http::StatusCode, serde_json::Value) {
+        body: &studio_json::Value,
+    ) -> (axum::http::StatusCode, studio_json::Value) {
         post(app, "/api/projects", body).await
     }
 
     async fn post(
         app: &axum::Router,
         path: &str,
-        body: &serde_json::Value,
-    ) -> (axum::http::StatusCode, serde_json::Value) {
+        body: &studio_json::Value,
+    ) -> (axum::http::StatusCode, studio_json::Value) {
         use axum::{
             body::{Body, to_bytes},
             extract::ConnectInfo,
@@ -1904,7 +1904,7 @@ mod local_registration_tests {
             .await
             .expect("project response");
         let status = response.status();
-        let body = serde_json::from_slice(
+        let body = studio_json::from_slice(
             &to_bytes(response.into_body(), 16 * 1024)
                 .await
                 .expect("response body"),
@@ -2020,7 +2020,7 @@ mod local_registration_tests {
                 Ok(studio_runtime_store::multi_server_delivery::RemoteReply {
                     request_id: envelope.request_id.clone(),
                     outcome: studio_runtime_schema::persistence::RemoteOutcome::Applied,
-                    value: Some(serde_json::value::to_raw_value(&value).expect("fixture reply")),
+                    value: Some(studio_json::to_raw_value(&value).expect("fixture reply")),
                     error: None,
                     waiting_for: None,
                 })
@@ -2057,7 +2057,7 @@ mod local_registration_tests {
         let project_path = root.path().join("project");
         std::fs::create_dir_all(&project_path).expect("project directory");
         let policy = AccountPolicyState::from_startup(
-            Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
+            Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
             [],
         )
         .expect("account snapshot");
@@ -2150,7 +2150,7 @@ mod local_registration_tests {
             Arc::new(NoEffects),
         ));
         let policy = AccountPolicyState::from_startup(
-            Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
+            Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
             [],
         )
         .expect("account snapshot");
@@ -2216,7 +2216,7 @@ mod local_registration_tests {
         let project_path = root.path().join("project");
         std::fs::create_dir_all(&project_path).expect("project directory");
         let policy = AccountPolicyState::from_startup(
-            Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
+            Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
             [],
         )
         .expect("account snapshot");

@@ -1,7 +1,7 @@
 //! Multi-server audit projection over existing access records.
 
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};

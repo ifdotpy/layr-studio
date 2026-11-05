@@ -25,7 +25,7 @@ struct TerminalActionIntent {
 }
 
 fn action_outbox_id(root: &str) -> String {
-    serde_json::json!(["terminal-action", root]).to_string()
+    studio_json::json!(["terminal-action", root]).to_string()
 }
 
 fn now_ms() -> StoreResult<i64> {
@@ -103,7 +103,7 @@ impl TerminalsRepository {
             )
             .optional()?;
         row.map(|row| {
-            serde_json::to_vec(&row)
+            studio_json::to_vec(&row)
                 .map(|bytes| crate::sha256_hex(&bytes).into_bytes())
                 .map_err(StoreError::from)
         })
@@ -479,7 +479,7 @@ mod tests {
         .expect("reserve before dispatch");
         tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES(?1,'native_action','agent','agent','other','unknown','{}',?2)",rusqlite::params![json!(["native-action",root]).to_string(),now]).expect("same external root in another family");
         assert!(
-            crate::outbox::Outbox::pending::<serde_json::Value>(
+            crate::outbox::Outbox::pending::<studio_json::Value>(
                 &tx,
                 OutboxKind::TerminalAction,
                 i64::MAX,
@@ -532,7 +532,7 @@ mod tests {
             "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
         )
         .expect("policy");
-        let reply = serde_json::json!({"ok":true,"delivery":"sent"});
+        let reply = studio_json::json!({"ok":true,"delivery":"sent"});
         let envelope = crate::request_results::ResultEnvelope {
             actor: None,
             reply: super::TerminalActionReply {
@@ -544,7 +544,7 @@ mod tests {
         db.execute(
             "INSERT INTO request_results(id,signature,result,created) VALUES('imported-terminal','signature',?1,?2)",
             rusqlite::params![
-                serde_json::to_string(&envelope).expect("envelope"),
+                studio_json::to_string(&envelope).expect("envelope"),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("clock")
@@ -564,7 +564,7 @@ mod tests {
         );
     }
     use rusqlite::{Connection, functions::FunctionFlags};
-    use serde_json::json;
+    use studio_json::json;
 
     use super::TerminalsRepository;
 

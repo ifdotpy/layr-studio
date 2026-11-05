@@ -67,6 +67,7 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/multi-server/v1/name", OwnerOnly),
     ("POST", "/api/multi-server/v1/pair", OwnerOnly),
     ("POST", "/api/native-command", Host),
+    ("POST", "/api/native-layr/settings", OwnerOnly),
     ("POST", "/api/orchestration/settings", OwnerOnly),
     ("POST", "/api/organization", OwnerOnly),
     ("POST", "/api/peer-teams", Spawn),

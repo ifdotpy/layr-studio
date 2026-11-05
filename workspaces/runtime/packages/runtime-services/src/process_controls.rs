@@ -2,8 +2,8 @@
 //! Listing is read-only; native effects are driven only after an action is claimed.
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
     BackgroundTaskAction, BackgroundTaskDisplay, BackgroundTaskIndicator, BackgroundTaskKind,
@@ -459,7 +459,7 @@ fn raw(connection: &Connection, table: &str, id: &str) -> Result<Option<Value>, 
         .optional()
         .map_err(StoreError::from)?;
     text.map(|text| {
-        serde_json::from_str(&text)
+        studio_json::from_str(&text)
             .map_err(StoreError::from)
             .map_err(Error::from)
     })
@@ -493,8 +493,9 @@ pub fn owners(connection: &Connection, scope: &str) -> Result<Vec<Value>, Error>
         .map_err(StoreError::from)?;
     let mut result = vec![root];
     for row in rows {
-        result
-            .push(serde_json::from_str(&row.map_err(StoreError::from)?).map_err(StoreError::from)?);
+        result.push(
+            studio_json::from_str(&row.map_err(StoreError::from)?).map_err(StoreError::from)?,
+        );
     }
     Ok(result)
 }
@@ -539,11 +540,11 @@ pub fn process_rows<'a>(
                 let (row_id, raw) = row.map_err(StoreError::from)?;
                 let source = if table == "runtime_monitors" {
                     ProcessSource::Monitor(Box::new(
-                        serde_json::from_str(&raw).map_err(StoreError::from)?,
+                        studio_json::from_str(&raw).map_err(StoreError::from)?,
                     ))
                 } else {
                     let record: studio_runtime_store::TaskRecord =
-                        serde_json::from_str(&raw).map_err(StoreError::from)?;
+                        studio_json::from_str(&raw).map_err(StoreError::from)?;
                     if record.id().as_ref() != row_id {
                         return Err(StoreError::InvalidStoredObject {
                             table: "runtime_tasks",
@@ -570,7 +571,7 @@ pub fn digest(value: &Value) -> String {
     studio_runtime_store::sha256_hex(value.to_string().as_bytes())
 }
 fn request_digest(request: &ProcessControlRequest) -> Result<String, Error> {
-    let bytes = serde_json::to_vec(request).map_err(StoreError::from)?;
+    let bytes = studio_json::to_vec(request).map_err(StoreError::from)?;
     Ok(studio_runtime_store::sha256_hex(&bytes))
 }
 pub fn project(
@@ -902,7 +903,7 @@ pub fn listing(
     let mut tasks = Vec::new();
     for entity in entities {
         let entity: TaskEntity =
-            serde_json::from_str(&entity.map_err(StoreError::from)?).map_err(StoreError::from)?;
+            studio_json::from_str(&entity.map_err(StoreError::from)?).map_err(StoreError::from)?;
         if owner_ids.contains(entity.value.agent.as_str()) && entity.value.display.active {
             tasks.push(entity.value);
         }
@@ -1027,7 +1028,7 @@ pub fn claim(
                 "The response changed. Refresh the process list",
             ));
         }
-        Some(serde_json::value::to_raw_value(response_target).map_err(StoreError::from)?)
+        Some(studio_json::to_raw_value(response_target).map_err(StoreError::from)?)
     } else {
         let (selected, include_descendants) = match command {
             ProcessControlRequest::StopSelected {
@@ -1153,7 +1154,7 @@ pub fn claim(
         params![
             id,
             signature,
-            serde_json::to_string(&record).map_err(StoreError::from)?
+            studio_json::to_string(&record).map_err(StoreError::from)?
         ],
     )
     .map_err(StoreError::from)?;
@@ -1185,14 +1186,14 @@ pub fn replay(
             "This process action ID has different content",
         ));
     }
-    let record: ProcessActionRecord = serde_json::from_str(&raw).map_err(StoreError::from)?;
+    let record: ProcessActionRecord = studio_json::from_str(&raw).map_err(StoreError::from)?;
     Ok(Some(record.result))
 }
 pub fn save(tx: &Transaction<'_>, record: &ProcessActionRecord) -> Result<(), Error> {
     tx.execute(
         "UPDATE runtime_process_actions SET record=? WHERE id=?",
         params![
-            serde_json::to_string(record).map_err(StoreError::from)?,
+            studio_json::to_string(record).map_err(StoreError::from)?,
             record.request_id
         ],
     )
@@ -1221,7 +1222,7 @@ pub fn receipt(connection: &Connection, query: &ReceiptIdentity) -> Result<Proce
         .map_err(StoreError::from)?;
     let record: Option<ProcessActionRecord> = record
         .as_deref()
-        .map(serde_json::from_str)
+        .map(studio_json::from_str)
         .transpose()
         .map_err(StoreError::from)?;
     if let Some(record) = record
@@ -1268,7 +1269,7 @@ mod claim_identity_tests {
     #[test]
     fn activity_snapshot_prefers_process_then_restores_task_after_exit() {
         let raw = r#"{"id":"command","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":"pid"}"#;
-        let task: studio_runtime_store::TaskRecord = serde_json::from_str(raw).unwrap();
+        let task: studio_runtime_store::TaskRecord = studio_json::from_str(raw).unwrap();
         let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
         let process = project(
             ProcessSourceKind::CodexTask,
@@ -1295,17 +1296,17 @@ mod claim_identity_tests {
         let owner = json!({"id":"owner","rootId":"owner","compactions":0,"epoch":1,"accountKey":"default","threadId":"thread","autoWake":true,"provider":"codex","status":"idle","cwd":std::env::temp_dir()});
         let fixture = format!(
             r#"{{"id":"watch","agent":"owner","epoch":1,"status":"running","requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":0,"command":"cat","cwd":{},"interactive":true,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","operation":{{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}}}}"#,
-            serde_json::to_string(&std::env::temp_dir()).unwrap(),
-            serde_json::to_string(&std::env::temp_dir().join("watch.log")).unwrap()
+            studio_json::to_string(&std::env::temp_dir()).unwrap(),
+            studio_json::to_string(&std::env::temp_dir().join("watch.log")).unwrap()
         );
-        let record: studio_runtime_store::MonitorRecord = serde_json::from_str(&fixture).unwrap();
+        let record: studio_runtime_store::MonitorRecord = studio_json::from_str(&fixture).unwrap();
         for state in ["open", "closed", "pending"] {
             let mut record = record.clone();
             if state == "closed" {
                 record.stdin_closed = Some(true);
             }
             if state == "pending" {
-                record.input_attempt = Some(serde_json::from_str(r#"{"id":"old","agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread","method":"command/exec/write","params":{"processId":"watch","deltaBase64":"YQ==","closeStdin":false},"status":"submitted","created":1}"#).unwrap());
+                record.input_attempt = Some(studio_json::from_str(r#"{"id":"old","agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread","method":"command/exec/write","params":{"processId":"watch","deltaBase64":"YQ==","closeStdin":false},"status":"submitted","created":1}"#).unwrap());
             }
             let snapshot =
                 crate::monitor_policy::MonitorSnapshot::checked_stored(&record, owner.clone())
@@ -1345,7 +1346,7 @@ mod claim_identity_tests {
         assert_eq!(display.stdin_state, None);
         assert!(!display.actions.contains(&BackgroundTaskAction::Input));
         assert!(
-            !serde_json::to_string(&display)
+            !studio_json::to_string(&display)
                 .unwrap()
                 .contains("stdinState")
         );
@@ -1370,11 +1371,11 @@ mod claim_identity_tests {
         for status in ["starting", "running"] {
             let fixture = format!(
                 r#"{{"id":"watch","agent":"owner","epoch":1,"status":"{status}","requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":12,"command":"printf x","cwd":{},"interactive":true,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"x","timeout_ms":3600000,"wakeOn":"exit","operation":{{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}}}}"#,
-                serde_json::to_string(&std::env::temp_dir()).unwrap(),
-                serde_json::to_string(&std::env::temp_dir().join("watch.log")).unwrap()
+                studio_json::to_string(&std::env::temp_dir()).unwrap(),
+                studio_json::to_string(&std::env::temp_dir().join("watch.log")).unwrap()
             );
             let record: studio_runtime_store::MonitorRecord =
-                serde_json::from_str(&fixture).unwrap();
+                studio_json::from_str(&fixture).unwrap();
             let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
             assert_eq!(projected.source_connection.as_deref(), Some("connection"));
             assert_eq!(projected.view.id, "watch");
@@ -1402,11 +1403,11 @@ mod claim_identity_tests {
     #[test]
     fn normalized_signature_replays_and_refuses_preupgrade_receipt() {
         let raw = r#"{"action":"stop_owned","requestId":"request","agent":"owner","accountKey":"acct","epoch":1.0,"processes":[{"key":"key","generation":"gen","agent":"owner","accountKey":"acct","epoch":1.0}],"responseTarget":null}"#;
-        let request: ProcessControlRequest = serde_json::from_str(raw).expect("request");
+        let request: ProcessControlRequest = studio_json::from_str(raw).expect("request");
         let normalized = raw
             .replace("1.0", "1")
             .replace(",\"responseTarget\":null", "");
-        let retry: ProcessControlRequest = serde_json::from_str(&normalized).expect("retry");
+        let retry: ProcessControlRequest = studio_json::from_str(&normalized).expect("retry");
         let signature = request_digest(&request).expect("signature");
         assert_eq!(signature, request_digest(&retry).expect("retry signature"));
         let old = "b16654521805af453f0fc6e0b9f42fb54887c3b20eb1fb103b50e05a645497f8";
@@ -1451,7 +1452,7 @@ mod claim_identity_tests {
             [owner.to_string()],
         )
         .expect("owner");
-        let raw = serde_json::value::RawValue::from_string(
+        let raw = studio_json::OwnedRawJson::from_string(
             json!({"action":"stop_response","requestId":"opaque-action-id",
             "agent":"owner","accountKey":"account","epoch":3,"responseTarget":{
                 "agent":"owner","accountKey":"account","epoch":3,"connectionId":"connection",
@@ -1459,7 +1460,7 @@ mod claim_identity_tests {
             .to_string(),
         )
         .expect("fixture JSON");
-        let request: ProcessControlRequest = serde_json::from_str(raw.get()).expect("request");
+        let request: ProcessControlRequest = studio_json::from_str(raw.as_str()).expect("request");
         let connections = Connections::from([("owner".into(), "connection".into())]);
         let tx = db.transaction().expect("transaction");
         let Claim::New { record, .. } =
@@ -1497,7 +1498,7 @@ mod claim_identity_tests {
                 |row| row.get(0),
             )
             .expect("owner record");
-        let persisted: ProcessActionRecord = serde_json::from_str(&persisted).expect("record");
+        let persisted: ProcessActionRecord = studio_json::from_str(&persisted).expect("record");
         assert_eq!(&persisted.root_request_id, root);
         assert_eq!(persisted.admitted_request, token);
         assert_eq!(
@@ -1510,8 +1511,8 @@ mod claim_identity_tests {
 #[test]
 fn typed_task_keeps_numeric_process_identity_projection() {
     let raw = r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":42}"#;
-    let typed: studio_runtime_store::TaskRecord = serde_json::from_str(raw).expect("task fixture");
-    let owner = serde_json::json!({"id":"a","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
+    let typed: studio_runtime_store::TaskRecord = studio_json::from_str(raw).expect("task fixture");
+    let owner = studio_json::json!({"id":"a","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
     let after = project(
         ProcessSourceKind::CodexTask,
         &typed,

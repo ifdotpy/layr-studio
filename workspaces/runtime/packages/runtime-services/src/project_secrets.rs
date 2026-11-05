@@ -1,8 +1,8 @@
 //! Project secrets RPC adaptation. Secret values cross the guest boundary once and are never
 //! included in a response, error message, or diagnostic representation.
 
-use serde_json::{Value, json};
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     MAX_PROJECT_SECRET_VALUE_BYTES, PROJECT_SECRETS_GUEST_TIMEOUT_SECONDS,
 };
@@ -180,9 +180,9 @@ mod tests {
         GUEST_CALL_TIMEOUT, GuestCallError, GuestRpc, MAX_PROJECT_SECRET_VALUE_BYTES,
         ProjectSecretsError, list_names, remove_secret, set_secret,
     };
-    use serde_json::{Value, json};
     use std::sync::Mutex;
     use std::time::Duration;
+    use studio_json::{Value, json};
 
     type GuestCall = (String, Value, Option<String>, Duration);
 

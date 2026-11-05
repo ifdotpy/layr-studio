@@ -644,7 +644,7 @@ mod tests {
     }
 
     fn analytics_record(index: usize) -> String {
-        serde_json::json!({"id": format!("item-{index:05}"), "agentId": "agent",
+        studio_json::json!({"id": format!("item-{index:05}"), "agentId": "agent",
             "rootId": "root", "type": "agentMessage", "output": {"bytes": index, "chars": index}})
         .to_string()
     }

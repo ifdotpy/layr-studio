@@ -328,7 +328,7 @@ pub(super) fn retire_written_response(
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for raw in rows {
-        let task: Task = serde_json::from_str(&raw).map_err(|_| invalid(owner_id))?;
+        let task: Task = studio_json::from_str(&raw).map_err(|_| invalid(owner_id))?;
         let accepted = &task.payload.accepted;
         if accepted.account == account
             && accepted.journal_scope == account
@@ -575,7 +575,7 @@ pub(super) async fn unsent(
         let mut query=db.prepare_cached(&format!("SELECT record {TASKS}{UNSENT} ORDER BY json_extract(record,'$.payload.accepted.generation'),json_extract(record,'$.payload.accepted.cursor') LIMIT ?7"))?;
         let rows=query.query_map(params![ToolRequestKind::ProviderCallback,ToolRequestStatus::Queued,ToolRequestStatus::Running,ToolRequestStatus::Unknown,account,i64::try_from(generation).map_err(|_|invalid(&account))?,i64::try_from(limit).map_err(|_|invalid(&account))?],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
         rows.into_iter().map(|raw|{
-            let task:Task=serde_json::from_str(&raw).map_err(|_|invalid(&account))?;
+            let task:Task=studio_json::from_str(&raw).map_err(|_|invalid(&account))?;
             let mut accepted=task.payload.accepted;
             accepted.root_request_id=task.payload.root_request_id;
             accepted.source_admission=callbacks::callback_admission(db,&accepted.root_request_id).map_err(callback_error)?;
@@ -613,7 +613,7 @@ pub(super) fn has_reply_demand(db: &Connection, account: &str) -> Result<bool, W
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_process::{EventCursor, Generation};
     use studio_runtime_providers::{Method, RequestFrame, RequestId};
 

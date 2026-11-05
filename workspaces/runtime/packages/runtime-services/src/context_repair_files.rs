@@ -15,8 +15,8 @@ use studio_runtime_store::path_identity::CanonicalPath;
 
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use thiserror::Error;
 
 use crate::context_repair::{HistoryRewrite, RepairError, RepairEventSummary};
@@ -425,7 +425,7 @@ fn rewrite_with_hook(
         } else {
             "task_complete"
         };
-        let mut payload = serde_json::Map::new();
+        let mut payload = studio_json::Map::new();
         payload.insert("type".into(), json!(marker_kind));
         payload.insert("turn_id".into(), json!(rewrite_terminal_id));
         let mut payload_order = vec![
@@ -436,7 +436,7 @@ fn rewrite_with_hook(
             payload.insert("completed_at".into(), json!(completed_at));
             payload_order.push(("completed_at".to_owned(), JsonOrder::Scalar));
         }
-        let mut marker = serde_json::Map::new();
+        let mut marker = studio_json::Map::new();
         marker.insert("type".into(), json!("event_msg"));
         marker.insert("payload".into(), Value::Object(payload));
         projected.push(HistoryRecord {
@@ -860,7 +860,7 @@ fn strip_role_from_item(
 fn role_digest(role: &str) -> Result<String, HistoryFileError> {
     // `codex_efficiency.digest` hashes compact `json.dumps(...,
     // ensure_ascii=False)` bytes and keeps the first 24 lowercase hex chars.
-    let packed = serde_json::to_vec(role).map_err(|_| HistoryFileError::Ancestry)?;
+    let packed = studio_json::to_vec(role).map_err(|_| HistoryFileError::Ancestry)?;
     let digest = data_encoding::HEXLOWER.encode(&Sha256::digest(packed));
     Ok(digest[..24].to_owned())
 }
@@ -1134,9 +1134,9 @@ fn read_prefix_detailed(
         }
         digest.update(&raw);
         let value =
-            serde_json::from_slice::<Value>(&raw).map_err(|_| HistoryFileError::Ancestry)?;
+            studio_json::from_slice::<Value>(&raw).map_err(|_| HistoryFileError::Ancestry)?;
         let order =
-            serde_json::from_slice::<JsonOrder>(&raw).map_err(|_| HistoryFileError::Ancestry)?;
+            studio_json::from_slice::<JsonOrder>(&raw).map_err(|_| HistoryFileError::Ancestry)?;
         records.push(HistoryRecord {
             value,
             order,
@@ -1166,7 +1166,7 @@ fn serialize_in_order(
                 }
                 first = false;
                 emitted.insert(key.as_str());
-                serde_json::to_writer(&mut *output, key).map_err(|_| HistoryFileError::Write)?;
+                studio_json::to_writer(&mut *output, key).map_err(|_| HistoryFileError::Write)?;
                 output.push(b':');
                 serialize_in_order(child, child_order, output)?;
             }
@@ -1178,9 +1178,9 @@ fn serialize_in_order(
                     output.push(b',');
                 }
                 first = false;
-                serde_json::to_writer(&mut *output, key).map_err(|_| HistoryFileError::Write)?;
+                studio_json::to_writer(&mut *output, key).map_err(|_| HistoryFileError::Write)?;
                 output.push(b':');
-                serde_json::to_writer(&mut *output, child).map_err(|_| HistoryFileError::Write)?;
+                studio_json::to_writer(&mut *output, child).map_err(|_| HistoryFileError::Write)?;
             }
             output.push(b'}');
         }
@@ -1193,13 +1193,13 @@ fn serialize_in_order(
                 if let Some(child_order) = entries.get(index) {
                     serialize_in_order(child, child_order, output)?;
                 } else {
-                    serde_json::to_writer(&mut *output, child)
+                    studio_json::to_writer(&mut *output, child)
                         .map_err(|_| HistoryFileError::Write)?;
                 }
             }
             output.push(b']');
         }
-        _ => serde_json::to_writer(output, value).map_err(|_| HistoryFileError::Write)?,
+        _ => studio_json::to_writer(output, value).map_err(|_| HistoryFileError::Write)?,
     }
     Ok(())
 }
@@ -1527,7 +1527,7 @@ fn sync_directory(path: &Path) -> Result<(), HistoryFileError> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     use super::*;
 
@@ -1581,7 +1581,7 @@ mod tests {
             format!(r#"{{"type":"session_meta","payload":{{"id":"{THREAD}"}},"ordinal":0}}"#),
             r#"{"type":"turn_context","payload":{"turn_id":"turn-1"},"ordinal":1}"#.to_owned(),
             r#"{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"},"ordinal":2}"#.to_owned(),
-            format!(r#"{{"type":"response_item","payload":{{"type":"message","role":"user","id":"item-1","internal_chat_message_metadata_passthrough":{{"turn_id":"turn-1"}},"content":[{{"type":"input_text","text":{}}}]}},"ordinal":3}}"#, serde_json::to_string(text).expect("JSON text")),
+            format!(r#"{{"type":"response_item","payload":{{"type":"message","role":"user","id":"item-1","internal_chat_message_metadata_passthrough":{{"turn_id":"turn-1"}},"content":[{{"type":"input_text","text":{}}}]}},"ordinal":3}}"#, studio_json::to_string(text).expect("JSON text")),
             r#"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","completed_at":10.0},"ordinal":4}"#.to_owned(),
         ];
         let source_bytes = records.join("\n") + "\n";
@@ -1597,7 +1597,7 @@ mod tests {
         fs::read_to_string(receipt.copy_path.as_ref().expect("private copy"))
             .expect("copy text")
             .lines()
-            .map(|line| serde_json::from_str(line).expect("copy record JSON"))
+            .map(|line| studio_json::from_str(line).expect("copy record JSON"))
             .collect()
     }
 
@@ -1662,7 +1662,7 @@ mod tests {
             "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"{TERMINAL}\"}},\"ordinal\":7}}\n"
         ) + &format!(
             "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"id\":\"item-child\",\"internal_chat_message_metadata_passthrough\":{{\"turn_id\":\"{TERMINAL}\"}},\"content\":[{{\"type\":\"input_text\",\"text\":{}}}]}},\"ordinal\":8}}\n",
-            serde_json::to_string(text).expect("JSON text")
+            studio_json::to_string(text).expect("JSON text")
         ) + &format!(
             "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"{TERMINAL}\",\"completed_at\":10.0}},\"ordinal\":9}}\n"
         );
@@ -1712,7 +1712,7 @@ mod tests {
             )
             + &format!(
                 "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"id\":\"item-parent\",\"internal_chat_message_metadata_passthrough\":{{\"turn_id\":\"{TERMINAL}\"}},\"content\":[{{\"type\":\"input_text\",\"text\":{}}}]}},\"ordinal\":4}}\n",
-                serde_json::to_string(text).expect("JSON text")
+                studio_json::to_string(text).expect("JSON text")
             )
             + &format!(
                 "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"{TERMINAL}\",\"completed_at\":9.0}},\"ordinal\":5}}\n"
@@ -1772,7 +1772,7 @@ mod tests {
         ];
         let mut source_bytes = Vec::new();
         for record in records {
-            serde_json::to_writer(&mut source_bytes, &record).expect("fixture record JSON");
+            studio_json::to_writer(&mut source_bytes, &record).expect("fixture record JSON");
             source_bytes.push(b'\n');
         }
         fs::write(&source, source_bytes).expect("history record-kind fixture");
@@ -1826,7 +1826,7 @@ mod tests {
             format!(r#"{{"type":"session_meta","payload":{{"id":"{THREAD}"}},"ordinal":0}}"#),
             r#"{"type":"turn_context","payload":{"turn_id":"turn-1"},"ordinal":1}"#.to_owned(),
             r#"{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"},"ordinal":2}"#.to_owned(),
-            format!(r#"{{"type":"response_item","payload":{{"type":"message","role":"user","id":"archived-item","internal_chat_message_metadata_passthrough":{{"turn_id":"turn-1"}},"content":[{{"type":"input_text","text":{}}}]}},"ordinal":3}}"#, serde_json::to_string(text).expect("JSON text")),
+            format!(r#"{{"type":"response_item","payload":{{"type":"message","role":"user","id":"archived-item","internal_chat_message_metadata_passthrough":{{"turn_id":"turn-1"}},"content":[{{"type":"input_text","text":{}}}]}},"ordinal":3}}"#, studio_json::to_string(text).expect("JSON text")),
             r#"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","completed_at":10.0},"ordinal":4}"#.to_owned(),
         ];
         fs::write(&source, records.join("\n") + "\n").expect("archived history");

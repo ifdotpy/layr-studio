@@ -180,9 +180,9 @@ fn the_vapid_authorization_signs_the_push_origin() {
     assert_eq!(public, key.public_key());
     let parts: Vec<&str> = token.split('.').collect();
     assert_eq!(parts.len(), 3);
-    let head: Value = serde_json::from_slice(&unbase64url(parts[0])).expect("header");
+    let head: Value = studio_json::from_slice(&unbase64url(parts[0])).expect("header");
     assert_eq!(head, json!({"typ": "JWT", "alg": "ES256"}));
-    let claims: Value = serde_json::from_slice(&unbase64url(parts[1])).expect("claims");
+    let claims: Value = studio_json::from_slice(&unbase64url(parts[1])).expect("claims");
     assert_eq!(
         claims,
         json!({"aud": "https://push.example.net", "exp": 1_000 + VAPID_TOKEN_SECONDS,
@@ -353,7 +353,7 @@ fn a_due_sign_in_card_is_pushed_once_and_a_gone_subscription_is_removed() {
     assert_eq!(header("TTL").as_deref(), Some("600"));
     assert!(header("Authorization").is_some_and(|value| value.starts_with("vapid t=")));
     let payload: Value =
-        serde_json::from_slice(&kept.decrypt(&body).expect("decrypt")).expect("payload");
+        studio_json::from_slice(&kept.decrypt(&body).expect("decrypt")).expect("payload");
     assert_eq!(
         payload,
         json!({"title": "Sign-in needed", "body": "id.example.com for Main",

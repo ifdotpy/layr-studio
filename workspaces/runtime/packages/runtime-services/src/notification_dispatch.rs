@@ -3,7 +3,7 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::Frame;
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
@@ -232,7 +232,7 @@ pub enum NotificationDispatchError {
     #[error(transparent)]
     Move(#[from] crate::agent_move::MoveError),
     #[error("JSON serialization failed")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     RequestResult(#[from] studio_runtime_store::request_results::RequestResultError),
 }
@@ -1290,7 +1290,7 @@ fn notification_content_signature(
 ) -> Result<String, NotificationDispatchError> {
     let payload =
         BorrowedNotification::new(notification).ok_or(NotificationDispatchError::invalid())?;
-    let bytes = serde_json::to_vec(&NotificationContentSignature {
+    let bytes = studio_json::to_vec(&NotificationContentSignature {
         agent,
         notification: payload,
     })?;
@@ -1611,7 +1611,7 @@ pub(crate) fn prune_inactive_streams(
             let owner = stream_owner(transaction, &key)?;
             if let Some((id, raw)) = owner {
                 let mut projection: Value =
-                    serde_json::from_str(&raw).map_err(|_| stored("runtime_agents", &id))?;
+                    studio_json::from_str(&raw).map_err(|_| stored("runtime_agents", &id))?;
                 projection["turnId"] = json!(key.turn);
                 projection["deletedAt"] = Value::Null;
                 flush_one_stream(
@@ -1629,7 +1629,7 @@ pub(crate) fn prune_inactive_streams(
         if !active {
             if let Some((id, raw)) = stream_owner(transaction, &key)? {
                 let mut projection: Value =
-                    serde_json::from_str(&raw).map_err(|_| stored("runtime_agents", &id))?;
+                    studio_json::from_str(&raw).map_err(|_| stored("runtime_agents", &id))?;
                 projection["turnId"] = json!(key.turn);
                 projection["deletedAt"] = Value::Null;
                 flush_one_stream(
@@ -1948,7 +1948,7 @@ fn enrich_association(
     if let Some((record, _)) = NotificationDispatchRepository::notification_item(tx, agent_id, &id)?
     {
         let text = saved_text(tx, &id, &record)?;
-        if let Ok(displayed) = serde_json::from_str::<Value>(&text) {
+        if let Ok(displayed) = studio_json::from_str::<Value>(&text) {
             for field in ["startedAtMs", "completedAtMs", "durationMs"] {
                 if let Some(value) = displayed.get(field) {
                     p["item"][field] = value.clone();
@@ -2187,7 +2187,7 @@ fn save_outcome(
 }
 
 fn sha256_json(value: &Value) -> Result<String, NotificationDispatchError> {
-    let bytes = serde_json::to_vec(value)?;
+    let bytes = studio_json::to_vec(value)?;
     Ok(sha256_hex(&bytes))
 }
 
@@ -2243,7 +2243,7 @@ fn format_utc(seconds: f64) -> Result<String, NotificationDispatchError> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use rusqlite::{Connection, params};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     use super::{
         DispatchOutcome, NotificationStreamBuffer, PreparedSubmission, ProviderDeliveryIdentity,
@@ -2410,7 +2410,7 @@ mod tests {
         let rows = query
             .query_map([], |row| row.get::<_, String>(0))
             .unwrap()
-            .map(|row| serde_json::from_str::<Value>(&row.unwrap()).unwrap())
+            .map(|row| studio_json::from_str::<Value>(&row.unwrap()).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(
             rows.len(),
@@ -2441,8 +2441,8 @@ mod tests {
         let cost =
             crate::costs::session_cost_with_account_profiles(&store, "root", &Default::default())
                 .expect("priced dispatch observations");
-        let cost: serde_json::Value =
-            serde_json::from_slice(&serde_json::to_vec(&cost).unwrap()).unwrap();
+        let cost: studio_json::Value =
+            studio_json::from_slice(&studio_json::to_vec(&cost).unwrap()).unwrap();
         assert_eq!(cost["pricedSamples"], 2);
         // Claude: 30 base + 7*0.5 reads + 3 writes + 12*2 output = 60.5;
         // Codex cumulative evidence is persisted but never priced as a response.
@@ -2491,8 +2491,8 @@ mod tests {
         let recovered_cost =
             crate::costs::session_cost_with_account_profiles(&store, "root", &Default::default())
                 .expect("price recovered Codex response");
-        let recovered_cost: serde_json::Value =
-            serde_json::from_slice(&serde_json::to_vec(&recovered_cost).unwrap()).unwrap();
+        let recovered_cost: studio_json::Value =
+            studio_json::from_slice(&studio_json::to_vec(&recovered_cost).unwrap()).unwrap();
         assert_eq!(recovered_cost["pricedSamples"], 3);
         assert!((recovered_cost["totalUSD"].as_f64().unwrap() - 110. / 1_000_000.).abs() < 1e-12);
     }
@@ -2516,7 +2516,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let frames: Vec<Value> = serde_json::from_str(include_str!(
+        let frames: Vec<Value> = studio_json::from_str(include_str!(
             "../../runtime-schema/src/fixtures/claude-usage-notifications.json"
         ))
         .unwrap();
@@ -2691,7 +2691,7 @@ mod tests {
     }
 
     pub(super) fn frame(value: &Value) -> Frame {
-        let mut bytes = serde_json::to_vec(value).expect("notification serializes");
+        let mut bytes = studio_json::to_vec(value).expect("notification serializes");
         bytes.push(b'\n');
         match studio_runtime_providers::decode_journal_entry(1, 1, bytes).payload {
             studio_runtime_providers::DecodedJournalPayload::Frame(frame) => frame,
@@ -2792,7 +2792,7 @@ mod tests {
         let mut closed: Vec<Value> = (0..8_192).map(|item| key("old-turn", item)).collect();
         closed.push(key("turn", 0));
         let mut streams: NotificationStreamBuffer =
-            serde_json::from_str(&json!({"entries":[],"closed":closed}).to_string())
+            studio_json::from_str(&json!({"entries":[],"closed":closed}).to_string())
                 .expect("old buffer loads");
         assert_eq!(streams.closed_len(), 8_193);
         let mut connection = database();
@@ -3008,7 +3008,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(record["sourceConnectionId"], expected);
             assert_eq!(record["ownerEpoch"], 1);
         }
@@ -3033,11 +3033,11 @@ mod tests {
                     }).to_string()]).map_err(StoreError::from)?;
                     let read_task = || -> Value {
                         let raw: String = tx.query_row("SELECT record FROM runtime_tasks WHERE id='agent:task:native-1'", [], |r| r.get(0)).unwrap();
-                        serde_json::from_str(&raw).unwrap()
+                        studio_json::from_str(&raw).unwrap()
                     };
                     let read_item = || -> Value {
                         let raw: String = tx.query_row("SELECT record FROM runtime_items WHERE id='agent:task:native-1'", [], |r| r.get(0)).unwrap();
-                        serde_json::from_str(&raw).unwrap()
+                        studio_json::from_str(&raw).unwrap()
                     };
                     let mut streams = NotificationStreamBuffer::default();
                     let params = json!({"threadId":"thread","turnId":"turn","item":{
@@ -3069,7 +3069,7 @@ mod tests {
                     assert_eq!(failed["durationMs"], 2000.0);
                     assert!(failed["tail"].as_str().unwrap().contains("Build failed"));
                     assert_eq!(read_item()["toolStatus"], "failed");
-                    let stored: Value = serde_json::from_str(read_item()["text"].as_str().unwrap()).unwrap();
+                    let stored: Value = studio_json::from_str(read_item()["text"].as_str().unwrap()).unwrap();
                     assert_eq!(stored["outputFile"], output_file);
                     Ok::<_, super::NotificationDispatchError>(())
                 }).await.unwrap();
@@ -3080,7 +3080,7 @@ mod tests {
     #[tokio::test]
     async fn question_tool_item_is_stored_as_the_card_contract() {
         // The chat card parses this stored text; Python has the same witness.
-        let contract: Value = serde_json::from_str(include_str!(
+        let contract: Value = studio_json::from_str(include_str!(
             "../../../../client/contracts/agent-question-item.json"
         ))
         .unwrap();
@@ -3126,11 +3126,11 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        let record: Value = serde_json::from_str(&raw).unwrap();
+        let record: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(record["role"], "output");
         assert_eq!(record["title"], "mcpToolCall");
         assert_eq!(record["toolStatus"], "completed");
-        let stored: Value = serde_json::from_str(record["text"].as_str().unwrap()).unwrap();
+        let stored: Value = studio_json::from_str(record["text"].as_str().unwrap()).unwrap();
         // Every provider field survives; the dispatcher may add timing fields.
         for (key, value) in item.as_object().unwrap() {
             assert_eq!(&stored[key], value, "{key}");
@@ -3195,7 +3195,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(record["role"], "output", "{provider}");
             assert_eq!(record["title"], "futureItem", "{provider}");
             assert_eq!(
@@ -3207,7 +3207,7 @@ mod tests {
                 .as_str()
                 .expect("raw is JSON text");
             assert_eq!(
-                serde_json::from_str::<Value>(raw_text).unwrap(),
+                studio_json::from_str::<Value>(raw_text).unwrap(),
                 item,
                 "{provider}"
             );
@@ -3500,7 +3500,7 @@ mod tests {
                 )?;
                 assert_eq!(manifest_event, event_id);
                 assert_eq!(
-                    serde_json::from_str::<Value>(&manifest)?["versions"]["worktreeReminder"],
+                    studio_json::from_str::<Value>(&manifest)?["versions"]["worktreeReminder"],
                     "v1"
                 );
                 Ok::<_, studio_runtime_store::StoreError>(())
@@ -3891,14 +3891,14 @@ mod tests {
             &json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"pending"}}),
             1.0
         );
-        let mut saved_streams = serde_json::from_str::<Value>(
-            &serde_json::to_string(&streams).expect("stream serializes"),
+        let mut saved_streams = studio_json::from_str::<Value>(
+            &studio_json::to_string(&streams).expect("stream serializes"),
         )
         .expect("JSON");
         saved_streams["entries"][0]["base"] = Value::String("base".into());
         saved_streams["entries"][0]["flushed"] = Value::Bool(true);
         streams =
-            serde_json::from_str(&saved_streams.to_string()).expect("persisted stream restores");
+            studio_json::from_str(&saved_streams.to_string()).expect("persisted stream restores");
         send!(
             &transaction,
             &mut streams,
@@ -4256,7 +4256,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .expect("metadata reads");
-            let meta: Value = serde_json::from_str(&meta).expect("metadata remains JSON");
+            let meta: Value = studio_json::from_str(&meta).expect("metadata remains JSON");
             assert_eq!(meta["transcriptItemId"], "agent:e1");
             assert_eq!(meta["modelEventProjection"], 1);
             assert_eq!(meta["providerSubmission"]["firstEventId"], "e1");
@@ -4345,9 +4345,7 @@ mod tests {
             admission,
             steer_id: "steer".into(),
             event_ids: vec!["e1".into()],
-            prepared_submission: Some(
-                serde_json::value::RawValue::from_string("{}".into()).unwrap(),
-            ),
+            prepared_submission: Some(studio_json::OwnedRawJson::from_string("{}".into()).unwrap()),
             events: vec![],
             submitted_at: 2.0,
         };
@@ -4413,7 +4411,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .expect("metadata reads");
-            let meta: Value = serde_json::from_str(&meta).expect("JSON");
+            let meta: Value = studio_json::from_str(&meta).expect("JSON");
             assert_eq!(meta["transcriptItemId"], "agent:e1");
         }
     }
@@ -4662,8 +4660,8 @@ mod tests {
         let mut streams = NotificationStreamBuffer::default();
         dispatch(&transaction, &mut streams, 1, &json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"before"}}), 1.0).expect("flushed delta");
         dispatch(&transaction, &mut streams, 2, &json!({"method":"item/started","params":{"threadId":"thread","turnId":"turn","item":{"id":"answer","type":"agentMessage","text":"snapshot"}}}), 2.0).expect("snapshot");
-        let saved = serde_json::to_string(&streams).expect("current stream state");
-        let saved_value: Value = serde_json::from_str(&saved).expect("JSON");
+        let saved = studio_json::to_string(&streams).expect("current stream state");
+        let saved_value: Value = studio_json::from_str(&saved).expect("JSON");
         assert_eq!(saved_value["entries"][0]["base"], "before");
         let bases: i64 = transaction
             .query_row(
@@ -4673,15 +4671,17 @@ mod tests {
             )
             .expect("old base count");
         assert_eq!(bases, 0);
-        streams = serde_json::from_str(&saved).expect("restart");
+        streams = studio_json::from_str(&saved).expect("restart");
         dispatch(&transaction, &mut streams, 3, &json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"after"}}), 3.0).expect("continued delta");
         let item = TranscriptRepository::item(&transaction, "agent", "agent:answer")
             .expect("read")
             .expect("item");
         assert_eq!(item.record.value()["text"], "beforeafter");
         assert!(
-            serde_json::from_str::<Value>(&serde_json::to_string(&streams).expect("stream state"))
-                .expect("JSON")["entries"][0]["base"]
+            studio_json::from_str::<Value>(
+                &studio_json::to_string(&streams).expect("stream state")
+            )
+            .expect("JSON")["entries"][0]["base"]
                 .is_null()
         );
     }
@@ -4753,8 +4753,10 @@ mod tests {
         assert_eq!(text(&transaction, "agent:short"), "snap");
         assert_eq!(base_rows(&transaction), 0);
         assert_eq!(
-            serde_json::from_str::<Value>(&serde_json::to_string(&streams).expect("stream state"))
-                .expect("JSON")["entries"][0]["base"],
+            studio_json::from_str::<Value>(
+                &studio_json::to_string(&streams).expect("stream state")
+            )
+            .expect("JSON")["entries"][0]["base"],
             "one"
         );
         dispatch(&transaction, &mut streams, 34, &delta("short", "two"), 5.0).expect("delta");
@@ -4777,7 +4779,7 @@ mod tests {
             let raw = json!({"message":r#"{"message":"This content was flagged for possible biological risk."}"#});
             dispatch(tx, &mut NotificationStreamBuffer::default(), 1, &json!({"method":"error","params":{"threadId":"thread","turnId":"turn","error":raw}}), 100.0)?;
             let stored: String = tx.query_row("SELECT record FROM runtime_items WHERE json_extract(record,'$.nativeError') IS NOT NULL LIMIT 1", [], |row| row.get(0)).map_err(StoreError::from)?;
-            let item: Value = serde_json::from_str(&stored)?;
+            let item: Value = studio_json::from_str(&stored)?;
             assert_eq!(item.pointer("/nativeError/message"), Some(&json!("This content was flagged for possible biological risk.")));
             assert_eq!(item.pointer("/nativeError/code"), Some(&json!("bio_policy")));
             assert_eq!(item.pointer("/nativeError/studioRawEvidence"), Some(&raw));
@@ -4832,5 +4834,11 @@ mod busy_stream_tests {
         let tx = db.transaction().unwrap();
         assert!(stream_turn_active(&tx, &key("busy")).unwrap());
         assert!(!stream_turn_active(&tx, &key("idle")).unwrap());
+    }
+}
+
+impl From<studio_json::error::Error> for NotificationDispatchError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
     }
 }

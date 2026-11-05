@@ -384,7 +384,7 @@ impl Worker {
 #[cfg(test)]
 mod busy_candidate_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn startup_candidates_are_busy_vm_chats_only() {

@@ -639,7 +639,7 @@ async fn manual_restart_settlement_evidence(state: &State) -> Value {
         for (label,signature) in [("manual-no-replay","signature"),("manual-terminal-proof","terminal-signature")] {
             let identity=manual_fixture_id(label);
             let result=if let Some(row)=studio_runtime_store::request_results::RequestResults::replay(tx,identity.id(),signature,chrono::Utc::now().timestamp_millis())? {
-                serde_json::from_str::<Value>(&row.result)?["reply"]["value"].clone()
+                studio_json::from_str::<Value>(&row.result)?["reply"]["value"].clone()
             } else {
                 let row=studio_runtime_store::outbox::Outbox::get::<Value>(tx,identity.id())?.expect("current manual owner");
                 row.payload["reply"]["value"].clone()
@@ -650,9 +650,9 @@ async fn manual_restart_settlement_evidence(state: &State) -> Value {
             .query_map([], |row| Ok(json!({"id":row.get::<_,String>(0)?,"agent":row.get::<_,String>(1)?,"epoch":row.get::<_,i64>(2)?,"status":row.get::<_,String>(3)?,"turn":row.get::<_,Option<String>>(4)?})))?
             .collect::<Result<Vec<_>,_>>()?;
         let attempt=studio_runtime_store::ExecutionHistoryRepository::attempt(tx,"manual-unknown-attempt")?.expect("exact original attempt");
-        let mut outcomes=serde_json::Map::new();
+        let mut outcomes=studio_json::Map::new();
         for (name,kind) in [("startResult",studio_runtime_schema::persistence::ExecutionReceiptKind::StartResult),("terminal",studio_runtime_schema::persistence::ExecutionReceiptKind::Terminal)] {
-            let saved=studio_runtime_store::ExecutionHistoryRepository::receipt::<serde_json::Value>(tx,"manual-unknown-attempt",kind)?.expect("exact execution result");
+            let saved=studio_runtime_store::ExecutionHistoryRepository::receipt::<studio_json::Value>(tx,"manual-unknown-attempt",kind)?.expect("exact execution result");
             outcomes.insert(name.into(),json!({"input":saved.input,"result":saved.result}));
         }
         Ok::<_,StoreError>(json!({"activeReceipt":receipts[0],"terminalReceipt":receipts[1],"events":events,"attempt":attempt.snapshot,"outcomes":outcomes}))
@@ -782,7 +782,7 @@ async fn reset_service_holds_lost_response_without_resending() {
             |row| row.get(0),
         )
         .unwrap();
-    let saved: Value = serde_json::from_str(&saved_before).unwrap();
+    let saved: Value = studio_json::from_str(&saved_before).unwrap();
     assert_eq!(saved["status"], "uncertain");
     assert_eq!(saved["certainty"], "unknown");
     assert_eq!(saved["transport_attempts"], 1);
@@ -1237,7 +1237,7 @@ async fn mismatched_not_sent_is_held(path: &'static str, value: Value) {
                 [path], |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
             assert_eq!(status, "unknown");
-            assert_eq!(serde_json::from_str::<Value>(&actual).unwrap(), expected);
+            assert_eq!(studio_json::from_str::<Value>(&actual).unwrap(), expected);
             Ok::<_, WorkerError>(())
         })
         .await
@@ -2674,7 +2674,7 @@ async fn restart_terminal_commit_before_wake_converges_on_next_worker_start() {
                 [&agent],
                 |row| row.get(0),
             )?;
-            let snapshot = RecoverySnapshot::from_record(serde_json::from_str(&raw).unwrap())
+            let snapshot = RecoverySnapshot::from_record(studio_json::from_str(&raw).unwrap())
                 .map_err(|error| StoreError::SchemaMismatch(error.to_string()))
                 .map_err(WorkerError::from)?;
             let scope = ConnectionScope {
@@ -4852,7 +4852,7 @@ async fn retained_vm_thread_start_provenance_survives_next_generation_attach() {
             .unwrap();
             let envelope: ResultEnvelope<
                 RetainedReply<Method, studio_runtime_store::request_results::AdmittedRequest>,
-            > = serde_json::from_str(&saved.result)?;
+            > = studio_json::from_str(&saved.result)?;
             assert_eq!(
                 envelope.reply.ack,
                 CommittedAck {

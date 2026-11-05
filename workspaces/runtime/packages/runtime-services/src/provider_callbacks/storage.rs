@@ -3,7 +3,7 @@ use super::model::*;
 use crate::tool_requests::{self, CallbackTask};
 use rusqlite::{Connection, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, ResponseBody, encode_line};
 use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, Hidden, Principal, Timestamp};
 use studio_runtime_schema::persistence::{
@@ -257,7 +257,7 @@ pub(super) fn response(
     Ok(Outbox::get(tx, &identity.key())?)
 }
 pub(super) fn put_response(tx: &Transaction<'_>, response: &Response) -> Result<(), CallbackError> {
-    if serde_json::to_vec(&response.payload)?.len() > MAX_BYTES {
+    if studio_json::to_vec(&response.payload)?.len() > MAX_BYTES {
         return Err(CallbackError::Invalid(
             "Callback result exceeds durable reply bound",
         ));
@@ -767,7 +767,7 @@ pub(super) fn hold_card(tx: &Transaction<'_>, card: &str) -> Result<(), Callback
         )?
         .collect::<Result<Vec<_>, _>>()?;
     for raw in owners {
-        let mut owner: Owner = serde_json::from_str(&raw)?;
+        let mut owner: Owner = studio_json::from_str(&raw)?;
         owner.status = ToolRequestStatus::Unknown;
         if let Some(mut saved) = response(tx, &owner.payload.identity)? {
             saved.status = OutboxStatus::Unknown;
@@ -954,7 +954,7 @@ fn owner_by_root(db: &Connection, root: &str) -> Result<Option<Owner>, CallbackE
             |row| row.get(0),
         )
         .optional()?;
-    let task: Option<Owner> = raw.map(|raw| serde_json::from_str(&raw)).transpose()?;
+    let task: Option<Owner> = raw.map(|raw| studio_json::from_str(&raw)).transpose()?;
     Ok(task)
 }
 

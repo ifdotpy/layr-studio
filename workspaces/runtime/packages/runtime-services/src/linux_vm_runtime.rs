@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 
 use crate::host_exec::HostExecRuntime;
 use crate::linux_vm_guest::{GuestError, GuestRpc, GuestSpaceProbe};
@@ -495,7 +495,7 @@ impl VmRuntime {
     fn read_json(&self, name: &str) -> Map<String, Value> {
         fs::read_to_string(self.state_dir.join(name))
             .ok()
-            .and_then(|text| serde_json::from_str::<Map<String, Value>>(&text).ok())
+            .and_then(|text| studio_json::from_str::<Map<String, Value>>(&text).ok())
             .unwrap_or_default()
     }
 

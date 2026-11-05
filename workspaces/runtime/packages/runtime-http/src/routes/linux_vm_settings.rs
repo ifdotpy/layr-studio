@@ -1,7 +1,7 @@
 //! Linux VM resource settings routes. All host control operations cross the fakeable RPC port.
 
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::{linux_vm_guest::UnixVmControlRpc, linux_vm_settings};
 
@@ -118,7 +118,7 @@ mod tests {
         body::Body,
         http::{Method, Request},
     };
-    use serde_json::json;
+    use studio_json::json;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
     use tokio_util::task::AbortOnDropHandle;
@@ -204,7 +204,7 @@ mod tests {
                     .read_line(&mut line)
                     .await
                     .expect("fake control reads request");
-                let request = serde_json::from_str::<Value>(&line).expect("request parses");
+                let request = studio_json::from_str::<Value>(&line).expect("request parses");
                 assert_eq!(request["method"], "host.status");
                 let mut stream = reader.into_inner();
                 let reply = json!({"id":request["id"],"result":{"state":"stopped"}});
@@ -234,7 +234,7 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&bytes)
         );
-        let value = serde_json::from_slice::<Value>(&bytes).expect("fixture operation succeeds");
+        let value = studio_json::from_slice::<Value>(&bytes).expect("fixture operation succeeds");
         assert_eq!(value["settings"]["cpus"], 1);
         assert_eq!(value["state"], "stopped");
         assert_eq!(value["allocatedDiskBytes"], 0);
@@ -252,11 +252,11 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("GET response body reads");
-        let readback = serde_json::from_slice::<Value>(&bytes).expect("GET response parses");
+        let readback = studio_json::from_slice::<Value>(&bytes).expect("GET response parses");
         assert_eq!(readback["settings"], value["settings"]);
         assert_eq!(readback["state"], "stopped");
         assert_eq!(
-            serde_json::from_slice::<Value>(
+            studio_json::from_slice::<Value>(
                 &std::fs::read(vm_dir.join("settings.json"))
                     .expect("settings use the injected directory")
             )
@@ -311,7 +311,7 @@ mod tests {
             .await
             .expect("fixture operation succeeds");
         assert_eq!(response.status(), StatusCode::OK);
-        let value: Value = serde_json::from_slice(
+        let value: Value = studio_json::from_slice(
             &axum::body::to_bytes(response.into_body(), 1024 * 1024)
                 .await
                 .expect("fixture operation succeeds"),
@@ -322,7 +322,7 @@ mod tests {
         let vm_dir = state_dir.path().join("private-vm");
         std::fs::create_dir_all(&vm_dir).expect("private settings directory");
         let settings_file = vm_dir.join("settings.json");
-        let before = serde_json::to_vec(&value["settings"]).expect("existing settings");
+        let before = studio_json::to_vec(&value["settings"]).expect("existing settings");
         std::fs::write(&settings_file, &before).expect("seed existing settings");
         let response = app
             .oneshot(request(
@@ -349,15 +349,15 @@ mod strict_settings_tests {
     #[test]
     fn settings_are_closed_and_bounded() {
         let valid = r#"{"cpus":1,"memoryBytes":1073741824,"systemDiskBytes":8589934592,"dataDiskBytes":8589934592}"#;
-        assert!(serde_json::from_str::<super::SettingsInput>(valid).is_ok());
+        assert!(studio_json::from_str::<super::SettingsInput>(valid).is_ok());
         assert!(
-            serde_json::from_str::<super::SettingsInput>(
+            studio_json::from_str::<super::SettingsInput>(
                 &valid.replace("1073741824", "1073741823")
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<super::SettingsInput>(
+            studio_json::from_str::<super::SettingsInput>(
                 &valid.replace(r#""cpus""#, r#""extra":1,"cpus""#)
             )
             .is_err()

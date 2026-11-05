@@ -61,8 +61,8 @@ mod tests {
             );
         }
         assert!(
-            serde_json::from_value::<Settings>(
-                serde_json::json!({"quietThresholdMs": 10000,"pressureCleanup":true,"extra":false})
+            studio_json::from_value::<Settings>(
+                studio_json::json!({"quietThresholdMs": 10000,"pressureCleanup":true,"extra":false})
             )
             .is_err()
         );

@@ -65,7 +65,7 @@ pub(crate) fn log_effect(
             Err(CaptureError::Invalid(_)) => return Ok(None),
         }
     }
-    Repo::append_projection(canvas, &serde_json::to_string(&effect)?)?;
+    Repo::append_projection(canvas, &studio_json::to_string(&effect)?)?;
     if observation.agent.as_ref().is_some_and(|agent| {
         studio_runtime_schema::provider_kind::ProviderKind::of_record(agent).is_err()
     }) {
@@ -151,7 +151,7 @@ fn apply_page(
     let mut through = after;
     for (seq, record) in page {
         tx.execute_batch("SAVEPOINT projection_row")?;
-        let applied = serde_json::from_str::<NotificationPostCommit>(record)
+        let applied = studio_json::from_str::<NotificationPostCommit>(record)
             .map_err(|_| CaptureError::Invalid("/record"))
             .and_then(|effect| capture_logged_effect(tx, &effect));
         match applied {
@@ -241,7 +241,7 @@ mod tests {
     use crate::notification_dispatch::{
         NotificationObservation, NotificationPublicationBatch, ProviderDeliveryIdentity, SharedJson,
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     /// Analytics tables whose rows the projection produces.
     const PROJECTED_TABLES: [&str; 7] = [
@@ -581,7 +581,7 @@ mod tests {
             .cloned()
             .expect("captureErrors recorded");
         let errors: Value =
-            serde_json::from_str(errors[1].as_str().expect("JSON text")).expect("errors JSON");
+            studio_json::from_str(errors[1].as_str().expect("JSON text")).expect("errors JSON");
         assert_eq!(errors["count"], 1);
         assert_eq!(errors["last"]["operation"], PROJECTION_OPERATION);
         assert_eq!(errors["last"]["code"], PROJECTION_REFUSED);

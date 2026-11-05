@@ -29,7 +29,7 @@ pub enum OutboxError {
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("outbox id {0} has another signature or owner")]
     Conflict(String),
 }
@@ -46,21 +46,23 @@ impl Outbox {
         discriminator: &[&str],
     ) -> String {
         // Strings and closed enums always serialize to a canonical tuple.
-        serde_json::to_string(&(request_id, kind, owner, owner_id, discriminator))
+        studio_json::to_string(&(request_id, kind, owner, owner_id, discriminator))
             .expect("effect identity serializes")
     }
 
     pub fn put<P: Serialize>(tx: &Transaction<'_>, row: &OutboxRow<P>) -> Result<()> {
-        let changed = tx.execute_cached("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) ON CONFLICT(id) DO UPDATE SET status=excluded.status,next_at=excluded.next_at,payload=excluded.payload WHERE kind=excluded.kind AND owner_kind=excluded.owner_kind AND owner_id=excluded.owner_id AND request_id IS excluded.request_id AND signature=excluded.signature AND account IS excluded.account AND stream_id IS excluded.stream_id AND generation IS excluded.generation AND ordinal IS excluded.ordinal AND created=excluded.created", params![row.id,row.kind,row.owner_kind,row.owner_id,row.request_id,row.signature,row.status,row.account,row.stream_id,row.generation,row.ordinal,row.next_at,serde_json::to_string(&row.payload)?,row.created])?;
+        let hint_position = crate::outbox_hint_position();
+        let changed = tx.execute_cached("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) ON CONFLICT(id) DO UPDATE SET status=excluded.status,next_at=excluded.next_at,payload=excluded.payload WHERE kind=excluded.kind AND owner_kind=excluded.owner_kind AND owner_id=excluded.owner_id AND request_id IS excluded.request_id AND signature=excluded.signature AND account IS excluded.account AND stream_id IS excluded.stream_id AND generation IS excluded.generation AND ordinal IS excluded.ordinal AND created=excluded.created", params![row.id,row.kind,row.owner_kind,row.owner_id,row.request_id,row.signature,row.status,row.account,row.stream_id,row.generation,row.ordinal,row.next_at,studio_json::to_string(&row.payload)?,row.created])?;
         if changed == 0 {
             return Err(OutboxError::Conflict(row.id.clone()));
         }
+        crate::record_outbox_kind(hint_position, row.kind);
         Ok(())
     }
 
     fn decode<P: DeserializeOwned>(row: &Row<'_>) -> rusqlite::Result<OutboxRow<P>> {
         let payload: String = row.get(12)?;
-        let payload = serde_json::from_str(&payload).map_err(|error| {
+        let payload = studio_json::from_str(&payload).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 12,
                 rusqlite::types::Type::Text,
@@ -136,7 +138,7 @@ impl Outbox {
             .collect::<rusqlite::Result<_>>()
             .map_err(|error| {
                 if let rusqlite::Error::FromSqlConversionFailure(index, ty, source) = error {
-                    match source.downcast::<serde_json::Error>() {
+                    match source.downcast::<studio_json::Error>() {
                         Ok(error) => OutboxError::Json(*error),
                         Err(source) => OutboxError::Sql(rusqlite::Error::FromSqlConversionFailure(
                             index, ty, source,
@@ -346,7 +348,7 @@ impl PublicationClass {
     rename_all = "camelCase",
     bound(deserialize = "T: serde::Deserialize<'de>")
 )]
-pub struct Publication<T = Box<serde_json::value::RawValue>> {
+pub struct Publication<T = studio_json::OwnedRawJson> {
     pub account: String,
     pub sequence: u64,
     pub index: usize,
@@ -383,5 +385,11 @@ impl<T> Default for Publication<T> {
             state_invalidation_generation: 0,
             token_rate_coalesced: false,
         }
+    }
+}
+
+impl From<studio_json::error::Error> for OutboxError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
     }
 }

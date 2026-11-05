@@ -5,7 +5,7 @@ use crate::{
     notification_dispatch::PreparedSubmission,
     scheduler::TurnIntent,
 };
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::Transaction;
 
 /// Worker Submitted transaction: call instead of freeze/commit/bind separately.

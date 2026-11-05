@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use gungraun::{Dhat, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::AgentRecord;
 use studio_runtime_store::stored_text;
 
@@ -42,14 +42,14 @@ fn record() -> Value {
 #[library_benchmark]
 #[bench::agent(record().to_string())]
 fn record_decode(input: String) -> (String, AgentRecord) {
-    let result = serde_json::from_str(black_box(&input)).expect("agent record");
+    let result = studio_json::from_str(black_box(&input)).expect("agent record");
     (input, result)
 }
 
 #[library_benchmark]
 #[bench::agent(AgentRecord::from_value(record()).expect("agent record"))]
 fn record_encode(input: AgentRecord) -> (AgentRecord, String) {
-    let result = serde_json::to_string(black_box(&input)).expect("agent record");
+    let result = studio_json::to_string(black_box(&input)).expect("agent record");
     (input, result)
 }
 

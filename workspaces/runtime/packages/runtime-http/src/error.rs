@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_schema::studio_errors::Cause;
 pub(crate) use studio_runtime_schema::studio_errors::HttpErrorKind as InternalErrorKind;
 pub(crate) use studio_runtime_services::studio_errors::store_error_kind;
@@ -17,7 +17,7 @@ const STORED_DATA_UNAVAILABLE: StatusCode = StatusCode::SERVICE_UNAVAILABLE;
 pub struct ApiError {
     status: StatusCode,
     message: String,
-    location: Option<serde_json::Value>,
+    location: Option<studio_json::Value>,
     code: Option<studio_runtime_schema::command::CommandErrorCode>,
     outcome: Option<crate::generated::ErrorResponseOutcome>,
     content_type: Option<&'static str>,
@@ -51,6 +51,12 @@ impl ApiError {
         error
     }
 
+    pub(crate) fn native_layr_store(message: impl Into<String>) -> Self {
+        let mut error = Self::not_applied(message);
+        error.code = Some(studio_runtime_schema::command::CommandErrorCode::NativeLayrStore);
+        error
+    }
+
     /// Mark a rejected preflight as safely retryable; callers must use this
     /// only when the operation has not been persisted or sent to a child.
     pub(crate) fn not_applied(message: impl Into<String>) -> Self {
@@ -67,11 +73,11 @@ impl ApiError {
         self.outcome.as_ref()
     }
 
-    pub(crate) fn validation(location: Vec<serde_json::Value>) -> Self {
+    pub(crate) fn validation(location: Vec<studio_json::Value>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: "Invalid request".to_owned(),
-            location: Some(serde_json::Value::Array(location)),
+            location: Some(studio_json::Value::Array(location)),
             code: None,
             outcome: None,
             content_type: None,
@@ -119,7 +125,7 @@ impl ApiError {
         error
     }
 
-    pub(crate) fn json(error: serde_json::Error) -> Self {
+    pub(crate) fn json(error: studio_json::Error) -> Self {
         let mut result = Self::internal_with_cause(InternalErrorKind::StoreData);
         result.diagnostic_causes.push(json_cause(&error));
         result
@@ -230,14 +236,14 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let mut body = serde_json::json!({"error": self.message});
+        let mut body = studio_json::json!({"error": self.message});
         if let Some(outcome) = self.outcome()
-            && let Ok(outcome) = serde_json::to_value(outcome)
+            && let Ok(outcome) = studio_json::to_value(outcome)
         {
             body["outcome"] = outcome;
         }
         if let Some(code) = self.code {
-            body["code"] = serde_json::json!(code);
+            body["code"] = studio_json::json!(code);
         }
         if let Some(location) = self.location {
             body["location"] = location;
@@ -343,7 +349,7 @@ mod tests {
             matches!(&facts.0[0],studio_runtime_schema::studio_errors::Cause::StoredRecord{pointer:Some(pointer),..} if pointer=="/status")
         );
         let body = to_bytes(response.into_body(), 4096).await.expect("body");
-        let body: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+        let body: studio_json::Value = studio_json::from_slice(&body).expect("JSON");
         assert_eq!(body["outcome"], "not_applied");
         assert!(!body.to_string().contains("private-canary"));
     }
@@ -355,7 +361,7 @@ mod tests {
         let body = to_bytes(response.into_body(), 4096)
             .await
             .expect("response body");
-        let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON body");
+        let value: studio_json::Value = studio_json::from_slice(&body).expect("JSON body");
         assert_eq!(value["error"], "invalid local input");
         assert_eq!(value["outcome"], "not_applied");
 
@@ -363,7 +369,7 @@ mod tests {
         let body = to_bytes(response.into_body(), 4096)
             .await
             .expect("response body");
-        let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON body");
+        let value: studio_json::Value = studio_json::from_slice(&body).expect("JSON body");
         assert!(value.get("outcome").is_none());
     }
 

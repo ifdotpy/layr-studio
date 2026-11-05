@@ -27,7 +27,8 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         String::from_utf8_lossy(&result.stderr)
     );
     let output = String::from_utf8(result.stdout).expect("state-check output is UTF-8");
-    let report: serde_json::Value = serde_json::from_str(&output).expect("state-check prints JSON");
+    let report: studio_json::Value =
+        studio_json::from_str(&output).expect("state-check prints JSON");
     let tables = report["tables"].as_array().expect("table reports exist");
     assert_eq!(tables.len(), 38);
     let names: std::collections::BTreeSet<_> = tables

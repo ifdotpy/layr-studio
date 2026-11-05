@@ -4,8 +4,8 @@ use crate::{
     coordination::CoordinationError, event_write::truthy, sync_entity_context::RoomDirectory,
 };
 use rusqlite::{OptionalExtension, Transaction};
-use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Value, json};
 use studio_runtime_schema::delivery::{MessageRecipientDelivery, MessageSendStatus};
 use studio_runtime_schema::persistence::{EventStatus, RecipientDelivery};
 use studio_runtime_schema::queue_command::Field;
@@ -53,7 +53,7 @@ pub fn delivery_receipts(
         .query_map(
             rusqlite::params![
                 agent,
-                serde_json::to_string(ids).map_err(studio_runtime_store::StoreError::from)?
+                studio_json::to_string(ids).map_err(studio_runtime_store::StoreError::from)?
             ],
             |row| {
                 Ok((
@@ -248,11 +248,11 @@ pub fn chat_read(
         let ids = selection
             .query_map(
                 rusqlite::params![
-                    serde_json::to_string(&members)
+                    studio_json::to_string(&members)
                         .map_err(studio_runtime_store::StoreError::from)?,
-                    serde_json::to_string(context.projects())
+                    studio_json::to_string(context.projects())
                         .map_err(studio_runtime_store::StoreError::from)?,
-                    serde_json::to_string(&rooms)
+                    studio_json::to_string(&rooms)
                         .map_err(studio_runtime_store::StoreError::from)?,
                     root_id
                 ],
@@ -349,7 +349,8 @@ pub fn chat_read(
         ))?;
         let rows = statement.query_map(
             rusqlite::params![
-                serde_json::to_string(&room_ids).map_err(studio_runtime_store::StoreError::from)?,
+                studio_json::to_string(&room_ids)
+                    .map_err(studio_runtime_store::StoreError::from)?,
                 before,
                 after,
                 (limit + 1) as i64
@@ -473,7 +474,7 @@ fn message_deliveries(
     id: &str,
     deliveries: &str,
 ) -> Result<BTreeMap<String, MessageRecipientDelivery>, studio_runtime_store::StoreError> {
-    let saved: BTreeMap<String, RecipientDelivery> = serde_json::from_str(deliveries)
+    let saved: BTreeMap<String, RecipientDelivery> = studio_json::from_str(deliveries)
         .map_err(|_| records::invalid("runtime_chat_messages", id))?;
     let mut deliveries: BTreeMap<String, MessageRecipientDelivery> = saved
         .into_iter()
@@ -508,7 +509,7 @@ fn message_deliveries(
             records::validate(
                 "runtime_events",
                 &event_id,
-                Value::Object(serde_json::Map::from_iter([
+                Value::Object(studio_json::Map::from_iter([
                     ("id".into(), Value::String(event_id.clone())),
                     ("status".into(), Value::String(event.0.as_str().into())),
                     (
@@ -538,7 +539,7 @@ mod delivery_tests {
             materialized: false,
         };
         assert_eq!(
-            serde_json::to_string(&receipt).expect("receipt serializes"),
+            studio_json::to_string(&receipt).expect("receipt serializes"),
             r#"{"id":"one","status":"sending","error":null,"materialized":false}"#
         );
         for (stored, expected) in [
@@ -570,8 +571,8 @@ mod delivery_tests {
                 },
             )]),
         };
-        let encoded = serde_json::to_string(&message).expect("message serializes");
-        let value: Value = serde_json::from_str(&encoded).expect("message JSON");
+        let encoded = studio_json::to_string(&message).expect("message serializes");
+        let value: Value = studio_json::from_str(&encoded).expect("message JSON");
         assert_eq!(value["deliveries"]["agent"]["status"], "queued");
     }
 
@@ -620,8 +621,8 @@ mod delivery_tests {
             sender_name: Value::Null,
             deliveries,
         };
-        let encoded = serde_json::to_string(&message).expect("encode");
-        let value: Value = serde_json::from_str(&encoded).expect("decode");
+        let encoded = studio_json::to_string(&message).expect("encode");
+        let value: Value = studio_json::from_str(&encoded).expect("decode");
         assert_eq!(value["deliveries"]["agent"]["status"], "uncertain");
     }
 

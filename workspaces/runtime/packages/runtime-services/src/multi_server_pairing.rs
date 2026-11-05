@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::{
     AccessNonceOutcome, RemoteTransportRepository, RuntimeStore, StoreError,
 };
@@ -446,7 +446,7 @@ impl MultiServerBoundary {
                     tx.execute(
                         "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                         params![
-                            serde_json::to_string(client).map_err(StoreError::from)?,
+                            studio_json::to_string(client).map_err(StoreError::from)?,
                             request.client_id()
                         ],
                     )?;
@@ -681,7 +681,7 @@ impl MultiServerBoundary {
                     tx.execute(
                         "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                         params![
-                            serde_json::to_string(&client).map_err(StoreError::from)?,
+                            studio_json::to_string(&client).map_err(StoreError::from)?,
                             request.client_id()
                         ],
                     )?;
@@ -788,7 +788,7 @@ fn apply_pair(
             .unwrap_or(crate::device_trust::GRANT_FULL)
             .to_owned();
         invite.mark_used();
-        let invite = serde_json::to_string(&invite).map_err(|_| {
+        let invite = studio_json::to_string(&invite).map_err(|_| {
             refused(
                 503,
                 "invalid_record",
@@ -824,7 +824,7 @@ fn apply_pair(
             studio_runtime_schema::queue_command::Field::Value(request.request_id().to_owned());
         client.pairing_hash = studio_runtime_schema::queue_command::Field::Value(fingerprint);
     }
-    tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),serde_json::to_string(&client).map_err(StoreError::from)?])?;
+    tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),studio_json::to_string(&client).map_err(StoreError::from)?])?;
     save_receipt(tx, &admitted, &result, now)?;
     if snapshot.client().is_none() {
         tx.execute(
@@ -858,7 +858,7 @@ fn pairing_reply(
         .decode(&reply.body)
         .map_err(|_| invalid())?;
     let result: studio_runtime_schema::multi_server_access::DevicePairReply =
-        serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+        studio_json::from_slice(&bytes).map_err(|_| invalid())?;
     if reply.status != 200
         || result.client_id != client
         || !result.paired
@@ -906,7 +906,7 @@ fn new_client(
         _ => return Err(invalid()),
     };
     let server = kind == AccessClientKind::Server;
-    let timestamp = serde_json::Number::from_f64(now).ok_or_else(invalid)?;
+    let timestamp = studio_json::Number::from_f64(now).ok_or_else(invalid)?;
     Ok(PersistedAccessClient {
         id: request
             .client_id()

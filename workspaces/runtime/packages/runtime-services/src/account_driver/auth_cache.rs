@@ -80,8 +80,8 @@ pub enum CredentialFormat {
 /// `~/.claude.json` grows with project history, so the bound is generous.
 pub(super) const CREDENTIAL_READ_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 
-fn present(value: &Option<serde_json::Value>) -> bool {
-    use serde_json::Value;
+fn present(value: &Option<studio_json::Value>) -> bool {
+    use studio_json::Value;
     !matches!(value, None | Some(Value::Null | Value::Bool(false)))
         && value.as_ref().and_then(Value::as_str) != Some("")
 }
@@ -91,8 +91,8 @@ impl CredentialFormat {
     /// which is a state of its own so that a repaired file is a change.
     fn identity(self, bytes: &[u8]) -> Option<u64> {
         use serde::Deserialize;
-        use serde_json::Value;
         use std::hash::{Hash, Hasher};
+        use studio_json::Value;
         #[derive(Deserialize)]
         struct Account {
             #[serde(rename = "oauthAccount")]
@@ -114,13 +114,13 @@ impl CredentialFormat {
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         match self {
-            Self::ClaudeAccount => serde_json::from_slice::<Account>(bytes)
+            Self::ClaudeAccount => studio_json::from_slice::<Account>(bytes)
                 .ok()?
                 .account
                 .map(|value| value.to_string())
                 .hash(&mut hasher),
             Self::ClaudeToken => {
-                let oauth = serde_json::from_slice::<Token>(bytes).ok()?.oauth;
+                let oauth = studio_json::from_slice::<Token>(bytes).ok()?.oauth;
                 oauth
                     .map(|oauth| {
                         (
@@ -132,7 +132,7 @@ impl CredentialFormat {
                     .hash(&mut hasher);
             }
             Self::CodexAuth => {
-                let auth = serde_json::from_slice::<super::CodexAuthFile>(bytes).ok()?;
+                let auth = studio_json::from_slice::<super::CodexAuthFile>(bytes).ok()?;
                 let tokens = auth.tokens.unwrap_or_default();
                 (
                     auth.auth_mode,

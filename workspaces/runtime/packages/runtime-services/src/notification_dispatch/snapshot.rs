@@ -1,6 +1,6 @@
 //! One checked boundary for the JSON records consumed by pure notification rules.
 use super::{NotificationDispatchError, stored};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::TaskRecord;
 
 pub(super) struct NotificationSnapshot {

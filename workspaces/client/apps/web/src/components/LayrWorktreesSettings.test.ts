@@ -13,7 +13,8 @@ vi.mock("react", async (original) => ({
   useEffect: () => {},
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ get: vi.fn() }),
+  useServerApi: () => ({ post: vi.fn() }),
+  useServerResources: () => ({ watchResourceChanges: vi.fn() }),
 }));
 import { LayrWorktreesSettings } from "./LayrWorktreesSettings";
 import { studioSettingsTabs } from "./StudioSettingsTabs";
@@ -41,7 +42,7 @@ it("lists the settings tab and displays the installed version and store", () => 
     storeRoot: "/store",
   });
   expect(html).toContain("0.14.2 (a6879be)");
-  expect(html).toContain("/store");
+  expect(html).toContain("Default store directory");
   expect(html).toContain("Worktrees");
 });
 it("displays the missing binary", () => {
@@ -67,4 +68,17 @@ it("displays the store error", () => {
   });
   expect(html).toContain("Unavailable");
   expect(html).toContain("Invalid settings");
+});
+
+it("renders the server readiness reason", () => {
+  expect(
+    render({
+      version: null,
+      storeRoot: "/store",
+      readiness: {
+        status: "notReady",
+        reason: "The store service is not running",
+      },
+    }),
+  ).toContain("The store service is not running");
 });

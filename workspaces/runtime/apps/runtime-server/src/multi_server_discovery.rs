@@ -12,7 +12,7 @@ use std::{
 use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::{
     multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
     multi_server_protocol::{ACCESS_PROTOCOL_VERSION, NonNegativeNumber},
@@ -106,7 +106,7 @@ impl TailscaleServerDiscovery {
         if response.status != 200 {
             return Err(unavailable("The peer identity is unavailable"));
         }
-        serde_json::from_slice(&response.body)
+        studio_json::from_slice(&response.body)
             .map_err(|_| unavailable("The peer identity is invalid"))
     }
 
@@ -408,7 +408,7 @@ impl TailscaleServerDiscovery {
                     })?;
                 tx.execute(
                     "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
-                    params![serde_json::to_string(&client)?, id],
+                    params![studio_json::to_string(&client)?, id],
                 )?;
                 Ok(true)
             })
@@ -444,7 +444,7 @@ async fn reserve_auto_pair_id(
             )
             .optional()?;
         if let Some(saved_raw) = &saved {
-            let saved: Value = serde_json::from_str(saved_raw).map_err(|_| {
+            let saved: Value = studio_json::from_str(saved_raw).map_err(|_| {
                 studio_runtime_store::StoreError::SchemaMismatch(
                     "invalid stored object runtime_access_auto_attempts".into(),
                 )
@@ -461,7 +461,7 @@ async fn reserve_auto_pair_id(
         request_content.state = AutoPairAttempt::present(json!("attempted"));
         tx.execute(
             "INSERT INTO runtime_access_auto_attempts(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![peer_id, serde_json::to_string(&request_content)?],
+            params![peer_id, studio_json::to_string(&request_content)?],
         )?;
         Ok::<_, studio_runtime_store::StoreError>(request_id)
     }).await
@@ -512,7 +512,7 @@ async fn save_auto_pair(
             ));
         }
         let invalid = || studio_runtime_store::StoreError::SchemaMismatch("invalid auto-paired identity".into());
-        let created = match saved.as_ref() { Some(saved) => saved.created().clone(), None => NonNegativeNumber::try_from(serde_json::Number::from(now)).map_err(|_| invalid())? };
+        let created = match saved.as_ref() { Some(saved) => saved.created().clone(), None => NonNegativeNumber::try_from(studio_json::Number::from(now)).map_err(|_| invalid())? };
         let mut record = PersistedAccessClient {
             id: id.clone().try_into().map_err(|_| invalid())?, client_id: id.clone().try_into().map_err(|_| invalid())?,
             server_id: Field::Value(id.clone()), kind: AccessClientKind::Server,
@@ -536,7 +536,7 @@ async fn save_auto_pair(
         }
         tx.execute(
             "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![id, serde_json::to_string(&record)?],
+            params![id, studio_json::to_string(&record)?],
         )?;
         if !existed {
             tx.execute(
@@ -593,7 +593,7 @@ async fn mark_origin_unreachable(store: &RuntimeStore, origin: &str) -> Result<(
                 peer.mark_unreachable();
                 tx.execute(
                     "UPDATE runtime_access_discovered SET record=?1 WHERE id=?2",
-                    params![serde_json::to_string(&peer)?, id],
+                    params![studio_json::to_string(&peer)?, id],
                 )?;
             }
             Ok::<_, studio_runtime_store::StoreError>(())
@@ -714,7 +714,7 @@ mod tests {
                 .optional()
                 .unwrap();
             if let Some(expected) = expected_created {
-                let record: Value = serde_json::from_str(stored.as_deref().unwrap()).unwrap();
+                let record: Value = studio_json::from_str(stored.as_deref().unwrap()).unwrap();
                 assert_eq!(record["created"], expected, "{raw:?}");
                 assert_eq!(record["status"], "paired");
             } else {
@@ -838,7 +838,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["extra"]["keep"],
+            studio_json::from_str::<Value>(&raw).unwrap()["extra"]["keep"],
             true
         );
         store.transaction(|tx| { tx.execute("UPDATE runtime_access_auto_attempts SET record=?1 WHERE id='peer'", [r#"{"protocol":1,"origin":"https://local.example","serverId":null,"label":null,"publicKey":null,"requestId":"legacy"}"#])?; Ok(()) }).await.unwrap();
@@ -981,7 +981,7 @@ mod tests {
             .unwrap();
         let db = store.test_reader().unwrap();
         let get = |id: &str| -> Value {
-            serde_json::from_str(
+            studio_json::from_str(
                 &db.query_row(
                     "SELECT record FROM runtime_access_discovered WHERE id=?1",
                     [id],
@@ -1144,7 +1144,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let saved: Value = serde_json::from_str(&saved).unwrap();
+        let saved: Value = studio_json::from_str(&saved).unwrap();
         assert_eq!(saved["grant"], "observe");
         assert_eq!(saved["pairingRequestId"], "request");
         assert_eq!(saved["pairingHash"], "hash");

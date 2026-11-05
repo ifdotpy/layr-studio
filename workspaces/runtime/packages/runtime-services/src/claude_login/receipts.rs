@@ -52,7 +52,7 @@ impl LoginReceipts for FileReceipts {
                 return Err(LoginError::InvalidRecord("receipt-size".into()));
             }
             let record = LoginSnapshot::from_record(
-                serde_json::from_slice(&bytes)
+                studio_json::from_slice(&bytes)
                     .map_err(|_| LoginError::InvalidRecord("receipt-json".into()))?,
             )?;
             if path.file_stem().and_then(|v| v.to_str()) != Some(record.request_id()) {
@@ -63,7 +63,7 @@ impl LoginReceipts for FileReceipts {
         Ok(records)
     }
     fn save(&self, record: &LoginSnapshot) -> Result<(), LoginError> {
-        let bytes = serde_json::to_vec(record.record()).map_err(|_| LoginError::Persistence)?;
+        let bytes = studio_json::to_vec(record.record()).map_err(|_| LoginError::Persistence)?;
         if bytes.len() as u64 > MAX_RECEIPT_BYTES {
             return Err(LoginError::Persistence);
         }

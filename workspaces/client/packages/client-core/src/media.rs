@@ -6,13 +6,13 @@
     allow(dead_code, unused_imports, unused_variables)
 )]
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use studio_client_domain::json_object::JsonObject;
+use studio_json::{Value, json};
 use tokio::sync::mpsc;
 
 pub const DICTATION_RATE: f64 = 16_000.0;
@@ -141,10 +141,10 @@ enum Command {
 
 fn command(method: &str, params: Value) -> Result<Command, String> {
     match method {
-        "media.captureStart" => serde_json::from_value::<JsonObject<CaptureParams>>(params)
+        "media.captureStart" => studio_json::from_value::<JsonObject<CaptureParams>>(params)
             .map(|JsonObject(p)| Command::CaptureStart(p.capture))
             .map_err(|_| "Invalid capture identity.".into()),
-        "media.captureStop" => serde_json::from_value::<JsonObject<CaptureParams>>(params)
+        "media.captureStop" => studio_json::from_value::<JsonObject<CaptureParams>>(params)
             .map(|JsonObject(p)| Command::CaptureStop(p.capture))
             .map_err(|_| "Invalid capture identity.".into()),
         _ => Err("Unknown audio command.".into()),
@@ -153,7 +153,7 @@ fn command(method: &str, params: Value) -> Result<Command, String> {
 
 /// A view subscription receives one capture's audio. Dropping it stops capture.
 pub fn attach(id: &Value) -> Result<mpsc::Receiver<Value>, String> {
-    let id = serde_json::from_value::<CaptureId>(id.clone())
+    let id = studio_json::from_value::<CaptureId>(id.clone())
         .map_err(|_| "Invalid capture identity.")?
         .0;
     let (sender, receiver) = mpsc::channel(QUEUE);

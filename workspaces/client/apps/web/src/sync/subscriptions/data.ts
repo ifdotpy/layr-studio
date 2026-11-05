@@ -48,6 +48,7 @@ const transientSelectors: ResourceDataSelectors<ResourceVersion | undefined> = {
   "rename-progress": (_ref, version) =>
     progressFor("rename-progress", version)?.value,
   "multi-server": (_ref, version) => version?.discoverySnapshot,
+  "native-layr-settings": (_ref, version) => version?.nativeLayrSettings,
   voice: (_ref, version) => version?.voiceRecords,
   drafts: (_ref, version) => version?.draftChanges,
 };

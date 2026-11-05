@@ -12,8 +12,8 @@ use std::io::{Read, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 
 /// Largest request or response frame, in bytes.
 pub(crate) const FRAME_LIMIT: usize = 2 * 1024 * 1024;
@@ -66,8 +66,8 @@ impl From<std::io::Error> for Failure {
     }
 }
 
-impl From<serde_json::Error> for Failure {
-    fn from(error: serde_json::Error) -> Self {
+impl From<studio_json::Error> for Failure {
+    fn from(error: studio_json::Error) -> Self {
         Self::Unexpected(error.to_string())
     }
 }
@@ -106,7 +106,7 @@ pub(crate) fn atomic(path: &Path, value: &impl serde::Serialize) -> std::io::Res
     let mut temporary = tempfile::Builder::new()
         .prefix(".host-exec-")
         .tempfile_in(parent)?;
-    temporary.write_all(serde_json::to_string(value)?.as_bytes())?;
+    temporary.write_all(studio_json::to_string(value)?.as_bytes())?;
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|error| error.error)?;
     fs::File::open(parent)?.sync_all()
@@ -114,7 +114,7 @@ pub(crate) fn atomic(path: &Path, value: &impl serde::Serialize) -> std::io::Res
 
 /// Read a JSON file.
 pub(crate) fn read_json(path: &Path) -> Outcome<Value> {
-    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+    Ok(studio_json::from_str(&fs::read_to_string(path)?)?)
 }
 
 /// A relative slash path without empty, `.` or `..` parts (guest `relative`).
@@ -202,12 +202,14 @@ pub(crate) fn load_hashes(path: &Path) -> HashCache {
     fs::read_to_string(path)
         .ok()
         .and_then(|text| {
-            serde_json::from_str::<BTreeMap<String, Box<serde_json::value::RawValue>>>(&text).ok()
+            studio_json::from_str::<BTreeMap<String, studio_json::OwnedRawJson>>(&text).ok()
         })
         .map(|rows| {
             rows.into_iter()
                 .filter_map(|(path, row)| {
-                    serde_json::from_str(row.get()).ok().map(|row| (path, row))
+                    studio_json::from_str(row.as_str())
+                        .ok()
+                        .map(|row| (path, row))
                 })
                 .collect()
         })

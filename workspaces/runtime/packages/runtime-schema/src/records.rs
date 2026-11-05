@@ -3,7 +3,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 pub use crate::persistence::WorkStatus;
 
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn stored_work_boundary_record_domains_have_one_generated_owner() {
-        let openapi = serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
             .expect("OpenAPI document");
         check_schema_parity(&openapi)
             .expect("all record domain consumers are generated from this owner");
@@ -111,7 +111,7 @@ mod tests {
             .expect("work states")
         {
             let parsed: WorkStatus =
-                serde_json::from_value(value.clone()).expect("owner value parses");
+                studio_json::from_value(value.clone()).expect("owner value parses");
             assert_eq!(json!(parsed), *value);
         }
         for value in schema::<WorkspaceMode>()["enum"]
@@ -119,14 +119,14 @@ mod tests {
             .expect("workspace modes")
         {
             let parsed: WorkspaceMode =
-                serde_json::from_value(value.clone()).expect("owner value parses");
+                studio_json::from_value(value.clone()).expect("owner value parses");
             assert_eq!(json!(parsed), *value);
             assert_eq!(
                 parsed.to_string(),
                 value.as_str().expect("mode has string representation")
             );
         }
-        assert!(serde_json::from_value::<WorkStatus>(json!("unknown")).is_err());
-        assert!(serde_json::from_value::<WorkspaceMode>(json!(7)).is_err());
+        assert!(studio_json::from_value::<WorkStatus>(json!("unknown")).is_err());
+        assert!(studio_json::from_value::<WorkspaceMode>(json!(7)).is_err());
     }
 }

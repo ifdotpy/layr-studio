@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{StateCheckTable, analytics_capture::check_state_readonly};
 use tempfile::tempdir;
 

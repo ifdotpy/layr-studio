@@ -26,9 +26,9 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     for (id, pointer, lazy) in rows {
         let mut failure = None;
         if let Some(raw) = pointer.as_deref().filter(|raw| *raw != "null") {
-            match serde_json::from_str::<TransferId>(raw) {
+            match studio_json::from_str::<TransferId>(raw) {
                 Ok(value) => {
-                    let value = serde_json::to_string(&value)?;
+                    let value = studio_json::to_string(&value)?;
                     tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransferId',json(?2)) WHERE id=?1",params![id,value])?;
                 }
                 Err(error) => {
@@ -38,9 +38,9 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
         }
         if let Some(raw) = lazy.as_deref().filter(|raw| *raw != "null") {
-            let value = match serde_json::from_str::<LazyTransfer>(raw) {
+            let value = match studio_json::from_str::<LazyTransfer>(raw) {
                 Ok(value) => LazyTransferState::Pending(Box::new(value)),
-                Err(error) => match serde_json::from_str::<UnreadableTransferSummary>(raw) {
+                Err(error) => match studio_json::from_str::<UnreadableTransferSummary>(raw) {
                     Ok(value) => LazyTransferState::Unreadable(value),
                     Err(_) => {
                         let reason = error.to_string();
@@ -48,18 +48,18 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                         LazyTransferState::Unreadable(UnreadableTransferSummary {
                             kind: UnreadableTransferKind::Unreadable,
                             reason,
-                            original: Some(serde_json::from_str(raw)?),
+                            original: Some(studio_json::from_str(raw)?),
                         })
                     }
                 },
             };
-            let value = serde_json::to_string(&value)?;
+            let value = studio_json::to_string(&value)?;
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.lazyAccountTransfer',json(?2)) WHERE id=?1",params![id,value])?;
         }
         if let Some(reason) = failure {
             unreadable += 1;
             eprintln!("account transfer pointer migration: agent={id} reason={reason}");
-            let marker = serde_json::to_string(&UnreadableTransferSummary {
+            let marker = studio_json::to_string(&UnreadableTransferSummary {
                 kind: UnreadableTransferKind::Unreadable,
                 reason,
                 original: None,
@@ -99,7 +99,7 @@ mod tests {
             let (id, raw) = row.unwrap();
             originals.push((
                 id.clone(),
-                serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
+                studio_json::from_str::<studio_json::Value>(&raw).unwrap(),
             ));
             db.execute(
                 "INSERT INTO runtime_agents VALUES(?1,?2)",
@@ -117,7 +117,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap();
-            let after: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let after: studio_json::Value = studio_json::from_str(&raw).unwrap();
             assert!(
                 after == *before,
                 "migration changed a known transfer pointer"
@@ -144,14 +144,14 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let value: studio_json::Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(value["accountTransferId"], "move");
         assert_eq!(value["accountTransfer"]["kind"], "unreadable");
         assert_eq!(value["lazyAccountTransfer"]["kind"], "unreadable");
         let original: String = tx.query_row("SELECT record->'$.lazyAccountTransfer.original' FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&original).unwrap(),
-            serde_json::json!({"id":"move","sourceAccountKey":"source","sourceState":{"pendingSettings":{"nested":{"value":42}}},"unexpected":true})
+            studio_json::from_str::<studio_json::Value>(&original).unwrap(),
+            studio_json::json!({"id":"move","sourceAccountKey":"source","sourceState":{"pendingSettings":{"nested":{"value":42}}},"unexpected":true})
         );
     }
 }

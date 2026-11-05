@@ -171,7 +171,7 @@ mod tests {
         candidate_query, retry_query,
     };
     use crate::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     fn database() -> Connection {
         let mut connection = Connection::open_in_memory().expect("memory database opens");
@@ -248,7 +248,7 @@ mod tests {
         crate::domain::project(
             &connection,
             "eligible-whitespace-object",
-            &serde_json::from_str(whitespace).expect("fixture record"),
+            &studio_json::from_str(whitespace).expect("fixture record"),
         )
         .expect("chat row follows the record");
         for (index, scheduled) in [
@@ -338,17 +338,17 @@ mod tests {
         put_agent(
             &connection,
             "later",
-            serde_json::json!({"reviewArchiveScheduled":"event-later","reviewArchiveNextAt":88.0}),
+            studio_json::json!({"reviewArchiveScheduled":"event-later","reviewArchiveNextAt":88.0}),
         );
         put_agent(
             &connection,
             "earlier",
-            serde_json::json!({"reviewArchiveScheduled":"event-earlier","reviewArchiveNextAt":42.0}),
+            studio_json::json!({"reviewArchiveScheduled":"event-earlier","reviewArchiveNextAt":42.0}),
         );
         put_agent(
             &connection,
             "not-scheduled",
-            serde_json::json!({"reviewArchiveNextAt":1.0}),
+            studio_json::json!({"reviewArchiveNextAt":1.0}),
         );
         assert_eq!(
             Repository::next_retry_at(&connection, 0.0).expect("retry deadline query"),

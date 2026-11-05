@@ -5,7 +5,7 @@ use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::persistence::{
     DeliveryStatus, FederationDeliveryState, FederationMessageKind, RecipientDelivery,
     RequestIdentity,
@@ -90,7 +90,7 @@ impl FederationRepository {
             .collect::<StoreResult<Vec<_>>>()?;
         // Validate every stored outbox record, including records excluded from the queue count.
         let mut queued = 0;
-        for entry in RemoteOutbox::entries::<Box<serde_json::value::RawValue>>(
+        for entry in RemoteOutbox::entries::<studio_json::OwnedRawJson>(
             connection,
             RemoteEffect::FederationMessage,
             None,
@@ -98,7 +98,7 @@ impl FederationRepository {
         .map_err(|_| invalid("runtime_outbox", "federation_message", "record"))?
         {
             let id = entry.request_id;
-            let value: OutboxRecord = serde_json::from_str(entry.record.get())
+            let value: OutboxRecord = studio_json::from_str(entry.record.as_str())
                 .map_err(|_| invalid("runtime_outbox", &id, "record"))?;
             if value.id != id {
                 return Err(invalid("runtime_outbox", &id, "id"));
@@ -197,7 +197,7 @@ impl FederationRepository {
                     status: DeliveryStatus::Cancelled,
                     error: None,
                 };
-                tx.execute("UPDATE runtime_chat_messages SET deliveries=json_set(deliveries,?1,json(?3)) WHERE id=?2",params![format!("$.remote:{id}"),out_id,serde_json::to_string(&delivery)?])?;
+                tx.execute("UPDATE runtime_chat_messages SET deliveries=json_set(deliveries,?1,json(?3)) WHERE id=?2",params![format!("$.remote:{id}"),out_id,studio_json::to_string(&delivery)?])?;
             }
         }
         let mut stmt=tx.prepare_cached("SELECT id,record FROM runtime_federation_rooms WHERE json_extract(record,'$.peerId')=?1")?;
@@ -461,7 +461,7 @@ impl FederationRepository {
             studio_runtime_schema::room_record::RoomKind::Federated,
         );
         local_room.members = Some(unique);
-        local_room.updated = serde_json::Number::from_f64(now).map_or(
+        local_room.updated = studio_json::Number::from_f64(now).map_or(
             studio_runtime_schema::queue_command::Field::Null,
             studio_runtime_schema::queue_command::Field::Value,
         );
@@ -638,7 +638,7 @@ fn record(c: &Connection, t: &str, id: &str) -> StoreResult<Option<Value>> {
         .transpose()
 }
 fn parse_record(t: &str, id: &str, raw: &str) -> StoreResult<Value> {
-    let v: Value = serde_json::from_str(raw).map_err(|_| invalid(t, id, "record"))?;
+    let v: Value = studio_json::from_str(raw).map_err(|_| invalid(t, id, "record"))?;
     if !v.is_object() {
         return Err(invalid(t, id, "record"));
     }
@@ -662,10 +662,10 @@ mod tests {
     #[test]
     fn outbox_record_accepts_persisted_shape_and_rejects_unknown_kind() {
         let raw = r#"{"id":"message","kind":"chat-message","room":"room","payload":{},"created":1.5,"nextAt":0,"attempts":0,"status":"queued","error":null,"requestId":"request"}"#;
-        let record: OutboxRecord = serde_json::from_str(raw).expect("valid outbox");
+        let record: OutboxRecord = studio_json::from_str(raw).expect("valid outbox");
         assert_eq!(record.status, FederationDeliveryState::Queued);
         assert!(
-            serde_json::from_str::<OutboxRecord>(&raw.replace("chat-message", "unknown")).is_err()
+            studio_json::from_str::<OutboxRecord>(&raw.replace("chat-message", "unknown")).is_err()
         );
     }
 }

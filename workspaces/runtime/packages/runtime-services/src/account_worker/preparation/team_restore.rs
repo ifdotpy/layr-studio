@@ -16,7 +16,7 @@ fn rows(
             r.get::<_, String>(0)
         })?
         .map(|row| {
-            serde_json::from_str(&row?)
+            studio_json::from_str(&row?)
                 .map_err(|_| WorkerError::PreparationRefused("invalid team state".into()))
         })
         .collect()
@@ -37,7 +37,7 @@ pub(super) fn snapshot(tx: &Transaction<'_>, actor: &Value) -> Result<Option<Val
     let mut has_children = false;
     for (_, raw) in team {
         let record: studio_runtime_store::AgentRecord =
-            serde_json::from_str(&raw).map_err(|_| refusal("invalid child record".into()))?;
+            studio_json::from_str(&raw).map_err(|_| refusal("invalid child record".into()))?;
         if record.id.0 == id
             || (!lead && record.parent_id.as_deref() != Some(id))
             || record.is_deleted()
@@ -97,7 +97,8 @@ pub(super) fn snapshot(tx: &Transaction<'_>, actor: &Value) -> Result<Option<Val
     let results = query
         .query_map([id], |row| row.get::<_, String>(0))?
         .map(|row| {
-            serde_json::from_str::<Value>(&row?).map_err(|_| refusal("invalid result event".into()))
+            studio_json::from_str::<Value>(&row?)
+                .map_err(|_| refusal("invalid result event".into()))
         })
         .collect::<Result<Vec<_>, WorkerError>>()?;
     if !lead && !has_children && monitors.is_empty() {
@@ -158,11 +159,11 @@ mod idle_return_tests {
             };
             let event = crate::turn_prepare::Event {
                 id:"return".into(),kind:"user".into(),text:"continue".into(),created:1.0,
-                metadata:crate::turn_prepare::EventMetadata {assets:vec![],accepted_at:None,extra:serde_json::Map::new()},
+                metadata:crate::turn_prepare::EventMetadata {assets:vec![],accepted_at:None,extra:studio_json::Map::new()},
                 preserve_progress:false,preserve_complaint:false,
             };
             let compiled=crate::turn_prepare::compile(&input,&[event]).expect("compile");
-            let wire=serde_json::to_string(&compiled.provider_inputs).expect("wire");
+            let wire=studio_json::to_string(&compiled.provider_inputs).expect("wire");
             assert!(wire.contains("Studio team state after compaction"));
             assert!(wire.contains("Finished work"));
             assert!(wire.contains("review"));

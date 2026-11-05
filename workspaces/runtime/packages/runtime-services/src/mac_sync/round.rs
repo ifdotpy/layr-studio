@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 
 use super::{
@@ -849,7 +849,7 @@ impl PreservedWrite {
             )
             .map_err(|error| io(error.into()))?,
         );
-        file.write_all(&serde_json::to_vec(&self.record).map_err(MacSyncError::Json)?)
+        file.write_all(&studio_json::to_vec(&self.record).map_err(MacSyncError::Json)?)
             .map_err(io)?;
         file.sync_all().map_err(io)?;
         rustix::fs::renameat(
@@ -1280,7 +1280,7 @@ impl<'a> ProjectSync<'a> {
         if value.is_null() {
             return Ok(None);
         }
-        serde_json::from_value(value)
+        studio_json::from_value(value)
             .map(Some)
             .map_err(MacSyncError::Json)
     }
@@ -1288,7 +1288,7 @@ impl<'a> ProjectSync<'a> {
     fn save_manifest(&self, manifest: &Manifest) -> Result<(), MacSyncError> {
         save_json(
             &self.path("manifest.json"),
-            &serde_json::to_value(manifest).map_err(MacSyncError::Json)?,
+            &studio_json::to_value(manifest).map_err(MacSyncError::Json)?,
         )
     }
 

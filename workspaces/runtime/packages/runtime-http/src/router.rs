@@ -4,10 +4,10 @@ use axum::http::{Request, StatusCode};
 use axum::middleware as axum_middleware;
 use axum::response::Response;
 use axum::routing::any;
-use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use studio_json::Value;
 use studio_runtime_process::operational_log::OperationalLog;
 use studio_runtime_services::change_notifications::ChangeNotificationHub;
 use studio_runtime_services::token_rate::TokenRateHub;
@@ -804,7 +804,7 @@ pub(crate) fn validation_probe_router(
         let body_schema = operation.pointer("/requestBody/content/application~1json/schema");
         let required = operation
             .pointer("/requestBody/required")
-            .and_then(serde_json::Value::as_bool)
+            .and_then(studio_json::Value::as_bool)
             == Some(true);
         let handler = if method == "GET" && path == "/api/sync/stream" {
             probe_typed_sync_query as ProbeHandler
@@ -885,7 +885,7 @@ fn probe_without_body(
 async fn probe_echo(state: HttpState, request: Request<Body>, body_kind: u8) -> Response {
     use axum::extract::{FromRequest, FromRequestParts};
     use axum::response::IntoResponse;
-    use serde_json::{Map, Value};
+    use studio_json::{Map, Value};
 
     let (mut parts, body) = request.into_parts();
     let query = match crate::routes::extractors::QueryParams::from_request_parts(&mut parts, &state)
@@ -1008,7 +1008,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::routing::post;
     use axum::{Json, Router};
-    use serde_json::Value;
+    use studio_json::Value;
     use tower::ServiceExt;
 
     use studio_runtime_store::{RuntimeStore, SyncDocumentsRepository};
@@ -1086,15 +1086,15 @@ mod tests {
         state
             .etag_operations
             .insert(("GET".into(), "/api/rules".into()));
-        let payload = serde_json::json!({"rules": ["rule content ".repeat(512)]});
-        let expected = serde_json::to_vec(&payload).expect("JSON");
+        let payload = studio_json::json!({"rules": ["rule content ".repeat(512)]});
+        let expected = studio_json::to_vec(&payload).expect("JSON");
         let sse = format!("data: {}\n\n", "event".repeat(1024));
         let app = super::with_boundary(
             Router::new()
                 .route("/api/rules", get(move || async move { Json(payload) }))
                 .route(
                     "/api/session",
-                    get(|| async { Json(serde_json::json!({"ok": true})) }),
+                    get(|| async { Json(studio_json::json!({"ok": true})) }),
                 )
                 .route(
                     "/api/sync/stream",
@@ -1196,7 +1196,7 @@ mod tests {
                 "application/jsonp",
             ] {
                 let (state, _directory) = state();
-                let payload = serde_json::to_string(&"x".repeat(size - 2)).expect("JSON string");
+                let payload = studio_json::to_string(&"x".repeat(size - 2)).expect("JSON string");
                 assert_eq!(payload.len(), size);
                 let app =
                     super::with_boundary(
@@ -1235,10 +1235,16 @@ mod tests {
                     .expect("validator");
             let app = super::with_boundary(Router::new().route("/api/commands", post(move || async move {
                 store.transaction(|tx| {
+<<<<<<< head
                     SyncDocumentsRepository::put_entity(tx, "project", "project", serde_json::json!({"id": "project", "name":"Project", "tail": "entity content ".repeat(512)}), false)?;
+||||||| base
+                    SyncDocumentsRepository::put_entity(tx, "agent", "agent", serde_json::json!({"id": "agent", "name":"Agent", "status":"idle", "source":"managed", "tail": "entity content ".repeat(512)}), false)?;
+=======
+                    SyncDocumentsRepository::put_entity(tx, "agent", "agent", studio_json::json!({"id": "agent", "name":"Agent", "status":"idle", "source":"managed", "tail": "entity content ".repeat(512)}), false)?;
+>>>>>>> https/main
                     Ok(())
                 }).await.expect("entity mutation");
-                Json(serde_json::json!({
+                Json(studio_json::json!({
                     "ok": true,
                     "result": "mutation result ".repeat(512),
                 }))
@@ -1273,7 +1279,7 @@ mod tests {
             } else {
                 bytes.to_vec()
             };
-            let result: Value = serde_json::from_slice(&bytes).expect("mutation result");
+            let result: Value = studio_json::from_slice(&bytes).expect("mutation result");
             assert_eq!(result["ok"], true);
             assert!(
                 result["result"]
@@ -1331,23 +1337,23 @@ mod tests {
     async fn entity_only_commits_preserve_volatile_resources_and_refresh_entity_refs() {
         let (state, store, _directory) = state_with_store().await;
         let volatile = [
-            serde_json::json!({"kind":"accounts"}),
-            serde_json::json!({"kind":"queue","agentId":"agent"}),
+            studio_json::json!({"kind":"accounts"}),
+            studio_json::json!({"kind":"queue","agentId":"agent"}),
         ];
         let entities = vec![
-            serde_json::json!({"kind":"costs"}),
-            serde_json::json!({"kind":"desktop"}),
-            serde_json::json!({"kind":"session-cost","agentId":"agent"}),
-            serde_json::json!({"kind":"terminals"}),
-            serde_json::json!({"kind":"agentDetail","agentId":"agent"}),
-            serde_json::json!({"kind":"monitors","agentId":"agent"}),
-            serde_json::json!({"kind":"state"}),
-            serde_json::json!({"kind":"transcript","agentId":"agent"}),
-            serde_json::json!({"kind":"transcripts"}),
-            serde_json::json!({"kind":"room","roomId":"room"}),
-            serde_json::json!({"kind":"tasks","agentId":"agent"}),
-            serde_json::json!({"kind":"task","taskId":"task"}),
-            serde_json::json!({"kind":"workspace","agentId":"agent"}),
+            studio_json::json!({"kind":"costs"}),
+            studio_json::json!({"kind":"desktop"}),
+            studio_json::json!({"kind":"session-cost","agentId":"agent"}),
+            studio_json::json!({"kind":"terminals"}),
+            studio_json::json!({"kind":"agentDetail","agentId":"agent"}),
+            studio_json::json!({"kind":"monitors","agentId":"agent"}),
+            studio_json::json!({"kind":"state"}),
+            studio_json::json!({"kind":"transcript","agentId":"agent"}),
+            studio_json::json!({"kind":"transcripts"}),
+            studio_json::json!({"kind":"room","roomId":"room"}),
+            studio_json::json!({"kind":"tasks","agentId":"agent"}),
+            studio_json::json!({"kind":"task","taskId":"task"}),
+            studio_json::json!({"kind":"workspace","agentId":"agent"}),
         ];
         let resources = volatile
             .iter()
@@ -1360,14 +1366,14 @@ mod tests {
                     tx,
                     "agent",
                     "agent",
-                    serde_json::json!({"id":"agent"}),
+                    studio_json::json!({"id":"agent"}),
                     false,
                 )?;
                 studio_runtime_store::SyncDocumentsRepository::put_entity(
                     tx,
                     "transcript:agent",
                     "item",
-                    serde_json::json!({"text":"hello"}),
+                    studio_json::json!({"text":"hello"}),
                     false,
                 )?;
                 Ok(())
@@ -1387,7 +1393,13 @@ mod tests {
         assert_eq!(view.resources, entities);
         assert!(!view.entity_reset, "known entity writes remain incremental");
         store.transaction(|tx| {
+<<<<<<< head
             studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "project", "project", serde_json::json!({"id":"project"}), false)?;
+||||||| base
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "agent", "agent", serde_json::json!({"id":"agent","status":"idle"}), false)?;
+=======
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "agent", "agent", studio_json::json!({"id":"agent","status":"idle"}), false)?;
+>>>>>>> https/main
             tx.execute("INSERT INTO runtime_items(id,agent,created,record) VALUES('mixed','agent',1,'{}')", [])?;
             Ok(())
         }).await.expect("mixed commit");
@@ -1497,11 +1509,11 @@ mod tests {
             )
             .expect("named resource publication succeeds");
         let view = notifications
-            .changes_since(&[serde_json::json!({"kind": "multi-server"})], Some(0))
+            .changes_since(&[studio_json::json!({"kind": "multi-server"})], Some(0))
             .expect("named resource cursor reads");
         assert_eq!(
             view.resources,
-            vec![serde_json::json!({"kind": "multi-server"})]
+            vec![studio_json::json!({"kind": "multi-server"})]
         );
         assert_eq!(view.cursor.resource_revision, 1);
         assert_eq!(view.cursor.revision, 2);
@@ -1708,7 +1720,7 @@ mod tests {
         );
         let response = app.clone().oneshot(request).await.expect("response");
         assert_eq!(response.status(), StatusCode::OK);
-        let response_body: Value = serde_json::from_slice(
+        let response_body: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 1024)
                 .await
                 .expect("response body reads"),
@@ -1721,7 +1733,7 @@ mod tests {
         let stored = SyncDocumentsRepository::preference_payload(&reader, "user")
             .expect("preference payload reads")
             .expect("preference payload was persisted");
-        let stored: Value = serde_json::from_str(&stored).expect("stored payload is JSON");
+        let stored: Value = studio_json::from_str(&stored).expect("stored payload is JSON");
         assert_eq!(stored["value"]["fields"][theme_key]["value"], "dark");
         drop(reader);
 
@@ -1842,14 +1854,14 @@ mod tests {
             .expect("request builds");
         let response = app.clone().oneshot(request).await.expect("response");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body: Value = serde_json::from_slice(
+        let body: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 1024)
                 .await
                 .expect("body reads"),
         )
         .expect("error is JSON");
         assert_eq!(body["error"], "Invalid request");
-        assert_eq!(body["location"], serde_json::json!(["body"]));
+        assert_eq!(body["location"], studio_json::json!(["body"]));
 
         let request = Request::builder()
             .method("GET")
@@ -1860,14 +1872,14 @@ mod tests {
             .expect("request builds");
         let response = app.oneshot(request).await.expect("response");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body: Value = serde_json::from_slice(
+        let body: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 1024)
                 .await
                 .expect("body reads"),
         )
         .expect("error is JSON");
         assert_eq!(body["error"], "Invalid request");
-        assert_eq!(body["location"], serde_json::json!(["query"]));
+        assert_eq!(body["location"], studio_json::json!(["query"]));
     }
 
     #[tokio::test]
@@ -1890,14 +1902,14 @@ mod tests {
             .expect("request builds");
         let response = app.oneshot(request).await.expect("response");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body: Value = serde_json::from_slice(
+        let body: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 1024)
                 .await
                 .expect("body reads"),
         )
         .expect("validation envelope is JSON");
         assert_eq!(body["error"], "Invalid request");
-        assert_eq!(body["location"], serde_json::json!(["body"]));
+        assert_eq!(body["location"], studio_json::json!(["body"]));
     }
 
     #[tokio::test]
@@ -2094,13 +2106,13 @@ mod tests {
             .await
             .expect("required body response");
         assert_eq!(required.status(), StatusCode::BAD_REQUEST);
-        let body: Value = serde_json::from_slice(
+        let body: Value = studio_json::from_slice(
             &to_bytes(required.into_body(), 1024)
                 .await
                 .expect("body reads"),
         )
         .expect("validation error JSON");
-        assert_eq!(body["location"], serde_json::json!(["body"]));
+        assert_eq!(body["location"], studio_json::json!(["body"]));
 
         let streamed = Body::from_stream(futures_util::stream::iter([
             Ok::<_, std::convert::Infallible>(axum::body::Bytes::from_static(b"{\"prompt\":")),
@@ -2117,13 +2129,13 @@ mod tests {
             .await
             .expect("chunked body response");
         assert_eq!(chunked.status(), StatusCode::OK);
-        let value: Value = serde_json::from_slice(
+        let value: Value = studio_json::from_slice(
             &to_bytes(chunked.into_body(), 1024)
                 .await
                 .expect("streamed response"),
         )
         .expect("probe JSON");
-        assert_eq!(value["body"], serde_json::json!({"prompt":"x"}));
+        assert_eq!(value["body"], studio_json::json!({"prompt":"x"}));
     }
 
     #[tokio::test]
@@ -2139,13 +2151,13 @@ mod tests {
             .expect("request builds");
         let response = app.oneshot(request).await.expect("response");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body: Value = serde_json::from_slice(
+        let body: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 1024)
                 .await
                 .expect("body reads"),
         )
         .expect("error envelope parses");
-        assert_eq!(body["location"], serde_json::json!(["query"]));
+        assert_eq!(body["location"], studio_json::json!(["query"]));
     }
 
     #[tokio::test]
@@ -2209,10 +2221,10 @@ mod tests {
                     let bytes = to_bytes(response.into_body(), 4096)
                         .await
                         .expect("probe response");
-                    let value: Value = serde_json::from_slice(&bytes).expect("probe JSON");
+                    let value: Value = studio_json::from_slice(&bytes).expect("probe JSON");
                     assert_eq!(
                         value["body"],
-                        serde_json::from_str::<Value>(valid_json).expect("valid fixture JSON")
+                        studio_json::from_str::<Value>(valid_json).expect("valid fixture JSON")
                     );
                 }
                 if path == "/api/assets" && length == limit {

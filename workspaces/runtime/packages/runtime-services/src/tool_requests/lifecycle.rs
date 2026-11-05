@@ -1,6 +1,6 @@
 //! Adapter from validated persisted receipts to the pure operation state machine.
 use super::{ToolRequestError, text};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_operations::*;
 use studio_runtime_schema::persistence::{ToolRequestOutcome as O, ToolRequestStatus as S};
 
@@ -162,10 +162,10 @@ pub(crate) fn settle(
         .find(|item| item["type"] == "inputText")
         .and_then(|item| item["text"].as_str());
     let tool: RequestTool =
-        serde_json::from_value(record["tool"].clone()).unwrap_or(RequestTool::Other);
+        studio_json::from_value(record["tool"].clone()).unwrap_or(RequestTool::Other);
     let server_outcome = if tool == RequestTool::OrchestrationServers {
         first
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .and_then(|s| studio_json::from_str::<Value>(s).ok())
             .and_then(|v| match v["outcome"].as_str() {
                 Some("applied") => Some(Outcome::Applied),
                 Some("not_applied") => Some(Outcome::NotApplied),

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::bounded_child::{self, PipeOutput};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::MAX_SAFE_INTEGER;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -245,13 +245,13 @@ struct TaskFeedCursorInput {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(try_from = "serde_json::Number")]
+#[serde(try_from = "studio_json::Number")]
 struct CursorNumber(f64);
 
-impl TryFrom<serde_json::Number> for CursorNumber {
+impl TryFrom<studio_json::Number> for CursorNumber {
     type Error = &'static str;
 
-    fn try_from(value: serde_json::Number) -> Result<Self, Self::Error> {
+    fn try_from(value: studio_json::Number) -> Result<Self, Self::Error> {
         if value
             .as_i64()
             .is_some_and(|integer| !(0..=MAX_SAFE_INTEGER).contains(&integer))
@@ -283,7 +283,7 @@ pub fn parse_task_cursor(
     let Some(value) = value.filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
-    let parsed: TaskFeedCursorInput = serde_json::from_str(value).map_err(|_| InvalidCursor)?;
+    let parsed: TaskFeedCursorInput = studio_json::from_str(value).map_err(|_| InvalidCursor)?;
     let time = match kind {
         CursorKind::Current if parsed.created.is_none() => parsed.updated,
         CursorKind::Before if parsed.updated.is_none() => parsed.created,
@@ -318,7 +318,7 @@ struct UpdatedCursor {
 
 #[derive(serde::Serialize)]
 struct BeforeCursor {
-    created: serde_json::Number,
+    created: studio_json::Number,
     id: String,
 }
 
@@ -682,8 +682,8 @@ mod tests {
         CursorKind, GitError, parse_task_cursor, run_git_program, run_git_program_timeout,
         task_feed_response,
     };
-    use serde_json::json;
     use std::time::Duration;
+    use studio_json::json;
 
     #[test]
     fn review_inbox_keeps_typed_work_root_and_missing_root() {
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn changes_cursor_advances_to_the_last_row_and_empty_poll_preserves_it() {
-        let task = serde_json::from_str(r#"{"id":"a","agent":"agent","created":1,"finished":2,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
+        let task = studio_json::from_str(r#"{"id":"a","agent":"agent","created":1,"finished":2,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
         let first = task_feed_response(
             vec![task],
             false,
@@ -787,7 +787,7 @@ mod tests {
 
     #[test]
     fn first_page_cursor_and_history_cursor_follow_python_contract() {
-        let task = serde_json::from_str(r#"{"id":"a","agent":"agent","created":2.0,"finished":5.0,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
+        let task = studio_json::from_str(r#"{"id":"a","agent":"agent","created":2.0,"finished":5.0,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
         let response = task_feed_response(vec![task], true, None, None);
         let cursor = response.cursor.unwrap();
         assert_eq!((cursor.updated, cursor.id.as_str()), (5.0, "a"));

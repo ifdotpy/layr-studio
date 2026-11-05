@@ -1,4 +1,4 @@
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_services::title_generation::title_model;
 
 #[test]

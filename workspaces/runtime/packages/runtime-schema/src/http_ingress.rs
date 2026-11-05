@@ -57,20 +57,20 @@ mod tests {
     #[test]
     fn optional_object_rejects_null_and_arrays() {
         assert!(
-            serde_json::from_str::<Outer>("{}")
+            studio_json::from_str::<Outer>("{}")
                 .expect("missing")
                 .nested
                 .is_none()
         );
         assert_eq!(
-            serde_json::from_str::<Outer>(r#"{"nested":{"value":3}}"#)
+            studio_json::from_str::<Outer>(r#"{"nested":{"value":3}}"#)
                 .expect("object")
                 .nested
                 .expect("nested")
                 .value,
             3
         );
-        assert!(serde_json::from_str::<Outer>(r#"{"nested":null}"#).is_err());
-        assert!(serde_json::from_str::<Outer>(r#"{"nested":[3]}"#).is_err());
+        assert!(studio_json::from_str::<Outer>(r#"{"nested":null}"#).is_err());
+        assert!(studio_json::from_str::<Outer>(r#"{"nested":[3]}"#).is_err());
     }
 }

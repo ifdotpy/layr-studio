@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
 use serde::ser::{Serialize, SerializeMap, Serializer};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 
 use crate::schema::{TableRequirement, TriggerRequirement};
 use crate::{CachedSql, StoreError, StoreResult};
@@ -296,7 +296,7 @@ pub(crate) fn merge_agent_row(
     ) -> StoreResult<()> {
         *target = row
             .get::<_, Option<String>>(index)?
-            .map(|encoded| serde_json::from_str(&encoded).map_err(|_| invalid(id)))
+            .map(|encoded| studio_json::from_str(&encoded).map_err(|_| invalid(id)))
             .transpose()?
             .flatten();
         Ok(())
@@ -305,7 +305,7 @@ pub(crate) fn merge_agent_row(
         .get::<_, Option<String>>(0)?
         .map(|encoded| {
             crate::records::deserialize_optional_safe_counter(
-                &mut serde_json::Deserializer::from_str(&encoded),
+                &mut studio_json::Deserializer::from_str(&encoded),
             )
             .map_err(|_| invalid(id))
         })
@@ -345,7 +345,7 @@ pub fn merged_record(connection: &Connection, id: &str) -> StoreResult<Option<Va
         )
         .optional()?;
     raw.map(|raw| {
-        let mut record = serde_json::from_str(&raw).map_err(|_| invalid(id))?;
+        let mut record = studio_json::from_str(&raw).map_err(|_| invalid(id))?;
         merge(connection, id, &mut record)?;
         Ok(record)
     })
@@ -392,13 +392,13 @@ pub fn merged_text(connection: &Connection, id: &str, raw: String) -> StoreResul
     };
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::Decode);
-    let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(&raw) else {
+    let Ok(Value::Object(mut fields)) = studio_json::from_str::<Value>(&raw) else {
         return Ok(raw);
     };
     merge_row(row, id, &mut fields)?;
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::TextRoundTrip);
-    Ok(serde_json::to_string(&fields)?)
+    Ok(studio_json::to_string(&fields)?)
 }
 
 /// [`merged_text`] for `(id, record)` agent rows.
@@ -425,7 +425,7 @@ pub(crate) fn merge_row(
                 fields.remove(*field);
             }
             ValueRef::Text(text) => {
-                let value = serde_json::from_slice(text).map_err(|_| invalid(id))?;
+                let value = studio_json::from_slice(text).map_err(|_| invalid(id))?;
                 fields.insert((*field).to_owned(), value);
             }
             ValueRef::Integer(_) | ValueRef::Real(_) | ValueRef::Blob(_) => {
@@ -460,7 +460,7 @@ impl Serialize for StoredRecord<'_> {
 
 /// The `runtime_agents.record` text of a checked agent object.
 fn stored_record(agent: &Map<String, Value>) -> StoreResult<String> {
-    Ok(serde_json::to_string(&StoredRecord(agent))?)
+    Ok(studio_json::to_string(&StoredRecord(agent))?)
 }
 
 /// Store all volatile fields of the complete agent for agent `id`.
@@ -468,7 +468,7 @@ fn put_fields(connection: &Connection, id: &str, agent: &Map<String, Value>) -> 
     let mut values: [Option<String>; AGENT_VOLATILE_FIELDS.len()] = Default::default();
     for (slot, field) in values.iter_mut().zip(AGENT_VOLATILE_FIELDS) {
         if let Some(value) = agent.get(field).filter(|value| !value.is_null()) {
-            *slot = Some(serde_json::to_string(value)?);
+            *slot = Some(studio_json::to_string(value)?);
         }
     }
     connection.execute_cached(
@@ -557,7 +557,7 @@ mod tests {
     use super::*;
     use crate::migrations::m2026_10_20_agents::MIGRATION_PRESERVED_TABLES;
     use crate::{AgentId, AgentRepository, RuntimeStore, system_reads};
-    use serde_json::json;
+    use studio_json::json;
 
     fn agents() -> Vec<Value> {
         vec![
@@ -586,7 +586,7 @@ mod tests {
             .optional()
             .expect("volatile row reads");
         (
-            serde_json::from_str(&record).expect("record JSON"),
+            studio_json::from_str(&record).expect("record JSON"),
             volatile,
         )
     }

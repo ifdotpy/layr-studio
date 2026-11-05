@@ -92,13 +92,13 @@ fn invalid_object(object: &'static str, id: String) -> RulesError {
 #[cfg(test)]
 mod tests {
     use super::{RuleActionName, RulesError, visible_rules};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::{AgentRecord, RuleRecord};
 
     #[test]
     fn rule_action_names_match_the_http_wire_contract() {
-        let openapi: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+        let openapi: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
                 .expect("HTTP contract parses");
         let wire = openapi["components"]["schemas"]["RuleBody"]["properties"]["action"]["enum"]
             .as_array()
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(RuleActionName::parse("unknown"), None);
     }
 
-    fn agent(id: &str, deleted_at: Option<serde_json::Value>) -> AgentRecord {
+    fn agent(id: &str, deleted_at: Option<studio_json::Value>) -> AgentRecord {
         let mut record = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
             "id": id,
             "rootId": id,
@@ -134,10 +134,10 @@ mod tests {
     fn rule(id: &str, agent: &str) -> RuleRecord {
         let raw = format!(
             r#"{{"id":{},"agent":{},"epoch":0,"name":"rule","kind":"interval","status":"active","intervalSeconds":60,"nextAt":1,"created":1,"command":"","text":"","checks":0,"wakes":0,"inFlight":false,"fileGeneration":0,"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"livenessCommand":"","event":""}}"#,
-            serde_json::to_string(id).expect("id"),
-            serde_json::to_string(agent).expect("agent")
+            studio_json::to_string(id).expect("id"),
+            studio_json::to_string(agent).expect("agent")
         );
-        serde_json::from_str(&raw).expect("rule record")
+        studio_json::from_str(&raw).expect("rule record")
     }
 
     #[test]
@@ -183,8 +183,8 @@ mod tests {
 /// Normalized save input; callers apply their own wire defaults before checking it.
 pub struct RuleSaveInput {
     pub kind: String,
-    pub minimum: Result<Option<serde_json::Number>, RuleSaveError>,
-    pub duration: Result<Option<serde_json::Number>, RuleSaveError>,
+    pub minimum: Result<Option<studio_json::Number>, RuleSaveError>,
+    pub duration: Result<Option<studio_json::Number>, RuleSaveError>,
     pub interval: Result<i64, RuleSaveError>,
     pub stall: Result<i64, RuleSaveError>,
     pub at: RuleTimeInput,
@@ -226,8 +226,8 @@ pub enum RuleKind {
     },
     Event,
     LowWorkers {
-        minimum: Option<serde_json::Number>,
-        duration: Option<serde_json::Number>,
+        minimum: Option<studio_json::Number>,
+        duration: Option<studio_json::Number>,
     },
 }
 impl RuleKind {
@@ -240,13 +240,13 @@ impl RuleKind {
             Self::LowWorkers { .. } => "low_workers",
         }
     }
-    pub fn minimum(&self) -> Option<&serde_json::Number> {
+    pub fn minimum(&self) -> Option<&studio_json::Number> {
         match self {
             Self::LowWorkers { minimum, .. } => minimum.as_ref(),
             Self::Interval | Self::Once | Self::File { .. } | Self::Event => None,
         }
     }
-    pub fn duration(&self) -> Option<&serde_json::Number> {
+    pub fn duration(&self) -> Option<&studio_json::Number> {
         match self {
             Self::LowWorkers { duration, .. } => duration.as_ref(),
             Self::Interval | Self::Once | Self::File { .. } | Self::Event => None,
@@ -346,14 +346,14 @@ impl CheckedRuleSave {
             }
             if !minimum
                 .as_ref()
-                .and_then(serde_json::Number::as_f64)
+                .and_then(studio_json::Number::as_f64)
                 .is_none_or(|value| (1.0..=255.0).contains(&value))
             {
                 return Err(RuleSaveError::Minimum);
             }
             if !duration
                 .as_ref()
-                .and_then(serde_json::Number::as_f64)
+                .and_then(studio_json::Number::as_f64)
                 .is_none_or(|value| (1.0..=525_600.0).contains(&value))
             {
                 return Err(RuleSaveError::Duration);
@@ -458,7 +458,7 @@ pub fn persisted_rule(
         },
     };
     let low_workers = matches!(kind, StoredKind::LowWorkers { .. });
-    let now = serde_json::Number::from_f64(context.now).ok_or(RuleSaveError::At)?;
+    let now = studio_json::Number::from_f64(context.now).ok_or(RuleSaveError::At)?;
     let previous = context.previous;
     Ok(RuleRecord {
         id: context.id.to_owned(),
@@ -479,8 +479,8 @@ pub fn persisted_rule(
             .interval
             .try_into()
             .map_err(|_| RuleSaveError::Interval)?,
-        next_at: serde_json::Number::from_f64(fields.at).ok_or(RuleSaveError::At)?,
-        at: Some(serde_json::Number::from_f64(fields.at).ok_or(RuleSaveError::At)?),
+        next_at: studio_json::Number::from_f64(fields.at).ok_or(RuleSaveError::At)?,
+        at: Some(studio_json::Number::from_f64(fields.at).ok_or(RuleSaveError::At)?),
         event: fields.event.as_str().to_owned(),
         command: fields
             .command
@@ -550,11 +550,11 @@ pub fn persisted_rule(
     })
 }
 fn rule_bound<const MIN: i64, const MAX: u64>(
-    value: Option<&serde_json::Number>,
+    value: Option<&studio_json::Number>,
     error: RuleSaveError,
 ) -> Result<studio_runtime_schema::bounded_integer::BoundedInteger<MIN, MAX>, RuleSaveError> {
     let value = value
-        .and_then(serde_json::Number::as_f64)
+        .and_then(studio_json::Number::as_f64)
         .filter(|v| v.fract() == 0.0)
         .ok_or(error)?;
     (value as i64).try_into().map_err(|_| error)

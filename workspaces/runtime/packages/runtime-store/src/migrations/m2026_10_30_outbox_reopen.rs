@@ -53,7 +53,7 @@ mod tests {
         let tx = db.transaction().unwrap();
         apply(&tx).unwrap();
         apply(&tx).unwrap();
-        let get = |id: &str| -> serde_json::Value {
+        let get = |id: &str| -> studio_json::Value {
             let text: String = tx
                 .query_row(
                     "SELECT payload FROM runtime_outbox WHERE id=?1",
@@ -61,12 +61,12 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            serde_json::from_str(&text).unwrap()
+            studio_json::from_str(&text).unwrap()
         };
-        assert_eq!(get("card")["reopen"], serde_json::json!({"fire_at":null}));
+        assert_eq!(get("card")["reopen"], studio_json::json!({"fire_at":null}));
         assert!(get("card").get("unanswered").is_none());
         assert!(get("plain").get("unanswered").is_none());
         assert!(get("plain").get("reopen").is_none());
-        assert_eq!(get("fresh")["reopen"]["fire_at"], serde_json::json!(5.0));
+        assert_eq!(get("fresh")["reopen"]["fire_at"], studio_json::json!(5.0));
     }
 }

@@ -74,7 +74,7 @@ mod workspace_views;
 
 use manifest::RouteGroup;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use studio_json::Value;
 
 type RegisteredRouteGroup = (&'static str, fn() -> RouteGroup);
 
@@ -86,9 +86,9 @@ pub(super) fn accounts_response(
 
     let project = |account: studio_runtime_services::account_policy::PublicAccount| {
         let eligibility = account.eligibility();
-        let mut value = serde_json::to_value(account)?;
-        value["eligibility"] = serde_json::to_value(eligibility)?;
-        serde_json::from_value::<Account>(value)
+        let mut value = studio_json::to_value(account)?;
+        value["eligibility"] = studio_json::to_value(eligibility)?;
+        studio_json::from_value::<Account>(value)
     };
     let accounts = snapshot
         .accounts
@@ -141,7 +141,7 @@ pub(super) fn accounts_response(
     Ok(axum::Json(AccountsResponse {
         accounts,
         archived_accounts,
-        default_account_key: serde_json::from_value(snapshot.default_account_key)
+        default_account_key: studio_json::from_value(snapshot.default_account_key)
             .map_err(|_| crate::error::ApiError::internal())?,
         default_account_groups: snapshot.default_account_groups,
         logins,
@@ -151,7 +151,7 @@ pub(super) fn accounts_response(
 }
 
 fn generated_json<T: DeserializeOwned>(value: Value) -> Result<T, crate::error::ApiError> {
-    serde_json::from_value::<T>(value).map_err(crate::error::ApiError::json)
+    studio_json::from_value::<T>(value).map_err(crate::error::ApiError::json)
 }
 
 fn registered_route_groups() -> Vec<RegisteredRouteGroup> {
@@ -275,17 +275,17 @@ mod registration_tests {
 
 #[cfg(test)]
 mod stored_shape_tests {
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn account_response_includes_server_eligibility() {
         let snapshot = studio_runtime_services::account_policy::AccountsSnapshot {
-            accounts: vec![serde_json::from_value(json!({"id":"a","home":"/a","label":"A","source":"test","provider":"codex","status":"ready"})).unwrap()],
+            accounts: vec![studio_json::from_value(json!({"id":"a","home":"/a","label":"A","source":"test","provider":"codex","status":"ready"})).unwrap()],
             archived_accounts: vec![], default_account_key: json!("a"), default_account_groups: vec![], logins: vec![], known_account_keys: Default::default(),
         };
         let response = super::accounts_response(snapshot).unwrap().0;
         assert_eq!(
-            serde_json::to_value(response).unwrap()["accounts"][0]["eligibility"]["kind"],
+            studio_json::to_value(response).unwrap()["accounts"][0]["eligibility"]["kind"],
             "available"
         );
     }

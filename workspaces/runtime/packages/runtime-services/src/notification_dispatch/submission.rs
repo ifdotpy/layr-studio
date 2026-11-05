@@ -1,7 +1,7 @@
 //! Submission validation, team-boundary policy, and canonical input records.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::request_results::AdmittedRequest;
 use studio_runtime_store::{
     ExecutionHistoryRepository, NotificationDispatchRepository, SchedulerRepository, Transaction,
@@ -50,7 +50,7 @@ pub(super) fn record_submission(
                 ExecutionHistoryRepository::attempt(tx, attempt_id)?
                     .and_then(|attempt| attempt.provider_submission)
                     .map(|raw| {
-                        serde_json::from_str(raw.get())
+                        studio_json::from_str(raw.as_str())
                             .map_err(|_| stored("runtime_event_meta", &submission.first_event_id))
                     })
                     .transpose()?
@@ -62,7 +62,7 @@ pub(super) fn record_submission(
             Some(owner) => Some(owner),
             None => input_owner
                 .map(|owner| {
-                    serde_json::from_str(owner.get())
+                    studio_json::from_str(owner.as_str())
                         .map_err(|_| stored("runtime_event_meta", &submission.first_event_id))
                 })
                 .transpose()?,
@@ -321,7 +321,7 @@ fn validate_submission_policy(
         return Ok(());
     }
     let payload: Value =
-        serde_json::from_str(text).map_err(|_| stored("runtime_events", event_id))?;
+        studio_json::from_str(text).map_err(|_| stored("runtime_events", event_id))?;
     if !payload.is_object() {
         return Err(stored("runtime_events", event_id));
     }

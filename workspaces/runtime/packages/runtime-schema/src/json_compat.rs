@@ -1,5 +1,5 @@
 //! Canonical legacy JSON spellings used by durable receipt identities.
-use serde_json::Value;
+use studio_json::Value;
 
 mod serializer;
 
@@ -11,7 +11,7 @@ pub fn python_json(value: &Value) -> String {
 /// Serialize typed data with Python-compatible sorted keys and ASCII escaping.
 pub fn python_json_serialized<T: serde::Serialize + ?Sized>(
     value: &T,
-) -> Result<String, serde_json::Error> {
+) -> Result<String, studio_json::Error> {
     serializer::serialize(value, ", ", ": ", true)
 }
 
@@ -28,7 +28,7 @@ pub fn python_json_compact(value: &Value) -> String {
 /// Serialize typed data using the legacy sorted UTF-8 compact spelling.
 pub fn python_json_compact_serialized<T: serde::Serialize + ?Sized>(
     value: &T,
-) -> Result<String, serde_json::Error> {
+) -> Result<String, studio_json::Error> {
     serializer::serialize(value, ",", ":", false)
 }
 
@@ -145,7 +145,7 @@ mod serialization_tests {
         python_float_json, python_json, python_json_compact, python_json_serialized,
         python_json_utf8, python_json_with_separators, python_quote,
     };
-    use serde_json::Value;
+    use studio_json::Value;
 
     fn old_json(value: &Value, item: &str, key_separator: &str, ascii: bool) -> String {
         match value {
@@ -181,7 +181,7 @@ mod serialization_tests {
             }
         }
     }
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn serialize_matches_existing_python_json_bytes() {
@@ -225,12 +225,12 @@ mod serialization_tests {
             values: vec![-0.0, 1e-7, 1e20],
             a: None,
         };
-        let old = record.serialize(serde_json::value::Serializer).unwrap();
+        let old = record.serialize(studio_json::value::Serializer).unwrap();
         assert_eq!(
             python_json_serialized(&record).unwrap(),
             old_json(&old, ", ", ": ", true)
         );
-        let raw = serde_json::value::RawValue::from_string("{\"a\":1}".into()).unwrap();
+        let raw = studio_json::OwnedRawJson::from_string("{\"a\":1}".into()).unwrap();
         assert!(python_json_serialized(&raw).is_err());
     }
 }

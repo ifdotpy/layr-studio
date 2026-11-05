@@ -1,6 +1,6 @@
 //! Paper keys go only to the person's Terminal, never a captured Studio stream.
-use serde_json::Value;
 use std::{io::Write, path::Path};
+use studio_json::Value;
 
 fn script(prefix: &str, program: &str) -> Result<tempfile::NamedTempFile, String> {
     if prefix.is_empty()

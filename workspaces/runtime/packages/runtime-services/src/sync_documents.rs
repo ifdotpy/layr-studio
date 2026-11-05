@@ -1,6 +1,6 @@
 //! Transactional publication of browser-owned sync documents.
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::{RuntimeStore, StoreError, SyncDocument, SyncDocumentsRepository};
 use thiserror::Error;
 
@@ -49,7 +49,7 @@ pub async fn push_drafts(
                             });
                         }
                         let value =
-                            serde_json::from_str::<Value>(&current.payload).map_err(|_| {
+                            studio_json::from_str::<Value>(&current.payload).map_err(|_| {
                                 StoreError::InvalidSyncObject {
                                     scope: "drafts".to_owned(),
                                     id: id.clone(),
@@ -84,7 +84,7 @@ pub async fn push_drafts(
                         }
                     }
 
-                    let payload = serde_json::to_string(&row.payload).map_err(StoreError::from)?;
+                    let payload = studio_json::to_string(&row.payload).map_err(StoreError::from)?;
                     changed |=
                         SyncDocumentsRepository::put_draft(transaction, id, &payload, row.deleted)?;
                 }
@@ -142,7 +142,7 @@ pub fn with_entity_delta(
     if !rows.is_empty() {
         result["_syncEntities"] = Value::Array(rows.iter().filter_map(entity_change).collect());
         if complete {
-            result["_syncEntitiesAfter"] = serde_json::json!(after);
+            result["_syncEntitiesAfter"] = studio_json::json!(after);
         }
     }
     Ok(result)
@@ -151,7 +151,7 @@ pub fn with_entity_delta(
 /// Normalize a historical stored entity envelope without serializing it again.
 /// Pull, stream, and every mutation envelope share this read boundary.
 pub fn entity_payload(row: &studio_runtime_store::EntityRow) -> Option<Value> {
-    let mut payload: Value = serde_json::from_str(row.payload.as_deref()?).ok()?;
+    let mut payload: Value = studio_json::from_str(row.payload.as_deref()?).ok()?;
     if !matches!(
         studio_runtime_schema::normalize_sync_entity_payload(
             &row.collection,

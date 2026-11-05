@@ -1,7 +1,7 @@
 //! Bounded continuation snapshots and atomic row writes on the runtime's existing writer.
 use crate::{AgentId, AgentRecord, AgentRepository, StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 #[derive(Clone, Copy, Debug)]
 pub enum ContinuationTable {
     Usage,
@@ -26,7 +26,7 @@ fn raw(db: &Connection, table: &'static str, id: &str) -> StoreResult<Option<Val
         )
         .optional()?;
     text.map(|s| {
-        let mut value = serde_json::from_str(&s).map_err(|_| StoreError::InvalidStoredObject {
+        let mut value = studio_json::from_str(&s).map_err(|_| StoreError::InvalidStoredObject {
             table,
             id: id.into(),
         })?;
@@ -103,7 +103,7 @@ impl ContinuationRepository {
                 table: table.name(),
                 id: id.into(),
             };
-            Some(serde_json::from_str::<Value>(&row.ok_or_else(invalid)?).map_err(|_| invalid())?)
+            Some(studio_json::from_str::<Value>(&row.ok_or_else(invalid)?).map_err(|_| invalid())?)
         } else {
             None
         };
@@ -159,11 +159,11 @@ impl ContinuationRepository {
                 id: id.into(),
             });
         }
-        db.execute(&format!("INSERT INTO {}(id,agent,record) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET record=excluded.record",table.name()),params![id,agent,serde_json::to_string(record)?])?;
+        db.execute(&format!("INSERT INTO {}(id,agent,record) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET record=excluded.record",table.name()),params![id,agent,studio_json::to_string(record)?])?;
         Ok(())
     }
     pub fn put_agent(db: &Connection, r: &Value) -> StoreResult<()> {
-        let agent: AgentRecord = serde_json::from_value(r.clone())?;
+        let agent: AgentRecord = studio_json::from_value(r.clone())?;
         Self::put_checked_agent(db, &agent)
     }
     pub fn put_checked_agent(db: &Connection, agent: &AgentRecord) -> StoreResult<()> {
@@ -196,8 +196,8 @@ mod tests {
     fn capacity_record_rejects_unknown_fields() {
         let valid = r#"{"id":"retry","accountKey":"a","attempt":1,"cause":"diskFull","cwd":"/work","epoch":1,"maxAttempts":2,"settings":{},"status":"scheduled","threadId":"t","turnId":"u"}"#;
         let unknown = valid.replace("\"id\":\"retry\"", "\"id\":\"retry\",\"unknown\":true");
-        assert!(serde_json::from_str::<CapacityContinuationRecord>(valid).is_ok());
-        assert!(serde_json::from_str::<CapacityContinuationRecord>(&unknown).is_err());
+        assert!(studio_json::from_str::<CapacityContinuationRecord>(valid).is_ok());
+        assert!(studio_json::from_str::<CapacityContinuationRecord>(&unknown).is_err());
     }
 
     #[test]

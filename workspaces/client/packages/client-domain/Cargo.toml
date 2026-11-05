@@ -10,7 +10,7 @@ workspace = true
 [dependencies]
 schemars.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+studio-json = { path = "../../../runtime/packages/json" }
 unicode-segmentation = "=1.13.3"
 pulldown-cmark = { version = "=0.13.5", default-features = false, features = ["html"] }
 html5ever = "=0.40.1"

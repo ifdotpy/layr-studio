@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::terminal_driver::{history_output, listing, output};
 use studio_runtime_store::{RuntimeStore, TerminalsRepository};
 
@@ -122,18 +122,21 @@ fn assert_python_rows(store: &RuntimeStore, expected: &Tables) {
     let connection = store.test_reader().expect("read Rust state");
     let archive = store.test_terminal_output().expect("read archive");
     for (table, rows) in [
-        ("user_terminals", serde_json::json!(expected.user_terminals)),
+        (
+            "user_terminals",
+            studio_json::json!(expected.user_terminals),
+        ),
         (
             "user_terminal_output",
-            serde_json::json!(expected.user_terminal_output),
+            studio_json::json!(expected.user_terminal_output),
         ),
         (
             "user_terminal_event_cursor",
-            serde_json::json!(expected.user_terminal_event_cursor),
+            studio_json::json!(expected.user_terminal_event_cursor),
         ),
         (
             "user_terminal_decoder_state",
-            serde_json::json!(expected.user_terminal_decoder_state),
+            studio_json::json!(expected.user_terminal_decoder_state),
         ),
     ] {
         let source = if table == "user_terminal_output" {
@@ -142,7 +145,7 @@ fn assert_python_rows(store: &RuntimeStore, expected: &Tables) {
             &connection
         };
         assert_eq!(
-            serde_json::json!(python_table_rows(source, table)),
+            studio_json::json!(python_table_rows(source, table)),
             rows,
             "stored terminal table {table} differs from the frozen corpus"
         );
@@ -158,10 +161,10 @@ async fn run_corpus() {
         .prefix("terminal-corpus-")
         .tempdir_in(&temp_root)
         .expect("Python-written terminal state");
-    let escaped_root = serde_json::to_string(&root.path()).expect("JSON fixture path");
+    let escaped_root = studio_json::to_string(&root.path()).expect("JSON fixture path");
     let fixture = include_str!("terminal_read_corpus.json")
         .replace("$ROOT", &escaped_root[1..escaped_root.len() - 1]);
-    let oracle: ReadCorpus = serde_json::from_str(&fixture).expect("frozen terminal corpus");
+    let oracle: ReadCorpus = studio_json::from_str(&fixture).expect("frozen terminal corpus");
     let store = std::sync::Arc::new(
         RuntimeStore::open(Some(root.path()))
             .await
@@ -201,7 +204,7 @@ async fn run_corpus() {
         .expect("Python-written terminal row");
     assert_eq!(
         row.record.value(),
-        serde_json::from_str::<Value>(&oracle.tables.user_terminals[0].1)
+        studio_json::from_str::<Value>(&oracle.tables.user_terminals[0].1)
             .expect("recorded terminal JSON")
     );
     assert_eq!(row.output, "alpha-Ж🙂-omega");

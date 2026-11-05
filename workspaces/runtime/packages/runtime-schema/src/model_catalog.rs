@@ -3,7 +3,7 @@
 
 use crate::ProviderKind;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 
 // A missing field is absent; a present field must deserialize as its declared
 // type. In particular, Option<Option<T>> preserves explicit upstream nulls.
@@ -151,10 +151,10 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    pub fn parse(value: Value) -> Result<Self, serde_json::Error> {
-        let catalog: Self = serde_json::from_value(value)?;
+    pub fn parse(value: Value) -> Result<Self, studio_json::Error> {
+        let catalog: Self = studio_json::from_value(value)?;
         if catalog.data.iter().any(|row| row.model.trim().is_empty()) {
-            return Err(<serde_json::Error as serde::de::Error>::custom(
+            return Err(<studio_json::Error as serde::de::Error>::custom(
                 "empty catalog model",
             ));
         }
@@ -196,7 +196,7 @@ pub fn schemas() -> Map<String, Value> {
     for schema in schemas.values_mut() {
         if schema.get("additionalProperties") == Some(&Value::Bool(true)) {
             schema["additionalProperties"] =
-                serde_json::json!({"$ref":"#/components/schemas/JsonValue"});
+                studio_json::json!({"$ref":"#/components/schemas/JsonValue"});
         }
     }
     schemas
@@ -205,7 +205,7 @@ pub fn schemas() -> Map<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn optional_nullable_fields_and_opaque_metadata_round_trip() {
@@ -216,13 +216,13 @@ mod tests {
         ] {
             let value = json!({"data":[row],"futureMetadata":42});
             let parsed = ModelCatalog::parse(value.clone()).expect("valid open catalog");
-            assert_eq!(serde_json::to_value(parsed).expect("serialize"), value);
+            assert_eq!(studio_json::to_value(parsed).expect("serialize"), value);
         }
         for provider in ProviderKind::ALL {
             let value = json!({"data":[{"model":"future", "provider":provider}]});
             let parsed = ModelCatalog::parse(value.clone()).expect("known Studio provider");
             assert_eq!(parsed.data[0].provider, Some(provider));
-            assert_eq!(serde_json::to_value(parsed).expect("serialize"), value);
+            assert_eq!(studio_json::to_value(parsed).expect("serialize"), value);
         }
     }
 

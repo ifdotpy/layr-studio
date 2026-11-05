@@ -25,8 +25,8 @@ impl Grant {
         }
     }
     /// A trust-list record without a `grant` field is `Full` (the default at pairing).
-    pub fn from_record(record: &serde_json::Value) -> Self {
-        match record.get("grant").and_then(serde_json::Value::as_str) {
+    pub fn from_record(record: &studio_json::Value) -> Self {
+        match record.get("grant").and_then(studio_json::Value::as_str) {
             Some("observe") => Self::Observe,
             _ => Self::Full,
         }
@@ -262,13 +262,13 @@ mod tests {
 
     #[test]
     fn grant_comes_from_the_record_and_defaults_to_full() {
-        assert_eq!(Grant::from_record(&serde_json::json!({})), Grant::Full);
+        assert_eq!(Grant::from_record(&studio_json::json!({})), Grant::Full);
         assert_eq!(
-            Grant::from_record(&serde_json::json!({"grant":"observe"})),
+            Grant::from_record(&studio_json::json!({"grant":"observe"})),
             Grant::Observe
         );
         assert_eq!(
-            Grant::from_record(&serde_json::json!({"grant":"bogus"})),
+            Grant::from_record(&studio_json::json!({"grant":"bogus"})),
             Grant::Full
         );
     }

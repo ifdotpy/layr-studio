@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
-use serde_json::{Value, json};
 use std::{fs, path::Path};
+use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{
     HANDLE_LIMIT, HandleSnapshot, NativeId, ReceiptSnapshot, WriteDecision,
 };
@@ -65,7 +65,7 @@ fn template_mode(seed: Seed) -> tempfile::TempDir {
 fn supervisor_python_written_decision_corpus() {
     let root = template(true);
     let cases: Vec<Value> =
-        serde_json::from_slice(&fs::read(root.path().join("cases.json")).unwrap()).unwrap();
+        studio_json::from_slice(&fs::read(root.path().join("cases.json")).unwrap()).unwrap();
     let full = std::env::var("STUDIO_RUNTIME_CORPUS_FULL").as_deref() == Ok("1");
     assert_eq!(cases.len(), if full { 159 } else { 51 });
     for case in cases {
@@ -96,7 +96,7 @@ fn supervisor_python_written_decision_corpus() {
         let result = state.write(
             prior.as_ref(),
             &digest,
-            serde_json::from_value::<Option<NativeId>>(case["native"].clone())
+            studio_json::from_value::<Option<NativeId>>(case["native"].clone())
                 .unwrap()
                 .as_ref(),
             &case["message"],
@@ -176,7 +176,7 @@ fn supervisor_journal_receipts_replay_ack_and_restart() {
     );
     let pending = json!({"notification":"still buffered"});
     journal.append("fixture", 1, 2, "stdout", &pending).unwrap();
-    let pending_bytes = serde_json::to_string(&pending).unwrap().len() as u64;
+    let pending_bytes = studio_json::to_string(&pending).unwrap().len() as u64;
     assert_eq!(
         journal.handle("fixture").unwrap().unwrap().buffered,
         pending_bytes
@@ -430,7 +430,7 @@ fn supervisor_journal_lifecycle_failpoints_preserve_all_rows() {
                 .close_unknown(
                     &journal.handle(handle).unwrap().unwrap(),
                     100.0,
-                    &serde_json::from_str(r#"{"blocked":null}"#).unwrap(),
+                    &studio_json::from_str(r#"{"blocked":null}"#).unwrap(),
                 )
                 .is_err(),
             "recover" => journal
@@ -443,7 +443,7 @@ fn supervisor_journal_lifecycle_failpoints_preserve_all_rows() {
                 .is_err(),
             "retire" => journal.retire(handle, 1, true, true).is_err(),
             _ => journal
-                .save_recovery(&serde_json::from_str(r#"{"blocked":null}"#).unwrap())
+                .save_recovery(&studio_json::from_str(r#"{"blocked":null}"#).unwrap())
                 .is_err(),
         };
         assert!(failed, "{action}/{table}");
@@ -656,11 +656,11 @@ fn supervisor_open_requires_cwd_but_accepts_null() {
     use studio_runtime_providers::supervisor_protocol::Request;
     let root = template_mode(Seed::Requests);
     let cases: Vec<Value> =
-        serde_json::from_slice(&fs::read(root.path().join("requests.json")).unwrap()).unwrap();
+        studio_json::from_slice(&fs::read(root.path().join("requests.json")).unwrap()).unwrap();
     assert_eq!(cases.len(), 3);
     for case in cases {
         assert_eq!(
-            serde_json::from_value::<Request>(case["request"].clone()).is_ok(),
+            studio_json::from_value::<Request>(case["request"].clone()).is_ok(),
             case["accepted"].as_bool().unwrap(),
             "{case}"
         );
@@ -673,12 +673,12 @@ fn supervisor_open_requires_cwd_but_accepts_null() {
 fn supervisor_python_written_text_native_ids_stay_exact() {
     let root = template_mode(Seed::NativeIds);
     let saved: Value =
-        serde_json::from_slice(&fs::read(root.path().join("native-ids.json")).unwrap()).unwrap();
+        studio_json::from_slice(&fs::read(root.path().join("native-ids.json")).unwrap()).unwrap();
     let journal = SupervisorJournal::open(root.path()).unwrap();
     // A retry of each Python-accepted write is a duplicate with the exact Python remote id.
     for write in saved["writes"].as_array().unwrap() {
         let operation = write["operation"].as_str().unwrap();
-        let native: Option<NativeId> = serde_json::from_value(write["native"].clone()).unwrap();
+        let native: Option<NativeId> = studio_json::from_value(write["native"].clone()).unwrap();
         let decision = journal
             .accept(
                 "fixture",

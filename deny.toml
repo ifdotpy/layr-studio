@@ -1,0 +1,33 @@
+[graph]
+all-features = true
+
+[bans]
+multiple-versions = "allow"
+# Add new third-party direct dependents deliberately when the dependency graph changes.
+deny = [{ name = "serde_json", wrappers = [
+  "studio-json",
+  "axum",
+  "cargo_metadata",
+  "gungraun-macros",
+  "iroh-relay",
+  "json-patch",
+  "jsonptr",
+  "jsonschema",
+  "jsonschema-value",
+  "openapi-to-rust",
+  "referencing",
+  "reqwest",
+  "rtc",
+  "schemars",
+  "serde_json_path",
+  "serde_json_path_core",
+  "serialize-to-javascript",
+  "simd-json",
+  "swift-rs",
+  "tauri",
+  "tauri-build",
+  "tauri-codegen",
+  "tauri-runtime",
+  "tauri-utils",
+  "tokio-rustls-acme",
+] }]

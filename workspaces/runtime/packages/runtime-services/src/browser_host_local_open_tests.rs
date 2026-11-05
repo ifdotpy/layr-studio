@@ -266,7 +266,7 @@ async fn control_socket_sends_typed_queue_in_existing_wire_shape() {
         .read_until(b'\n', &mut line)
         .await
         .expect("response");
-    let reply: Value = serde_json::from_slice(&line).expect("JSON response");
+    let reply: Value = studio_json::from_slice(&line).expect("JSON response");
     assert_eq!(reply["id"], "request");
     assert_eq!(reply["result"]["items"][0]["state"], "pending");
     assert_eq!(reply["result"]["items"][0]["agentId"], SESSION);
@@ -286,7 +286,7 @@ async fn control_socket_rejects_unknown_request_fields() {
         .read_until(b'\n', &mut line)
         .await
         .expect("response");
-    let reply: Value = serde_json::from_slice(&line).expect("JSON response");
+    let reply: Value = studio_json::from_slice(&line).expect("JSON response");
     assert_eq!(reply["id"], "");
     assert_eq!(reply["error"]["code"], "invalid_request");
     host.service.stop().await;

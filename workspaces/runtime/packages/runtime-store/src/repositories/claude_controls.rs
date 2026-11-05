@@ -2,7 +2,7 @@
 use crate::schema::SchemaRequirements;
 use crate::{AgentId, AgentRecord, AgentRepository, StoreError, StoreResult, Transaction};
 use rusqlite::{OptionalExtension, params};
-use serde_json::Value;
+use studio_json::Value;
 pub struct ClaudeControlRepository;
 impl From<StoreError> for studio_runtime_schema::claude_controls::ControlError {
     fn from(_: StoreError) -> Self {
@@ -26,7 +26,7 @@ impl ClaudeControlRepository {
             )
             .optional()?;
         let operation = raw
-            .map(|raw| serde_json::from_str::<Value>(&raw))
+            .map(|raw| studio_json::from_str::<Value>(&raw))
             .transpose()?;
         if let Some(op) = &operation {
             validate(op)?;
@@ -46,7 +46,7 @@ impl ClaudeControlRepository {
         let mut query = tx.prepare_cached("SELECT record FROM runtime_workspace_operations WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.kind')='claude_rollback' AND json_extract(record,'$.phase')='completed' AND json_extract(record,'$.restoreFiles')=1")?;
         let mut ids = Vec::new();
         for raw in query.query_map([id], |r| r.get::<_, String>(0))? {
-            let op: Value = serde_json::from_str(&raw?)?;
+            let op: Value = studio_json::from_str(&raw?)?;
             validate(&op)?;
             if op.get("source") == Some(&source) && op["result"]["filesRestored"] == true {
                 ids.push(
@@ -65,7 +65,7 @@ impl ClaudeControlRepository {
         id: &str,
         outcome: &studio_runtime_schema::claude_controls::ControlOutcome,
     ) -> StoreResult<()> {
-        let encoded = serde_json::to_string(outcome)?;
+        let encoded = studio_json::to_string(outcome)?;
         tx.execute(
             "UPDATE runtime_workspace_operations SET record=json_set(record,'$.finalResponse',json(?1)) WHERE id=?2",
             params![encoded, id],

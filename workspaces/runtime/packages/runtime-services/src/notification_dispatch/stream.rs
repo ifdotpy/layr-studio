@@ -13,7 +13,7 @@ use std::{
 };
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
+use studio_json::Value;
 
 const MAX_PENDING_TEXT_BYTES: usize = 64 * 1024;
 /// Sanity bound on remembered finished streams (count). A turn's keys are dropped
@@ -372,7 +372,7 @@ impl NotificationStreamBuffer {
             if Self::is_best_effort_analytics(effect) {
                 self.post_commit_analytics_count += 1;
                 self.post_commit_analytics_bytes = self.post_commit_analytics_bytes.saturating_add(
-                    serde_json::to_vec(effect.value()).map_or(usize::MAX, |v| v.len()),
+                    studio_json::to_vec(effect.value()).map_or(usize::MAX, |v| v.len()),
                 );
             }
         }
@@ -464,7 +464,7 @@ impl NotificationStreamBuffer {
         // persists them as durable receipts in the same journal transaction.
         // Rust measures retained JSON bytes, rather than CPython heap sizes.
         if Self::is_best_effort_analytics(&effect) {
-            let size = serde_json::to_vec(&effect).map_or(usize::MAX, |bytes| bytes.len());
+            let size = studio_json::to_vec(&effect).map_or(usize::MAX, |bytes| bytes.len());
             if self.post_commit_analytics_count >= MAX_POST_COMMIT_STREAM_EFFECTS
                 || self.post_commit_analytics_bytes.saturating_add(size)
                     > MAX_POST_COMMIT_STREAM_BYTES
@@ -516,7 +516,7 @@ impl NotificationStreamBuffer {
                 let saved = &mut capture.observation;
                 let metrics = &mut capture.metrics;
                 let mut removed_bytes = 0;
-                let mut added_bytes = serde_json::to_string(&delta)
+                let mut added_bytes = studio_json::to_string(&delta)
                     .map_or(usize::MAX, |value| value.len())
                     .saturating_sub(2);
                 let mut text = match std::mem::take(&mut saved.params["delta"]) {
@@ -527,7 +527,7 @@ impl NotificationStreamBuffer {
                     | other @ Value::Array(_)
                     | other @ Value::Object(_) => {
                         removed_bytes =
-                            serde_json::to_string(&other).map_or(usize::MAX, |value| value.len());
+                            studio_json::to_string(&other).map_or(usize::MAX, |value| value.len());
                         added_bytes = added_bytes.saturating_add(2);
                         String::new()
                     }
@@ -542,7 +542,7 @@ impl NotificationStreamBuffer {
                         .nth(TOOL_OUTPUT_CHARS - 1)
                         .map_or(0, |(index, _)| index);
                     removed_bytes = removed_bytes.saturating_add(
-                        serde_json::to_string(&text[..start])
+                        studio_json::to_string(&text[..start])
                             .map_or(usize::MAX, |value| value.len())
                             .saturating_sub(2),
                     );
@@ -1000,7 +1000,7 @@ impl NotificationStreamBuffer {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn analytics_counts_compact_json_bytes() {
@@ -1075,8 +1075,8 @@ mod tests {
             let capture = &streams.analytics[0];
             assert_eq!(capture.observation.params["delta"], expected);
             assert_eq!(capture.retained_bytes, retained_bytes);
-            let raw = serde_json::to_string(&streams).unwrap();
-            let restored: NotificationStreamBuffer = serde_json::from_str(&raw).unwrap();
+            let raw = studio_json::to_string(&streams).unwrap();
+            let restored: NotificationStreamBuffer = studio_json::from_str(&raw).unwrap();
             assert_eq!(restored.analytics_bytes, streams.analytics_bytes);
         }
     }
@@ -1359,7 +1359,7 @@ mod tests {
             item: "answer".into(),
             method: "item/agentMessage/delta".into(),
         };
-        let params = serde_json::json!({"threadId":"thread","turnId":"turn","itemId":"answer"});
+        let params = studio_json::json!({"threadId":"thread","turnId":"turn","itemId":"answer"});
         let mut streams = NotificationStreamBuffer::default();
         assert!(matches!(
             streams.enqueue_delta(key.clone(), "first", &params, 0),
@@ -1418,8 +1418,8 @@ mod tests {
         streams.flush(&key("c", Some("turn")), "").expect("flushes");
         streams.close(&key("c", Some("turn")));
         let former = |streams: &NotificationStreamBuffer| {
-            let mut metadata = serde_json::from_str::<Value>(
-                &serde_json::to_string(streams).expect("buffer encodes"),
+            let mut metadata = studio_json::from_str::<Value>(
+                &studio_json::to_string(streams).expect("buffer encodes"),
             )
             .expect("JSON");
             let mut pending = Vec::new();
@@ -1433,17 +1433,17 @@ mod tests {
             }
             (metadata, (!pending.is_empty()).then(|| json!(pending)))
         };
-        let parse = |text: &str| serde_json::from_str::<Value>(text).expect("JSON text");
+        let parse = |text: &str| studio_json::from_str::<Value>(text).expect("JSON text");
         for buffer in [streams.clone(), NotificationStreamBuffer::default()] {
             let (metadata, pending) = buffer.persisted_parts();
             let (expected_metadata, expected_pending) = former(&buffer);
             assert_eq!(
-                parse(&serde_json::to_string(&metadata).unwrap()),
+                parse(&studio_json::to_string(&metadata).unwrap()),
                 expected_metadata
             );
             assert_eq!(
-                pending.map(|pending| serde_json::from_str::<Value>(
-                    &serde_json::to_string(&pending).expect("pending state")
+                pending.map(|pending| studio_json::from_str::<Value>(
+                    &studio_json::to_string(&pending).expect("pending state")
                 )
                 .expect("JSON")),
                 expected_pending
@@ -1453,8 +1453,8 @@ mod tests {
 
     #[test]
     fn unowned_stream_state_is_rejected_after_migration() {
-        let result = serde_json::from_str::<NotificationStreamBuffer>(
-            &serde_json::json!({
+        let result = studio_json::from_str::<NotificationStreamBuffer>(
+            &studio_json::json!({
                 "entries": [],
                 "closed": [{
                     "account": "default",
@@ -1507,10 +1507,10 @@ mod tests {
         streams.enqueue_delta(key.clone(), "abc", &json!({"delta":"abc"}), 0);
         assert!(streams.has_pending(&key));
         assert_eq!(streams.pending_bytes(), 3);
-        let encoded = serde_json::to_string(&streams).unwrap();
-        let value: Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = studio_json::to_string(&streams).unwrap();
+        let value: Value = studio_json::from_str(&encoded).unwrap();
         assert!(value.get("indexes").is_none());
-        let mut restored: NotificationStreamBuffer = serde_json::from_str(&encoded).unwrap();
+        let mut restored: NotificationStreamBuffer = studio_json::from_str(&encoded).unwrap();
         assert!(restored.has_pending(&key));
         assert_eq!(restored.pending_bytes(), 3);
         let _flushed = restored.flush(&key, "").unwrap();
@@ -1551,7 +1551,7 @@ mod tests {
         assert_eq!(streams.analytics.len(), 1);
         assert_eq!(streams.analytics[0].observation.params["delta"], "ab");
         assert_eq!(
-            serde_json::from_str::<Value>(&serde_json::to_string(&streams).unwrap()).unwrap()["analytics"][0]
+            studio_json::from_str::<Value>(&studio_json::to_string(&streams).unwrap()).unwrap()["analytics"][0]
                 .as_array()
                 .unwrap()
                 .len(),
@@ -1559,8 +1559,8 @@ mod tests {
         );
         assert!(streams.analytics_bytes > first_size);
         assert_eq!(streams.indexes.analytics.get(&key), Some(&0));
-        let raw = serde_json::to_string(&streams).unwrap();
-        let mut restored: NotificationStreamBuffer = serde_json::from_str(&raw).unwrap();
+        let raw = studio_json::to_string(&streams).unwrap();
+        let mut restored: NotificationStreamBuffer = studio_json::from_str(&raw).unwrap();
         assert_eq!(restored.analytics_bytes, streams.analytics_bytes);
         assert_eq!(restored.indexes.analytics.get(&key), Some(&0));
         restored.flush_analytics(&key, &json!({"id":"agent"}));

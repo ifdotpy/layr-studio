@@ -63,6 +63,8 @@ pub enum OperationError {
     #[error("{0}")]
     Invalid(&'static str),
     #[error("{0}")]
+    InvalidStore(String),
+    #[error("{0}")]
     Forbidden(&'static str),
     #[error("Not implemented: requires {0}")]
     Unavailable(&'static str),
@@ -187,7 +189,7 @@ fn permissions_signature(request: &Conversation) -> String {
 }
 
 fn typed_signature(body: &impl Serialize) -> String {
-    let body = serde_json::to_vec(body).expect("signature fields are serializable");
+    let body = studio_json::to_vec(body).expect("signature fields are serializable");
     data_encoding::HEXLOWER.encode(&Sha256::digest(body))
 }
 
@@ -315,7 +317,7 @@ async fn creation_workspace_mode(
         let saved=context.store.read_async("agents-create/default-replay", move |tx| {
             use rusqlite::OptionalExtension;
             let signature:Option<String>=tx.query_row("SELECT signature FROM runtime_lead_requests WHERE id=?1 UNION ALL SELECT json_extract(record,'$.quickCreateRequest') FROM runtime_agents WHERE id=?1 AND json_type(record,'$.quickCreateRequest')='text' LIMIT 1", [&id], |row|row.get(0)).optional().map_err(StoreError::from)?;
-            Ok::<_,StoreError>(signature.and_then(|value|serde_json::from_str::<SavedWorkspace>(&value).ok()).and_then(|value|value.workspace_mode))
+            Ok::<_,StoreError>(signature.and_then(|value|studio_json::from_str::<SavedWorkspace>(&value).ok()).and_then(|value|value.workspace_mode))
         }).await?;
         if let Some(saved) = saved {
             return Ok(saved);
@@ -698,7 +700,7 @@ mod agent_catalog_requirement_tests {
             profile_id: Field::Value("execution-profile".into()),
             ..Default::default()
         };
-        let profile: studio_runtime_store::ProfileRecord = serde_json::from_str(r#"{"id":"p","name":"Profile","role":"reviewer","model":"gpt-6-luna","effort":"high","instructions":""}"#).unwrap();
+        let profile: studio_runtime_store::ProfileRecord = studio_json::from_str(r#"{"id":"p","name":"Profile","role":"reviewer","model":"gpt-6-luna","effort":"high","instructions":""}"#).unwrap();
         let mut effective = original.clone();
         assert!(merge_profile_catalog_fields(
             &mut effective,
@@ -859,31 +861,48 @@ async fn create(
     let state = context.store.state_dir().to_path_buf();
     let requested_project = cwd.clone();
     let native_workspace = workspace == "layr-native";
+    let requested_store = request.intent.layr_store_root.clone();
+    if requested_store.is_some() && !native_workspace {
+        return Err(OperationError::Invalid(
+            "A store override requires Layr workspace mode",
+        ));
+    }
     let (native_store, project_path) = studio_runtime_process::blocking_pool::spawn_blocking(
         "agents-create/native-store",
         move || {
-            let root = crate::layr_native::settings::store_for_validation(&state);
-            let project = crate::project_path::ProjectPath::new(requested_project, &root)
-                .map_err(OperationError::Invalid)?;
-            let root = if native_workspace {
-                crate::layr_native::settings::selected_store(&state).map_err(|_| {
-                    OperationError::Invalid(
-                        "Cannot read the native Layr store setting. Inspect native-layr paths.",
-                    )
-                })?
+            let canonical = if native_workspace {
+                let root = crate::layr_native::settings::resolve_for_new_chat(
+                    &state,
+                    requested_store.as_deref().map(std::path::Path::new),
+                )
+                .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+                Some(
+                    crate::layr_native::settings::resolve_root(&root)
+                        .map_err(|e| OperationError::InvalidStore(e.to_string()))?,
+                )
             } else {
-                root
+                None
             };
+            let root = canonical
+                .as_ref()
+                .map(|root| root.as_path().to_owned())
+                .unwrap_or_else(|| crate::layr_native::settings::store_for_validation(&state));
+            let project = crate::project_path::ProjectPath::new(requested_project.clone(), &root)
+                .map_err(OperationError::Invalid)?;
+            if let Some(canonical) = &canonical {
+                crate::layr_native::settings::check_project_overlap(
+                    &root,
+                    std::path::Path::new(&requested_project),
+                )
+                .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+                crate::layr_native::settings::validate_resolved_root(&state, canonical)
+                    .map_err(|e| OperationError::InvalidStore(e.to_string()))?;
+            }
             Ok::<_, OperationError>((root, project))
         },
     )
     .await
     .map_err(|_| OperationError::Internal)??;
-    if workspace == "layr-native" && !native_capability(context).await?.is_ready() {
-        return Err(OperationError::Invalid(
-            "Native Layr is not ready on this server. Select WT or configure its store and daemon.",
-        ));
-    }
     if crate::projects::refuses_worktree(&context.store, &cwd, &workspace).await? {
         return Err(OperationError::Invalid(
             crate::projects::WORKTREE_REFUSED_BY_LAYR_POLICY,
@@ -1167,7 +1186,12 @@ async fn create(
             && draft
             && !reuse_execution_fields
             && !request.worker_catalog
-            && reusable_previous_workspace(&prior, &workspace_for_write, &cwd)
+            && reusable_previous_workspace(
+                &prior,
+                &workspace_for_write,
+                &cwd,
+                record.layr_store_root.as_deref(),
+            )
             && prior.layr_ready != Some(true)
             && prior
                 .workspace_mode
@@ -1760,8 +1784,8 @@ pub async fn configure(
                 &signature,
             )? {
                 MutationAdmission::Replay(reply) => {
-                    return serde_json::to_vec(&reply)
-                        .and_then(|bytes| serde_json::from_slice(&bytes))
+                    return studio_json::to_vec(&reply)
+                        .and_then(|bytes| studio_json::from_slice(&bytes))
                         .map_err(StoreError::from)
                         .map_err(Into::into);
                 }
@@ -1822,8 +1846,8 @@ pub async fn configure(
             };
             crate::event_write::settle_request(tx, &admitted, Some(&request.id), &result)
                 .map_err(MutationError::from)?;
-            serde_json::to_vec(&result)
-                .and_then(|bytes| serde_json::from_slice(&bytes))
+            studio_json::to_vec(&result)
+                .and_then(|bytes| studio_json::from_slice(&bytes))
                 .map_err(StoreError::from)
                 .map_err(Into::into)
         })
@@ -2742,7 +2766,7 @@ fn project_for_cwd(
             id: id.clone(),
         };
         let record: studio_runtime_schema::project_record::ProjectRecord =
-            serde_json::from_str(&raw).map_err(|_| invalid())?;
+            studio_json::from_str(&raw).map_err(|_| invalid())?;
         let studio_runtime_schema::project_record::ProjectRecord::Live(record) = record else {
             continue;
         };
@@ -3356,11 +3380,18 @@ fn lead_signature(
     if let Some(cwd) = cwd {
         settings.cwd = Some(cwd.to_owned());
     }
-    serde_json::to_string(&settings).map_err(|_| OperationError::Internal)
+    studio_json::to_string(&settings).map_err(|_| OperationError::Internal)
 }
 
-fn reusable_previous_workspace(prior: &AgentRecord, _workspace: &str, _cwd: &str) -> bool {
-    prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
+fn reusable_previous_workspace(
+    prior: &AgentRecord,
+    workspace: &str,
+    _cwd: &str,
+    store_root: Option<&str>,
+) -> bool {
+    (workspace != "layr-native"
+        || (store_root.is_some() && prior.layr_store_root.as_deref() == store_root))
+        && prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
         && prior.image_workspace.value() != Some(&true)
 }
 
@@ -3502,6 +3533,23 @@ async fn mutate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_reuse_requires_the_same_store() {
+        let mut prior = studio_runtime_store::AgentRecord::test_defaults();
+        prior.layr_store_root = Some("/store-a".into());
+        assert!(!super::reusable_previous_workspace(
+            &prior,
+            "layr-native",
+            "/project",
+            Some("/store-b")
+        ));
+        assert!(super::reusable_previous_workspace(
+            &prior,
+            "layr-native",
+            "/project",
+            Some("/store-a")
+        ));
+    }
     use super::*;
     use crate::host_worker_create::CreationCatalog as _;
 
@@ -3588,9 +3636,9 @@ mod tests {
             max_agents: 4,
             sync: MutationSync::default(),
         };
-        let bytes = serde_json::to_vec(&reply).expect("reply");
-        let response: Value = serde_json::from_slice(&bytes).expect("dispatch value");
-        assert_eq!(serde_json::to_vec(&response).expect("response"), br#"{"agentMode":"multi","agentModeRevision":2,"concurrency":1,"id":"agent","maxAgents":4}"#);
+        let bytes = studio_json::to_vec(&reply).expect("reply");
+        let response: Value = studio_json::from_slice(&bytes).expect("dispatch value");
+        assert_eq!(studio_json::to_vec(&response).expect("response"), br#"{"agentMode":"multi","agentModeRevision":2,"concurrency":1,"id":"agent","maxAgents":4}"#);
     }
 
     #[tokio::test]
@@ -4380,7 +4428,7 @@ mod tests {
             account_id: None,
             email: None,
         };
-        let automatic_luna: WorkerDefaults = serde_json::from_str(
+        let automatic_luna: WorkerDefaults = studio_json::from_str(
             r#"{"account_key":null,"model":"gpt-6-luna","effort":"high","fast_mode":false}"#,
         )
         .unwrap();
@@ -4404,7 +4452,7 @@ mod tests {
             "automatic choice stays unpinned"
         );
 
-        let explicit_claude_luna: WorkerDefaults = serde_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-luna","effort":"high","fast_mode":false}"#).unwrap();
+        let explicit_claude_luna: WorkerDefaults = studio_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-luna","effort":"high","fast_mode":false}"#).unwrap();
         assert!(matches!(
             resolve_worker_defaults(
                 &context,
@@ -4418,7 +4466,7 @@ mod tests {
             Err(OperationError::Invalid(_))
         ));
 
-        let cleared_pin: WorkerDefaults = serde_json::from_str(
+        let cleared_pin: WorkerDefaults = studio_json::from_str(
             r#"{"account_key":null,"model":null,"effort":null,"fast_mode":false}"#,
         )
         .unwrap();
@@ -4515,14 +4563,14 @@ mod tests {
             email: None,
         };
         let defaults: ReviewDefaults =
-            serde_json::from_str(r#"{"account_key":"default","model":"gpt-6-astra"}"#).unwrap();
+            studio_json::from_str(r#"{"account_key":"default","model":"gpt-6-astra"}"#).unwrap();
         let result =
             resolve_review_defaults(&context, Some(&defaults), "default", &account, None, &[])
                 .await
                 .unwrap();
         assert_eq!(result.account_key.as_deref(), Some("default"));
         let invalid: ReviewDefaults =
-            serde_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-astra"}"#)
+            studio_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-astra"}"#)
                 .unwrap();
         assert!(
             resolve_review_defaults(&context, Some(&invalid), "default", &account, None, &[])
@@ -4561,12 +4609,12 @@ mod tests {
             },
             "review_defaults": {"model": "gpt-6.1-sol", "effort": "high"}
         });
-        let worker_defaults: WorkerDefaults = serde_json::from_str(
+        let worker_defaults: WorkerDefaults = studio_json::from_str(
             r#"{"account_key":"default","model":"gpt-6-luna","effort":"high","fast_mode":false}"#,
         )
         .unwrap();
         let review_defaults: ReviewDefaults =
-            serde_json::from_str(r#"{"model":"gpt-6.1-sol","effort":"high"}"#).unwrap();
+            studio_json::from_str(r#"{"model":"gpt-6.1-sol","effort":"high"}"#).unwrap();
         let workers = resolve_worker_defaults(
             &context,
             Some(&worker_defaults),
@@ -4851,7 +4899,7 @@ mod tests {
             .expect("seed project and conversation");
         let accounts = AccountPolicyState::from_startup(
             Some(
-                &serde_json::to_vec(&json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","provider":studio_runtime_schema::ProviderKind::Codex,"home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{},"deleteReceipts":{}})).expect("current registry JSON"),
+                &studio_json::to_vec(&json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","provider":studio_runtime_schema::ProviderKind::Codex,"home":"/default","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{},"deleteReceipts":{}})).expect("current registry JSON"),
             ),
             [],
         )

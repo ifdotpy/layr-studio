@@ -1,7 +1,7 @@
 use std::process::Command;
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::rule_record::{RuleKind, RuleStatus};
 use studio_runtime_services::rules_engine::{CheckResult, RuleCheck};
 use studio_runtime_services::rules_tick::{
@@ -26,7 +26,7 @@ async fn seeded_state() -> TempDir {
         rule: RuleRecord,
     }
     let mut seed: Seed =
-        serde_json::from_str(include_str!("rules_engine/seed.json")).expect("frozen rule seed");
+        studio_json::from_str(include_str!("rules_engine/seed.json")).expect("frozen rule seed");
     seed.owner.provider = studio_runtime_schema::queue_command::Field::Value(
         studio_runtime_schema::ProviderKind::Codex,
     );
@@ -495,7 +495,7 @@ async fn interval_check_uses_injected_clock_and_records_fake_runner_result() {
         rule.in_flight = false;
         rule.checks = 0_i64.try_into().expect("checks");
         rule.interval_seconds = 60_i64.try_into().expect("interval");
-        rule.next_at = serde_json::Number::from_f64(NOW).expect("time");
+        rule.next_at = studio_json::Number::from_f64(NOW).expect("time");
         rule.command = "printf fake-runner".to_owned().try_into().expect("command");
     })
     .await;
@@ -558,7 +558,7 @@ async fn cancelled_paused_check_settles_its_durable_launch_intent() {
         rule.in_flight = false;
         rule.checks = 0_i64.try_into().expect("checks");
         rule.interval_seconds = 60_i64.try_into().expect("interval");
-        rule.next_at = serde_json::Number::from_f64(NOW).expect("time");
+        rule.next_at = studio_json::Number::from_f64(NOW).expect("time");
         rule.command = "printf fixture".to_owned().try_into().expect("command");
     })
     .await;
@@ -600,7 +600,7 @@ async fn cancelled_paused_check_settles_its_durable_launch_intent() {
             |row| row.get(0),
         )
         .expect("persisted monitor intent");
-    let check: RuleCheck = serde_json::from_str(&intent).expect("persisted monitor intent");
+    let check: RuleCheck = studio_json::from_str(&intent).expect("persisted monitor intent");
     assert!(
         finish(
             &store,
@@ -696,7 +696,7 @@ impl RuleMonitor for DurableMonitor<'_> {
             match row {
                 None => CheckReconciliation::NotSubmitted,
                 Some(row)
-                    if serde_json::from_str::<MonitorCheck>(&row)
+                    if studio_json::from_str::<MonitorCheck>(&row)
                         .ok()
                         .and_then(|record| record.check)
                         .as_ref()
@@ -813,7 +813,7 @@ async fn committed_launch_intent_survives_process_exit_before_monitor_launch() {
             assert!(rule(&store).in_flight);
             let intent: String = store.test_reader().expect("read").query_row("SELECT json_extract(record, '$.launchIntent') FROM runtime_rules WHERE id='rule'", [], |row| row.get(0)).expect("exact intent committed before launch");
             let check: RuleCheck =
-                serde_json::from_str(&intent).expect("exact intent committed before launch");
+                studio_json::from_str(&intent).expect("exact intent committed before launch");
             assert!(events(&store).is_empty());
             let monitor = DurableMonitor {
                 store: &store,
@@ -895,7 +895,7 @@ async fn change_owner(store: &RuntimeStore, fields: Value) {
     store
         .transaction(move |tx| {
             let id = studio_runtime_store::AgentId::from("owner");
-            let mut value = serde_json::to_value(
+            let mut value = studio_json::to_value(
                 studio_runtime_store::AgentRepository::get(tx, &id)?.expect("owner exists"),
             )?;
             for (field, value_new) in fields.as_object().expect("owner changes") {
@@ -977,7 +977,7 @@ async fn a_rule_pauses_while_its_owner_cannot_run_and_resumes_when_it_can() {
         change(&store, |rule| {
             rule.kind = RuleKind::Interval;
             rule.interval_seconds = 240_i64.try_into().expect("interval");
-            rule.next_at = serde_json::Number::from_f64(NOW).expect("time");
+            rule.next_at = studio_json::Number::from_f64(NOW).expect("time");
             rule.command = "check.sh".to_owned().try_into().expect("command");
         })
         .await;
@@ -1070,7 +1070,7 @@ async fn a_rule_pauses_while_its_owner_cannot_run_and_resumes_when_it_can() {
         change(&store, |rule| {
             rule.kind = RuleKind::Interval;
             rule.interval_seconds = 240_i64.try_into().expect("interval");
-            rule.next_at = serde_json::Number::from_f64(NOW).expect("time");
+            rule.next_at = studio_json::Number::from_f64(NOW).expect("time");
             rule.command = "check.sh".to_owned().try_into().expect("command");
         })
         .await;

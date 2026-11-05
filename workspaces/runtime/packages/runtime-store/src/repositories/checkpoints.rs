@@ -1,7 +1,7 @@
 //! Persisted checkpoint records and their capture reservations.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use crate::records::{decode_json_record, get_json_record};
 use crate::schema::{SchemaRequirements, TableRequirement};
@@ -309,7 +309,7 @@ impl CheckpointsRepository {
         }
         transaction.execute(
             "INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)",
-            params![operation_id, serde_json::to_string(&operation)?],
+            params![operation_id, studio_json::to_string(&operation)?],
         )?;
         let object = record
             .as_object_mut()
@@ -1024,7 +1024,7 @@ fn update_object(
     }
     transaction.execute(
         &format!("UPDATE {table} SET record=?1 WHERE id=?2"),
-        params![serde_json::to_string(record)?, id],
+        params![studio_json::to_string(record)?, id],
     )?;
     Ok(())
 }
@@ -1043,7 +1043,7 @@ fn insert_object(
             CheckpointRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
         transaction.execute(
             "INSERT INTO runtime_checkpoints(id,record) VALUES(?1,?2)",
-            params![id, serde_json::to_string(&typed)?],
+            params![id, studio_json::to_string(&typed)?],
         )?;
         return Ok(());
     }
@@ -1055,7 +1055,7 @@ fn insert_object(
     }
     transaction.execute(
         &format!("INSERT INTO {table}(id,record) VALUES(?1,?2)"),
-        params![id, serde_json::to_string(record)?],
+        params![id, studio_json::to_string(record)?],
     )?;
     Ok(())
 }
@@ -1088,7 +1088,7 @@ mod tests {
         CheckpointsRepository, StoredCheckpointObject, WorkspaceSnapshot, same_workspace_activity,
     };
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn checkpoint_reads_enforce_typed_shape_and_preserve_extensions() {

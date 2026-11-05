@@ -14,7 +14,7 @@ pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for (id, encoded) in rows {
-        let matches = match serde_json::from_str::<ProjectRecord>(&encoded) {
+        let matches = match studio_json::from_str::<ProjectRecord>(&encoded) {
             Ok(ProjectRecord::Live(project)) => project.id == id,
             Ok(ProjectRecord::Removal(project)) => project.id == id,
             Err(_) => false,

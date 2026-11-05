@@ -2,7 +2,7 @@
 use super::{UsageEvidence, UsageObservation, UsageParseError, UsageScope, UsageTokens};
 use crate::provider_kind::ProviderKind;
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 
 /// Compatibility reader for pre-contract analytics rows only. Typed rows use the ledger.
 /// Sparse Claude rows retain their known total for the legacy totals-only budget path.
@@ -17,17 +17,17 @@ pub fn analytics_usage_notification(
     }
     match parse_analytics_usage_row(provider, row) {
         Ok(observation) => {
-            let mut notification = serde_json::json!({"threadId":row["threadId"],"turnId":row["turnId"],"studioUsage":observation});
+            let mut notification = studio_json::json!({"threadId":row["threadId"],"turnId":row["turnId"],"studioUsage":observation});
             if row.get("studioUsage").is_none() {
                 notification["tokenUsage"] =
-                    serde_json::json!({"total":row["total"],"last":row["last"]});
+                    studio_json::json!({"total":row["total"],"last":row["last"]});
             }
             Ok(notification)
         }
         Err(error) => match provider {
             ProviderKind::Codex => Err(error),
             ProviderKind::Claude => Ok(
-                serde_json::json!({"threadId":row["threadId"],"turnId":row["turnId"],"responseId":row["responseId"],
+                studio_json::json!({"threadId":row["threadId"],"turnId":row["turnId"],"responseId":row["responseId"],
                 "rawTokenUsageRecord":row["rawTokenUsageRecord"],"requestUsage":row["requestUsage"],
                 "usageSource":row["usageSource"],"tokenUsage":{"total":row["total"],"last":row["last"]}}),
             ),
@@ -225,7 +225,7 @@ fn tokens(value: &Value, input_uncached: bool) -> Result<UsageTokens, UsageParse
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn legacy_native_notice_response_association_is_still_cumulative() {
@@ -261,8 +261,8 @@ mod tests {
     #[test]
     fn analytics_schema_copies_match_the_usage_owner() {
         // Owner: runtime-schema::usage::{UsageObservation, UsageTokens}; schemas() is its renderer.
-        let expected: Value = serde_json::from_str(
-            &serde_json::to_string(&super::super::schemas())
+        let expected: Value = studio_json::from_str(
+            &studio_json::to_string(&super::super::schemas())
                 .expect("owner schema")
                 .replace("#/components/schemas/", "#/$defs/"),
         )
@@ -271,7 +271,7 @@ mod tests {
             include_str!("../schemas/analytics-usage.schema.json"),
             include_str!("../schemas/analytics-notice.schema.json"),
         ] {
-            let schema: Value = serde_json::from_str(text).expect("analytics schema");
+            let schema: Value = studio_json::from_str(text).expect("analytics schema");
             assert_eq!(
                 schema["properties"]["studioUsage"],
                 json!({"$ref":"#/$defs/UsageObservation"})

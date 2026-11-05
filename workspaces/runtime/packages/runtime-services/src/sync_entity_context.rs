@@ -2,9 +2,21 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
+<<<<<<< head
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
+||||||| base
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
+use std::collections::HashMap;
+=======
+use std::collections::HashMap;
+use studio_json::Value;
+#[cfg(test)]
+use studio_json::json;
+>>>>>>> https/main
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{StoreResult, system_reads as records};
 
@@ -75,7 +87,7 @@ fn account_destinations(
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
-    let entity: Entity = serde_json::from_str(&raw)?;
+    let entity: Entity = studio_json::from_str(&raw)?;
     Ok(entity
         .value
         .accounts
@@ -89,6 +101,416 @@ fn account_destinations(
         .collect())
 }
 
+<<<<<<< head
+||||||| base
+/// Work performed by one bulk projection-context pass, exposed for deterministic tests.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AgentContextWork {
+    pub agents_computed: usize,
+    pub work_records_scanned: usize,
+    pub event_rows_scanned: usize,
+    pub item_agents_matched: usize,
+}
+
+/// Build all agent contexts from the already captured source rows in one pass.
+pub(crate) fn agent_view_contexts(
+    transaction: &Transaction<'_>,
+    agents: &[(&str, &Value)],
+    work_records: &[studio_runtime_store::WorkItemRecord],
+    project_server_id: Option<&str>,
+) -> StoreResult<(HashMap<String, AgentViewContext>, AgentContextWork)> {
+    let destinations = account_destinations(transaction)?;
+    let lead_ids = agents
+        .iter()
+        .filter_map(|(id, record)| {
+            let eligible = truthy(record.get("isLead"))
+                && !truthy(record.get("deletedAt"))
+                && !truthy(record.get("accountTransferId"))
+                && record.get("status").and_then(Value::as_str) == Some("idle")
+                && !truthy(record.get("threadId"))
+                && !truthy(record.get("prompt"));
+            eligible.then_some(*id)
+        })
+        .collect::<Vec<_>>();
+    // Children decide `empty_lead` even when the caller passes only changed
+    // agents, so the parent lookup reads the indexed table, not the slice.
+    let mut parent_ids = std::collections::HashSet::new();
+    for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut statement = transaction.prepare(&format!(
+            "SELECT DISTINCT parent_id FROM runtime_agents \
+             WHERE parent_id IN ({placeholders})"
+        ))?;
+        parent_ids.extend(
+            statement
+                .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    // `empty_lead` only needs to know whether each eligible lead owns any
+    // monitor. The agent-key index bounds this lookup to the small lead set;
+    // capturing every historical monitor row would rescan the full journal on
+    // each unrelated lifecycle write.
+    let mut monitor_agents = std::collections::HashSet::new();
+    if !lead_ids.is_empty() && table_exists(transaction, "runtime_monitors")? {
+        if crate::sync_policy::monitor_owner_index_exists(transaction)? {
+            // The indexed JSON expression rejects malformed rows at write
+            // time, so this bounded owner lookup is safe and index-backed.
+            for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let mut statement = transaction.prepare(&format!(
+                    "SELECT DISTINCT json_extract(record,'$.agent') FROM runtime_monitors \
+                     WHERE json_extract(record,'$.agent') IN ({placeholders})"
+                ))?;
+                monitor_agents.extend(
+                    statement
+                        .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                            row.get::<_, String>(0)
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+        } else {
+            // Legacy/test schemas without the expression index may contain
+            // invalid JSON. Preserve the former decode-and-skip behavior.
+            let lead_set = lead_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>();
+            let mut statement = transaction.prepare("SELECT record FROM runtime_monitors")?;
+            for raw in statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+            {
+                if let Ok(record) =
+                    serde_json::from_str::<studio_runtime_store::MonitorRecord>(&raw)
+                    && lead_set.contains(record.agent.as_str())
+                {
+                    monitor_agents.insert(record.agent);
+                }
+            }
+        }
+    }
+    let mut event_agents = std::collections::HashSet::new();
+    let mut event_rows_scanned = 0;
+    if !lead_ids.is_empty() && table_exists(transaction, "runtime_events")? {
+        for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut statement = transaction.prepare(&format!(
+                "SELECT agent FROM runtime_events WHERE agent IN ({placeholders})"
+            ))?;
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            event_rows_scanned += rows.len();
+            event_agents.extend(rows);
+        }
+    }
+    let mut item_agents = std::collections::HashSet::new();
+    if !lead_ids.is_empty() && table_exists(transaction, "runtime_items")? {
+        for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut statement = transaction.prepare(&format!(
+                "SELECT DISTINCT agent FROM runtime_items WHERE agent IN ({placeholders})"
+            ))?;
+            item_agents.extend(
+                statement
+                    .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+    }
+    let mut latest_work = HashMap::<String, (f64, String)>::new();
+    let mut assigned = HashMap::<String, Vec<&crate::agent_progress::Assignment>>::new();
+    for record in work_records {
+        let record_value = record.value();
+        let Some(owner) = record_value.get("owner").and_then(Value::as_str) else {
+            continue;
+        };
+        for result in record_value
+            .get("results")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if result.get("agent").and_then(Value::as_str) != Some(owner) {
+                continue;
+            }
+            let Some(path) = result
+                .get("resultFile")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let created = result
+                .get("created")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            if latest_work
+                .get(owner)
+                .is_none_or(|(prior, _)| created > *prior)
+            {
+                latest_work.insert(owner.to_owned(), (created, path.to_owned()));
+            }
+        }
+        assigned.entry(owner.to_owned()).or_default().push(record);
+    }
+    let mut contexts = HashMap::with_capacity(agents.len());
+    for &(id, record) in agents {
+        let progress = crate::agent_progress::derive(
+            transaction,
+            record,
+            assigned.get(id).into_iter().flatten().copied(),
+        )?;
+        let empty_lead = truthy(record.get("isLead"))
+            && !truthy(record.get("deletedAt"))
+            && !truthy(record.get("accountTransferId"))
+            && record.get("status").and_then(Value::as_str) == Some("idle")
+            && !truthy(record.get("threadId"))
+            && !truthy(record.get("prompt"))
+            && !event_agents.contains(id)
+            && !item_agents.contains(id)
+            && !parent_ids.contains(id)
+            && !monitor_agents.contains(id);
+        let attention = pending_attention(transaction, id, record)?;
+        contexts.insert(
+            id.to_owned(),
+            AgentViewContext {
+                account_destinations: destinations.clone(),
+                transfer: transfer_observation(transaction, record),
+                team_counts: team_counts(transaction, id, record)?,
+                project_server_id: project_server_id.map(str::to_owned),
+                launcher_alive: true,
+                empty_lead,
+                has_question: attention.0,
+                has_approval: attention.1,
+                latest_work_result_file: latest_work.remove(id).map(|(_, path)| path),
+                command_progress: progress.commands,
+                stall: progress.stall,
+            },
+        );
+    }
+    let work = AgentContextWork {
+        agents_computed: contexts.len(),
+        work_records_scanned: work_records.len(),
+        event_rows_scanned,
+        item_agents_matched: item_agents.len(),
+    };
+    Ok((contexts, work))
+}
+
+=======
+/// Work performed by one bulk projection-context pass, exposed for deterministic tests.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AgentContextWork {
+    pub agents_computed: usize,
+    pub work_records_scanned: usize,
+    pub event_rows_scanned: usize,
+    pub item_agents_matched: usize,
+}
+
+/// Build all agent contexts from the already captured source rows in one pass.
+pub(crate) fn agent_view_contexts(
+    transaction: &Transaction<'_>,
+    agents: &[(&str, &Value)],
+    work_records: &[studio_runtime_store::WorkItemRecord],
+    project_server_id: Option<&str>,
+) -> StoreResult<(HashMap<String, AgentViewContext>, AgentContextWork)> {
+    let destinations = account_destinations(transaction)?;
+    let lead_ids = agents
+        .iter()
+        .filter_map(|(id, record)| {
+            let eligible = truthy(record.get("isLead"))
+                && !truthy(record.get("deletedAt"))
+                && !truthy(record.get("accountTransferId"))
+                && record.get("status").and_then(Value::as_str) == Some("idle")
+                && !truthy(record.get("threadId"))
+                && !truthy(record.get("prompt"));
+            eligible.then_some(*id)
+        })
+        .collect::<Vec<_>>();
+    // Children decide `empty_lead` even when the caller passes only changed
+    // agents, so the parent lookup reads the indexed table, not the slice.
+    let mut parent_ids = std::collections::HashSet::new();
+    for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut statement = transaction.prepare(&format!(
+            "SELECT DISTINCT parent_id FROM runtime_agents \
+             WHERE parent_id IN ({placeholders})"
+        ))?;
+        parent_ids.extend(
+            statement
+                .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    // `empty_lead` only needs to know whether each eligible lead owns any
+    // monitor. The agent-key index bounds this lookup to the small lead set;
+    // capturing every historical monitor row would rescan the full journal on
+    // each unrelated lifecycle write.
+    let mut monitor_agents = std::collections::HashSet::new();
+    if !lead_ids.is_empty() && table_exists(transaction, "runtime_monitors")? {
+        if crate::sync_policy::monitor_owner_index_exists(transaction)? {
+            // The indexed JSON expression rejects malformed rows at write
+            // time, so this bounded owner lookup is safe and index-backed.
+            for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let mut statement = transaction.prepare(&format!(
+                    "SELECT DISTINCT json_extract(record,'$.agent') FROM runtime_monitors \
+                     WHERE json_extract(record,'$.agent') IN ({placeholders})"
+                ))?;
+                monitor_agents.extend(
+                    statement
+                        .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                            row.get::<_, String>(0)
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+        } else {
+            // Legacy/test schemas without the expression index may contain
+            // invalid JSON. Preserve the former decode-and-skip behavior.
+            let lead_set = lead_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>();
+            let mut statement = transaction.prepare("SELECT record FROM runtime_monitors")?;
+            for raw in statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+            {
+                if let Ok(record) =
+                    studio_json::from_str::<studio_runtime_store::MonitorRecord>(&raw)
+                    && lead_set.contains(record.agent.as_str())
+                {
+                    monitor_agents.insert(record.agent);
+                }
+            }
+        }
+    }
+    let mut event_agents = std::collections::HashSet::new();
+    let mut event_rows_scanned = 0;
+    if !lead_ids.is_empty() && table_exists(transaction, "runtime_events")? {
+        for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut statement = transaction.prepare(&format!(
+                "SELECT agent FROM runtime_events WHERE agent IN ({placeholders})"
+            ))?;
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            event_rows_scanned += rows.len();
+            event_agents.extend(rows);
+        }
+    }
+    let mut item_agents = std::collections::HashSet::new();
+    if !lead_ids.is_empty() && table_exists(transaction, "runtime_items")? {
+        for chunk in lead_ids.chunks(LEAD_LOOKUP_CHUNK_ROWS) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut statement = transaction.prepare(&format!(
+                "SELECT DISTINCT agent FROM runtime_items WHERE agent IN ({placeholders})"
+            ))?;
+            item_agents.extend(
+                statement
+                    .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+    }
+    let mut latest_work = HashMap::<String, (f64, String)>::new();
+    let mut assigned = HashMap::<String, Vec<&crate::agent_progress::Assignment>>::new();
+    for record in work_records {
+        let record_value = record.value();
+        let Some(owner) = record_value.get("owner").and_then(Value::as_str) else {
+            continue;
+        };
+        for result in record_value
+            .get("results")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if result.get("agent").and_then(Value::as_str) != Some(owner) {
+                continue;
+            }
+            let Some(path) = result
+                .get("resultFile")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let created = result
+                .get("created")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            if latest_work
+                .get(owner)
+                .is_none_or(|(prior, _)| created > *prior)
+            {
+                latest_work.insert(owner.to_owned(), (created, path.to_owned()));
+            }
+        }
+        assigned.entry(owner.to_owned()).or_default().push(record);
+    }
+    let mut contexts = HashMap::with_capacity(agents.len());
+    for &(id, record) in agents {
+        let progress = crate::agent_progress::derive(
+            transaction,
+            record,
+            assigned.get(id).into_iter().flatten().copied(),
+        )?;
+        let empty_lead = truthy(record.get("isLead"))
+            && !truthy(record.get("deletedAt"))
+            && !truthy(record.get("accountTransferId"))
+            && record.get("status").and_then(Value::as_str) == Some("idle")
+            && !truthy(record.get("threadId"))
+            && !truthy(record.get("prompt"))
+            && !event_agents.contains(id)
+            && !item_agents.contains(id)
+            && !parent_ids.contains(id)
+            && !monitor_agents.contains(id);
+        let attention = pending_attention(transaction, id, record)?;
+        contexts.insert(
+            id.to_owned(),
+            AgentViewContext {
+                account_destinations: destinations.clone(),
+                transfer: transfer_observation(transaction, record),
+                team_counts: team_counts(transaction, id, record)?,
+                project_server_id: project_server_id.map(str::to_owned),
+                launcher_alive: true,
+                empty_lead,
+                has_question: attention.0,
+                has_approval: attention.1,
+                latest_work_result_file: latest_work.remove(id).map(|(_, path)| path),
+                command_progress: progress.commands,
+                stall: progress.stall,
+            },
+        );
+    }
+    let work = AgentContextWork {
+        agents_computed: contexts.len(),
+        work_records_scanned: work_records.len(),
+        event_rows_scanned,
+        item_agents_matched: item_agents.len(),
+    };
+    Ok((contexts, work))
+}
+
+>>>>>>> https/main
 pub(crate) fn agent_view_context(
     transaction: &Connection,
     record: &Value,
@@ -253,7 +675,7 @@ impl RoomSources {
 
 fn room_rows<T: DeserializeOwned>(rows: &[(String, String)], table: &str) -> StoreResult<Vec<T>> {
     rows.iter()
-        .map(|(id, raw)| serde_json::from_str(raw).map_err(|_| records::invalid(table, id)))
+        .map(|(id, raw)| studio_json::from_str(raw).map_err(|_| records::invalid(table, id)))
         .collect()
 }
 
@@ -399,11 +821,11 @@ impl RoomDirectory {
                 let _deliveries: std::collections::BTreeMap<
                     String,
                     studio_runtime_schema::persistence::RecipientDelivery,
-                > = serde_json::from_str(&deliveries)
+                > = studio_json::from_str(&deliveries)
                     .map_err(|_| records::invalid("runtime_chat_messages", &key))?;
                 let seq = studio_runtime_schema::room_record::ChatSequence::from_i64(seq)
                     .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
-                let created = serde_json::Number::from_f64(created)
+                let created = studio_json::Number::from_f64(created)
                     .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
                 Ok::<_, studio_runtime_store::StoreError>(
                     studio_runtime_schema::room_record::RoomLastMessage {
@@ -635,4 +1057,286 @@ mod room_preparation_tests {
         ));
         assert_eq!(first.active_agent_indices.len(), 1);
     }
+<<<<<<< head
+||||||| base
+
+    #[test]
+    fn cold_agent_contexts_scan_work_once_for_many_agents() {
+        const AGENT_COUNT: usize = 32;
+        let mut connection = Connection::open_in_memory().expect("database");
+        connection
+            .execute_batch(&studio_runtime_store::agent_columns::fixture_sql(
+                "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
+                 CREATE TABLE runtime_events(agent TEXT NOT NULL);
+                 CREATE TABLE runtime_items(agent TEXT NOT NULL);
+                 CREATE INDEX runtime_item_agent ON runtime_items(agent);",
+            ))
+            .expect("context tables");
+        connection
+            .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
+            .expect("volatile agent table creates");
+        let mut agents = Vec::with_capacity(AGENT_COUNT);
+        let mut work = Vec::with_capacity(AGENT_COUNT);
+        let transaction = connection.transaction().expect("seed transaction");
+        for index in 0..AGENT_COUNT {
+            let id = format!("agent-{index:04}");
+            let agent = json!({"id":id,"provider":studio_runtime_schema::ProviderKind::Codex,"status":"idle"}).to_string();
+            let work_id = format!("work-{index:04}");
+            let task = json!({"id":work_id,"owner":id,"status":"running","results":[]}).to_string();
+            transaction
+                .execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    rusqlite::params![id, agent],
+                )
+                .expect("agent row");
+            transaction
+                .execute(
+                    "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+                    rusqlite::params![work_id, task],
+                )
+                .expect("work row");
+            agents.push((id, agent));
+            work.push(
+                studio_runtime_store::WorkItemRecord::decode(&work_id, &task).expect("work JSON"),
+            );
+        }
+        transaction.commit().expect("seed commit");
+        let transaction = connection.transaction().expect("read transaction");
+        let decoded = agents
+            .iter()
+            .map(|(id, raw)| {
+                (
+                    id.as_str(),
+                    serde_json::from_str::<Value>(raw).expect("agent JSON"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let agents = decoded
+            .iter()
+            .map(|(id, value)| (*id, value))
+            .collect::<Vec<_>>();
+        let (after, work) = agent_view_contexts(&transaction, &agents, &work, None)
+            .expect("bulk contexts are built");
+        assert_eq!(work.agents_computed, AGENT_COUNT);
+        assert_eq!(work.work_records_scanned, AGENT_COUNT);
+        assert_eq!(work.event_rows_scanned, 0);
+        assert_eq!(work.item_agents_matched, 0);
+        assert_eq!(after.len(), AGENT_COUNT);
+        for (id, record) in agents {
+            let context =
+                agent_view_context(&transaction, record, None).expect("single-agent context");
+            let actual = after.get(id).expect("bulk context exists");
+            assert_eq!(actual.empty_lead, context.empty_lead);
+            assert_eq!(
+                actual.latest_work_result_file,
+                context.latest_work_result_file
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_agent_contexts_use_indexed_monitor_owner_lookup() {
+        let mut connection = Connection::open_in_memory().expect("database");
+        connection
+            .execute_batch(
+                &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+                 CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(
+                     json_extract(record,'$.agent'),json_extract(record,'$.status'));
+                 CREATE TABLE runtime_events(agent TEXT NOT NULL);
+                 CREATE TABLE runtime_items(agent TEXT NOT NULL);
+                 INSERT INTO runtime_monitors(id,record) VALUES
+                     ('old-monitor','{\"id\":\"old-monitor\",\"agent\":\"lead-busy\",\"status\":\"completed\"}');"),
+            )
+            .expect("context fixture");
+        connection
+            .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
+            .expect("volatile agent table creates");
+        let agents = [
+            (
+                "lead-busy".to_owned(),
+                json!({"id":"lead-busy","status":"idle","isLead":true}).to_string(),
+            ),
+            (
+                "lead-empty".to_owned(),
+                json!({"id":"lead-empty","status":"idle","isLead":true}).to_string(),
+            ),
+        ];
+        let transaction = connection.transaction().expect("context transaction");
+        let plan = transaction
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT DISTINCT json_extract(record,'$.agent') \
+                 FROM runtime_monitors WHERE json_extract(record,'$.agent') IN (?1,?2)",
+            )
+            .expect("owner lookup explain plan")
+            .query_map(["lead-busy", "lead-empty"], |row| row.get::<_, String>(3))
+            .expect("owner plan rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("owner plan read");
+        assert!(
+            plan.iter()
+                .any(|line| line.contains("runtime_monitor_agent_status")),
+            "monitor owner lookup must use the owner index: {plan:?}"
+        );
+        let decoded = agents
+            .iter()
+            .map(|(id, raw)| {
+                (
+                    id.as_str(),
+                    serde_json::from_str::<Value>(raw).expect("agent JSON"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let agents = decoded
+            .iter()
+            .map(|(id, value)| (*id, value))
+            .collect::<Vec<_>>();
+        let (contexts, _) =
+            agent_view_contexts(&transaction, &agents, &[], None).expect("bulk contexts are built");
+        assert!(!contexts["lead-busy"].empty_lead);
+        assert!(contexts["lead-empty"].empty_lead);
+    }
+=======
+
+    #[test]
+    fn cold_agent_contexts_scan_work_once_for_many_agents() {
+        const AGENT_COUNT: usize = 32;
+        let mut connection = Connection::open_in_memory().expect("database");
+        connection
+            .execute_batch(&studio_runtime_store::agent_columns::fixture_sql(
+                "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
+                 CREATE TABLE runtime_events(agent TEXT NOT NULL);
+                 CREATE TABLE runtime_items(agent TEXT NOT NULL);
+                 CREATE INDEX runtime_item_agent ON runtime_items(agent);",
+            ))
+            .expect("context tables");
+        connection
+            .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
+            .expect("volatile agent table creates");
+        let mut agents = Vec::with_capacity(AGENT_COUNT);
+        let mut work = Vec::with_capacity(AGENT_COUNT);
+        let transaction = connection.transaction().expect("seed transaction");
+        for index in 0..AGENT_COUNT {
+            let id = format!("agent-{index:04}");
+            let agent = json!({"id":id,"provider":studio_runtime_schema::ProviderKind::Codex,"status":"idle"}).to_string();
+            let work_id = format!("work-{index:04}");
+            let task = json!({"id":work_id,"owner":id,"status":"running","results":[]}).to_string();
+            transaction
+                .execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    rusqlite::params![id, agent],
+                )
+                .expect("agent row");
+            transaction
+                .execute(
+                    "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+                    rusqlite::params![work_id, task],
+                )
+                .expect("work row");
+            agents.push((id, agent));
+            work.push(
+                studio_runtime_store::WorkItemRecord::decode(&work_id, &task).expect("work JSON"),
+            );
+        }
+        transaction.commit().expect("seed commit");
+        let transaction = connection.transaction().expect("read transaction");
+        let decoded = agents
+            .iter()
+            .map(|(id, raw)| {
+                (
+                    id.as_str(),
+                    studio_json::from_str::<Value>(raw).expect("agent JSON"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let agents = decoded
+            .iter()
+            .map(|(id, value)| (*id, value))
+            .collect::<Vec<_>>();
+        let (after, work) = agent_view_contexts(&transaction, &agents, &work, None)
+            .expect("bulk contexts are built");
+        assert_eq!(work.agents_computed, AGENT_COUNT);
+        assert_eq!(work.work_records_scanned, AGENT_COUNT);
+        assert_eq!(work.event_rows_scanned, 0);
+        assert_eq!(work.item_agents_matched, 0);
+        assert_eq!(after.len(), AGENT_COUNT);
+        for (id, record) in agents {
+            let context =
+                agent_view_context(&transaction, record, None).expect("single-agent context");
+            let actual = after.get(id).expect("bulk context exists");
+            assert_eq!(actual.empty_lead, context.empty_lead);
+            assert_eq!(
+                actual.latest_work_result_file,
+                context.latest_work_result_file
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_agent_contexts_use_indexed_monitor_owner_lookup() {
+        let mut connection = Connection::open_in_memory().expect("database");
+        connection
+            .execute_batch(
+                &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+                 CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(
+                     json_extract(record,'$.agent'),json_extract(record,'$.status'));
+                 CREATE TABLE runtime_events(agent TEXT NOT NULL);
+                 CREATE TABLE runtime_items(agent TEXT NOT NULL);
+                 INSERT INTO runtime_monitors(id,record) VALUES
+                     ('old-monitor','{\"id\":\"old-monitor\",\"agent\":\"lead-busy\",\"status\":\"completed\"}');"),
+            )
+            .expect("context fixture");
+        connection
+            .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
+            .expect("volatile agent table creates");
+        let agents = [
+            (
+                "lead-busy".to_owned(),
+                json!({"id":"lead-busy","status":"idle","isLead":true}).to_string(),
+            ),
+            (
+                "lead-empty".to_owned(),
+                json!({"id":"lead-empty","status":"idle","isLead":true}).to_string(),
+            ),
+        ];
+        let transaction = connection.transaction().expect("context transaction");
+        let plan = transaction
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT DISTINCT json_extract(record,'$.agent') \
+                 FROM runtime_monitors WHERE json_extract(record,'$.agent') IN (?1,?2)",
+            )
+            .expect("owner lookup explain plan")
+            .query_map(["lead-busy", "lead-empty"], |row| row.get::<_, String>(3))
+            .expect("owner plan rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("owner plan read");
+        assert!(
+            plan.iter()
+                .any(|line| line.contains("runtime_monitor_agent_status")),
+            "monitor owner lookup must use the owner index: {plan:?}"
+        );
+        let decoded = agents
+            .iter()
+            .map(|(id, raw)| {
+                (
+                    id.as_str(),
+                    studio_json::from_str::<Value>(raw).expect("agent JSON"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let agents = decoded
+            .iter()
+            .map(|(id, value)| (*id, value))
+            .collect::<Vec<_>>();
+        let (contexts, _) =
+            agent_view_contexts(&transaction, &agents, &[], None).expect("bulk contexts are built");
+        assert!(!contexts["lead-busy"].empty_lead);
+        assert!(contexts["lead-empty"].empty_lead);
+    }
+>>>>>>> https/main
 }

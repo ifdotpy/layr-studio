@@ -40,9 +40,9 @@ pub struct ProjectProjection {
     #[serde(skip_serializing_if = "Field::is_missing")]
     home_server_id: Field<String>,
     #[serde(skip_serializing_if = "Field::is_missing")]
-    created: Field<serde_json::Number>,
+    created: Field<studio_json::Number>,
     #[serde(skip_serializing_if = "Field::is_missing")]
-    updated: Field<serde_json::Number>,
+    updated: Field<studio_json::Number>,
     #[serde(skip_serializing_if = "Field::is_missing")]
     peer_teams_revision: Field<u64>,
     #[serde(skip_serializing_if = "Field::is_missing")]
@@ -236,18 +236,18 @@ pub fn project_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::project_record::ProjectRecord;
 
     #[test]
     fn project_view_preserves_presence_and_bounds_known_fields() {
-        let ProjectRecord::Live(project) = serde_json::from_str(r#"{"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":[],"sidebarHidden":false,"workspacePolicy":"isolated"}"#).unwrap() else { panic!("live") };
+        let ProjectRecord::Live(project) = studio_json::from_str(r#"{"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":[],"sidebarHidden":false,"workspacePolicy":"isolated"}"#).unwrap() else { panic!("live") };
         let mut project = *project;
         project.account_groups = Field::Value(vec!["x".repeat(12_001); 201]);
         let projection =
             project_record(project, Field::Null, Field::Missing, Field::Missing, &[]).unwrap();
-        let encoded = serde_json::to_string(&projection).unwrap();
-        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = studio_json::to_string(&projection).unwrap();
+        let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
         assert_eq!(actual["name"], json!(null));
         assert_eq!(actual["peerTeams"], json!([]));
         assert_eq!(actual["locations"], json!([]));
@@ -276,7 +276,7 @@ mod tests {
     }
 
     fn team_project() -> ProjectLive {
-        let ProjectRecord::Live(project) = serde_json::from_str(r#"{"recordKind":"live","id":"proj-a","path":"/a","peerTeams":[{"id":"t1","name":"Team","members":["lead-a","sub-a"]}],"locations":[]}"#).unwrap() else { panic!("live") };
+        let ProjectRecord::Live(project) = studio_json::from_str(r#"{"recordKind":"live","id":"proj-a","path":"/a","peerTeams":[{"id":"t1","name":"Team","members":["lead-a","sub-a"]}],"locations":[]}"#).unwrap() else { panic!("live") };
         *project
     }
 
@@ -301,7 +301,7 @@ mod tests {
             &leads,
         )
         .unwrap();
-        let encoded = serde_json::to_string(&projection).unwrap();
+        let encoded = studio_json::to_string(&projection).unwrap();
         assert!(
             encoded.contains(
                 r#""peerLeads":[{"grant":"g1","remoteProject":"proj-b","server":"server-b","label":"Laptop"}]"#
@@ -322,7 +322,7 @@ mod tests {
             &[],
         )
         .unwrap();
-        let encoded = serde_json::to_string(&projection).unwrap();
+        let encoded = studio_json::to_string(&projection).unwrap();
         assert!(!encoded.contains("peerLeads"), "{encoded}");
         assert!(
             encoded.contains(r#""members":["lead-a","sub-a"]"#),

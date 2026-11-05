@@ -39,7 +39,7 @@ impl RadioControls {
     }
 }
 
-pub(crate) fn schema() -> serde_json::Value {
+pub(crate) fn schema() -> studio_json::Value {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::pricing::{PricingArtifact, RawCatalog, RawModel, RawRates, RawTier};
 use thiserror::Error;
 
@@ -63,7 +63,7 @@ static LOADED: LazyLock<crate::file_derived::FileDerived<LoadedPricing>> =
 /// `None` when the file is missing or unreadable.
 pub fn load_pricing(state_root: &Path) -> Option<Arc<LoadedPricing>> {
     LOADED.get_or_load(&state_root.join(PRICING_ARTIFACT), |path| {
-        let artifact = serde_json::from_slice::<PricingArtifact>(&std::fs::read(path).ok()?).ok();
+        let artifact = studio_json::from_slice::<PricingArtifact>(&std::fs::read(path).ok()?).ok();
         let catalog_value = artifact
             .as_ref()
             .filter(|artifact| artifact.version == 1)
@@ -353,10 +353,10 @@ fn valid_amount(value: Option<f64>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{PriceStatus, PricingCatalog};
-    use serde_json::json;
+    use studio_json::json;
 
-    fn usage(value: serde_json::Value) -> super::TokenUsage {
-        serde_json::from_value(value).expect("token usage")
+    fn usage(value: studio_json::Value) -> super::TokenUsage {
+        studio_json::from_value(value).expect("token usage")
     }
 
     fn catalog() -> PricingCatalog {

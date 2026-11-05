@@ -4,9 +4,9 @@ use crate::provider_adapter::{ProviderKind, codex_user_mcp_servers};
 use crate::{model_catalog::ModelCatalogService, thread_prepare as thread, turn_prepare as turn};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, de::DeserializeOwned};
-use serde_json::Map;
 use std::path::{Path, PathBuf};
 use std::{future::Future, pin::Pin};
+use studio_json::Map;
 use studio_runtime_process::ProviderLaunchSpec;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -177,9 +177,10 @@ impl PreparationResources {
             thread_config: Map<String, Value>,
             tools: Vec<thread::ToolDefinition>,
         }
-        let mut data: Bundled = serde_json::from_str(include_str!("../preparation-resources.json"))
-            .map_err(|_| invalid("preparation resources"))?;
-        let mut legacy_tools: Vec<thread::ToolDefinition> = serde_json::from_str(include_str!(
+        let mut data: Bundled =
+            studio_json::from_str(include_str!("../preparation-resources.json"))
+                .map_err(|_| invalid("preparation resources"))?;
+        let mut legacy_tools: Vec<thread::ToolDefinition> = studio_json::from_str(include_str!(
             "../../../../../../../.agents/skills/codex-workspace/references/native-tools.json"
         ))
         .map_err(|_| invalid("legacy tools"))?;
@@ -511,7 +512,7 @@ impl PreparationResources {
     }
 }
 pub(super) fn decode<T: DeserializeOwned>(value: Value, location: &str) -> Result<T, WorkerError> {
-    serde_json::from_value(value).map_err(|_| invalid(location))
+    studio_json::from_value(value).map_err(|_| invalid(location))
 }
 pub(super) fn invalid(location: &str) -> WorkerError {
     StoreError::InvalidStoredObject {
@@ -850,7 +851,7 @@ pub(super) fn guidance(
             .map(|inputs| inputs.mcp_servers.clone())
             .unwrap_or_default()
             .into_iter()
-            .map(|name| (name, serde_json::json!({"enabled": false})))
+            .map(|name| (name, studio_json::json!({"enabled": false})))
             .collect();
         if !servers.is_empty() {
             thread_config.insert("mcp_servers".into(), Value::Object(servers));
@@ -1055,7 +1056,7 @@ fn role(record: &Value) -> Result<thread::Role, WorkerError> {
 
 fn federation_enabled(tx: &Transaction<'_>) -> Result<bool, WorkerError> {
     Ok(record_by_id(tx, "runtime_federation_settings", "global")?
-        .map(|raw| serde_json::from_str::<Value>(&raw).map_err(|_| invalid("federation settings")))
+        .map(|raw| studio_json::from_str::<Value>(&raw).map_err(|_| invalid("federation settings")))
         .transpose()?
         .is_some_and(|v| v["enabled"] == true))
 }
@@ -1111,7 +1112,7 @@ pub(crate) fn actor_tool_definitions(
                 .clone(),
         );
     }
-    serde_json::to_value(filtered).map_err(|_| invalid("tool catalog"))
+    studio_json::to_value(filtered).map_err(|_| invalid("tool catalog"))
 }
 
 pub(super) fn native_thread_blocked(record: &Value) -> bool {
@@ -1197,7 +1198,7 @@ fn preserve_complaint(
             return Ok(true);
         };
         let complaint: studio_runtime_schema::complaint_record::ComplaintRecord =
-            serde_json::from_str(&raw).map_err(|_| invalid("complaint"))?;
+            studio_json::from_str(&raw).map_err(|_| invalid("complaint"))?;
         if complaint.lead_id() != Some(agent) {
             return Ok(true);
         }
@@ -1260,7 +1261,7 @@ fn frozen_params(record: &Value) -> Result<Option<thread::FrozenParams>, WorkerE
             .cloned()
             .ok_or_else(|| invalid("agent/frozenNativeParams"))
     };
-    let dynamic_tools = serde_json::from_value(field("dynamicTools")?)
+    let dynamic_tools = studio_json::from_value(field("dynamicTools")?)
         .map_err(|_| invalid("agent/frozenNativeParams"))?;
     Ok(Some(thread::FrozenParams {
         base_instructions: field("baseInstructions")?,
@@ -1276,8 +1277,8 @@ fn native_claude_options(
     resources: &PreparationResources,
     record: &Value,
     state_root: &Path,
-) -> Result<serde_json::Map<String, Value>, WorkerError> {
-    let mut options: serde_json::Map<String, Value> =
+) -> Result<studio_json::Map<String, Value>, WorkerError> {
+    let mut options: studio_json::Map<String, Value> =
         optional(record, "claudeOptions")?.unwrap_or_default();
     if let Some(mode) = record.get("permissionMode").filter(|mode| !mode.is_null()) {
         options.insert("permissionMode".into(), mode.clone());
@@ -1453,14 +1454,14 @@ pub(super) fn submission_snapshot(
         .ok_or_else(|| invalid("agent/rootId"))?;
     let root = agent(tx, root_id)?.value();
     let role = role_guidance(resources, record)?;
-    let plan=record_by_id(tx, "runtime_plans", root_id)?.map(|s|serde_json::from_str::<Value>(&s).map_err(|_|invalid("plan"))).transpose()?.filter(|v|v["native"].is_object()).map(|v|decode(json!({"id":v["id"],"rootId":v["rootId"],"steps":v["native"].get("plan").cloned().unwrap_or_else(||json!([])),"explanation":v["native"].get("explanation").filter(|v|!v.is_null()).cloned().unwrap_or(json!(""))}),"plan")).transpose()?;
+    let plan=record_by_id(tx, "runtime_plans", root_id)?.map(|s|studio_json::from_str::<Value>(&s).map_err(|_|invalid("plan"))).transpose()?.filter(|v|v["native"].is_object()).map(|v|decode(json!({"id":v["id"],"rootId":v["rootId"],"steps":v["native"].get("plan").cloned().unwrap_or_else(||json!([])),"explanation":v["native"].get("explanation").filter(|v|!v.is_null()).cloned().unwrap_or(json!(""))}),"plan")).transpose()?;
     let mut complaints = Vec::new();
     for raw in lead_complaints(tx, &intent.agent_id)? {
         use studio_runtime_schema::complaint_record::{
             ComplaintRecipient, ComplaintRecord, ComplaintSource, ComplaintStatus,
         };
         let complaint: ComplaintRecord =
-            serde_json::from_str(&raw).map_err(|_| invalid("complaint"))?;
+            studio_json::from_str(&raw).map_err(|_| invalid("complaint"))?;
         if complaint.lead_id() != Some(intent.agent_id.as_str())
             || complaint.recipient != ComplaintRecipient::Lead
         {
@@ -1517,7 +1518,7 @@ pub(super) fn submission_snapshot(
         .query_map([&intent.agent_id], |r| r.get::<_, String>(0))?
         .map(|r| {
             let r = r?;
-            serde_json::from_str(&r).map_err(|_| invalid("manifest"))
+            studio_json::from_str(&r).map_err(|_| invalid("manifest"))
         })
         .collect::<Result<Vec<_>, WorkerError>>()?;
     let epoch = turn::Epoch(
@@ -1551,7 +1552,7 @@ pub(super) fn submission_snapshot(
         Vec::new()
     };
     for (_, raw) in team {
-        let worker: AgentRecord = serde_json::from_str(&raw).map_err(|_| invalid("worker"))?;
+        let worker: AgentRecord = studio_json::from_str(&raw).map_err(|_| invalid("worker"))?;
         let status = turn::WorkerStatus::from_agent_status(worker.status.as_str());
         let deleted = worker.is_deleted();
         workers.push(turn::Worker {
@@ -1584,7 +1585,7 @@ pub(super) fn submission_snapshot(
             )
             .optional()?
             .ok_or_else(|| refusal("Unknown attachment".into()))?;
-        let v: Value = serde_json::from_str(&raw).map_err(|_| invalid("asset"))?;
+        let v: Value = studio_json::from_str(&raw).map_err(|_| invalid("asset"))?;
         let owner = text(&v, "agentId")?
             .or(text(&v, "agent")?)
             .ok_or_else(|| invalid("asset/agent"))?;
@@ -1738,7 +1739,7 @@ mod resource_tests {
             created: 0.0,
             epoch: 1,
             error: None,
-            metadata: serde_json::json!({}),
+            metadata: studio_json::json!({}),
         };
         event.text = r#"{"complaints":[{"complaint_id":"bad"},{}]}"#.into();
         assert!(super::preserve_complaint(&tx, "lead", &event).is_err());
@@ -1801,9 +1802,9 @@ mod resource_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
         store.transaction_with_error(|tx| {
-            let root = serde_json::from_str(r#"{"id":"lead","rootId":"lead","isLead":true,"epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0,"concurrency":32,"workerDefaults":{"delegationDepth":2}}"#).unwrap();
-            let child = serde_json::from_str(r#"{"id":"child","rootId":"lead","parentId":"lead","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0}"#).unwrap();
-            let leaf = serde_json::from_str(r#"{"id":"leaf","rootId":"lead","parentId":"child","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0}"#).unwrap();
+            let root = studio_json::from_str(r#"{"id":"lead","rootId":"lead","isLead":true,"epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0,"concurrency":32,"workerDefaults":{"delegationDepth":2}}"#).unwrap();
+            let child = studio_json::from_str(r#"{"id":"child","rootId":"lead","parentId":"lead","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0}"#).unwrap();
+            let leaf = studio_json::from_str(r#"{"id":"leaf","rootId":"lead","parentId":"child","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0}"#).unwrap();
             for record in [&root, &child, &leaf] {
                 let agent: AgentRecord = serde::Deserialize::deserialize(record).unwrap();
                 AgentRepository::put(tx, &agent)?;
@@ -1856,7 +1857,7 @@ mod resource_tests {
 
     fn guidance(
         resources: &super::PreparationResources,
-        record: &serde_json::Value,
+        record: &studio_json::Value,
         state_root: &std::path::Path,
     ) -> Result<crate::thread_prepare::GuidanceBundle, super::WorkerError> {
         super::guidance(
@@ -2041,7 +2042,7 @@ mod resource_tests {
     /// submission never scans the complaints of other leads.
     #[test]
     fn lead_complaints_use_the_lead_index() {
-        let fixture: Value = serde_json::from_str(include_str!(
+        let fixture: Value = studio_json::from_str(include_str!(
             "../../../../runtime-store/tests/fixtures/live-state-schema.json"
         ))
         .expect("live-state schema fixture");
@@ -2087,7 +2088,7 @@ mod resource_tests {
         let ids: Vec<String> = lead_complaints(&connection, "lead")
             .expect("lead complaints")
             .iter()
-            .map(|raw| serde_json::from_str::<Value>(raw).expect("record")["id"].to_string())
+            .map(|raw| studio_json::from_str::<Value>(raw).expect("record")["id"].to_string())
             .collect();
         assert_eq!(ids, ["\"a\"", "\"b\""]);
     }
@@ -2201,8 +2202,7 @@ mod resource_tests {
         let custom = tempfile::tempdir().expect("custom store");
         let alias = directory.path().join("alias");
         std::os::unix::fs::symlink(&default_root, &alias).expect("default alias");
-        crate::layr_native::settings::configure(&state_root, Some(custom.path()))
-            .expect("selection");
+        crate::layr_native::settings::fixture_select(&state_root, custom.path());
         let resources = PreparationResources::bundled(String::new(), ModelCatalogService::new())
             .expect("resources");
         // A selected store is canonicalized by settings::configure; a recorded root is kept as given.
@@ -3126,7 +3126,7 @@ mod workspace_fence_tests {
                         if fenced {
                             assert_eq!(options["permissionMode"], "bypassPermissions");
                             assert_eq!(options["env"]["CLAUDE_CODE_HOST_WORKTREE"], record["cwd"]);
-                            let fence: Vec<String> = serde_json::from_str(
+                            let fence: Vec<String> = studio_json::from_str(
                                 options["env"]["CLAUDE_CODE_HOST_WORKTREE_FENCE"]
                                     .as_str()
                                     .expect("JSON fence"),

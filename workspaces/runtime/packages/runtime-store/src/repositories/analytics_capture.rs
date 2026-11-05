@@ -5,7 +5,7 @@ use rusqlite::{
     Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
     types::ValueRef,
 };
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::provider_kind::ProviderKind;
 
 /// Indexed capture record lookup template; the table name comes only from CaptureTable.
@@ -185,7 +185,7 @@ impl AnalyticsCaptureRepository {
             })
             .optional()?;
         raw.map(|raw| {
-            let value = serde_json::from_str(&raw)?;
+            let value = studio_json::from_str(&raw)?;
             table.validate(&value)?;
             if value["id"].as_str() != Some(id) {
                 return Err(StoreError::SchemaValidation(format!("{}/id", table.name())));
@@ -224,7 +224,7 @@ impl AnalyticsCaptureRepository {
         let [raw] = rows.as_slice() else {
             return Ok(None);
         };
-        let value: Value = serde_json::from_str(raw)?;
+        let value: Value = studio_json::from_str(raw)?;
         let ledger = if value.get("studioUsage").is_some() {
             studio_runtime_schema::usage::ledger::UsageLedgerRow::from_typed_analytics(&value)
         } else {
@@ -254,7 +254,7 @@ impl AnalyticsCaptureRepository {
                 result.truncated = true;
                 break;
             }
-            let value: Value = serde_json::from_str(&row.get::<_, String>(0)?)?;
+            let value: Value = studio_json::from_str(&row.get::<_, String>(0)?)?;
             let ledger = if value.get("studioUsage").is_some() {
                 UsageLedgerRow::from_typed_analytics(&value)
             } else {
@@ -296,7 +296,7 @@ impl AnalyticsCaptureRepository {
     }
     fn usage_raw(raw: Option<String>) -> StoreResult<Option<Value>> {
         raw.map(|r| {
-            let v = serde_json::from_str(&r)?;
+            let v = studio_json::from_str(&r)?;
             CaptureTable::Usage.validate(&v)?;
             Ok(v)
         })
@@ -310,7 +310,7 @@ impl AnalyticsCaptureRepository {
                 |r| r.get(0),
             )
             .optional()?;
-        raw.map(|r| serde_json::from_str(&r).map_err(StoreError::from))
+        raw.map(|r| studio_json::from_str(&r).map_err(StoreError::from))
             .transpose()
     }
     pub fn write(db: &Transaction<'_>, table: CaptureTable, value: &Value) -> StoreResult<()> {
@@ -689,7 +689,7 @@ fn check_analytics_table(
         } else {
             row.get(1)?
         };
-        let error = match serde_json::from_str::<Value>(&raw) {
+        let error = match studio_json::from_str::<Value>(&raw) {
             Ok(v) => {
                 let schema = studio_runtime_schema::first_error(table.schema(), &v)
                     .map_err(StoreError::SchemaValidation)?;
@@ -756,7 +756,7 @@ fn check_history_rows(
             record_analytics_failure(report, failures, ("/agent".into(), "rowKey".into()));
             continue;
         }
-        let value = match serde_json::from_str::<Value>(raw) {
+        let value = match studio_json::from_str::<Value>(raw) {
             Ok(value) => value,
             Err(_) => {
                 record_analytics_failure(report, failures, (String::new(), "json".into()));
@@ -815,7 +815,7 @@ mod cost_hint_tests {
 
     #[tokio::test]
     async fn provider_identity_usage_inventory_uses_stored_provider() {
-        use serde_json::json;
+        use studio_json::json;
         use studio_runtime_schema::usage::{UsageObservation, UsageScope};
         let root = tempfile::tempdir().expect("state");
         let store = RuntimeStore::open(Some(root.path())).await.expect("store");
@@ -840,7 +840,7 @@ mod cost_hint_tests {
 
     #[tokio::test]
     async fn provider_identity_typed_inventory_preserves_facts_without_valid_owner() {
-        use serde_json::json;
+        use studio_json::json;
         let root = tempfile::tempdir().expect("state");
         let store = RuntimeStore::open(Some(root.path())).await.expect("store");
         store.analytics_transaction::<_, StoreError>(|tx, _| {
@@ -867,7 +867,7 @@ mod cost_hint_tests {
                 AnalyticsCaptureRepository::write(
                     tx,
                     CaptureTable::Items,
-                    &serde_json::json!({
+                    &studio_json::json!({
                         "id":"item","agentId":"agent","rootId":"root","at":1,
                         "type":"text","name":"metadata","isTool":false
                     }),

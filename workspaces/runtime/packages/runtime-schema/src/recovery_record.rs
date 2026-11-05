@@ -3,8 +3,8 @@
 use crate::shared_values::MAX_SAFE_INTEGER;
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Deserializer, de::Error};
-use serde_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(transparent)]
@@ -43,7 +43,7 @@ impl SafeInteger {
     pub fn as_u64(&self) -> Option<u64> {
         self.0.number().as_u64()
     }
-    pub fn number(&self) -> &serde_json::Number {
+    pub fn number(&self) -> &studio_json::Number {
         self.0.number()
     }
 }
@@ -276,20 +276,20 @@ impl RecoveryAgentRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use sha2::{Digest, Sha256};
+    use studio_json::json;
 
     #[test]
     fn recovery_attempt_rejects_invalid_action() {
         let raw =
             r#"{"id":"a","rootId":"a","epoch":1,"status":"running","startAttempt":{"action":42}}"#;
-        assert!(serde_json::from_str::<RecoveryAgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<RecoveryAgentRecord>(raw).is_err());
     }
 
     #[test]
     fn safe_integer_retains_numeric_encoding() {
-        let integer: SafeInteger = serde_json::from_str("1").expect("integer");
-        let decimal: SafeInteger = serde_json::from_str("1.0").expect("integer alias");
+        let integer: SafeInteger = studio_json::from_str("1").expect("integer");
+        let decimal: SafeInteger = studio_json::from_str("1.0").expect("integer alias");
         assert_eq!(integer.get(), decimal.get());
         assert_eq!(integer.as_u64(), Some(1));
         assert_eq!(decimal.as_u64(), None);
@@ -300,19 +300,19 @@ mod tests {
         for spelling in ["pending", "result"] {
             let mut record = json!({"id":"a","rootId":"a","epoch":1,"status":"running",
                 "connectionRecovery":{"requestState":spelling}});
-            assert!(serde_json::from_value::<RecoveryAgentRecord>(record.clone()).is_ok());
+            assert!(studio_json::from_value::<RecoveryAgentRecord>(record.clone()).is_ok());
             record["connectionRecovery"]["requestState"] = json!({spelling:null});
             assert!(!crate::validate("RecoveryAgentRecord", &record).expect("schema"));
-            assert!(serde_json::from_value::<RecoveryAgentRecord>(record).is_err());
+            assert!(studio_json::from_value::<RecoveryAgentRecord>(record).is_err());
         }
         let mut record = json!({"id":"a","rootId":"a","epoch":1,"status":"running",
             "connectionRecovery":{"requestState":null}});
-        assert!(serde_json::from_value::<RecoveryAgentRecord>(record.clone()).is_ok());
+        assert!(studio_json::from_value::<RecoveryAgentRecord>(record.clone()).is_ok());
         record["connectionRecovery"]
             .as_object_mut()
             .expect("object")
             .remove("requestState");
-        assert!(serde_json::from_value::<RecoveryAgentRecord>(record).is_ok());
+        assert!(studio_json::from_value::<RecoveryAgentRecord>(record).is_ok());
     }
 
     #[test]
@@ -323,12 +323,12 @@ mod tests {
             "4e53ebe649313ce2dddf1ae8e7899c87858cd5c0e703b4a397c9e828d833e0f8",
             "recovery-agent-record.schema.json changed: review the typed owner and parity cases"
         );
-        let schema: Value = serde_json::from_str(schema_text).expect("schema");
-        let generated = serde_json::to_string(&schemars::schema_for!(
+        let schema: Value = studio_json::from_str(schema_text).expect("schema");
+        let generated = studio_json::to_string(&schemars::schema_for!(
             crate::start_attempt::StartAttemptView
         ))
         .unwrap();
-        let mut owner: Value = serde_json::from_str(&generated).unwrap();
+        let mut owner: Value = studio_json::from_str(&generated).unwrap();
         let defs = owner.as_object_mut().unwrap().remove("$defs").unwrap();
         owner.as_object_mut().unwrap().remove("$schema");
         assert_eq!(schema["$defs"]["StartAttemptView"], owner);
@@ -396,7 +396,7 @@ mod tests {
                     let schema_accepts =
                         crate::validate("RecoveryAgentRecord", &record).expect("validator");
                     let typed_accepts =
-                        serde_json::from_value::<RecoveryAgentRecord>(record.clone()).is_ok();
+                        studio_json::from_value::<RecoveryAgentRecord>(record.clone()).is_ok();
                     assert_eq!(
                         typed_accepts, schema_accepts,
                         "{container:?} {field}: {record}"

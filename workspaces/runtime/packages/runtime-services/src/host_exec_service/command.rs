@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde_json::{Map, json};
+use studio_json::{Map, json};
 use tokio::io::AsyncReadExt;
 
 use super::protocol::{self, Failure, HostExecError, INVALID, Manifest, Outcome, require};

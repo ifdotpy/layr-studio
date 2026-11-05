@@ -66,7 +66,7 @@ pub fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     app.once("studio-native-check-result", move |event| {
         eprintln!("Hidden native check: {}", event.payload());
-        let passed = serde_json::from_str::<serde_json::Value>(event.payload())
+        let passed = studio_json::from_str::<studio_json::Value>(event.payload())
             .ok()
             .and_then(|value| value["passed"].as_bool())
             == Some(true);
@@ -118,7 +118,7 @@ pub fn loaded(window: &tauri::Webview) {
     // A string always serializes to valid JSON, including any mode supplied by the harness.
     let script = format!(
         "window.__studioCheckMode = {};\n{}",
-        serde_json::to_string(&mode).expect("mode string serializes"),
+        studio_json::to_string(&mode).expect("mode string serializes"),
         include_str!("native-check.js")
     );
     if let Err(error) = window.eval(script) {

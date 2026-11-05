@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 /// A JSON Schema integer, preserving integral decimal spellings and large values.
 #[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
-pub struct StoredJsonInteger(#[schemars(schema_with = "integer_schema")] serde_json::Number);
+pub struct StoredJsonInteger(#[schemars(schema_with = "integer_schema")] studio_json::Number);
 
 impl StoredJsonInteger {
     pub(crate) fn from_i64(value: i64) -> Self {
         Self(value.into())
     }
 
-    pub(crate) fn number(&self) -> &serde_json::Number {
+    pub(crate) fn number(&self) -> &studio_json::Number {
         &self.0
     }
 }
@@ -22,7 +22,7 @@ fn integer_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 impl<'de> Deserialize<'de> for StoredJsonInteger {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let number = serde_json::Number::deserialize(deserializer)?;
+        let number = studio_json::Number::deserialize(deserializer)?;
         if number.is_i64()
             || number.is_u64()
             || number.as_f64().is_some_and(|value| value.fract() == 0.0)
@@ -60,7 +60,7 @@ impl AgentCounter {
         ))
     }
     /// Original numeric spelling, retained for persisted wire compatibility.
-    pub fn as_number(&self) -> &serde_json::Number {
+    pub fn as_number(&self) -> &studio_json::Number {
         self.0.number()
     }
     /// Integer value after safe-range validation.
@@ -84,21 +84,21 @@ impl<'de> Deserialize<'de> for AgentCounter {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
-pub struct NonnegativeNumber(serde_json::Number);
+pub struct NonnegativeNumber(studio_json::Number);
 impl NonnegativeNumber {
     pub fn from_f64(value: f64) -> Option<Self> {
         (value >= 0.0)
-            .then(|| serde_json::Number::from_f64(value))
+            .then(|| studio_json::Number::from_f64(value))
             .flatten()
             .map(Self)
     }
-    pub fn number(&self) -> &serde_json::Number {
+    pub fn number(&self) -> &studio_json::Number {
         &self.0
     }
 }
 impl<'de> Deserialize<'de> for NonnegativeNumber {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let number = serde_json::Number::deserialize(deserializer)?;
+        let number = studio_json::Number::deserialize(deserializer)?;
         if number.as_f64().is_some_and(|value| value >= 0.0) {
             Ok(Self(number))
         } else {
@@ -110,7 +110,7 @@ impl<'de> Deserialize<'de> for NonnegativeNumber {
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn agent_counter_schema_tracks_its_safe_integer_bound() {
@@ -143,7 +143,7 @@ mod tests {
                 }
                 let record = T::deserialize(input.clone()).unwrap();
                 assert_eq!(
-                    record.serialize(serde_json::value::Serializer).unwrap(),
+                    record.serialize(studio_json::value::Serializer).unwrap(),
                     input
                 );
             }

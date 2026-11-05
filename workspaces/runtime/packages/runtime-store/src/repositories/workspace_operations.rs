@@ -3,7 +3,7 @@ use crate::{
     AgentRecord, AgentRepository, StoreError, StoreResult, Table, WorkspaceOperationRecord,
 };
 use rusqlite::{Connection, Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 
 pub const MAX_CHECKPOINT_LINEAGE: usize = 16_384;
 
@@ -57,7 +57,7 @@ impl WorkspaceOperationsRepository {
                 params![checkpoint, (MAX_CHECKPOINT_LINEAGE + 1) as i64],
                 |r| r.get::<_, String>(0),
             )?
-            .map(|r| serde_json::from_str(&r?).map_err(StoreError::from))
+            .map(|r| studio_json::from_str(&r?).map_err(StoreError::from))
             .collect::<StoreResult<Vec<_>>>()?;
         let mut query = connection
             .prepare_cached("SELECT id,created FROM runtime_items WHERE agent=?1 ORDER BY rowid")?;
@@ -72,7 +72,7 @@ impl WorkspaceOperationsRepository {
     ) -> StoreResult<()> {
         let changed = tx.execute(
             "UPDATE runtime_workspace_operations SET record=?1 WHERE id=?2",
-            params![serde_json::to_string(operation)?, operation.id],
+            params![studio_json::to_string(operation)?, operation.id],
         )?;
         if changed == 0 {
             return Err(StoreError::InvalidStoredObject {
@@ -96,7 +96,7 @@ impl WorkspaceOperationsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn stored_operation_roundtrips_nullable_and_opaque_evidence() {
@@ -123,7 +123,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        let saved: Value = serde_json::from_str(&saved).unwrap();
+        let saved: Value = studio_json::from_str(&saved).unwrap();
         assert_eq!(saved, raw);
         assert!(saved.get("unknownField").is_none());
     }

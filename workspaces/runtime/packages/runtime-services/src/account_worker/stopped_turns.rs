@@ -13,8 +13,8 @@
 //! turn of its provider generation, and ends it as the stop would have.
 use super::retained::{RequestActor, RequestResult, RetainedSessionPort, SessionRequest};
 use crate::recovery_history::ConnectionScope;
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository,
@@ -54,8 +54,8 @@ enum Owner {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredAdmissions {
-    admission: Option<Box<serde_json::value::RawValue>>,
-    terminals_admission: Option<Box<serde_json::value::RawValue>>,
+    admission: Option<studio_json::OwnedRawJson>,
+    terminals_admission: Option<studio_json::OwnedRawJson>,
 }
 
 #[derive(serde::Deserialize)]
@@ -94,13 +94,13 @@ fn stored_admission(
     };
     let admissions = match owner {
         Owner::Disconnect { .. } => {
-            serde_json::from_str::<StoredDisconnect>(raw)
+            studio_json::from_str::<StoredDisconnect>(raw)
                 .map_err(|_| invalid())?
                 .disconnect_recovery
                 .stop_interrupt
         }
         Owner::Stop { .. } => {
-            serde_json::from_str::<StoredStop>(raw)
+            studio_json::from_str::<StoredStop>(raw)
                 .map_err(|_| invalid())?
                 .start_attempt
                 .interrupt
@@ -112,7 +112,7 @@ fn stored_admission(
         admissions.terminals_admission
     }
     .ok_or_else(invalid)?;
-    serde_json::from_str(saved.get()).map_err(|_| invalid())
+    studio_json::from_str(saved.as_str()).map_err(|_| invalid())
 }
 
 #[cfg(test)]

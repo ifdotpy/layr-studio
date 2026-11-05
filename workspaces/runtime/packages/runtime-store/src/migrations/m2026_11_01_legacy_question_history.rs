@@ -4,7 +4,7 @@
 //! question methods convert here. Other legacy rows keep their existing rule.
 use crate::{StoreError, StoreResult, SyncDocumentsRepository, approvals};
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_requests")? {
@@ -23,7 +23,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             .collect::<Result<Vec<_>, _>>()?
     };
     for (id, record) in rows {
-        let mut value: Value = serde_json::from_str(&record)?;
+        let mut value: Value = studio_json::from_str(&record)?;
         // A question without a time reads as time 0, the converter's own default.
         if let Some(object) = value.as_object_mut() {
             object.entry("createdAt").or_insert(Value::from(0));
@@ -53,7 +53,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::approvals::ApprovalId;
 
     #[tokio::test]

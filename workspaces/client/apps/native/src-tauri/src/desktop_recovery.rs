@@ -7,7 +7,7 @@ use tauri::{
 
 pub struct Intent {
     path: PathBuf,
-    value: serde_json::Value,
+    value: studio_json::Value,
 }
 /// The signal that closes this window through its save check (`close::close_on_terminate`).
 /// `install_update.py` reads it from the intent as `closeSignal` (`CLOSE_SIGNAL` there) and
@@ -19,8 +19,8 @@ fn intent_value(
     executable: &std::path::Path,
     profile: &std::path::Path,
     closes_on_signal: bool,
-) -> serde_json::Value {
-    let mut value = serde_json::json!({
+) -> studio_json::Value {
+    let mut value = studio_json::json!({
         "version": 1, "desiredOpen": true, "pid": pid, "startedAt": started, "executable": executable, "profile": profile
     });
     if closes_on_signal {
@@ -34,24 +34,24 @@ fn write_intent(intent: &Intent, open: bool) -> Result<(), String> {
     let temporary = intent.path.with_extension("json.tmp");
     std::fs::write(
         &temporary,
-        serde_json::to_vec(&value).map_err(|e| e.to_string())?,
+        studio_json::to_vec(&value).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
     std::fs::rename(temporary, &intent.path).map_err(|e| e.to_string())
 }
-fn enabled(value: &serde_json::Value) -> Option<bool> {
+fn enabled(value: &studio_json::Value) -> Option<bool> {
     if !value.is_object() {
         return None;
     }
-    serde_json::from_value::<studio_client_core::startup::EnabledRecovery>(value.clone())
+    studio_json::from_value::<studio_client_core::startup::EnabledRecovery>(value.clone())
         .ok()?
         .enabled
 }
 fn preference(state: &std::path::Path) -> Result<bool, String> {
     match std::fs::read(state.join("background-recovery.json")) {
         Ok(bytes) => {
-            let value: serde_json::Value =
-                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            let value: studio_json::Value =
+                studio_json::from_slice(&bytes).map_err(|e| e.to_string())?;
             enabled(&value).ok_or("Invalid background recovery setting.".into())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
@@ -170,7 +170,7 @@ pub fn install(
                 eprintln!("Cannot change background recovery: {error}");
                 drop(app.emit(
                     "studio-desktop-error",
-                    serde_json::json!({"message": error}),
+                    studio_json::json!({"message": error}),
                 ));
             }
         });
@@ -203,7 +203,7 @@ fn configure(
     configure_receipt(&output.stdout, enabled)
 }
 fn configure_receipt(bytes: &[u8], expected: bool) -> Result<(), String> {
-    let receipt: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    let receipt: studio_json::Value = studio_json::from_slice(bytes).map_err(|e| e.to_string())?;
     if enabled(&receipt) != Some(expected) {
         return Err("Recovery configuration returned an unexpected setting.".into());
     }

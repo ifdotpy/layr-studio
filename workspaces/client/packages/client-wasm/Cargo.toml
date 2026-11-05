@@ -13,6 +13,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 studio-client-domain = { path = "../client-domain" }
 studio-request-signing = { path = "../../../runtime/packages/request-signing", default-features = false }
-serde_json.workspace = true
+studio-json = { path = "../../../runtime/packages/json" }
 sha2.workspace = true
 wasm-bindgen = "=0.2.129"

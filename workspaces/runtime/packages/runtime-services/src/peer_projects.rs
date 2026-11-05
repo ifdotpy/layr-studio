@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use rusqlite::Transaction;
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_store::{RuntimeStore, StoreError, SyncDocumentsRepository};
 use tokio::sync::{Notify, watch};
 
@@ -381,7 +381,7 @@ impl PeerProjects {
             .await
         {
             Ok(ExchangeOutcome::Applied(list)) => {
-                serde_json::from_str::<ProjectList>(list.value.get())
+                studio_json::from_str::<ProjectList>(list.value.as_str())
                     .ok()
                     .map(|list| list.items)
             }
@@ -408,14 +408,14 @@ mod tests {
         OrchestrationEffects, PairedTransport, RuntimeOrchestrationEffects,
     };
     use futures_util::future::BoxFuture;
-    use serde_json::Value;
+    use studio_json::Value;
     use studio_runtime_store::ProjectsRepository;
 
     const PEER: &str = "peer-server";
 
     #[test]
     fn typed_aliases_filter_mirrors_and_keep_projection() {
-        let items: ProjectList = serde_json::from_str(
+        let items: ProjectList = studio_json::from_str(
             r#"{"items":[{"id":"one","name":"First"},{"id":"two","name":"Second"}]}"#,
         )
         .unwrap();
@@ -423,8 +423,8 @@ mod tests {
         let result = mirrored(PEER, "Peer", &items.items, &aliases, "local");
         assert_eq!(result.len(), 1);
         let view = json!({"id":"peer:peer-server:two","path":null,"name":"Second","created":null,"updated":null,"homeServerId":PEER,"serverLabel":"Peer"});
-        let encoded = serde_json::to_string(&result[&entity_id(PEER, "two")]).unwrap();
-        let actual: Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = studio_json::to_string(&result[&entity_id(PEER, "two")]).unwrap();
+        let actual: Value = studio_json::from_str(&encoded).unwrap();
         assert_eq!(actual, view);
     }
 
@@ -493,16 +493,16 @@ mod tests {
                     items: &'a [T],
                 }
                 let value = match envelope.command.kind().as_str() {
-                    "projects" => serde_json::value::to_raw_value(&Items {
+                    "projects" => studio_json::to_raw_value(&Items {
                         items: &self.items.lock().unwrap(),
                     })
                     .unwrap(),
                     CHANGED_ACTION => {
                         *self.notices.lock().unwrap() += 1;
-                        serde_json::value::RawValue::from_string("{}".to_owned()).unwrap()
+                        studio_json::OwnedRawJson::from_string("{}".to_owned()).unwrap()
                     }
                     crate::device_trust::ACTION => {
-                        serde_json::value::RawValue::from_string("{\"entries\":[]}".to_owned())
+                        studio_json::OwnedRawJson::from_string("{\"entries\":[]}".to_owned())
                             .unwrap()
                     }
                     _ => panic!("unexpected action"),
@@ -589,7 +589,7 @@ mod tests {
                 Ok::<_, StoreError>(
                     rows.into_iter()
                         .map(|(id, payload)| {
-                            (id, serde_json::from_str::<Value>(&payload).unwrap()["value"].clone())
+                            (id, studio_json::from_str::<Value>(&payload).unwrap()["value"].clone())
                         })
                         .collect(),
                 )

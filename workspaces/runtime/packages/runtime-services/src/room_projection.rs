@@ -2,8 +2,8 @@
 use crate::submit_gates::{AgentAuthorityRow, Deletion};
 use crate::sync_views::{RoomViewContext, SYNC_ARRAY_ITEMS, bound_sync_text};
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_schema::recovery_record::SafeInteger;
 use studio_runtime_schema::room_record::{
@@ -33,7 +33,7 @@ pub(crate) struct RoomProjection {
     #[serde(skip_serializing_if = "Field::is_missing")]
     project_path: Field<String>,
     #[serde(skip_serializing_if = "Field::is_missing")]
-    updated: Field<serde_json::Number>,
+    updated: Field<studio_json::Number>,
     #[serde(skip_serializing_if = "Field::is_missing")]
     user_hidden: Field<bool>,
     #[serde(skip_serializing_if = "Field::is_missing")]
@@ -96,7 +96,7 @@ fn active_agent<'a>(context: &'a RoomViewContext, id: &str) -> Option<&'a AgentA
 pub(crate) fn project_room(
     record: &RoomRecord,
     context: &RoomViewContext,
-) -> Result<Option<RoomProjection>, serde_json::Error> {
+) -> Result<Option<RoomProjection>, studio_json::Error> {
     if record.id.is_empty() || record.project_deleted_at.is_some() {
         return Ok(None);
     }
@@ -111,7 +111,7 @@ pub(crate) fn project_radio_room(
     record: &RoomRecord,
     context: &RoomViewContext,
     state: &Radio,
-) -> Result<Option<RoomProjection>, serde_json::Error> {
+) -> Result<Option<RoomProjection>, studio_json::Error> {
     if record.id.is_empty() || record.project_deleted_at.is_some() {
         return Ok(None);
     }
@@ -119,12 +119,12 @@ pub(crate) fn project_radio_room(
         i64::try_from(value)
             .ok()
             .and_then(SafeInteger::from_i64)
-            .ok_or_else(|| serde_json::Error::io(std::io::Error::other("invalid radio integer")))
+            .ok_or_else(|| studio_json::Error::io(std::io::Error::other("invalid radio integer")))
     };
     let active = state
         .active
         .as_ref()
-        .map(|active| -> Result<RadioActive, serde_json::Error> {
+        .map(|active| -> Result<RadioActive, studio_json::Error> {
             Ok(RadioActive {
                 identity: active.identity.clone(),
                 event_id: active.event_id.clone(),
@@ -372,7 +372,7 @@ fn bound_radio(mut state: RadioProjection) -> RadioProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn room_leads_are_stable_across_publication_order() {
@@ -388,7 +388,7 @@ mod tests {
             shared_room_id: None,
             execution_mode: None,
         };
-        let room: RoomRecord = serde_json::from_str(r#"{"id":"radio:x","kind":"private","members":["a","b","c"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#).unwrap();
+        let room: RoomRecord = studio_json::from_str(r#"{"id":"radio:x","kind":"private","members":["a","b","c"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#).unwrap();
         let first = RoomViewContext::new(
             vec![agent("b", 1.0), agent("a", 2.0), agent("c", 2.0)],
             vec![],
@@ -447,18 +447,18 @@ mod tests {
             r#"{"id":"radio:x","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#,
             r#"{"id":"radio:y","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":1,"status":"speaking","speaker":"a","next":[],"active":{"identity":["thread",1,2],"eventId":"event","agentId":"a","epoch":1,"threadId":"thread","through":3,"turnId":null},"error":null,"direct":false,"seen":{"a":{"identity":["thread",1,2],"seq":3}}}}"#,
         ].into_iter().zip(expected) {
-            let record: RoomRecord = serde_json::from_str(raw).unwrap();
-            let actual = serde_json::to_string(&project_room(&record, &context).unwrap().unwrap()).unwrap();
-            let mut value: Value = serde_json::from_str(&actual).unwrap();
+            let record: RoomRecord = studio_json::from_str(raw).unwrap();
+            let actual = studio_json::to_string(&project_room(&record, &context).unwrap().unwrap()).unwrap();
+            let mut value: Value = studio_json::from_str(&actual).unwrap();
             assert_eq!(value.as_object_mut().unwrap().remove("leadIds"), Some(json!(["a"])));
             if let Some(radio) = value.get_mut("radio") {
                 assert_eq!(radio["controls"]["busy"], record.id == "radio:y");
                 assert_eq!(radio["controls"]["inputBlocked"], false);
                 radio.as_object_mut().unwrap().remove("controls");
             }
-            assert_eq!(value, serde_json::from_str::<Value>(expected).unwrap());
+            assert_eq!(value, studio_json::from_str::<Value>(expected).unwrap());
             if let Field::Value(state) = &record.radio {
-                let direct = serde_json::to_string(&
+                let direct = studio_json::to_string(&
                     project_radio_room(&record, &context, state)
                         .unwrap()
                         .unwrap(),
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn malformed_radio_is_an_error_not_a_deleted_room() {
         assert!(
-            serde_json::from_str::<RoomRecord>(
+            studio_json::from_str::<RoomRecord>(
                 r#"{"id":"r","kind":"private","radio":{"teamId":"broken"}}"#
             )
             .is_err()

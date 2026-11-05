@@ -1,8 +1,8 @@
-use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use studio_json::{Value, json};
 use studio_runtime_services::event_write::{AnnotationWrite, annotate};
 use studio_runtime_services::scheduler::{
     SchedulerError, TurnStart, claim_intent, mark_submitted_for_provider, recover_on_startup,
@@ -20,7 +20,7 @@ async fn seeded<T: serde::de::DeserializeOwned>(
     state: &TemporaryState,
     fixture: &str,
 ) -> (RuntimeStore, T) {
-    let seed: Seed<T> = serde_json::from_str(fixture).expect("frozen scheduler seed");
+    let seed: Seed<T> = studio_json::from_str(fixture).expect("frozen scheduler seed");
     let store = RuntimeStore::open(Some(&state.0))
         .await
         .expect("scheduler store");
@@ -129,7 +129,7 @@ async fn send_now_recovers_unsent_batch_after_result_gc() {
                 .expect("clock")
                 .as_millis() as i64;
             assert!(studio_runtime_store::request_results::RequestResults::gc(tx, now)? > 0);
-            let body: studio_runtime_schema::queue_command::QueueCommand = serde_json::from_str(
+            let body: studio_runtime_schema::queue_command::QueueCommand = studio_json::from_str(
                 &format!(r#"{{"action":"send_now","id":"{target}","request_id":"{request}"}}"#),
             )
             .expect("valid queue command");
@@ -273,7 +273,7 @@ fn rust_policy_snapshot(store: &RuntimeStore, agent: &str) -> Value {
         .iter()
         .map(|event| event.0.clone())
         .collect::<Vec<_>>();
-    let ids_json = serde_json::to_string(&ids).expect("event IDs serialize");
+    let ids_json = studio_json::to_string(&ids).expect("event IDs serialize");
     let metadata = reader.prepare("SELECT id,record FROM runtime_event_meta WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id")
         .expect("metadata snapshot prepares").query_map([&ids_json], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))
         .expect("metadata snapshot queries").collect::<Result<Vec<_>,_>>().expect("metadata snapshot reads");

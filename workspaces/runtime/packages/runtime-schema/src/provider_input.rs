@@ -17,7 +17,7 @@ pub mod items;
 #[derive(Serialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum UnsupportedClaudeRateLimit {
-    Unsupported { raw: serde_json::Value },
+    Unsupported { raw: studio_json::Value },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,9 +41,9 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: String,
     #[serde(rename = "inputSchema")]
-    pub input_schema: serde_json::Map<String, serde_json::Value>,
+    pub input_schema: studio_json::Map<String, studio_json::Value>,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    pub extra: studio_json::Map<String, studio_json::Value>,
 }
 
 /// Managed Claude session extension; omit the whole object for user sessions.
@@ -99,7 +99,7 @@ impl<'de> Deserialize<'de> for RequestId {
     }
 }
 
-impl From<RequestId> for serde_json::Value {
+impl From<RequestId> for studio_json::Value {
     fn from(id: RequestId) -> Self {
         match id {
             RequestId::Number(number) => Self::from(number),

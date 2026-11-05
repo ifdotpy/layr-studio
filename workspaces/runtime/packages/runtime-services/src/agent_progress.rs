@@ -69,10 +69,10 @@ pub(crate) fn publish_monitor_owner_change(
 
 pub(crate) fn derive<'a>(
     connection: &Connection,
-    record: &serde_json::Value,
+    record: &studio_json::Value,
     assignments: impl IntoIterator<Item = &'a Assignment>,
 ) -> StoreResult<AgentProgress> {
-    let agent: AgentSource = serde_json::from_value(record.clone())?;
+    let agent: AgentSource = studio_json::from_value(record.clone())?;
     let mut commands = Vec::new();
     if crate::sync_policy::table_exists(connection, "runtime_monitors")? {
         // This runs for every agent write inside the writer transaction. The
@@ -96,7 +96,7 @@ pub(crate) fn derive<'a>(
         })?;
         for row in rows {
             let (id, raw) = row?;
-            let monitor: studio_runtime_store::MonitorRecord = match serde_json::from_str(&raw) {
+            let monitor: studio_runtime_store::MonitorRecord = match studio_json::from_str(&raw) {
                 Ok(monitor) => monitor,
                 Err(error) => {
                     eprintln!(
@@ -144,7 +144,7 @@ pub(crate) fn derive<'a>(
                     )
                     .optional()?;
                 if let Some(raw) = raw {
-                    let execution: ExecutionSource = serde_json::from_str(&raw)?;
+                    let execution: ExecutionSource = studio_json::from_str(&raw)?;
                     since = since.max(execution.finished.unwrap_or_default());
                 }
             }
@@ -191,8 +191,8 @@ pub(crate) fn publish_owner(transaction: &Transaction<'_>, agent_id: &str) -> St
 mod tests {
     use super::*;
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
-    use serde_json::json;
     use std::cell::Cell;
+    use studio_json::json;
 
     thread_local! { static AGENT_PUBLICATIONS: Cell<usize> = const { Cell::new(0) }; }
     fn trace_agent_publication(event: TraceEvent<'_>) {
@@ -272,7 +272,7 @@ mod tests {
                 [json!({"finished":30.0}).to_string()],
             )
             .expect("test fixture value");
-        let task: Assignment = serde_json::from_value(
+        let task: Assignment = studio_json::from_value(
             json!({"id":"task","owner":"worker","status":"running","updated":10}),
         )
         .expect("test fixture value");
@@ -370,7 +370,7 @@ mod tests {
 
     /// SQLite work of one projection, in virtual machine steps. The count is
     /// deterministic for a given database state, unlike wall time.
-    fn derive_work(connection: &Connection, agent: &serde_json::Value) -> (u64, AgentProgress) {
+    fn derive_work(connection: &Connection, agent: &studio_json::Value) -> (u64, AgentProgress) {
         let ticks = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let counter = std::sync::Arc::clone(&ticks);
         connection
@@ -459,15 +459,23 @@ mod tests {
             let actor = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"worker","epoch":0,"status":"running","autoWake":true})).expect("test fixture value");
             AgentRepository::put(tx,&actor)?;
             let record = json!({"id":"m","agent":"worker","epoch":0,"status":"running","command":"just test-fast","created":5,"tail":"first","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("m.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit"});
-            let raw = format!(r#"{{"id":"m","agent":"worker","epoch":0,"status":"running","command":"just test-fast","created":5,"tail":"first","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":{},"interactive":false,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit"}}"#, serde_json::to_string(&std::env::temp_dir()).expect("cwd"), serde_json::to_string(&std::env::temp_dir().join("m.log")).expect("log"));
-            let typed: MonitorRecord = serde_json::from_str(&raw).expect("test fixture value");
+            let raw = format!(r#"{{"id":"m","agent":"worker","epoch":0,"status":"running","command":"just test-fast","created":5,"tail":"first","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":{},"interactive":false,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit"}}"#, studio_json::to_string(&std::env::temp_dir()).expect("cwd"), studio_json::to_string(&std::env::temp_dir().join("m.log")).expect("log"));
+            let typed: MonitorRecord = studio_json::from_str(&raw).expect("test fixture value");
             Table::<MonitorRecord>::new(tx).put(&typed)?;
             let snapshot = crate::monitor_policy::MonitorSnapshot::checked(record.clone(),actor.value())?;
             let mut decision = snapshot.decision();
             decision.record.tail = "first\nlast gate passed".to_owned().try_into().expect("tail");
             crate::monitor_runtime::apply(tx,&snapshot,&actor,&decision,20.0)?;
+<<<<<<< head
             let raw = crate::entity_scope::direct_document(tx,"agent","worker")?.and_then(|row| row.payload).expect("test fixture value");
             let view: serde_json::Value = serde_json::from_str(&raw).expect("test fixture value");
+||||||| base
+            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='agent' AND id='worker'",[],|r|r.get(0)).expect("test fixture value");
+            let view: serde_json::Value = serde_json::from_str(&raw).expect("test fixture value");
+=======
+            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='agent' AND id='worker'",[],|r|r.get(0)).expect("test fixture value");
+            let view: studio_json::Value = studio_json::from_str(&raw).expect("test fixture value");
+>>>>>>> https/main
             assert_eq!(view["value"]["commandProgress"][0]["lastOutputLine"],"last gate passed");
             assert_eq!(AgentRepository::get(tx,&AgentId::from("worker"))?.expect("test fixture value").status,AgentStatus::Running);
             let (before, actor) = crate::monitor_runtime::snapshot(tx, "m")?;
@@ -493,7 +501,7 @@ mod tests {
         store.transaction_with(|tx| {
             let actor = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"worker","epoch":0,"status":"running","autoWake":true})).unwrap();
             AgentRepository::put(tx, &actor)?;
-            let record: MonitorRecord = serde_json::from_str(r#"{"id":"m","agent":"worker","epoch":0,"status":"running","command":"test","created":5,"tail":"","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"worker","epoch":0,"accountKey":"default","connectionId":"connection"}}"#).unwrap();
+            let record: MonitorRecord = studio_json::from_str(r#"{"id":"m","agent":"worker","epoch":0,"status":"running","command":"test","created":5,"tail":"","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"worker","epoch":0,"accountKey":"default","connectionId":"connection"}}"#).unwrap();
             Table::new(tx).put(&record)?;
             let start = std::time::Instant::now();
             for _ in 0..10_000 {
@@ -517,7 +525,7 @@ mod tests {
         store.transaction_with(|tx| {
             let actor = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"worker","epoch":0,"status":"running","autoWake":true})).unwrap();
             AgentRepository::put(tx, &actor)?;
-            let record: MonitorRecord = serde_json::from_str(r#"{"id":"m","agent":"worker","epoch":0,"status":"running","command":"test","created":5,"tail":"","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"worker","epoch":0,"accountKey":"default","connectionId":"connection"}}"#).unwrap();
+            let record: MonitorRecord = studio_json::from_str(r#"{"id":"m","agent":"worker","epoch":0,"status":"running","command":"test","created":5,"tail":"","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"worker","epoch":0,"accountKey":"default","connectionId":"connection"}}"#).unwrap();
             Table::new(tx).put(&record)?;
             Ok::<(), crate::monitor_policy::MonitorError>(())
         }).await.unwrap();
@@ -551,7 +559,7 @@ mod tests {
         store.transaction_with(|tx| {
             let actor = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"worker","epoch":0,"status":"running","autoWake":true})).unwrap();
             AgentRepository::put(tx, &actor)?;
-            let record: MonitorRecord = serde_json::from_str(r#"{"id":"m","agent":"worker","epoch":0,"status":"running","command":"test","created":5,"tail":"","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"worker","epoch":0,"accountKey":"default","connectionId":"connection"}}"#).unwrap();
+            let record: MonitorRecord = studio_json::from_str(r#"{"id":"m","agent":"worker","epoch":0,"status":"running","command":"test","created":5,"tail":"","requestId":"request","activityAt":5,"activityGeneration":0,"bytes":0,"cwd":"/work","interactive":false,"livenessCommand":"","log":"/work/m.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"worker","epoch":0,"accountKey":"default","connectionId":"connection"}}"#).unwrap();
             Table::new(tx).put(&record)?;
             let start = std::time::Instant::now();
             for index in 0..10_000 {

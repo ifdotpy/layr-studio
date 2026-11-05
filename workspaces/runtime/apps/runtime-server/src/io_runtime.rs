@@ -338,7 +338,7 @@ mod tests {
         let runtime = IoRuntime::start(Arc::clone(&store))
             .await
             .expect("IO runtime");
-        let record = TerminalRecord::from_value(serde_json::json!({
+        let record = TerminalRecord::from_value(studio_json::json!({
             "id": "terminal-fixture",
             "agent": "agent-fixture",
             "title": "Terminal",
@@ -381,7 +381,7 @@ mod tests {
             start_time_ticks: 124,
             boot_id: "fixture-boot".into(),
         };
-        let expected_identity = serde_json::to_value(&queued_identity).expect("identity JSON");
+        let expected_identity = studio_json::to_value(&queued_identity).expect("identity JSON");
         let (reply, completion) = oneshot::channel();
         runtime
             .persistence

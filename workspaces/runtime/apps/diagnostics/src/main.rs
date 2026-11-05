@@ -1,7 +1,7 @@
-use serde_json::Value;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
+use studio_json::Value;
 
 const DEFAULT_PORT: u16 = 4620;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -18,7 +18,7 @@ fn main() {
     };
 
     match fetch_diagnostics(port) {
-        Ok(value) => match serde_json::to_string_pretty(&value) {
+        Ok(value) => match studio_json::to_string_pretty(&value) {
             Ok(output) => println!("{output}"),
             Err(error) => {
                 eprintln!("codex-diagnostics: invalid JSON response: {error}");
@@ -159,7 +159,7 @@ fn fetch_diagnostics_with_timeout(port: u16, timeout: Duration) -> Result<Value,
             .map_err(|error| format_http_error(&error))?;
         body
     };
-    serde_json::from_slice(&body).map_err(|error| format!("invalid JSON response: {error}"))
+    studio_json::from_slice(&body).map_err(|error| format!("invalid JSON response: {error}"))
 }
 
 fn read_chunked(reader: &mut impl BufRead) -> io::Result<Vec<u8>> {

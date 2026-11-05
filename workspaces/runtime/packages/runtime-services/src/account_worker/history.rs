@@ -1,6 +1,6 @@
 //! Terminal transcript effects share the lifecycle transaction and its replay receipt.
 use crate::notification_dispatch::notices::error_message as message;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, NotificationDispatchRepository, StoreResult, Transaction};
 pub(crate) fn terminal(
     tx: &Transaction<'_>,
@@ -88,7 +88,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .expect("notice");
-            let notice: Value = serde_json::from_str(&raw).expect("notice JSON");
+            let notice: Value = studio_json::from_str(&raw).expect("notice JSON");
             assert_eq!(notice["title"], expected);
             assert_eq!(
                 notice["text"],

@@ -1,8 +1,6 @@
 //! Desktop backend ownership rules ported from desktop/backend.ts.
 use crate::backend::Backend;
 use serde::Deserialize;
-#[cfg(test)]
-use serde_json::Value;
 use std::{
     collections::BTreeMap,
     env,
@@ -19,6 +17,8 @@ use std::{
     time::Duration,
 };
 use studio_client_domain::json_object::optional_field;
+#[cfg(test)]
+use studio_json::Value;
 use tokio::time::{Instant, sleep};
 
 // Desktop HTTP identity mirrors backend.ts; backend.test.ts checks parity.
@@ -331,7 +331,7 @@ async fn ensure_with_environment(
     fs::create_dir_all(state).map_err(|e| e.to_string())?;
     let state = state.canonicalize().map_err(|e| e.to_string())?;
     let saved = match fs::read(state.join("background-recovery.json")) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
+        Ok(bytes) => studio_json::from_slice(&bytes)
             .map_err(|e| format!("Cannot read backend recovery settings: {e}"))?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => SavedRecovery::default(),
         Err(error) => return Err(error.to_string()),
@@ -458,24 +458,24 @@ mod tests {
     #[test]
     fn recovery_projections_preserve_partial_reads_and_missing_launch_fields() {
         for value in [
-            serde_json::json!(null),
-            serde_json::json!(true),
-            serde_json::json!(false),
-            serde_json::json!(1),
-            serde_json::json!("yes"),
-            serde_json::json!([]),
-            serde_json::json!({}),
+            studio_json::json!(null),
+            studio_json::json!(true),
+            studio_json::json!(false),
+            studio_json::json!(1),
+            studio_json::json!("yes"),
+            studio_json::json!([]),
+            studio_json::json!({}),
         ] {
             let enabled =
-                EnabledRecovery::deserialize(&serde_json::json!({"enabled":value})).unwrap();
+                EnabledRecovery::deserialize(&studio_json::json!({"enabled":value})).unwrap();
             assert_eq!(enabled.enabled, value.as_bool());
         }
-        let source = serde_json::json!({"enabled":true,"supervisorEnabled":true,"environment":null,"unsetEnvironment":5,"platformSpecific":{"future":true}});
-        let enabled: EnabledRecovery = serde_json::from_value(source.clone()).unwrap();
-        let supervisor: SupervisorRecovery = serde_json::from_value(source.clone()).unwrap();
+        let source = studio_json::json!({"enabled":true,"supervisorEnabled":true,"environment":null,"unsetEnvironment":5,"platformSpecific":{"future":true}});
+        let enabled: EnabledRecovery = studio_json::from_value(source.clone()).unwrap();
+        let supervisor: SupervisorRecovery = studio_json::from_value(source.clone()).unwrap();
         assert_eq!(enabled.enabled, Some(true));
         assert!(supervisor.supervisor_enabled.get());
-        assert!(serde_json::from_value::<SavedRecovery>(source).is_err());
+        assert!(studio_json::from_value::<SavedRecovery>(source).is_err());
         assert!(!SupervisorRecovery::default().supervisor_enabled.get());
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -483,10 +483,10 @@ mod tests {
             #[serde(default)]
             supervisor_enabled: bool,
         }
-        let previous = serde_json::from_slice::<PriorSupervisor>(b"[true]");
-        let current = serde_json::from_slice::<SupervisorRecovery>(b"[true]");
-        assert!(serde_json::from_slice::<SavedRecovery>(b"[true]").is_err());
-        let launch: SavedRecovery = serde_json::from_slice(br#"[1,"/state",{},[],true]"#).unwrap();
+        let previous = studio_json::from_slice::<PriorSupervisor>(b"[true]");
+        let current = studio_json::from_slice::<SupervisorRecovery>(b"[true]");
+        assert!(studio_json::from_slice::<SavedRecovery>(b"[true]").is_err());
+        let launch: SavedRecovery = studio_json::from_slice(br#"[1,"/state",{},[],true]"#).unwrap();
         assert!(launch.supervisor_enabled.get());
         assert_eq!(previous.is_ok(), current.is_ok());
         if let (Ok(previous), Ok(current)) = (previous, current) {
@@ -495,12 +495,12 @@ mod tests {
                 current.supervisor_enabled.get()
             );
         }
-        let saved: SavedRecovery = serde_json::from_str(r#"{"unknown":true}"#).unwrap();
+        let saved: SavedRecovery = studio_json::from_str(r#"{"unknown":true}"#).unwrap();
         assert!(saved.environment.is_none());
         assert!(saved.unset_environment.is_none());
         for field in ["environment", "unsetEnvironment"] {
             assert!(
-                serde_json::from_str::<SavedRecovery>(&format!(r#"{{"{field}":null}}"#)).is_err()
+                studio_json::from_str::<SavedRecovery>(&format!(r#"{{"{field}":null}}"#)).is_err()
             );
         }
     }
@@ -509,14 +509,14 @@ mod tests {
         // The shapes of two live background-recovery.json files that the
         // deleted Python backend wrote (values replaced by fixture paths).
         let records = [
-            serde_json::json!({"version":1, "enabled":true, "supervisorEnabled":true, "stateDir":"/state",
+            studio_json::json!({"version":1, "enabled":true, "supervisorEnabled":true, "stateDir":"/state",
                 "resources":"/Applications/Codex Studio.app/Contents/Resources/workspace",
                 "python":"/opt/homebrew/bin/python3", "codex":"/opt/homebrew/bin/codex", "port":4620,
                 "environment":{"SHELL":"/bin/zsh", "PATH":"/opt/homebrew/bin:/usr/bin:/bin"},
                 "unsetEnvironment":["CODEX_HOME", "CODEX_CANVAS_CWD", "CODEX_CANVAS_CONCURRENCY", "CODEX_BIN",
                     "CODEX_AGENTS_PYTHON", "LANG", "LC_ALL", "CODEX_AGENTS_SUPERVISOR_MODE",
                     "CODEX_AGENTS_SUPERVISOR_FALLBACK"]}),
-            serde_json::json!({"version":1, "enabled":true, "supervisorEnabled":true, "stateDir":"/state",
+            studio_json::json!({"version":1, "enabled":true, "supervisorEnabled":true, "stateDir":"/state",
                 "resources":"/Applications/Codex Studio.app/Contents/Resources/workspace",
                 "python":"/opt/homebrew/bin/python3", "codex":"/opt/homebrew/bin/codex", "port":4620,
                 "environment":{"CODEX_BIN":"/usr/bin/true", "SHELL":"/bin/zsh", "LANG":"en_US.UTF-8",
@@ -535,7 +535,7 @@ mod tests {
         for saved in &records {
             let restored = saved_environment(
                 environment.clone(),
-                &serde_json::from_value(saved.clone()).unwrap(),
+                &studio_json::from_value(saved.clone()).unwrap(),
                 Path::new("/state"),
             )
             .unwrap_or_else(|error| panic!("{error}: {saved}"));
@@ -555,7 +555,7 @@ mod tests {
         assert!(
             saved_environment(
                 environment,
-                &serde_json::from_value(unknown).unwrap(),
+                &studio_json::from_value(unknown).unwrap(),
                 Path::new("/state")
             )
             .is_err()
@@ -568,10 +568,10 @@ mod tests {
             ("CODEX_HOME".into(), "inherited".into()),
             ("HOME".into(), "/home/user".into()),
         ]);
-        let saved = serde_json::json!({"version":1, "stateDir":"/state", "environment":{"CODEX_BIN":"/bin/codex", "PATH":"/bin"}, "unsetEnvironment":["CODEX_HOME"]});
+        let saved = studio_json::json!({"version":1, "stateDir":"/state", "environment":{"CODEX_BIN":"/bin/codex", "PATH":"/bin"}, "unsetEnvironment":["CODEX_HOME"]});
         let restored = saved_environment(
             environment.clone(),
-            &serde_json::from_value(saved.clone()).unwrap(),
+            &studio_json::from_value(saved.clone()).unwrap(),
             Path::new("/state"),
         )
         .unwrap();
@@ -587,41 +587,43 @@ mod tests {
         assert!(
             saved_environment(
                 environment.clone(),
-                &serde_json::from_value(saved.clone()).unwrap(),
+                &studio_json::from_value(saved.clone()).unwrap(),
                 Path::new("/other")
             )
             .is_err()
         );
         for (key, value) in [
-            ("environment", serde_json::json!({"UNAPPROVED":"value"})),
-            ("unsetEnvironment", serde_json::json!(["PATH"])),
-            ("unsetEnvironment", serde_json::json!(["CODEX_BIN"])),
+            ("environment", studio_json::json!({"UNAPPROVED":"value"})),
+            ("unsetEnvironment", studio_json::json!(["PATH"])),
+            ("unsetEnvironment", studio_json::json!(["CODEX_BIN"])),
         ] {
             let mut invalid = saved.clone();
             invalid[key] = value;
             assert!(
                 saved_environment(
                     environment.clone(),
-                    &serde_json::from_value(invalid).unwrap(),
+                    &studio_json::from_value(invalid).unwrap(),
                     Path::new("/state")
                 )
                 .is_err()
             );
         }
         assert!(
-            serde_json::from_value::<SavedRecovery>(serde_json::json!({"supervisorEnabled":"yes"}))
-                .is_err()
+            studio_json::from_value::<SavedRecovery>(
+                studio_json::json!({"supervisorEnabled":"yes"})
+            )
+            .is_err()
         );
         for invalid in [
-            serde_json::json!({"environment":null}),
-            serde_json::json!({"unsetEnvironment":null}),
-            serde_json::json!({"supervisorEnabled":null}),
+            studio_json::json!({"environment":null}),
+            studio_json::json!({"unsetEnvironment":null}),
+            studio_json::json!({"supervisorEnabled":null}),
         ] {
-            assert!(serde_json::from_value::<SavedRecovery>(invalid).is_err());
+            assert!(studio_json::from_value::<SavedRecovery>(invalid).is_err());
         }
         assert!(supervisor_mode(
             &environment,
-            &serde_json::from_value(serde_json::json!({"supervisorEnabled":true})).unwrap()
+            &studio_json::from_value(studio_json::json!({"supervisorEnabled":true})).unwrap()
         ));
     }
 
@@ -655,7 +657,7 @@ setTimeout(() => process.exit(0), fixtureLifetimeMs);
         environment.insert("CODEX_AGENTS_SUPERVISOR_MODE".into(), "0".into());
         let state = root.join("state");
         fs::create_dir(&state).unwrap();
-        fs::write(state.join("background-recovery.json"), serde_json::json!({"version":1,"stateDir":state,"environment":{"LANG":"C"},"unsetEnvironment":["CODEX_HOME"]}).to_string()).unwrap();
+        fs::write(state.join("background-recovery.json"), studio_json::json!({"version":1,"stateDir":state,"environment":{"LANG":"C"},"unsetEnvironment":["CODEX_HOME"]}).to_string()).unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
@@ -680,7 +682,7 @@ setTimeout(() => process.exit(0), fixtureLifetimeMs);
             .unwrap();
         assert_eq!(first.pid, second.pid);
         let launched: Value =
-            serde_json::from_slice(&fs::read(state.join("launched.json")).unwrap()).unwrap();
+            studio_json::from_slice(&fs::read(state.join("launched.json")).unwrap()).unwrap();
         assert!(launched["home"].is_null());
         assert_eq!(launched["language"], "C");
         environment.insert("CODEX_AGENTS_SUPERVISOR_MODE".into(), "1".into());
@@ -707,7 +709,7 @@ setTimeout(() => process.exit(0), fixtureLifetimeMs);
             ] {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 read_http(&mut stream).await;
-                reply(&mut stream, &serde_json::json!({"application":"codex-agents", "protocol":1, "backendKind":"rust", "pid":std::process::id(), "stateDir":"/expected", "backendBuild":build, "diskSpace":{"level":null,"message":null}}).to_string()).await;
+                reply(&mut stream, &studio_json::json!({"application":"codex-agents", "protocol":1, "backendKind":"rust", "pid":std::process::id(), "stateDir":"/expected", "backendBuild":build, "diskSpace":{"level":null,"message":null}}).to_string()).await;
             }
         });
         for valid in [false, false, true] {
@@ -735,7 +737,7 @@ setTimeout(() => process.exit(0), fixtureLifetimeMs);
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             read_http(&mut stream).await;
-            reply(&mut stream,&serde_json::json!({"application":"codex-agents","protocol":1,"backendKind":"rust","pid":std::process::id(),"stateDir":"/other", "backendBuild":"a".repeat(64)}).to_string()).await;
+            reply(&mut stream,&studio_json::json!({"application":"codex-agents","protocol":1,"backendKind":"rust","pid":std::process::id(),"stateDir":"/other", "backendBuild":"a".repeat(64)}).to_string()).await;
         });
         assert!(
             identity(

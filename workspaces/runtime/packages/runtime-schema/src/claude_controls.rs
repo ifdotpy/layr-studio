@@ -3,7 +3,7 @@
 use crate::{claude_permissions::PermissionMode, queue_command::Field};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 /// Maximum UTF-8 byte length of a Claude control agent or request identity.
 pub const CONTROL_ID_MAX_BYTES: usize = 1024;
@@ -251,7 +251,7 @@ mod tests {
     fn control_outcome_persisted_schema_accepts_every_typed_error() {
         use strum::VariantNames;
         let schema: Value =
-            serde_json::from_str(include_str!("schemas/persisted-claude-control.schema.json"))
+            studio_json::from_str(include_str!("schemas/persisted-claude-control.schema.json"))
                 .expect("persisted schema");
         let validator = jsonschema::validator_for(&schema["properties"]["finalResponse"])
             .expect("outcome schema");
@@ -281,7 +281,7 @@ mod tests {
             ControlOutcome::Err(ControlError::Unavailable),
             ControlOutcome::Err(ControlError::Request),
         ] {
-            assert!(validator.is_valid(&serde_json::to_value(outcome).unwrap()));
+            assert!(validator.is_valid(&studio_json::to_value(outcome).unwrap()));
         }
         assert!(!validator.is_valid(&json!({"status":"err","error":{"kind":"future"}})));
     }
@@ -300,7 +300,7 @@ mod tests {
             "schema: {value}"
         );
         assert_eq!(
-            serde_json::from_value::<ClaudeControlCommand>(value.clone()).is_ok(),
+            studio_json::from_value::<ClaudeControlCommand>(value.clone()).is_ok(),
             expected,
             "serde: {value}"
         );
@@ -388,7 +388,7 @@ mod tests {
     fn claude_control_identity_limit_remains_utf8_bytes() {
         for (text, expected) in [("🙂".repeat(256), true), ("🙂".repeat(257), false)] {
             assert_eq!(
-                serde_json::from_value::<ControlId>(json!(text)).is_ok(),
+                studio_json::from_value::<ControlId>(json!(text)).is_ok(),
                 expected
             );
         }
@@ -401,8 +401,9 @@ mod tests {
             json!({"autoCompactWindow":null}),
             json!({"thinking":false,"permissionMode":"plan","autoCompactWindow":100000}),
         ] {
-            let typed: ClaudeSettings = serde_json::from_value(settings.clone()).expect("settings");
-            assert_eq!(serde_json::to_value(typed).expect("serialize"), settings);
+            let typed: ClaudeSettings =
+                studio_json::from_value(settings.clone()).expect("settings");
+            assert_eq!(studio_json::to_value(typed).expect("serialize"), settings);
         }
         let schema = schemars::schema_for!(PermissionMode).to_value();
         assert_eq!(
@@ -425,8 +426,8 @@ mod tests {
 
     #[test]
     fn claude_control_schema_parity_rejects_drift() {
-        let openapi: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+            .expect("OpenAPI");
         check_schema_parity(&openapi).expect("generated command schemas");
         for (name, _) in schemas() {
             let mut drifted = openapi.clone();
@@ -441,8 +442,8 @@ mod tests {
 
     #[test]
     fn settings_schema_rejects_null_nonnullable_fields() {
-        let openapi: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+            .expect("OpenAPI");
         let validator =
             jsonschema::validator_for(&openapi["components"]["schemas"]["ClaudeSettings"])
                 .expect("settings schema");

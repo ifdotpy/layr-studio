@@ -1,6 +1,6 @@
 use crate::monitor_fixtures as fixtures;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     monitor_policy::Operation,
     monitor_receipts::{self, ResultReceipt},
@@ -20,7 +20,7 @@ fn running(cases: &[Value]) -> Value {
 }
 
 fn operation(case: &Value) -> Operation {
-    serde_json::from_value(case["before"]["operation"].clone()).expect("monitor operation")
+    studio_json::from_value(case["before"]["operation"].clone()).expect("monitor operation")
 }
 
 fn add_request(tx: &rusqlite::Transaction<'_>, request: &Value) {

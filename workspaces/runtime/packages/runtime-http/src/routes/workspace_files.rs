@@ -306,7 +306,7 @@ mod tests {
         body::{Body, to_bytes},
         http::{Request, StatusCode},
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
 
@@ -349,7 +349,7 @@ mod tests {
             let response = app.clone().oneshot(request).await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
             let body: Value =
-                serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap())
+                studio_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap())
                     .unwrap();
             assert_eq!(body["name"], "sample.txt");
             assert_eq!(body[field], expected);
@@ -448,7 +448,7 @@ mod tests {
             let response = app.clone().oneshot(request).await.expect("response");
             assert_eq!(response.status(), status);
             if let Some(size) = size {
-                let body: Value = serde_json::from_slice(
+                let body: Value = studio_json::from_slice(
                     &to_bytes(response.into_body(), 65536).await.expect("body"),
                 )
                 .expect("json");
@@ -490,10 +490,10 @@ mod typed_query_tests {
 mod asset_ingress_tests {
     #[test]
     fn asset_is_closed_and_bounded() {
-        assert!(serde_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n"}"#).is_ok());
-        assert!(serde_json::from_str::<super::AssetUpload>(r#"{"agent":"","name":"n"}"#).is_err());
+        assert!(studio_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n"}"#).is_ok());
+        assert!(studio_json::from_str::<super::AssetUpload>(r#"{"agent":"","name":"n"}"#).is_err());
         assert!(
-            serde_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n","extra":1}"#)
+            studio_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n","extra":1}"#)
                 .is_err()
         );
     }

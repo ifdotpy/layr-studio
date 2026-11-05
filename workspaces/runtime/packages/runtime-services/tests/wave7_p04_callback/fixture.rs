@@ -2,15 +2,15 @@
 #[path = "../recovery/frozen.rs"]
 pub(crate) mod frozen;
 
-use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, OnceLock};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, Method, RequestFrame, RequestId};
 use studio_runtime_services::{callback_runtime::*, provider_callbacks::*};
 use studio_runtime_store::RuntimeStore;
 pub fn template() -> &'static Value {
     static VALUE: OnceLock<Value> = OnceLock::new();
     VALUE.get_or_init(|| {
-        serde_json::from_str(include_str!("expected.json")).expect("frozen callback expectations")
+        studio_json::from_str(include_str!("expected.json")).expect("frozen callback expectations")
     })
 }
 
@@ -179,7 +179,7 @@ pub async fn put_actor(store: &RuntimeStore, value: &Value) {
     let record = value.to_string();
     store
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {
-            let mut record: Value = serde_json::from_str(&record).expect("actor JSON");
+            let mut record: Value = studio_json::from_str(&record).expect("actor JSON");
             crate::agent_view_fixtures::normalize_legacy_agent(&mut record);
             let previous = studio_runtime_store::agent_volatile::merged_record(tx, &id)?
                 .expect("actor exists");
@@ -212,7 +212,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let mut result = serde_json::Map::new();
+    let mut result = studio_json::Map::new();
     for name in tables {
         // The frozen oracle compares domain writes. Transport obligations and their
         // cached results have dedicated assertions; physical snapshots include all rows.
@@ -250,7 +250,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
             for i in 0..count {
                 values.push(match row.get_ref(i)? {
                     ValueRef::Null=>Value::Null,ValueRef::Integer(v)=>json!(v),ValueRef::Real(v)=>json!(v),
-                    ValueRef::Text(v)=>{let s=std::str::from_utf8(v).unwrap();serde_json::from_str(s).unwrap_or(json!(s))},
+                    ValueRef::Text(v)=>{let s=std::str::from_utf8(v).unwrap();studio_json::from_str(s).unwrap_or(json!(s))},
                     ValueRef::Blob(v)=>json!({"blobHex":v.iter().map(|b|format!("{b:02x}")).collect::<String>()}),
                 });
             }
@@ -279,7 +279,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
 }
 pub fn logical_changes(before: &Value, after: &Value) -> Value {
     use std::collections::BTreeMap;
-    let mut result = serde_json::Map::new();
+    let mut result = studio_json::Map::new();
     for (table, rows) in before.as_object().unwrap() {
         if table == "runtime_agent_record_generation" {
             let delta = after[table][0][1].as_i64().unwrap() - rows[0][1].as_i64().unwrap();
@@ -446,7 +446,7 @@ pub async fn seed_admission(store: &RuntimeStore, before: &Value) {
     store
         .transaction_with::<_, CallbackError>(move |tx| {
             admit_callback_request(tx, &context, &frame)?;
-            let rpc_id = serde_json::from_value(request["id"].clone())?;
+            let rpc_id = studio_json::from_value(request["id"].clone())?;
             let key = callback_origin_key(&context, &rpc_id);
             let mut owner =
                 studio_runtime_services::tool_requests::get_callback::<CallbackOwner>(tx, &key)?
@@ -580,26 +580,26 @@ fn insert_row(
     Ok(())
 }
 
-pub(crate) fn normalize_agent_nulls(value: &mut serde_json::Value) {
+pub(crate) fn normalize_agent_nulls(value: &mut studio_json::Value) {
     match value {
-        serde_json::Value::Object(fields) => {
+        studio_json::Value::Object(fields) => {
             crate::agent_view_fixtures::normalize_frozen_projection(fields);
             if fields.contains_key("rootId") && fields.contains_key("epoch") {
                 for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS
                     .into_iter()
                     .chain(["parentId", "threadId", "turnId", "deletedAt"])
                 {
-                    if fields.get(field).is_some_and(serde_json::Value::is_null) {
+                    if fields.get(field).is_some_and(studio_json::Value::is_null) {
                         fields.remove(field);
                     }
                 }
             }
             fields.values_mut().for_each(normalize_agent_nulls);
         }
-        serde_json::Value::Array(values) => values.iter_mut().for_each(normalize_agent_nulls),
-        serde_json::Value::Null
-        | serde_json::Value::Bool(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::String(_) => {}
+        studio_json::Value::Array(values) => values.iter_mut().for_each(normalize_agent_nulls),
+        studio_json::Value::Null
+        | studio_json::Value::Bool(_)
+        | studio_json::Value::Number(_)
+        | studio_json::Value::String(_) => {}
     }
 }

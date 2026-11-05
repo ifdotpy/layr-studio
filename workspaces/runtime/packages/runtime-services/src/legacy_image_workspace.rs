@@ -1,6 +1,6 @@
 //! Compatibility for stored workspaces whose executor has been removed.
 //! Keep the original row and workspace metadata. Never access its filesystem.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
 
 /// Refusal for an executor removed from this build.
@@ -75,7 +75,7 @@ pub async fn finish_stored_workspaces(store: &RuntimeStore) -> Result<usize, Sto
             let mut count = 0;
             for row in rows {
                 let mut value: Value =
-                    serde_json::from_str(&row).map_err(|_| StoreError::InvalidStoredObject {
+                    studio_json::from_str(&row).map_err(|_| StoreError::InvalidStoredObject {
                         table: "runtime_agents",
                         id: "legacy".into(),
                     })?;
@@ -129,7 +129,7 @@ mod tests {
         let store = RuntimeStore::open(Some(directory.path()))
             .await
             .expect("store");
-        let mut original: Value = serde_json::from_str(include_str!(
+        let mut original: Value = studio_json::from_str(include_str!(
             "../tests/startup_recovery/legacy-image-agent.json"
         ))
         .expect("legacy fixture");
@@ -227,7 +227,7 @@ mod tests {
             )
             .expect("fixture operation succeeds");
         assert_eq!(
-            serde_json::from_str::<Value>(&task).expect("fixture operation succeeds")["status"],
+            studio_json::from_str::<Value>(&task).expect("fixture operation succeeds")["status"],
             crate::task_settlement::SETTLED_TASK_STATUS
         );
         let background: String = db
@@ -238,7 +238,7 @@ mod tests {
             )
             .expect("fixture operation succeeds");
         assert_eq!(
-            serde_json::from_str::<Value>(&background).expect("fixture operation succeeds")["status"],
+            studio_json::from_str::<Value>(&background).expect("fixture operation succeeds")["status"],
             crate::task_settlement::LOST_TASK_STATUS
         );
     }

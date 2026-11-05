@@ -152,7 +152,7 @@ impl GuestRpc for FakeGuest {
             )
             .ok()
             .flatten()
-            .map(|raw| serde_json::from_str(&raw).unwrap());
+            .map(|raw| studio_json::from_str(&raw).unwrap());
         self.saved_before_exec.lock().unwrap().push(saved);
         if let Some((started, release)) = self.hold.lock().unwrap().take() {
             started.send(()).unwrap();
@@ -342,7 +342,7 @@ async fn vm_agent_runs_one_command_with_its_exact_guest_request() {
     let args = json!({"action": "execute", "command": "make", "request_id": "build", "timeout_seconds": 30});
     let first = fixture.call(LEAD, "call-1", args.clone()).await;
     assert_eq!(first["success"], true, "{first}");
-    let value: Value = serde_json::from_str(&text(&first)).unwrap();
+    let value: Value = studio_json::from_str(&text(&first)).unwrap();
     assert_eq!(
         (value["exitCode"].clone(), value["output"].clone()),
         (json!(0), json!("hello"))

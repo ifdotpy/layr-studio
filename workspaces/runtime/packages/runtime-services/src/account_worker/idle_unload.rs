@@ -894,7 +894,7 @@ impl Worker {
                 return Ok(None);
             };
             let Ok(IdlePage::Page { data, next_cursor }) =
-                serde_json::from_value::<IdlePage<String>>(page)
+                studio_json::from_value::<IdlePage<String>>(page)
             else {
                 return Ok(None);
             };
@@ -999,7 +999,7 @@ impl Worker {
                     id,
                     status: IdleThreadStatus::Status { state },
                 },
-        }) = serde_json::from_value::<IdleThreadReadReply>(read)
+        }) = studio_json::from_value::<IdleThreadReadReply>(read)
         else {
             return Ok(UnloadResult::Busy(IdleBlocker::Provider));
         };
@@ -1020,7 +1020,7 @@ impl Worker {
             match self.idle_request(request).await? {
                 // Work entries only prove that the page is nonempty; their
                 // contents are not used to classify provider work.
-                Some(page) => match serde_json::from_value::<IdlePage<IgnoredAny>>(page) {
+                Some(page) => match studio_json::from_value::<IdlePage<IgnoredAny>>(page) {
                     Ok(IdlePage::Page { data, next_cursor })
                         if data.is_empty() && next_cursor.is_none() => {}
                     Ok(IdlePage::Page { .. }) | Err(_) => {
@@ -1067,7 +1067,7 @@ impl Worker {
             return Ok(UnloadResult::Retry);
         };
         Ok(
-            match serde_json::from_value::<IdleUnsubscribeReply>(reply) {
+            match studio_json::from_value::<IdleUnsubscribeReply>(reply) {
                 Ok(IdleUnsubscribeReply::Reply { status }) => match status {
                     IdleUnsubscribeStatus::Unsubscribed
                     | IdleUnsubscribeStatus::NotSubscribed

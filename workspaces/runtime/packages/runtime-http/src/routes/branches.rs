@@ -10,10 +10,10 @@ use axum::{Json, extract::State, http::StatusCode};
 use rusqlite::OptionalExtension;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::transcript_asset::TranscriptAssetView;
 use studio_runtime_schema::{queue_command::Field, workspace_operation::OperationPhase};
@@ -47,19 +47,19 @@ struct BranchOperation {
         default,
         skip_serializing_if = "Field::is_missing"
     )]
-    legacy_phase: Field<Box<serde_json::value::RawValue>>,
+    legacy_phase: Field<studio_json::OwnedRawJson>,
     #[serde(
         rename = "legacyPhaseCollision",
         default,
         skip_serializing_if = "Field::is_missing"
     )]
-    legacy_phase_collision: Field<Box<serde_json::value::RawValue>>,
+    legacy_phase_collision: Field<studio_json::OwnedRawJson>,
     #[serde(
         rename = "legacyRecord",
         default,
         skip_serializing_if = "Field::is_missing"
     )]
-    legacy_record: Field<Box<serde_json::value::RawValue>>,
+    legacy_record: Field<studio_json::OwnedRawJson>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     provider: Field<Value>,
     #[serde(
@@ -67,24 +67,24 @@ struct BranchOperation {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "decode_result"
     )]
-    result: Option<Box<serde_json::value::RawValue>>,
+    result: Option<studio_json::OwnedRawJson>,
     #[serde(flatten)]
-    other: serde_json::Map<String, Value>,
+    other: studio_json::Map<String, Value>,
 }
 
 fn decode_result<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<Box<serde_json::value::RawValue>>, D::Error> {
-    let result = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+) -> Result<Option<studio_json::OwnedRawJson>, D::Error> {
+    let result = studio_json::OwnedRawJson::deserialize(deserializer)?;
     // The inspected 2026-10-31 snapshot contained zero null branch results.
-    if result.get() == "null" {
+    if result.as_str() == "null" {
         return Err(serde::de::Error::custom("null branch result"));
     }
     Ok(Some(result))
 }
 
-fn decode_branch_operation(raw: &str) -> Result<BranchOperation, serde_json::Error> {
-    serde_json::from_str::<studio_runtime_schema::json_object::JsonObject<BranchOperation>>(raw)
+fn decode_branch_operation(raw: &str) -> Result<BranchOperation, studio_json::Error> {
+    studio_json::from_str::<studio_runtime_schema::json_object::JsonObject<BranchOperation>>(raw)
         .map(|object| object.0)
 }
 
@@ -132,7 +132,7 @@ fn branch_draft_request(
     Ok(crate::generated::CreateLeadRequest {
         id: Some(Some(child_id)),
         account_key: Some(account),
-        cwd: serde_json::from_value(source["cwd"].clone()).map_err(|_| ApiError::internal())?,
+        cwd: studio_json::from_value(source["cwd"].clone()).map_err(|_| ApiError::internal())?,
         model: Some(Some(model.to_owned())),
         yolo_mode: source
             .get("permissionMode")
@@ -176,7 +176,7 @@ async fn branch(
         .await?;
     let operation_id = format!("branch:{}", body.id);
     let signature = sha256_hex(
-        serde_json::to_string(&json!({
+        studio_json::to_string(&json!({
             "agent":body.agent,"id":body.id,"message_id":body.message_id,"before":body.before
         }))
         .map_err(|_| ApiError::internal())?
@@ -271,7 +271,7 @@ async fn branch(
                             prior.other.remove("error");
                             tx.execute(
                                 "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                                params![operation_id, serde_json::to_string(&prior)?],
+                                params![operation_id, studio_json::to_string(&prior)?],
                             )?;
                         }
                         OperationPhase::ProviderPending | OperationPhase::RecoveryRequired => {
@@ -311,7 +311,7 @@ async fn branch(
                             prior.other.insert("reserved".into(), json!(true));
                             tx.execute(
                                 "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                                params![operation_id, serde_json::to_string(&prior)?],
+                                params![operation_id, studio_json::to_string(&prior)?],
                             )?;
                             return Ok(Some(prior));
                         }
@@ -354,7 +354,7 @@ async fn branch(
                 {
                     decode_branch_operation(&existing)?
                 } else {
-                    let other = serde_json::Map::from_iter([
+                    let other = studio_json::Map::from_iter([
                         ("id".into(), json!(operation_id)),
                         ("kind".into(), json!("branch")),
                         ("agent".into(), json!(agent_id)),
@@ -388,7 +388,7 @@ async fn branch(
                     };
                     tx.execute(
                         "INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)",
-                        params![operation_id, serde_json::to_string(&record)?],
+                        params![operation_id, studio_json::to_string(&record)?],
                     )?;
                     record
                 };
@@ -402,7 +402,7 @@ async fn branch(
                 record.other.insert("reserved".into(), json!(true));
                 tx.execute(
                     "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                    params![operation_id, serde_json::to_string(&record)?],
+                    params![operation_id, studio_json::to_string(&record)?],
                 )?;
                 Ok(Some(record))
             })
@@ -418,7 +418,7 @@ async fn branch(
         .filter(|op| op.phase == OperationPhase::Completed)
     {
         let result = op.result.as_ref().ok_or_else(ApiError::internal)?;
-        return serde_json::from_str::<crate::generated::BranchResponse>(result.get())
+        return studio_json::from_str::<crate::generated::BranchResponse>(result.as_str())
             .map(Json)
             .map_err(ApiError::json);
     }
@@ -475,7 +475,7 @@ async fn branch(
                 )
                 .await?;
                 let result: BranchTurnPage =
-                    serde_json::from_value(result).map_err(|_| ApiError::internal())?;
+                    studio_json::from_value(result).map_err(|_| ApiError::internal())?;
                 for turn in result.data {
                     if turn.id.is_empty() {
                         return Err(ApiError::internal());
@@ -555,7 +555,7 @@ async fn branch(
                 .as_ref()
                 .and_then(|owner| owner.other.get("providerAdmission"))
                 .cloned()
-                .map(serde_json::from_value)
+                .map(studio_json::from_value)
                 .transpose()
                 .map_err(ApiError::json)?,
             account: account.clone(),
@@ -653,7 +653,7 @@ async fn branch(
             op.set_phase(OperationPhase::ProviderReady);
             tx.execute(
                 "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![persist_operation_id, serde_json::to_string(&op)?],
+                params![persist_operation_id, studio_json::to_string(&op)?],
             )?;
             Ok::<_, studio_runtime_store::StoreError>(())
         })
@@ -802,7 +802,7 @@ async fn settle_failure(
             operation.other.insert("error".into(), json!(error.clone()));
             tx.execute(
                 "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![operation_id.as_str(), serde_json::to_string(&operation)?],
+                params![operation_id.as_str(), studio_json::to_string(&operation)?],
             )?;
             if let Some(mut actor) = AgentRepository::get(
                 tx,
@@ -858,7 +858,7 @@ async fn release_provider_ready_reservation(
             operation.other.insert("reserved".into(), json!(false));
             tx.execute(
                 "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![operation_id.as_str(), serde_json::to_string(&operation)?],
+                params![operation_id.as_str(), studio_json::to_string(&operation)?],
             )?;
             if let Some(mut actor) = AgentRepository::get(tx, &AgentId::from(agent_id))?
                 && actor.workspace_reservation_id.value().map(String::as_str)
@@ -893,7 +893,7 @@ async fn persist_fork_turn(
             operation.fork_turn_id = fork_turn;
             tx.execute(
                 "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![operation_id.as_str(), serde_json::to_string(&operation)?],
+                params![operation_id.as_str(), studio_json::to_string(&operation)?],
             )?;
             Ok::<_, studio_runtime_store::StoreError>(())
         })
@@ -1045,12 +1045,12 @@ async fn copy_branch_history(
         let rows=stmt.query_map([source.as_str()],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,f64>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
         drop(stmt);
         let cutoff=match fork_turn {
-            Some(fork_turn) => rows.iter().filter_map(|(_,raw,created)|serde_json::from_str::<studio_runtime_schema::json_object::JsonObject<BranchTurn>>(raw).ok().map(|r| r.0).filter(|r|r.turn_id.as_deref()==Some(fork_turn.as_str())).map(|_|*created)).reduce(f64::max).unwrap_or(f64::NEG_INFINITY),
+            Some(fork_turn) => rows.iter().filter_map(|(_,raw,created)|studio_json::from_str::<studio_runtime_schema::json_object::JsonObject<BranchTurn>>(raw).ok().map(|r| r.0).filter(|r|r.turn_id.as_deref()==Some(fork_turn.as_str())).map(|_|*created)).reduce(f64::max).unwrap_or(f64::NEG_INFINITY),
             None => f64::NEG_INFINITY,
         };
         let mut assets=BTreeMap::<String,TranscriptAssetView>::new();
         for (old_id, raw, _created) in rows.into_iter().take_while(|(_, _, created)| *created <= cutoff) {
-            let source_record = serde_json::from_str::<studio_runtime_schema::transcript_record::TranscriptItemRecord>(&raw)
+            let source_record = studio_json::from_str::<studio_runtime_schema::transcript_record::TranscriptItemRecord>(&raw)
                 .map_err(|_| studio_runtime_store::StoreError::InvalidStoredObject { table: "runtime_items", id: old_id.clone() })?;
             if before && source_record.turn_id().value()==selected.record.turn_id().value(){continue;}
             let local_id=old_id.split_once(':').map(|(_,id)|id).unwrap_or(&old_id);
@@ -1139,9 +1139,9 @@ async fn copy_branch_history(
         studio_runtime_services::agents_create::publish_agent(tx,&value)?;
         let result=value.clone();
         operation.set_phase(OperationPhase::Completed);
-        operation.result = Some(serde_json::value::to_raw_value(&result)?);
+        operation.result = Some(studio_json::to_raw_value(&result)?);
         operation.other.insert("updated".into(), json!(unix_time()));
-        tx.execute("UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",params![operation_id.as_str(),serde_json::to_string(&operation)?])?;
+        tx.execute("UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",params![operation_id.as_str(),studio_json::to_string(&operation)?])?;
         if let Some(mut actor)=AgentRepository::get(tx,&AgentId::from(source))? {
             actor.workspace_reservation_id = studio_runtime_schema::queue_command::Field::Missing;
             actor.workspace_operation = studio_runtime_schema::queue_command::Field::Null;
@@ -1238,13 +1238,13 @@ fn branch_draft_payload(
 }
 
 fn decode_asset_views(
-    views: &Field<Vec<Box<serde_json::value::RawValue>>>,
+    views: &Field<Vec<studio_json::OwnedRawJson>>,
 ) -> Result<Vec<TranscriptAssetView>, studio_runtime_store::StoreError> {
     views
         .value()
         .into_iter()
         .flatten()
-        .map(|view| serde_json::from_str(view.get()).map_err(Into::into))
+        .map(|view| studio_json::from_str(view.as_str()).map_err(Into::into))
         .collect()
 }
 
@@ -1338,7 +1338,7 @@ mod tests {
                 .legacy_phase
                 .value()
                 .expect("phase evidence")
-                .get(),
+                .as_str(),
             r#"{"old":2}"#
         );
         assert_eq!(
@@ -1346,7 +1346,7 @@ mod tests {
                 .legacy_phase_collision
                 .value()
                 .expect("collision evidence")
-                .get(),
+                .as_str(),
             r#"[{"older":3},{"new":1}]"#
         );
     }
@@ -1364,7 +1364,7 @@ mod tests {
     fn branch_operation_preserves_opaque_result_bytes() {
         let raw = r#"{"signature":"s","phase":"completed","result":{"vendor":  {"x":  1}}}"#;
         let operation = decode_branch_operation(raw).unwrap();
-        let encoded = serde_json::to_string(&operation).unwrap();
+        let encoded = studio_json::to_string(&operation).unwrap();
         assert!(encoded.contains(r#""result":{"vendor":  {"x":  1}}"#));
         assert!(
             decode_branch_operation(r#"{"signature":"s","phase":"completed","result":null}"#)
@@ -1375,13 +1375,13 @@ mod tests {
     #[test]
     fn branch_item_rejects_non_string_turn_id() {
         assert!(
-            serde_json::from_str::<studio_runtime_schema::transcript_record::TranscriptItemRecord>(
+            studio_json::from_str::<studio_runtime_schema::transcript_record::TranscriptItemRecord>(
                 r#"{"id":"i","role":"assistant","turnId":7}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<studio_runtime_schema::transcript_record::TranscriptItemRecord>(
+            studio_json::from_str::<studio_runtime_schema::transcript_record::TranscriptItemRecord>(
                 r#"{"id":"i","role":"assistant","turnId":"turn"}"#
             )
             .is_ok()
@@ -1391,9 +1391,9 @@ mod tests {
     #[test]
     fn branch_item_rejects_invalid_asset_view() {
         let invalid: studio_runtime_schema::transcript_record::TranscriptItemRecord =
-            serde_json::from_str(r#"{"id":"i","role":"assistant","assets":[{"id":5}]}"#).unwrap();
+            studio_json::from_str(r#"{"id":"i","role":"assistant","assets":[{"id":5}]}"#).unwrap();
         let valid: studio_runtime_schema::transcript_record::TranscriptItemRecord =
-            serde_json::from_str(r#"{"id":"i","role":"assistant","assets":[{"id":"asset"}]}"#)
+            studio_json::from_str(r#"{"id":"i","role":"assistant","assets":[{"id":"asset"}]}"#)
                 .unwrap();
         assert!(decode_asset_views(invalid.assets()).is_err());
         assert!(decode_asset_views(valid.assets()).is_ok());
@@ -1402,7 +1402,7 @@ mod tests {
     #[test]
     fn agent_record_rejects_invalid_branch_draft() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","accountKey":"default","compactions":0,"draft":{"text":42,"prefixText":"","assets":[]}}"#;
-        assert!(serde_json::from_str::<studio_runtime_store::AgentRecord>(raw).is_err());
+        assert!(studio_json::from_str::<studio_runtime_store::AgentRecord>(raw).is_err());
         let value = json!({"id":"agent","rootId":"agent","epoch":0,"status":"idle","accountKey":"default","compactions":0,"draft":{"text":"hello","prefixText":"","assets":[{"id":"asset","vendor":{"x":1}}]}});
         let agent = studio_runtime_store::AgentRecord::from_value(value).unwrap();
         assert_eq!(agent.draft.unwrap().assets[0].id(), "asset");
@@ -1413,26 +1413,26 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(root.path())).await.unwrap();
         store.transaction(|tx| {
-            let asset: studio_runtime_store::TranscriptAssetRecord = serde_json::from_str(
+            let asset: studio_runtime_store::TranscriptAssetRecord = studio_json::from_str(
                 r#"{"id":"asset","agent":"source","name":"n","path":"private","mime":"text/plain","image":false,"size":1,"hash":"h","created":2,"vendor":{"x":  1}}"#,
             )?;
             WorkspaceFilesRepository::insert_asset(tx, "asset", &asset)?;
-            let mut views: Vec<TranscriptAssetView> = serde_json::from_str(r#"[{"id":"asset"},{"id":"asset"}]"#)?;
+            let mut views: Vec<TranscriptAssetView> = studio_json::from_str(r#"[{"id":"asset"},{"id":"asset"}]"#)?;
             let mut copied = BTreeMap::new();
             copy_asset_views(tx, "child", &mut views, &mut copied)?;
             assert_eq!(views[0].id(), views[1].id());
             assert_eq!(copied.len(), 1);
-            let wire = serde_json::to_string(&views)?;
+            let wire = studio_json::to_string(&views)?;
             assert!(!wire.contains("private"));
             assert!(wire.contains(r#""vendor":{"x":  1}"#));
             let selected = studio_runtime_store::TranscriptItem {
                 id: "source:message".into(),
                 agent: "source".into(),
-                record: serde_json::from_str(r#"{"id":"source:message","role":"user","text":"hello","assets":[{"id":"asset"}]}"#)?,
+                record: studio_json::from_str(r#"{"id":"source:message","role":"user","text":"hello","assets":[{"id":"asset"}]}"#)?,
             };
             let draft = branch_draft_payload(tx, "source", "child", &selected, "source:message", &mut copied)?;
             assert_eq!(draft.assets[0].id(), views[0].id());
-            let wire = serde_json::to_string(&draft)?;
+            let wire = studio_json::to_string(&draft)?;
             assert!(!wire.contains("private"));
             assert!(wire.contains(r#""vendor":{"x":  1}"#));
             Ok::<_, studio_runtime_store::StoreError>(())
@@ -1468,7 +1468,7 @@ mod tests {
         let selected = studio_runtime_store::TranscriptItem {
             id: "source:a".into(),
             agent: "source".into(),
-            record: serde_json::from_str(r#"{"id":"source:a","role":"assistant","turnId":"t"}"#)
+            record: studio_json::from_str(r#"{"id":"source:a","role":"assistant","turnId":"t"}"#)
                 .unwrap(),
         };
         let provider = json!({"thread":{"id":"fork"}});
@@ -1557,7 +1557,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let record: Value = serde_json::from_str(&raw).unwrap();
+        let record: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(record["phase"], "recovery_required");
         assert_eq!(record["provider"], json!([1, null]));
         assert_eq!(record["result"], false);
@@ -1628,7 +1628,7 @@ mod tests {
     fn branch_draft_uses_typed_input_identity_and_prefix() {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
         let tx = db.transaction().unwrap();
-        let record = serde_json::from_str(r#"{"id":"agent:parent","role":"user","text":"parent","inputs":[{"id":"one","kind":"user","text":"first"},{"id":null,"kind":"user","text":"second"}]}"#).unwrap();
+        let record = studio_json::from_str(r#"{"id":"agent:parent","role":"user","text":"parent","inputs":[{"id":"one","kind":"user","text":"first"},{"id":null,"kind":"user","text":"second"}]}"#).unwrap();
         let selected = studio_runtime_store::TranscriptItem {
             id: "agent:parent".into(),
             agent: "agent".into(),
@@ -1675,7 +1675,7 @@ mod tests {
         ] {
             let typed =
                 branch_draft_request(&source, "child".into(), "account".into(), "model").unwrap();
-            assert_eq!(historical_request, serde_json::to_value(typed).unwrap());
+            assert_eq!(historical_request, studio_json::to_value(typed).unwrap());
         }
     }
 
@@ -1729,7 +1729,7 @@ mod tests {
         let selected = studio_runtime_store::TranscriptItem {
             id: "message".into(),
             agent: "source".into(),
-            record: serde_json::from_str(r#"{"id":"message","role":"assistant","turnId":"turn"}"#)
+            record: studio_json::from_str(r#"{"id":"message","role":"assistant","turnId":"turn"}"#)
                 .expect("selected transcript item"),
         };
         let provider = json!({"thread":{"id":"new-thread"}});
@@ -1767,7 +1767,7 @@ mod tests {
         let selected = studio_runtime_store::TranscriptItem {
             id: "message".into(),
             agent: "source".into(),
-            record: serde_json::from_str(r#"{"id":"message","role":"assistant","turnId":"turn"}"#)
+            record: studio_json::from_str(r#"{"id":"message","role":"assistant","turnId":"turn"}"#)
                 .unwrap(),
         };
         let provider = json!({"thread":{"id":"new-thread"}});
@@ -1800,7 +1800,7 @@ mod tests {
         let selected = studio_runtime_store::TranscriptItem {
             id: "source:legacy".into(),
             agent: "source".into(),
-            record: serde_json::from_str(
+            record: studio_json::from_str(
                 r#"{"id":"source:legacy","role":"assistant","turnId":"t"}"#,
             )
             .unwrap(),
@@ -2107,7 +2107,7 @@ mod tests {
             .await
             .expect("seed");
         let policy = Arc::new(studio_runtime_services::account_policy::AccountPolicyState::from_startup(
-            Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"fixture","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()), []
+            Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"fixture","label":"Default","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()), []
         ).expect("policy"));
         let mut state = HttpState::new(
             "token".into(),
@@ -2126,7 +2126,7 @@ mod tests {
         let result = Box::pin(branch(
             State(state.clone()),
             ApiJson(
-                serde_json::from_value(json!({
+                studio_json::from_value(json!({
                     "id":"lookup","agent":"source","message_id":"message","before":before
                 }))
                 .expect("request"),
@@ -2138,7 +2138,7 @@ mod tests {
             if selected == 0 {
                 store.transaction(|tx| {
                     let raw: String = tx.query_row("SELECT record FROM runtime_workspace_operations WHERE id='branch:lookup'", [], |row| row.get(0))?;
-                    let mut operation: Value = serde_json::from_str(&raw)?;
+                    let mut operation: Value = studio_json::from_str(&raw)?;
                     operation["provider"] = json!(["old"]);
                     operation["result"] = json!({"old":true});
                     operation["vendor"] = json!({"retained":true});
@@ -2149,7 +2149,7 @@ mod tests {
             let retried = Box::pin(branch(
                 State(state.clone()),
                 ApiJson(
-                    serde_json::from_str(&format!(
+                    studio_json::from_str(&format!(
                         r#"{{"id":"lookup","agent":"source","message_id":"message","before":{before}}}"#
                     ))
                     .expect("request"),
@@ -2167,7 +2167,7 @@ mod tests {
                         |row| row.get(0),
                     )
                     .expect("operation");
-                serde_json::from_str::<Value>(&raw).map_err(studio_runtime_store::StoreError::from)
+                studio_json::from_str::<Value>(&raw).map_err(studio_runtime_store::StoreError::from)
             })
             .await
             .expect("operation read");
@@ -2283,7 +2283,7 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("error body");
-        (status, serde_json::from_slice(&bytes).expect("error JSON"))
+        (status, studio_json::from_slice(&bytes).expect("error JSON"))
     }
 
     #[tokio::test]
@@ -2425,13 +2425,13 @@ mod branch_ingress_tests {
     #[test]
     fn branch_is_closed() {
         assert!(
-            serde_json::from_str::<super::BranchRequest>(
+            studio_json::from_str::<super::BranchRequest>(
                 r#"{"agent":"a","message_id":"m","id":"i"}"#
             )
             .is_ok()
         );
         assert!(
-            serde_json::from_str::<super::BranchRequest>(
+            studio_json::from_str::<super::BranchRequest>(
                 r#"{"agent":"a","message_id":"m","id":"i","extra":1}"#
             )
             .is_err()

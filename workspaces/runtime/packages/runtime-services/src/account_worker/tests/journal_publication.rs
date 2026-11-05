@@ -101,10 +101,26 @@ async fn long_answers_use_canonical_bounded_agent_sync_projection() {
     store
         .transaction(|tx| {
             for (id, _) in AGENTS {
+<<<<<<< head
                 let raw = crate::entity_scope::direct_document(tx, "agent", id)?
                     .and_then(|row| row.payload)
                     .expect("agent projection");
                 let envelope: Value = serde_json::from_str(&raw)?;
+||||||| base
+                let raw: String = tx.query_row(
+                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
+                    [id],
+                    |row| row.get(0),
+                )?;
+                let envelope: Value = serde_json::from_str(&raw)?;
+=======
+                let raw: String = tx.query_row(
+                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
+                    [id],
+                    |row| row.get(0),
+                )?;
+                let envelope: Value = studio_json::from_str(&raw)?;
+>>>>>>> https/main
                 let payload = &envelope["value"];
                 assert_eq!(
                     payload["lastAnswer"].as_str().map(str::len),
@@ -440,7 +456,7 @@ async fn recovery_preserves_interleaved_journal(drain: bool) {
         )],
     )
     .await;
-    let before: Value = serde_json::to_value(&streams).expect("stream JSON");
+    let before: Value = studio_json::to_value(&streams).expect("stream JSON");
     if drain {
         store
             .transaction(|tx| {
@@ -481,7 +497,7 @@ async fn recovery_preserves_interleaved_journal(drain: bool) {
         .transaction_with(|tx| store::load_streams(tx, "default"))
         .await
         .expect("committed streams");
-    let after = serde_json::to_value(&committed).expect("stream JSON");
+    let after = studio_json::to_value(&committed).expect("stream JSON");
     assert!(
         after["publication_sequence"].as_u64().expect("sequence")
             > before["publication_sequence"].as_u64().expect("sequence")
@@ -542,7 +558,7 @@ async fn stream_cache_revision_keeps_allocations_and_bounds_validation_work() {
             )],
         )
         .await;
-        let mut value = serde_json::to_value(base).expect("stream JSON");
+        let mut value = studio_json::to_value(base).expect("stream JSON");
         let prototype = value["entries"][0].clone();
         value["entries"] = Value::Array(
             (0..count)
@@ -554,7 +570,7 @@ async fn stream_cache_revision_keeps_allocations_and_bounds_validation_work() {
                 .collect(),
         );
         let mut cached: NotificationStreamBuffer =
-            serde_json::from_value(value).expect("many streams");
+            studio_json::from_value(value).expect("many streams");
         let ticks = Arc::new(AtomicU64::new(0));
         let counter = Arc::clone(&ticks);
         let elapsed = store
@@ -631,10 +647,10 @@ async fn stream_cache_revision_handles_owner_snapshots_and_rolled_back_handoffs(
     assert_eq!(restored, canonical);
     // A commit can change pending text without advancing publication_sequence.
     let old = canonical.clone();
-    let mut value = serde_json::to_value(&canonical).expect("stream JSON");
+    let mut value = studio_json::to_value(&canonical).expect("stream JSON");
     value["entries"][0]["pending"] = json!("new pending text");
     let mut replacement: NotificationStreamBuffer =
-        serde_json::from_value(value).expect("new buffer");
+        studio_json::from_value(value).expect("new buffer");
     let current = store
         .transaction_with(move |tx| {
             store::persist_streams(tx, "default", &mut replacement)?;

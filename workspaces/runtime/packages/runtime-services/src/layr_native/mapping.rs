@@ -134,7 +134,7 @@ fn project_origin(root: &Path, project: &str) -> Result<Option<String>> {
         .optional()
         .map_err(|e| NativeLayrError::Refused(format!("Cannot read project origin: {e}")))?;
     raw.map(|raw| {
-        serde_json::from_str::<String>(&raw)
+        studio_json::from_str::<String>(&raw)
             .map_err(|e| NativeLayrError::Refused(format!("Invalid project origin: {e}")))
     })
     .transpose()
@@ -208,7 +208,7 @@ const CACHE_HISTORY_RECORDS: &str = "200";
 
 pub(super) fn cached_main_start(state: &Path, main: &Path) -> Result<(String, Option<String>)> {
     let output = super::runtime::run(state, main, &["log", "--json", "-n", "1", "main"])?;
-    let head: response::StateEntry = serde_json::from_str(&output).map_err(|error| {
+    let head: response::StateEntry = studio_json::from_str(&output).map_err(|error| {
         NativeLayrError::Refused(format!("Cannot inspect main caches: {error}"))
     })?;
     let warning = cache_warning_for_head(main, &head)?;
@@ -216,7 +216,7 @@ pub(super) fn cached_main_start(state: &Path, main: &Path) -> Result<(String, Op
     if warning.is_none() {
         return Ok((id, None));
     }
-    let lines: response::Lines = serde_json::from_str(&super::runtime::run(
+    let lines: response::Lines = studio_json::from_str(&super::runtime::run(
         state,
         main,
         &["line", "list", "--json"],
@@ -232,7 +232,7 @@ pub(super) fn cached_main_start(state: &Path, main: &Path) -> Result<(String, Op
     )?;
     let records = output
         .lines()
-        .map(serde_json::from_str::<response::StateEntry>)
+        .map(studio_json::from_str::<response::StateEntry>)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| {
             NativeLayrError::Refused(format!("Cannot inspect main cache history: {error}"))
@@ -294,7 +294,7 @@ pub(super) fn resolve(state: &Path, root: &Path, record: &Value) -> Result<Strin
     let metadata = settings::metadata(state, root);
     let binding = metadata.join(format!("binding-{source_key}.json"));
     if binding.exists() {
-        let binding: Value = serde_json::from_slice(&fs::read(binding)?)
+        let binding: Value = studio_json::from_slice(&fs::read(binding)?)
             .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
         let project = binding["projectId"]
             .as_str()
@@ -360,10 +360,10 @@ mod tests {
 null"#;
         let records: Vec<response::StateEntry> = input
             .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
+            .map(|line| studio_json::from_str(line).unwrap())
             .collect();
         assert_eq!(newest_main_cache(&records, "main"), Some("b"));
-        assert!(serde_json::from_str::<response::StateEntry>("{").is_err());
+        assert!(studio_json::from_str::<response::StateEntry>("{").is_err());
     }
 
     #[test]
@@ -371,7 +371,7 @@ null"#;
         let main = Path::new("/store/projects/studio/lines/main");
         let warning = cache_warning_for_head(
             main,
-            &serde_json::from_str(r#"{"id":"main-state"}"#).unwrap(),
+            &studio_json::from_str(r#"{"id":"main-state"}"#).unwrap(),
         )
         .expect("inspection")
         .expect("missing cache warning");
@@ -502,7 +502,7 @@ null"#;
         fs::create_dir_all(&db).expect("metadata");
         let connection = Connection::open(db.join("layr.sqlite")).expect("db");
         connection.execute_batch("CREATE TABLE config(key TEXT, value TEXT); INSERT INTO config VALUES('remote.origin.url','\"https://example.test/org/repo.git\"');").expect("origin config");
-        settings::configure(&state, Some(&root)).expect("configure");
+        settings::fixture_select(&state, &root);
         let root = settings::selected_store(&state).expect("root");
         let record = json!({"hostProjectPath":source});
         assert_eq!(

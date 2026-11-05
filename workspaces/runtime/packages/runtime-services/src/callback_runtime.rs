@@ -3,7 +3,7 @@
 //! the exact attempt Unknown.
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, RequestId};
 use studio_runtime_store::RuntimeStore;
 

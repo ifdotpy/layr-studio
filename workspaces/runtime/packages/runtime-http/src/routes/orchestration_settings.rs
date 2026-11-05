@@ -181,7 +181,7 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::SettingsInput;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn settings_input_matches_openapi_and_shell_policy_bounds() {
@@ -193,7 +193,7 @@ mod tests {
                 "shellPolicy":{"quietThresholdMs":quiet,"pressureCleanup":true}});
             assert_eq!(validator.is_valid(&value), accepted, "schema: {value}");
             assert_eq!(
-                serde_json::from_value::<SettingsInput>(value.clone()).is_ok(),
+                studio_json::from_value::<SettingsInput>(value.clone()).is_ok(),
                 accepted,
                 "input: {value}"
             );

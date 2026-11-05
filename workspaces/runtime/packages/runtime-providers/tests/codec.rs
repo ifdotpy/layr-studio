@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_providers::{
     CodecError, DecodedJournalPayload, Frame, Method, NotificationFrame, PendingBook, RequestFrame,
     RequestId, RequestState, ResponseBody, decode_journal_entry, decode_journal_entry_borrowed,
@@ -36,15 +36,15 @@ fn known_method_set_has_unique_reversible_wire_names() {
     for method in Method::all() {
         assert_eq!(Method::from_wire(method.as_str()), Some(*method));
         assert_eq!(
-            serde_json::to_value(method).unwrap(),
+            studio_json::to_value(method).unwrap(),
             json!(method.as_str())
         );
         assert_eq!(
-            serde_json::from_value::<Method>(json!(method.as_str())).unwrap(),
+            studio_json::from_value::<Method>(json!(method.as_str())).unwrap(),
             *method
         );
     }
-    assert!(serde_json::from_value::<Method>(json!("turn/strat")).is_err());
+    assert!(studio_json::from_value::<Method>(json!("turn/strat")).is_err());
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn unknown_method_and_extension_fields_round_trip_structurally() {
         "params": {"nested": [1, true, null]},
         "futureField": {"opaque": "kept"}
     });
-    let bytes = serde_json::to_vec(&original).expect("fixture json");
+    let bytes = studio_json::to_vec(&original).expect("fixture json");
     let DecodedJournalPayload::Frame(decoded) = decode_journal_entry(1, 1, bytes).payload else {
         panic!("unknown method must decode");
     };
@@ -97,7 +97,7 @@ fn unknown_method_and_extension_fields_round_trip_structurally() {
         matches!(&decoded, Frame::UnknownMethod(frame) if frame.method == "future/newNotification")
     );
     let round_trip: Value =
-        serde_json::from_slice(&encode_line(&decoded).expect("encode unknown")).expect("json");
+        studio_json::from_slice(&encode_line(&decoded).expect("encode unknown")).expect("json");
     assert_eq!(round_trip, original);
 }
 
@@ -175,14 +175,14 @@ fn journal_value_decoder_matches_the_wire_decoder_for_valid_and_malformed_values
         "params": {"threadId": "thread"},
         "extension": {"future": true}
     });
-    let valid_bytes = serde_json::to_vec(&valid).expect("value serializes");
+    let valid_bytes = studio_json::to_vec(&valid).expect("value serializes");
     assert_eq!(
         decode_journal_value(42, 9, &valid),
         decode_journal_entry(42, 9, valid_bytes),
     );
 
     let malformed = json!({"method": 17, "extension": [1, 2]});
-    let malformed_bytes = serde_json::to_vec(&malformed).expect("value serializes");
+    let malformed_bytes = studio_json::to_vec(&malformed).expect("value serializes");
     // A parsed value has no source position, so only the error text differs.
     assert!(matches!(
         decode_journal_value(43, 9, &malformed).payload,
@@ -298,8 +298,8 @@ fn wire_envelope_round_trips_valid_objects_and_refuses_malformed_ones() {
             panic!("refused {}", String::from_utf8_lossy(line));
         };
         let encoded: Value =
-            serde_json::from_slice(&encode_line(&frame).expect("frame encodes")).expect("JSON");
-        let original: Value = serde_json::from_slice(line).expect("test line is JSON");
+            studio_json::from_slice(&encode_line(&frame).expect("frame encodes")).expect("JSON");
+        let original: Value = studio_json::from_slice(line).expect("test line is JSON");
         assert_eq!(encoded, original, "{}", String::from_utf8_lossy(line));
     }
     type Expected = fn(&CodecError) -> bool;
@@ -354,7 +354,7 @@ fn claude_failure_metadata_is_bounded_and_redacted_before_retention() {
     let DecodedJournalPayload::Frame(frame) = decode_journal_entry(
         1,
         1,
-        serde_json::to_vec(&wire).expect("wire fixture serializes"),
+        studio_json::to_vec(&wire).expect("wire fixture serializes"),
     )
     .payload
     else {
@@ -364,7 +364,7 @@ fn claude_failure_metadata_is_bounded_and_redacted_before_retention() {
         String::from_utf8(encode_line(&frame).expect("frame encodes")).expect("frame is UTF-8");
     assert!(!encoded.contains("secret"));
     assert!(!encoded.contains("private prompt"));
-    let value: Value = serde_json::from_str(&encoded).expect("encoded frame is JSON");
+    let value: Value = studio_json::from_str(&encoded).expect("encoded frame is JSON");
     assert_eq!(
         value["params"]["turn"]["error"]["claudeFailure"],
         json!({"apiError":"provider_credentials","apiErrorStatus":401,"apiErrorCode":"new_gate","provider":"bedrock","remedy":"refresh_credentials","promptTokens":210001,"maxContextTokens":200000,"title":"Provider credentials failed","message":"The cloud provider refused the credentials or access. Check this account's sign-in and model access. Context: 210001 tokens. Limit: 200000 tokens."})
@@ -382,14 +382,14 @@ fn claude_failure_sanitizer_preserves_unknown_methods_and_handles_turn_history()
     let DecodedJournalPayload::Frame(frame) = decode_journal_entry(
         1,
         1,
-        serde_json::to_vec(&future).expect("future fixture serializes"),
+        studio_json::to_vec(&future).expect("future fixture serializes"),
     )
     .payload
     else {
         panic!("frame")
     };
     assert_eq!(
-        serde_json::from_slice::<Value>(&encode_line(&frame).expect("frame encodes"))
+        studio_json::from_slice::<Value>(&encode_line(&frame).expect("frame encodes"))
             .expect("encoded frame is JSON"),
         future
     );
@@ -401,7 +401,7 @@ fn claude_failure_sanitizer_preserves_unknown_methods_and_handles_turn_history()
         let DecodedJournalPayload::Frame(frame) = decode_journal_entry(
             1,
             1,
-            serde_json::to_vec(&wire).expect("wire fixture serializes"),
+            studio_json::to_vec(&wire).expect("wire fixture serializes"),
         )
         .payload
         else {

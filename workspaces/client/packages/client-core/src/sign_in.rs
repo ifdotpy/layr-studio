@@ -1,12 +1,12 @@
 //! A native gesture reserves one exact sign-in while server approval completes.
 use serde::Deserialize;
-use serde_json::Value;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use studio_client_domain::json_object::{LenientField, optional_field};
+use studio_json::Value;
 
 /// Maximum time between the native click and use of its sign-in intent. Unit: seconds.
 const INTENT_LIFETIME: Duration = Duration::from_secs(60);
@@ -204,7 +204,7 @@ pub(crate) fn cancel(params: &Value, now: Instant) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn params() -> Value {
         json!({"_nativeWindow":"main", "value":{"requestId":"card-1", "url":"https://example.com/authorize?state=one"}})

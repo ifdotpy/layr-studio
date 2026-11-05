@@ -1,4 +1,3 @@
-use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     sync::{
@@ -7,6 +6,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_services::{
     recovery::*, recovery_absence::*, recovery_history::*, recovery_policy::*, recovery_runtime::*,
     recovery_store::*, task_recovery::*, task_recovery_store::*,
@@ -48,7 +48,7 @@ fn corpus() -> &'static Value {
     static CORPUS: OnceLock<Value> = OnceLock::new();
     CORPUS.get_or_init(|| {
         let mut cases: Value =
-            serde_json::from_str(include_str!("wave7_p07_fixtures/expected.json"))
+            studio_json::from_str(include_str!("wave7_p07_fixtures/expected.json"))
                 .expect("frozen recovery expectations");
         normalize_agent_records(&mut cases);
         cases
@@ -111,7 +111,7 @@ async fn seed(store: &RuntimeStore, agent: &Value) {
         .expect("seed agent");
 }
 fn agent(store: &RuntimeStore) -> Value {
-    serde_json::from_str(
+    studio_json::from_str(
         &AgentRepository::get_raw(&store.test_reader().expect("read"), &AgentId::from("agent"))
             .expect("agent")
             .expect("row"),
@@ -213,7 +213,7 @@ fn records(store: &RuntimeStore, table: &str) -> Vec<Value> {
         .expect("prepare")
         .query_map([], |r| r.get::<_, String>(0))
         .expect("query")
-        .map(|r| serde_json::from_str(&r.expect("row")).expect("json"))
+        .map(|r| studio_json::from_str(&r.expect("row")).expect("json"))
         .collect()
 }
 #[tokio::test]
@@ -869,7 +869,7 @@ async fn recovery_scan_skips_deleted_task_owners_before_reading_receipts() {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id,live.to_string()])?;
             let task = TaskRecord::new(
                 id.to_owned(), "item".into(), "turn".into(),
-                serde::Deserialize::deserialize(serde::de::value::F64Deserializer::<serde_json::Error>::new(1.0))?,
+                serde::Deserialize::deserialize(serde::de::value::F64Deserializer::<studio_json::Error>::new(1.0))?,
                 studio_runtime_schema::task_record::TaskType::CommandExecution, "command".into(),
             );
             TaskRepository::put(tx, &task)?;
@@ -1107,7 +1107,7 @@ async fn task_completion_rejects_changed_alias_or_operation_receipt() {
                 };
                 tx.execute(
                     "INSERT INTO runtime_tool_requests(id,record) VALUES(?1,json_set(?2,'$.admitted',json(?3)))",
-                    rusqlite::params![saved_root, receipt_to_save.to_string(), serde_json::to_string(&admitted)?],
+                    rusqlite::params![saved_root, receipt_to_save.to_string(), studio_json::to_string(&admitted)?],
                 )?;
                 let stored: String = tx.query_row("SELECT record FROM runtime_tool_requests WHERE id=?1", [&saved_root], |row| row.get(0))?;
                 studio_runtime_services::tool_requests::settle_result(
@@ -1116,7 +1116,7 @@ async fn task_completion_rejects_changed_alias_or_operation_receipt() {
                     &receipt_to_save["result"],
                 )
                 .expect("settle result");
-                Ok::<_, studio_runtime_store::StoreError>(serde_json::from_str::<Value>(&stored)?)
+                Ok::<_, studio_runtime_store::StoreError>(studio_json::from_str::<Value>(&stored)?)
             })
             .await
             .expect("seed");

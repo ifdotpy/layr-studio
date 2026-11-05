@@ -1,6 +1,6 @@
 //! Callback services plug into this typed dispatch boundary.
-use serde_json::{Value, json};
 use std::sync::{Arc, LazyLock};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, ResponseBody};
 use studio_runtime_store::{AgentExecutionMode, AgentRecord, JsonRecord, RuntimeStore};
 use tokio::sync::Notify;
@@ -51,7 +51,7 @@ pub(super) async fn vm_codex_refresh_response(
     let (id, params) = match frame {
         Frame::Request(request) => (request.id.clone(), request.params.as_ref()),
         Frame::UnknownMethod(request) => (
-            serde_json::from_value(request.fields.get("id")?.clone()).ok()?,
+            studio_json::from_value(request.fields.get("id")?.clone()).ok()?,
             request.fields.get("params"),
         ),
         Frame::Notification(_) | Frame::Response { .. } => return None,
@@ -632,7 +632,7 @@ pub(super) fn response(frame: &Frame) -> Option<Frame> {
     let id = match frame {
         Frame::Request(request) => request.id.clone(),
         Frame::UnknownMethod(request) => {
-            serde_json::from_value(request.fields.get("id")?.clone()).ok()?
+            studio_json::from_value(request.fields.get("id")?.clone()).ok()?
         }
         Frame::Notification(_) | Frame::Response { .. } => return None,
     };
@@ -651,7 +651,7 @@ pub(super) fn response(frame: &Frame) -> Option<Frame> {
 mod tests {
     use super::{CALLBACK_CONTEXT_QUERY, callback_context};
     use rusqlite::params;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     #[tokio::test]
@@ -781,8 +781,8 @@ mod tests {
 #[cfg(test)]
 mod catalog_wait_tests {
     use super::{CatalogWait, wait_for_managed_catalog};
-    use serde_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::{Method, RequestFrame, RequestId};
     use studio_runtime_store::RuntimeStore;
 
@@ -876,8 +876,8 @@ mod vm_auth_tests {
         VmProviderAuthFuture, VmProviderLaunchFuture, VmProviderLaunchRequest,
         VmProviderLaunchResolver,
     };
-    use serde_json::Map;
     use std::sync::{Arc, Mutex};
+    use studio_json::Map;
     use studio_runtime_providers::{RequestId, UnknownMethodFrame};
 
     struct Resolver {
@@ -943,7 +943,7 @@ mod vm_auth_tests {
     }
 
     fn refresh_request() -> Frame {
-        let fields = serde_json::from_value::<Map<String, Value>>(json!({
+        let fields = studio_json::from_value::<Map<String, Value>>(json!({
             "id": 41,
             "params": {"previousAccountId":"fixture-account"}
         }))

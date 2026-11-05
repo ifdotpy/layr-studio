@@ -259,7 +259,7 @@ pub(crate) async fn boundary(
         } else if has_json_schema && !bytes.is_empty() {
             match crate::json_body::parse_bounded(&bytes, limit) {
                 Err(_) => {
-                    return ApiError::validation(vec![serde_json::Value::String(
+                    return ApiError::validation(vec![studio_json::Value::String(
                         "body".to_owned(),
                     )])
                     .into_response();
@@ -351,7 +351,7 @@ pub(crate) fn edge_check(
 async fn own_link_refusal(
     store: Option<std::sync::Arc<studio_runtime_store::RuntimeStore>>,
     server: String,
-    body: Option<&serde_json::Value>,
+    body: Option<&studio_json::Value>,
 ) -> Option<Response> {
     let refused = || {
         Some(error_response(
@@ -361,7 +361,7 @@ async fn own_link_refusal(
     };
     let Some(parent) = body
         .and_then(|body| body.get("parent"))
-        .and_then(serde_json::Value::as_str)
+        .and_then(studio_json::Value::as_str)
         .filter(|parent| !parent.is_empty())
         .map(str::to_owned)
     else {
@@ -734,7 +734,7 @@ pub(crate) async fn capture_http_failure(
 }
 
 fn operator_incident(diagnostics: &studio_runtime_schema::studio_errors::Diagnostics) {
-    match serde_json::to_string(diagnostics) {
+    match studio_json::to_string(diagnostics) {
         Ok(encoded) => eprintln!("ERROR app diagnostic could not be stored: {encoded}"),
         Err(_) => eprintln!("ERROR app diagnostic could not be stored or serialized"),
     }
@@ -780,7 +780,7 @@ mod response_safety_tests {
     use axum::http::{Request, StatusCode, header};
     use axum::middleware::from_fn_with_state;
     use axum::routing::get;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use tower::ServiceExt;
 
     use crate::{HttpState, middleware::response_safety};
@@ -1196,7 +1196,7 @@ mod tests {
     use axum::http::Request;
     use axum::middleware::from_fn_with_state;
     use axum::routing::get;
-    use serde_json::Value;
+    use studio_json::Value;
     use tower::ServiceExt;
 
     use super::{request_limit, response_safety};
@@ -1209,6 +1209,52 @@ mod tests {
         assert_eq!(request_limit("/api/projects"), 6 * 1024 * 1024);
         assert_eq!(request_limit("/api/federation/v1/pull"), 256 * 1024);
         assert_eq!(request_limit("/api/unknown"), 256 * 1024);
+    }
+
+    #[tokio::test]
+    async fn accepted_body_reaches_handler_byte_exact() {
+        use axum::{extract::ConnectInfo, routing::post};
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            directory.path().to_string_lossy().into_owned(),
+            49171,
+            None,
+            None,
+            None,
+        );
+        state.validators = crate::validation::Registry::compile(&[(
+            "POST".into(),
+            "/api/servers/orchestration".into(),
+        )])
+        .unwrap();
+        let app = Router::new()
+            .route(
+                "/api/servers/orchestration",
+                post(|body: axum::body::Bytes| async move { body }),
+            )
+            .layer(from_fn_with_state(state, super::boundary));
+        let input = br#"{ "requestId":"r", "action":"event", "operation":[], "payload":{ "escaped":"\u0061", "nested":[{"n": 9007199254740991}] }}"#;
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/servers/orchestration")
+            .header("host", "127.0.0.1:49171")
+            .header("origin", "http://127.0.0.1:49171")
+            .header("content-type", "application/json")
+            .header("x-canvas-token", "token")
+            .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+            .extension(ConnectInfo(
+                "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+            ))
+            .body(Body::from(input.as_slice()))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body(), 4096).await.unwrap().as_ref(),
+            input
+        );
     }
 
     async fn panic_handler() -> &'static str {
@@ -1248,12 +1294,12 @@ mod tests {
                 .headers()
                 .contains_key(crate::schema::API_SCHEMA_HASH_HEADER)
         );
-        let body: Value = serde_json::from_slice(
+        let body: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 1024)
                 .await
                 .expect("body reads"),
         )
         .expect("JSON error envelope");
-        assert_eq!(body, serde_json::json!({"error":"Internal server error"}));
+        assert_eq!(body, studio_json::json!({"error":"Internal server error"}));
     }
 }

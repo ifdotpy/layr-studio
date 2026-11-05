@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use studio_runtime_store::path_identity::CanonicalPath;
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::shared_values::{
     MAX_WORKSPACE_PREVIEW_BYTES, WORKSPACE_PREVIEW_LIMIT_LABEL,
 };
@@ -211,7 +211,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use serde_json::json;
+    use studio_json::json;
 
     use super::{
         MAX_PREVIEW_BYTES, WORKSPACE_PREVIEW_LIMIT_LABEL, WorkspaceContext, WorkspaceFilesError,

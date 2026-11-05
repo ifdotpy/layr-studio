@@ -1,9 +1,9 @@
-use serde_json::json;
 use std::collections::VecDeque;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+use studio_json::json;
 use studio_runtime_providers::{Method, RequestId, RequestTicket};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use studio_runtime_services::account_session_runtime::{
@@ -273,7 +273,7 @@ async fn callback_actor_flushes_fallback_tail_when_provider_closes() {
         .expect("flushed transcript row");
     assert_eq!(text, "partial words");
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&payload).expect("payload")["partial"],
+        studio_json::from_str::<studio_json::Value>(&payload).expect("payload")["partial"],
         true
     );
 }
@@ -478,7 +478,7 @@ fn save_scope(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
     .expect("fixture agent exists");
     let scope = studio_runtime_store::account_state::current_provider_scope(tx, &agent)
         .expect("fixture provider is attached");
-    let encoded = serde_json::to_string(&scope).expect("encode provider scope");
+    let encoded = studio_json::to_string(&scope).expect("encode provider scope");
     tx.execute(
         "UPDATE voice_sessions SET provider_scope=?1 WHERE connection_id=?2",
         rusqlite::params![encoded, scope.connection],
@@ -854,7 +854,7 @@ async fn rejected_ordinary_stop_can_be_stopped_by_deletion() {
     assert_eq!(intent[0].session.session_id, "rejected-stop");
 }
 
-fn table_rows(connection: &rusqlite::Connection, table: &str, order: &str) -> serde_json::Value {
+fn table_rows(connection: &rusqlite::Connection, table: &str, order: &str) -> studio_json::Value {
     let mut statement = connection
         .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
         .expect("table snapshot query");
@@ -865,10 +865,10 @@ fn table_rows(connection: &rusqlite::Connection, table: &str, order: &str) -> se
         .collect::<Vec<_>>();
     let rows = statement
         .query_map([], |row| {
-            let mut value = serde_json::Map::new();
+            let mut value = studio_json::Map::new();
             for (index, name) in columns.iter().enumerate() {
                 let field = match row.get_ref(index)? {
-                    rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                    rusqlite::types::ValueRef::Null => studio_json::Value::Null,
                     rusqlite::types::ValueRef::Integer(value) => json!(value),
                     rusqlite::types::ValueRef::Real(value) => json!(value),
                     rusqlite::types::ValueRef::Text(value) => {
@@ -878,7 +878,7 @@ fn table_rows(connection: &rusqlite::Connection, table: &str, order: &str) -> se
                 };
                 value.insert(name.clone(), field);
             }
-            Ok(serde_json::Value::Object(value))
+            Ok(studio_json::Value::Object(value))
         })
         .expect("table snapshot rows")
         .collect::<Result<Vec<_>, _>>()
@@ -893,7 +893,7 @@ struct CapturedRequest {
     expected_scope: Option<ConnectionScope>,
     deleted_actor_session: Option<String>,
     method: Method,
-    params: serde_json::Value,
+    params: studio_json::Value,
 }
 
 struct MockAccountSession {
@@ -1178,7 +1178,7 @@ async fn account_session_voice_approval_uses_the_shared_callback_lane() {
                 [],
                 |row| row.get(0),
             )?;
-            let mut actor: serde_json::Value = serde_json::from_str(&raw)?;
+            let mut actor: studio_json::Value = studio_json::from_str(&raw)?;
             actor["status"] = json!("approval");
             actor["autoWake"] = json!(true);
             actor["turnId"] = json!("turn");
@@ -1380,8 +1380,8 @@ async fn changed_speech_text_after_written_receipt_refuses_without_writes() {
 #[allow(clippy::disallowed_methods)]
 async fn real_python_start_speech_end_rows_match_rust_with_rpc_boundary_stub() {
     let (_root, store) = seeded_store().await;
-    let expected: serde_json::Value =
-        serde_json::from_str(include_str!("voice_provider/lifecycle-expected.json"))
+    let expected: studio_json::Value =
+        studio_json::from_str(include_str!("voice_provider/lifecycle-expected.json"))
             .expect("frozen voice lifecycle corpus");
 
     store.transaction(|tx| {
@@ -1439,7 +1439,7 @@ async fn real_python_start_speech_end_rows_match_rust_with_rpc_boundary_stub() {
         )
         .expect("captured voice scope");
     let scope: studio_runtime_schema::persistence::ProviderScope =
-        serde_json::from_str(&encoded_scope).expect("typed voice scope");
+        studio_json::from_str(&encoded_scope).expect("typed voice scope");
     assert_eq!(
         scope,
         studio_runtime_schema::persistence::ProviderScope {
@@ -1501,7 +1501,7 @@ async fn real_python_start_speech_end_rows_match_rust_with_rpc_boundary_stub() {
             .as_str()
             .is_some_and(|value| value.starts_with("voice-content-sha256:"))
     );
-    receipts[0]["error"] = serde_json::Value::Null;
+    receipts[0]["error"] = studio_json::Value::Null;
     assert_eq!(
         receipts, python_receipts,
         "only expected difference: Rust's registered transcript digest marker in error"
@@ -1514,13 +1514,13 @@ async fn real_python_start_speech_end_rows_match_rust_with_rpc_boundary_stub() {
             .len(),
         3
     );
-    let rust_agent: serde_json::Value = connection
+    let rust_agent: studio_json::Value = connection
         .query_row(
             "SELECT record FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get::<_, String>(0),
         )
-        .map(|raw| serde_json::from_str(&raw).expect("Rust agent row JSON"))
+        .map(|raw| studio_json::from_str(&raw).expect("Rust agent row JSON"))
         .expect("Rust voice actor row");
     assert_eq!(rust_agent["autoWake"], expected["agent"]["autoWake"]);
     assert_eq!(rust_agent["turnEpoch"], expected["agent"]["turnEpoch"]);
@@ -1592,7 +1592,7 @@ async fn audio_validation_precedes_scoped_expiry_pruning() {
         )
         .expect("audio payload");
     let own_expired = directory.join(
-        serde_json::from_str::<serde_json::Value>(&payload).expect("audio payload JSON")["file"]
+        studio_json::from_str::<studio_json::Value>(&payload).expect("audio payload JSON")["file"]
             .as_str()
             .expect("audio file name"),
     );
@@ -1714,7 +1714,7 @@ impl VoiceProviderPort for DelayedPrepareProvider {
         _scope: VoiceProviderContext,
         _operation_id: studio_runtime_services::voice_runtime::VoiceOperation,
         _method: Method,
-        _params: serde_json::Value,
+        _params: studio_json::Value,
         _deadline: Instant,
     ) -> ProviderFuture<'a, VoiceRequestReceipt> {
         Box::pin(async move {
@@ -1763,7 +1763,7 @@ impl VoiceProviderPort for PrepareNotSentProvider {
         _scope: VoiceProviderContext,
         _operation_id: studio_runtime_services::voice_runtime::VoiceOperation,
         _method: Method,
-        _params: serde_json::Value,
+        _params: studio_json::Value,
         _deadline: Instant,
     ) -> ProviderFuture<'a, VoiceRequestReceipt> {
         Box::pin(async move {
@@ -1816,7 +1816,7 @@ impl VoiceProviderPort for ReceiptProvider {
         _scope: VoiceProviderContext,
         operation_id: studio_runtime_services::voice_runtime::VoiceOperation,
         method: Method,
-        _params: serde_json::Value,
+        _params: studio_json::Value,
         deadline: std::time::Instant,
     ) -> ProviderFuture<'a, VoiceRequestReceipt> {
         let operation_id = operation_id.id;
@@ -1877,7 +1877,7 @@ impl VoiceProviderPort for SignaledReceiptProvider {
         _scope: VoiceProviderContext,
         operation_id: studio_runtime_services::voice_runtime::VoiceOperation,
         method: Method,
-        _params: serde_json::Value,
+        _params: studio_json::Value,
         _deadline: Instant,
     ) -> ProviderFuture<'a, VoiceRequestReceipt> {
         let operation_id = operation_id.id;
@@ -1938,7 +1938,7 @@ impl VoiceProviderPort for BlockingProvider {
         scope: VoiceProviderContext,
         operation_id: studio_runtime_services::voice_runtime::VoiceOperation,
         method: Method,
-        params: serde_json::Value,
+        params: studio_json::Value,
         deadline: std::time::Instant,
     ) -> ProviderFuture<'a, VoiceRequestReceipt> {
         let operation_id = operation_id.id;
@@ -2204,7 +2204,7 @@ async fn provider_actions_do_not_dispatch_when_intent_write_fails() {
     let (_root, store) = seeded_store().await;
     store.transaction(|tx| {
         let actor: String = tx.query_row("SELECT record FROM runtime_agents WHERE id='agent'", [], |row| row.get(0))?;
-        let mut actor: serde_json::Value = serde_json::from_str(&actor).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+        let mut actor: studio_json::Value = studio_json::from_str(&actor).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         actor["autoWake"] = json!(true);
         tx.execute("UPDATE runtime_agents SET record=?1 WHERE id='agent'", [actor.to_string()])?;
         tx.execute("UPDATE voice_sessions SET native_thread='thread',account_key='account',connection_id='receipt-matrix-connection',state='ready' WHERE id='session'", [])?;
@@ -2213,7 +2213,7 @@ async fn provider_actions_do_not_dispatch_when_intent_write_fails() {
         let request = json!({"id":"matrix-approve-fail-request","rpcId":"matrix-rpc-fail","agent":"agent","epoch":0,"status":"pending","method":"item/commandExecution/requestApproval","accountKey":"account","connectionId":"receipt-matrix-connection","params":{"command":"safe","threadId":"thread"}});
         let approval = studio_runtime_store::approvals::from_legacy_record("matrix-approve-fail-request", &request).expect("typed approval");
         studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
-        let request = serde_json::to_value(&approval).expect("approval json");
+        let request = studio_json::to_value(&approval).expect("approval json");
         let fingerprint = studio_runtime_store::sha256_hex(studio_runtime_store::python_json(&request).as_bytes());
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('matrix-approve-fail-speech','agent','','orchestrator','approval','','',?1,1)", [json!({"request_id":"matrix-approve-fail-request","fingerprint":fingerprint}).to_string()])?;
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('matrix-approve-fail-playback','agent','matrix-approve-fail','playback','played','','',?1,2)", [json!({"record_id":"matrix-approve-fail-speech"}).to_string()])?;
@@ -2262,7 +2262,7 @@ async fn approval_from_another_connection_generation_is_refused_without_writes()
     let (_root, store) = seeded_store().await;
     store.transaction(|tx| {
         let actor: String = tx.query_row("SELECT record FROM runtime_agents WHERE id='agent'", [], |row| row.get(0))?;
-        let mut actor: serde_json::Value = serde_json::from_str(&actor)
+        let mut actor: studio_json::Value = studio_json::from_str(&actor)
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         actor["autoWake"] = json!(true);
         tx.execute("UPDATE runtime_agents SET record=?1 WHERE id='agent'", [actor.to_string()])?;
@@ -2276,7 +2276,7 @@ async fn approval_from_another_connection_generation_is_refused_without_writes()
         });
         let approval = studio_runtime_store::approvals::from_legacy_record("request-from-prior-generation", &request).expect("typed approval");
         studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
-        let request = serde_json::to_value(&approval).expect("approval json");
+        let request = studio_json::to_value(&approval).expect("approval json");
         let fingerprint = studio_runtime_store::sha256_hex(studio_runtime_store::python_json(&request).as_bytes());
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('connection-bound-speech','agent','','orchestrator','approval','','',?1,1)", [json!({"request_id":"request-from-prior-generation","fingerprint":fingerprint}).to_string()])?;
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('connection-bound-playback','agent','connection-bound-approval','playback','played','','',?1,2)", [json!({"record_id":"connection-bound-speech"}).to_string()])?;
@@ -2592,7 +2592,7 @@ async fn unknown_provider_receipts_survive_restart_without_resending() {
 
     store.transaction(|tx| {
         let actor: String = tx.query_row("SELECT record FROM runtime_agents WHERE id='agent'", [], |row| row.get(0))?;
-        let mut actor: serde_json::Value = serde_json::from_str(&actor)
+        let mut actor: studio_json::Value = studio_json::from_str(&actor)
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         actor["autoWake"] = json!(true);
         tx.execute("UPDATE runtime_agents SET record=?1 WHERE id='agent'", [actor.to_string()])?;
@@ -2602,7 +2602,7 @@ async fn unknown_provider_receipts_survive_restart_without_resending() {
         let request = json!({"id":"matrix-request","rpcId":"matrix-rpc","agent":"agent","epoch":0,"status":"pending","method":"item/commandExecution/requestApproval","accountKey":"account","connectionId":"receipt-matrix-connection","params":{"command":"safe","threadId":"thread"}});
         let approval = studio_runtime_store::approvals::from_legacy_record("matrix-request", &request).expect("typed approval");
         studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
-        let request = serde_json::to_value(&approval).expect("approval json");
+        let request = studio_json::to_value(&approval).expect("approval json");
         let fingerprint = studio_runtime_store::sha256_hex(studio_runtime_store::python_json(&request).as_bytes());
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('matrix-approval-speech','agent','','orchestrator','approval','','',?1,1)", [json!({"request_id":"matrix-request","fingerprint":fingerprint}).to_string()])?;
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('matrix-playback','agent','matrix-approve','playback','played','','',?1,2)", [json!({"record_id":"matrix-approval-speech"}).to_string()])?;
@@ -2826,14 +2826,14 @@ async fn written_provider_effects_survive_restart_and_replay_once() {
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('written-fail-speech','agent','','orchestrator','spoken','item','', '{}',1)", [])?;
         tx.execute_batch("CREATE TRIGGER fail_speech_finalize BEFORE UPDATE OF state ON voice_speech_requests WHEN OLD.id='session:written-fail-speech' BEGIN SELECT RAISE(ABORT,'crash after provider Written'); END;")?;
         let actor: String = tx.query_row("SELECT record FROM runtime_agents WHERE id='agent'", [], |row| row.get(0))?;
-        let mut actor: serde_json::Value = serde_json::from_str(&actor).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+        let mut actor: studio_json::Value = studio_json::from_str(&actor).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         actor["autoWake"] = json!(true);
         tx.execute("UPDATE runtime_agents SET record=?1 WHERE id='agent'", [actor.to_string()])?;
         tx.execute("INSERT INTO voice_sessions(id,agent,created,account_key,connection_id,state) VALUES('written-approval','agent',1,'account','receipt-matrix-connection','ready')", [])?;
         let request = json!({"id":"written-request","rpcId":"written-rpc","agent":"agent","epoch":0,"status":"pending","method":"item/commandExecution/requestApproval","accountKey":"account","connectionId":"receipt-matrix-connection","params":{"command":"safe","threadId":"thread"}});
         let approval = studio_runtime_store::approvals::from_legacy_record("written-request", &request).expect("typed approval");
         studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
-        let request = serde_json::to_value(&approval).expect("approval json");
+        let request = studio_json::to_value(&approval).expect("approval json");
         let fingerprint = studio_runtime_store::sha256_hex(studio_runtime_store::python_json(&request).as_bytes());
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('written-approval-speech','agent','','orchestrator','approval','','',?1,1)", [json!({"request_id":"written-request","fingerprint":fingerprint}).to_string()])?;
         tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('written-approval-playback','agent','written-approval','playback','played','','',?1,2)", [json!({"record_id":"written-approval-speech"}).to_string()])?;

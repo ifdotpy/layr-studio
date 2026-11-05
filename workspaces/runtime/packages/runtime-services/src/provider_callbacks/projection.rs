@@ -1,7 +1,7 @@
 //! Bounded provider view; the complete result remains in request_results.
 use super::{CallbackError, tool_result};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::json_object::JsonObject;
 
 enum TextKind {
@@ -43,7 +43,7 @@ fn text_item(item: &Value) -> Option<&str> {
 }
 
 fn is_output_page(text: &str) -> bool {
-    serde_json::from_str::<JsonObject<OutputPage>>(text).is_ok()
+    studio_json::from_str::<JsonObject<OutputPage>>(text).is_ok()
 }
 
 fn clip(text: &str, size: usize) -> &str {
@@ -76,7 +76,7 @@ pub fn project_tool_result(
             return bounded(result.clone(), key, outcome);
         }
     }
-    if serde_json::to_vec(&texts.iter().map(|(item, _)| *item).collect::<Vec<_>>())?.len() <= 16000
+    if studio_json::to_vec(&texts.iter().map(|(item, _)| *item).collect::<Vec<_>>())?.len() <= 16000
     {
         return bounded(result.clone(), key, outcome);
     }
@@ -86,10 +86,10 @@ pub fn project_tool_result(
         .collect::<Vec<_>>()
         .join("\n");
     let mut preview = json!({"requestId":key,"outputRef":key,"success":result["success"],"truncated":true,"textBytes":raw.len(),"excerpt":clip(&raw,4000),"read":{"tool":"orchestration_read","output_ref":key},"outcome":outcome});
-    if let Ok(value) = serde_json::from_str::<Value>(&raw)
+    if let Ok(value) = studio_json::from_str::<Value>(&raw)
         && value.is_object()
     {
-        let mut summary = serde_json::Map::new();
+        let mut summary = studio_json::Map::new();
         for field in [
             "id",
             "requestId",

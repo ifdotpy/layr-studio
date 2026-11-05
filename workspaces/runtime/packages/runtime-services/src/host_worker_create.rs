@@ -9,10 +9,10 @@
 //! those characters keep them in Rust.
 
 use crate::agents_create::{CreateError, build_agent_record};
-use serde_json::{Value, json};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_schema;
 use studio_runtime_schema::agent_limits::{DEFAULT_MAX_TEAM_AGENTS, DEFAULT_SUBAGENT_CONCURRENCY};
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -754,7 +754,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let mut child: Value = serde_json::from_str(&parent).unwrap();
+        let mut child: Value = studio_json::from_str(&parent).unwrap();
         for n in 0..64 {
             let id = format!("limit-worker-{n}");
             child["id"] = json!(id);
@@ -971,7 +971,7 @@ mod tests {
                 [&fixture.parent_id.0],
                 |row| row.get::<_, String>(0),
             )
-            .map(|raw| serde_json::from_str(&raw).expect("parent JSON"))
+            .map(|raw| studio_json::from_str(&raw).expect("parent JSON"))
             .expect("parent row");
         parent["cwd"] = json!(guest_cwd);
         parent["hostProjectPath"] = json!(host_path);
@@ -1054,7 +1054,7 @@ mod tests {
                     [&fixture.parent_id.0],
                     |row| row.get::<_, String>(0),
                 )
-                .map(|raw| serde_json::from_str(&raw).expect("parent JSON"))
+                .map(|raw| studio_json::from_str(&raw).expect("parent JSON"))
                 .expect("parent row");
             changed_parent[field] = json!(changed);
             fixture
@@ -1156,7 +1156,7 @@ mod tests {
 
     #[test]
     fn malformed_participant_is_refused_before_any_store_access() {
-        let result = serde_json::from_value::<studio_runtime_schema::peer_team_ingress::RadioCreate>(
+        let result = studio_json::from_value::<studio_runtime_schema::peer_team_ingress::RadioCreate>(
             json!({
                 "action":"radio", "radio_action":"create", "path":"/project", "request_id":"request", "name":"Pair",
                 "participants":[{"account_key":"one","model":"m"}]

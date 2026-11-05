@@ -5,7 +5,7 @@
 pub mod runtime;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_store::sha256_hex;
 
 const RECEIPT_FIELDS: &[&str] = &[
@@ -98,7 +98,7 @@ fn decode<T: serde::de::DeserializeOwned>(
     value: &Value,
     location: &'static str,
 ) -> Result<T, InvalidRecord> {
-    serde_json::from_value(value.clone()).map_err(|_| invalid(location))
+    studio_json::from_value(value.clone()).map_err(|_| invalid(location))
 }
 fn source(agent: &Map<String, Value>) -> Map<String, Value> {
     SOURCE_FIELDS

@@ -185,7 +185,7 @@ async fn ports_with_wake(
 pub(super) struct RequestWithAdmission {
     pub admitted: studio_runtime_store::request_results::AdmittedRequest,
     #[serde(flatten)]
-    pub fields: serde_json::Map<String, Value>,
+    pub fields: studio_json::Map<String, Value>,
 }
 
 pub(super) fn request_with_admission(store: &RuntimeStore, call_id: &str) -> RequestWithAdmission {
@@ -193,7 +193,7 @@ pub(super) fn request_with_admission(store: &RuntimeStore, call_id: &str) -> Req
         "SELECT record FROM runtime_tool_requests WHERE kind='managed_tool' AND json_extract(record,'$.callId')=?1",
         [call_id], |row| row.get(0),
     ).unwrap();
-    serde_json::from_str(&raw).unwrap()
+    studio_json::from_str(&raw).unwrap()
 }
 
 pub(super) fn request_row(store: &RuntimeStore, call_id: &str) -> Value {
@@ -755,7 +755,7 @@ async fn connection_recovery_settles_a_claim_without_an_in_process_owner() {
                 [&row_id],
                 |row| row.get(0),
             )?;
-            let mut row: RequestWithAdmission = serde_json::from_str(&raw)?;
+            let mut row: RequestWithAdmission = studio_json::from_str(&raw)?;
             row.fields.insert("stage".into(), json!("running"));
             row.fields.insert("outcome".into(), json!("pending"));
             row.fields.remove("finished");
@@ -763,7 +763,7 @@ async fn connection_recovery_settles_a_claim_without_an_in_process_owner() {
             row.fields.remove("deliveryCertainty");
             tx.execute(
                 "UPDATE runtime_tool_requests SET record=?1 WHERE id=?2",
-                params![serde_json::to_string(&row)?, row_id],
+                params![studio_json::to_string(&row)?, row_id],
             )?;
             tx.execute(
                 "DELETE FROM request_results WHERE id=?1",

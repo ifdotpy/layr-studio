@@ -1,9 +1,9 @@
 use axum::extract::{FromRequest, FromRequestParts};
 use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
 #[cfg(test)]
 use std::sync::Arc;
+use studio_json::Value;
 
 use crate::error::ApiError;
 
@@ -146,7 +146,7 @@ where
                 "JSON required",
             ));
         }
-        let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+        let mut deserializer = studio_json::Deserializer::from_slice(&bytes);
         let studio_runtime_schema::http_ingress::Object(value) =
             serde_path_to_error::deserialize(&mut deserializer)
                 .map_err(|error| ApiError::validation(serde_location("body", error.path())))?;
@@ -197,7 +197,7 @@ where
 /// Raw query pairs plus values validated and typed from the registered schema.
 #[cfg(test)]
 pub(crate) struct QueryParams {
-    typed: Arc<serde_json::Map<String, Value>>,
+    typed: Arc<studio_json::Map<String, Value>>,
 }
 
 #[cfg(test)]
@@ -206,7 +206,7 @@ impl QueryParams {
         self.typed.get(name)
     }
 
-    pub(crate) fn into_typed(self) -> Arc<serde_json::Map<String, Value>> {
+    pub(crate) fn into_typed(self) -> Arc<studio_json::Map<String, Value>> {
         self.typed
     }
 }
@@ -238,9 +238,9 @@ mod tests {
     use axum::routing::{get, post};
     use axum::{Json, Router};
     use serde::Deserialize;
-    use serde_json::{Value, json};
     #[cfg(test)]
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use tower::ServiceExt;
 
     #[cfg(test)]
@@ -341,7 +341,7 @@ mod tests {
             .expect("response body reads");
         (
             status,
-            serde_json::from_slice(&bytes).expect("response is JSON"),
+            studio_json::from_slice(&bytes).expect("response is JSON"),
         )
     }
 
@@ -367,7 +367,10 @@ mod tests {
         let app = with_validated(
             Router::new().route("/items", get(query_handler)),
             ValidatedRequest {
-                query: Arc::new(serde_json::Map::from_iter([("value".to_owned(), json!(1))])),
+                query: Arc::new(studio_json::Map::from_iter([(
+                    "value".to_owned(),
+                    json!(1),
+                )])),
                 ..ValidatedRequest::default()
             },
         );

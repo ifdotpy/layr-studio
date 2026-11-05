@@ -1,6 +1,6 @@
 //! Typed shape of Claude options stored in account registry records.
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Number, Value};
+use studio_json::{Map, Number, Value};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,12 +39,12 @@ fn optional_integer<'de, D: Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::ClaudeOptionsRecord;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn registry_schema_constraints_are_owned_by_this_parser() {
-        let schema: serde_json::Value =
-            serde_json::from_str(include_str!("schemas/account-registry.schema.json")).unwrap();
+        let schema: studio_json::Value =
+            studio_json::from_str(include_str!("schemas/account-registry.schema.json")).unwrap();
         assert_eq!(
             schema["$defs"]["ClaudeOptionsRecord"],
             json!({
@@ -120,7 +120,7 @@ mod tests {
         ]);
         for value in values {
             assert_eq!(
-                serde_json::from_value::<ClaudeOptionsRecord>(value.clone()).is_ok(),
+                studio_json::from_value::<ClaudeOptionsRecord>(value.clone()).is_ok(),
                 crate::validate("account-registry/ClaudeOptionsRecord", &value).unwrap(),
                 "{value}"
             );

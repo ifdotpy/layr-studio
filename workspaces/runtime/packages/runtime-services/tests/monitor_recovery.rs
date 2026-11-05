@@ -1,5 +1,5 @@
 use crate::monitor_fixtures as fixtures;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     monitor_output::MonitorOutput,
     monitor_policy::{self, Input, InputOutcome, Operation},
@@ -17,7 +17,7 @@ fn running(cases: &[Value]) -> Value {
         .clone()
 }
 fn operation(case: &Value) -> Operation {
-    serde_json::from_value(case["before"]["operation"].clone()).expect("monitor fixture")
+    studio_json::from_value(case["before"]["operation"].clone()).expect("monitor fixture")
 }
 fn record(store: &RuntimeStore, id: &str) -> studio_runtime_store::MonitorRecord {
     MonitorsRepository::get(&store.test_reader().expect("monitor fixture"), id)

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 const RUN_LIMIT: usize = 25;
 const RELATED_LIMIT: usize = 100;
@@ -20,8 +20,8 @@ pub fn execution_ledger(connection: &Connection) -> Result<Value, rusqlite::Erro
         .collect::<Result<Vec<_>, _>>()?;
     let mut runs = Vec::with_capacity(raw_runs.len());
     for raw in raw_runs {
-        let mut run: serde_json::Map<String, Value> =
-            serde_json::from_str(&raw).map_err(|error| {
+        let mut run: studio_json::Map<String, Value> =
+            studio_json::from_str(&raw).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     0,
                     rusqlite::types::Type::Text,
@@ -108,7 +108,7 @@ pub fn durable_input_pending(connection: &Connection) -> Result<i64, rusqlite::E
 
 /// Read durable migration cursors using the Python diagnostics field names.
 pub fn migration_status(connection: &Connection) -> Result<Value, rusqlite::Error> {
-    let mut status = serde_json::Map::new();
+    let mut status = studio_json::Map::new();
     if table_exists(connection, "runtime_search_rollout")? {
         let row = connection
             .query_row(
@@ -165,7 +165,7 @@ pub fn migration_status(connection: &Connection) -> Result<Value, rusqlite::Erro
                             "updated": p.updated, "error": p.error, "dirty": p.dirty}),
                     )
                 })
-                .collect::<serde_json::Map<_, _>>();
+                .collect::<studio_json::Map<_, _>>();
             status.insert("online".to_owned(), Value::Object(by_name));
         }
     }
@@ -222,7 +222,7 @@ fn related_records(
     records
         .into_iter()
         .map(|raw| {
-            serde_json::from_str::<Value>(&raw).map_err(|error| {
+            studio_json::from_str::<Value>(&raw).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     0,
                     rusqlite::types::Type::Text,

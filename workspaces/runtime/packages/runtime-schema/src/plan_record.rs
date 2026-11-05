@@ -2,7 +2,7 @@
 use crate::queue_command::Field;
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use studio_json::{Number, Value};
 
 /// A plan version is an integral JSON number within the safe-integer domain.
 #[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
@@ -107,12 +107,12 @@ impl PlanRecord {
     pub fn id(&self) -> &str {
         &self.id
     }
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        serde_json::from_value(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        studio_json::from_value(value)
     }
     pub fn value(&self) -> Value {
         // Every member is already JSON data and the typed scalars are serializable.
-        serde_json::to_value(self).expect("plan fields are JSON serializable")
+        studio_json::to_value(self).expect("plan fields are JSON serializable")
     }
     pub fn into_value(self) -> Value {
         self.value()
@@ -153,7 +153,7 @@ impl PlanRecord {
         }
         view
     }
-    pub fn update_native(&mut self, native: Value, updated: f64) -> Result<(), serde_json::Error> {
+    pub fn update_native(&mut self, native: Value, updated: f64) -> Result<(), studio_json::Error> {
         let steps = native
             .get("plan")
             .map(Deserialize::deserialize)
@@ -183,7 +183,7 @@ pub(crate) fn schema() -> Value {
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
     let stored: Value =
-        serde_json::from_slice(include_bytes!("schemas/persisted-plan-record.schema.json"))
+        studio_json::from_slice(include_bytes!("schemas/persisted-plan-record.schema.json"))
             .map_err(|error| error.to_string())?;
     if stored != schema() {
         return Err("persisted plan schema must be generated from plan_record::PlanRecord".into());
@@ -194,7 +194,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn public_plan_omits_agent_without_changing_stored_record() {
@@ -260,7 +260,7 @@ mod tests {
         cases.push((json!(["a"]), false));
         for (value, valid) in cases {
             assert_eq!(
-                serde_json::from_value::<PlanRecord>(value.clone()).is_ok(),
+                studio_json::from_value::<PlanRecord>(value.clone()).is_ok(),
                 valid,
                 "{value}"
             );

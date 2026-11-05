@@ -158,7 +158,7 @@ impl RemoteOutbox {
         next_at: Option<i64>,
         record: T,
     ) -> Result<bool, OutboxError> {
-        let payload = serde_json::to_string(&RemotePayload { effect, record })?;
+        let payload = studio_json::to_string(&RemotePayload { effect, record })?;
         Ok(tx.execute(
             "UPDATE runtime_outbox SET status=?3,next_at=?4,payload=?5 WHERE id=?1 AND signature=?2",
             params![
@@ -263,7 +263,7 @@ impl RemoteOutbox {
     fn decode<T: DeserializeOwned>(
         (id, target, request_id, signature, status, next_at, payload): RawEntry,
     ) -> Result<RemoteEntry<T>, OutboxError> {
-        let payload: RemotePayload<T> = serde_json::from_str(&payload)?;
+        let payload: RemotePayload<T> = studio_json::from_str(&payload)?;
         Ok(RemoteEntry {
             target: target.ok_or_else(|| OutboxError::Conflict(id.clone()))?,
             request_id: request_id.ok_or_else(|| OutboxError::Conflict(id.clone()))?,
@@ -288,7 +288,7 @@ impl RemoteOutbox {
         record: T,
         created: i64,
     ) -> Result<(), OutboxError> {
-        let record = serde_json::value::to_raw_value(&record)?;
+        let record = studio_json::to_raw_value(&record)?;
         let changed = Self::update(
             tx, effect, target, request_id, signature, status, next_at, &record,
         )?;
@@ -345,7 +345,7 @@ impl RemoteOutbox {
                 continue;
             };
             let effect = RemoteEffect::deserialize(serde::de::value::StrDeserializer::<
-                serde_json::Error,
+                studio_json::Error,
             >::new(&effect))?;
             if effect.restart_rule() == RestartRule::TargetDedupes {
                 continue;
@@ -362,7 +362,7 @@ impl RemoteOutbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn database() -> Connection {
         let db = Connection::open_in_memory().expect("database");
@@ -393,7 +393,7 @@ mod tests {
             put("other", OutboxStatus::Pending),
             Err(OutboxError::Conflict(_))
         ));
-        let entry = RemoteOutbox::get::<serde_json::Value>(
+        let entry = RemoteOutbox::get::<studio_json::Value>(
             &tx,
             RemoteEffect::ServerFetch,
             "peer",
@@ -404,12 +404,12 @@ mod tests {
         assert_eq!(entry.status, OutboxStatus::Submitted);
         assert_eq!(entry.target, "peer");
         let found =
-            RemoteOutbox::find::<serde_json::Value>(&tx, RemoteEffect::ServerFetch, "request")
+            RemoteOutbox::find::<studio_json::Value>(&tx, RemoteEffect::ServerFetch, "request")
                 .unwrap()
                 .expect("found without target");
         assert_eq!(found.id, entry.id);
         assert!(
-            RemoteOutbox::find::<serde_json::Value>(&tx, RemoteEffect::AccessRequest, "request")
+            RemoteOutbox::find::<studio_json::Value>(&tx, RemoteEffect::AccessRequest, "request")
                 .unwrap()
                 .is_none()
         );
@@ -435,7 +435,7 @@ mod tests {
         }
         assert_eq!(RemoteOutbox::release_target(&tx, "a", 100).unwrap(), 1);
         let due = |target: &str| {
-            RemoteOutbox::get::<serde_json::Value>(
+            RemoteOutbox::get::<studio_json::Value>(
                 &tx,
                 RemoteEffect::AccessRequest,
                 target,
@@ -466,7 +466,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(RemoteOutbox::hold_unclean(&tx).unwrap(), 1);
-        let entry = RemoteOutbox::get::<serde_json::Value>(
+        let entry = RemoteOutbox::get::<studio_json::Value>(
             &tx,
             RemoteEffect::ServerFetch,
             "peer",
@@ -521,7 +521,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let entries = RemoteOutbox::entries::<serde_json::Value>(
+        let entries = RemoteOutbox::entries::<studio_json::Value>(
             &tx,
             RemoteEffect::FederationMessage,
             Some("peer"),
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(entries[0].record["text"], "changed");
         assert_eq!(entries[0].status, OutboxStatus::Committed);
         assert_eq!(
-            RemoteOutbox::entries::<serde_json::Value>(&tx, RemoteEffect::ServerFetch, None)
+            RemoteOutbox::entries::<studio_json::Value>(&tx, RemoteEffect::ServerFetch, None)
                 .unwrap()
                 .len(),
             1

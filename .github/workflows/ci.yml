@@ -24,6 +24,9 @@ jobs:
       - uses: ./.github/actions/fast-tier-setup
         with:
           rust-cache: rust-checks
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
+        with:
+          tool: cargo-deny@0.20.2
       - uses: ./.github/actions/client-build-setup
         with:
           native: "true"
@@ -33,6 +36,8 @@ jobs:
         run: pnpm run contracts:check
       - name: Rust formatting
         run: cargo fmt --check
+      - name: Cargo dependency bans
+        run: cargo fetch --locked && just deny-bans
       - name: Rust Clippy
         run: node workspaces/tooling/apps/repository-checks/clippy-ratchet.ts
       - name: Rust compiler policy witnesses

@@ -13,7 +13,7 @@ pub use operations::*;
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, AgentStatus, RuntimeStore, StoreError,
     SyncDocumentsRepository, Transaction,
@@ -213,7 +213,7 @@ pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) -> Resu
         .ok_or(StoreError::RecordContract("invalid agent record"))?
         .insert(
             "capacity".into(),
-            serde::Serialize::serialize(&capacity, serde_json::value::Serializer)?,
+            serde::Serialize::serialize(&capacity, studio_json::value::Serializer)?,
         );
     Ok(())
 }
@@ -370,7 +370,7 @@ fn decode_record(
         table,
         id: id.to_owned(),
     };
-    let mut value: Value = serde_json::from_str(raw).map_err(|_| invalid())?;
+    let mut value: Value = studio_json::from_str(raw).map_err(|_| invalid())?;
     studio_runtime_store::agent_volatile::merge_if_agent(connection, table, id, &mut value)?;
     if value.get("id").and_then(Value::as_str) != Some(id) || !validate(schema, &value) {
         return Err(invalid());
@@ -389,7 +389,7 @@ fn save_agent(
             id: record["id"].as_str().unwrap_or_default().to_owned(),
         });
     }
-    let agent: AgentRecord = serde_json::from_value(record.clone()).map_err(StoreError::from)?;
+    let agent: AgentRecord = studio_json::from_value(record.clone()).map_err(StoreError::from)?;
     AgentRepository::put(transaction, &agent)?;
     Ok(publish_agent(transaction, record)?)
 }
@@ -432,7 +432,7 @@ pub(crate) fn ensure_project(
         id: path.to_owned(),
         path: path.to_owned(),
         name: Field::Value(name.to_owned()),
-        created: serde_json::Number::from_f64(created).map_or(Field::Missing, Field::Value),
+        created: studio_json::Number::from_f64(created).map_or(Field::Missing, Field::Value),
         account_key: Field::Value(account.to_owned()),
         account_revision: Field::Value(1),
         home_server_id: Field::Value(server.to_owned()),
@@ -472,7 +472,7 @@ pub(crate) fn ensure_project(
             "INSERT INTO runtime_projects(id,record) VALUES(?1,?2)",
             rusqlite::params![
                 path,
-                serde_json::to_string(&stored).map_err(StoreError::from)?
+                studio_json::to_string(&stored).map_err(StoreError::from)?
             ],
         )
         .map_err(StoreError::from)?;
@@ -498,7 +498,7 @@ fn load_open_record(
             table,
             id: id.to_owned(),
         };
-        let mut record: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
+        let mut record: Value = studio_json::from_str(&raw).map_err(|_| invalid())?;
         if !record.is_object() || record.get("id").and_then(Value::as_str) != Some(id) {
             return Err(invalid());
         }
@@ -773,7 +773,7 @@ fn rename(
 mod tests {
     #[test]
     fn capacity_access_uses_the_typed_kind() {
-        let record = serde_json::json!({"capacity":{"kind":"future","max":8}});
+        let record = studio_json::json!({"capacity":{"kind":"future","max":8}});
         assert_eq!(
             super::capacity_max(&record),
             studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
@@ -781,7 +781,7 @@ mod tests {
     }
     use super::{create_agent, ensure_project, replay_agent};
     use rusqlite::Connection;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("memory database opens");
@@ -820,8 +820,8 @@ mod tests {
         use studio_runtime_schema::creation_intent::CreationIntent;
         let connection = database();
         let legacy = r#"{"cwd":"/project","model":null,"previous":null,"worker_defaults":{"account_key":"worker","effort":"high","fast_mode":false,"model":"gpt-6-luna"},"workspaceMode":"worktree"}"#;
-        let typed: CreationIntent = serde_json::from_str(legacy).unwrap();
-        let signature = serde_json::to_string(&typed).unwrap();
+        let typed: CreationIntent = studio_json::from_str(legacy).unwrap();
+        let signature = studio_json::to_string(&typed).unwrap();
         assert_ne!(legacy, signature);
         let record = json!({"id":"lead","rootId":"lead","epoch":0,"status":"idle","accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"compactions":0});
         connection
@@ -1035,7 +1035,7 @@ mod tests {
     fn agent_creation_is_atomic_replayable_and_publishes_sync_projection() {
         let mut connection = database();
         let tx = connection.transaction().expect("transaction starts");
-        let record = serde_json::from_str(r#"{"compactions":0,"provider":"codex",
+        let record = studio_json::from_str(r#"{"compactions":0,"provider":"codex",
             "id":"agent-a", "rootId":"agent-a", "epoch":0, "status":"queued",
             "name":"Agent A", "prompt":"Start the task", "cwd":"/project",
             "accountKey":"default", "serverId":"server-a", "isLead":true, "needsTitle":false, "autoWake":true,
@@ -1070,7 +1070,7 @@ mod tests {
             .and_then(|row| row.payload)
             .expect("agent projection exists");
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&projection).expect("projection JSON")["value"]
+            studio_json::from_str::<studio_json::Value>(&projection).expect("projection JSON")["value"]
                 ["id"],
             "agent-a"
         );
@@ -1081,7 +1081,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("project projection exists");
-        let project = serde_json::from_str::<serde_json::Value>(&project)
+        let project = studio_json::from_str::<studio_json::Value>(&project)
             .expect("project projection JSON")["value"]
             .clone();
         assert_eq!(project["homeServerId"], "server-a");
@@ -1157,7 +1157,7 @@ mod tests {
             )
             .expect("project sync projection exists");
         let project =
-            serde_json::from_str::<Value>(&payload).expect("project projection JSON")["value"]
+            studio_json::from_str::<Value>(&payload).expect("project projection JSON")["value"]
                 .clone();
         assert_eq!(project["homeServerId"], "persisted-server");
         assert_eq!(
@@ -1195,7 +1195,7 @@ mod tests {
                      BEGIN SELECT RAISE(ABORT,'injected creation failure'); END;"
                 ))
                 .expect("install targeted failpoint");
-            let record: studio_runtime_store::AgentRecord = serde_json::from_str(
+            let record: studio_runtime_store::AgentRecord = studio_json::from_str(
                 r#"{"compactions":0,"provider":"codex",
                 "id":"agent-failpoint", "rootId":"parent", "parentId":"parent", "epoch":0,
                 "status":"queued", "name":"Agent", "prompt":"Task", "cwd":"/project",

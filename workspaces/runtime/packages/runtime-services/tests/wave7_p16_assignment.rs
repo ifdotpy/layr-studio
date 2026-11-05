@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::work_assignment_runtime::assign_in_transaction;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, WorkItemsRepository};
 

@@ -1,12 +1,12 @@
 //! Pure projections used by the skills and capabilities discovery endpoints.
 
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
-use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use tokio::time::Instant;
 
@@ -25,7 +25,7 @@ pub fn managed_tool_catalog(
 ) -> Result<Vec<Value>, &'static str> {
     crate::thread_prepare::full_tool_catalog(catalog)
         .into_iter()
-        .map(|tool| serde_json::to_value(tool).map_err(|_| "Invalid tool catalog"))
+        .map(|tool| studio_json::to_value(tool).map_err(|_| "Invalid tool catalog"))
         .collect()
 }
 
@@ -319,7 +319,7 @@ pub fn vm_finder_view(state_dir: &Path, agent: &Value) -> Value {
         };
         let directory = entry.path();
         match std::fs::read(directory.join("mount.json")) {
-            Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(bytes) => match studio_json::from_slice::<Value>(&bytes) {
                 Ok(value) => {
                     let saved = crate::saved_mount::SavedMount::from_value(value);
                     if saved.project_id.as_str() == Some(project_id) {
@@ -332,7 +332,7 @@ pub fn vm_finder_view(state_dir: &Path, agent: &Value) -> Value {
             Err(error) => return finder_status_error(error.to_string()),
         }
         match std::fs::read(directory.join("mount-error.json")) {
-            Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(bytes) => match studio_json::from_slice::<Value>(&bytes) {
                 Ok(value) => {
                     let saved = crate::saved_mount::SavedMountFailure::from_value(value);
                     if saved.project_id.as_str() == Some(project_id) {
@@ -456,16 +456,16 @@ mod tests {
         apply_capability_result, capabilities_base, host_finder_view, skills_for_cwd,
         vm_finder_view,
     };
-    use serde_json::json;
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
     };
+    use studio_json::json;
 
     use tokio::time::Instant;
 
     struct RetainedDiscovery {
-        calls: Arc<Mutex<Vec<serde_json::Value>>>,
+        calls: Arc<Mutex<Vec<studio_json::Value>>>,
     }
 
     impl crate::account_session_runtime::AccountSessionPort for RetainedDiscovery {

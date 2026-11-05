@@ -372,7 +372,7 @@ mod projection_copy_tests {
                 let (id, raw) = row.unwrap();
                 count += 1;
                 let valid = match table {
-                    "runtime_projects" => match serde_json::from_str::<
+                    "runtime_projects" => match studio_json::from_str::<
                         studio_runtime_schema::project_record::ProjectRecord,
                     >(&raw)
                     {
@@ -384,15 +384,15 @@ mod projection_copy_tests {
                         )) => record.id == id,
                         Err(_) => false,
                     },
-                    "runtime_work" => serde_json::from_str::<
+                    "runtime_work" => studio_json::from_str::<
                         studio_runtime_schema::work_item_record::WorkItem,
                     >(&raw)
                     .is_ok_and(|record| record.id().as_ref() == id),
-                    "runtime_plans" => {
-                        serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
-                            .is_ok_and(|record| record.id() == id)
-                    }
-                    "runtime_annotations" => serde_json::from_str::<
+                    "runtime_plans" => studio_json::from_str::<
+                        studio_runtime_schema::plan_record::PlanRecord,
+                    >(&raw)
+                    .is_ok_and(|record| record.id() == id),
+                    "runtime_annotations" => studio_json::from_str::<
                         studio_runtime_schema::annotation_record::AnnotationRecord,
                     >(&raw)
                     .is_ok_and(|record| record.id() == &id),
@@ -408,7 +408,7 @@ mod projection_copy_tests {
             let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
             let (mut count, mut refused) = (0, 0);
             for row in rows {
-                let payload: serde_json::Value = serde_json::from_str(&row.unwrap()).unwrap();
+                let payload: studio_json::Value = studio_json::from_str(&row.unwrap()).unwrap();
                 let value = &payload["value"];
                 count += 1;
                 for (name, valid) in [
@@ -2357,7 +2357,7 @@ mod tests {
             ("host", "host", "default"),
             ("other", "vm", "other"),
         ] {
-            let record = serde_json::json!({"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":account,"executionMode":mode});
+            let record = studio_json::json!({"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":account,"executionMode":mode});
             db.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                 rusqlite::params![id, record.to_string()],

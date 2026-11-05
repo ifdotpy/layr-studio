@@ -5,7 +5,7 @@ fn main() {
     io::stdin()
         .read_to_string(&mut input)
         .expect("read parity fixtures");
-    let cases: Vec<(String, bool)> = serde_json::from_str(&input).expect("valid parity fixtures");
+    let cases: Vec<(String, bool)> = studio_json::from_str(&input).expect("valid parity fixtures");
     // All fixture documents are valid and within the parser budgets.
     let output: Vec<_> = cases
         .into_iter()
@@ -16,6 +16,6 @@ fn main() {
     // Markdown trees contain only JSON-serializable fields.
     println!(
         "{}",
-        serde_json::to_string(&output).expect("Markdown trees serialize")
+        studio_json::to_string(&output).expect("Markdown trees serialize")
     );
 }

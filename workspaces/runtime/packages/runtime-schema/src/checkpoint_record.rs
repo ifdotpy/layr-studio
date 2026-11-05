@@ -2,8 +2,8 @@
 
 use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
 use std::collections::BTreeMap;
+use studio_json::{Number, Value};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CheckpointRecord {
@@ -19,8 +19,8 @@ pub struct CheckpointRecord {
 }
 
 impl CheckpointRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        serde_json::from_value(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        studio_json::from_value(value)
     }
     pub fn id(&self) -> &String {
         &self.id
@@ -30,7 +30,7 @@ impl CheckpointRecord {
     }
     pub fn into_value(self) -> Value {
         // All fields are already serializable JSON values or scalars.
-        serde_json::to_value(self).expect("checkpoint fields are JSON serializable")
+        studio_json::to_value(self).expect("checkpoint fields are JSON serializable")
     }
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(CheckpointRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-checkpoint-record.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -51,7 +51,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn checkpoint_schema_and_typed_record_agree() {
@@ -68,7 +68,7 @@ mod tests {
             (json!(["c"]), false),
             (json!({}), false),
         ] {
-            let decoded = serde_json::from_value::<CheckpointRecord>(value.clone());
+            let decoded = studio_json::from_value::<CheckpointRecord>(value.clone());
             assert_eq!(decoded.is_ok(), valid, "{value}");
             assert_eq!(
                 crate::validate("PersistedCheckpointRecord", &value).unwrap(),

@@ -3,7 +3,7 @@
 use crate::CachedSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::ProjectRemovalReason;
 use studio_runtime_schema::project_record::{ProjectLive, ProjectRecord, ProjectRemoval};
 
@@ -90,7 +90,7 @@ impl ProjectsRepository {
             .optional()?
             .flatten();
         let removal: Option<ProjectRemoval> =
-            raw.map(|raw| serde_json::from_str(&raw)).transpose()?;
+            raw.map(|raw| studio_json::from_str(&raw)).transpose()?;
         Ok(removal.is_some_and(|removal| {
             removal.reason == ProjectRemovalReason::Delete && removal.sequence == seq
         }))
@@ -117,7 +117,7 @@ impl ProjectsRepository {
             .map(|row| {
                 let (id, raw) = row?;
                 let value =
-                    serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                    studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                         object: "runtime_projects",
                         id: id.clone(),
                     })?;
@@ -137,7 +137,7 @@ impl ProjectsRepository {
         raw.map(|raw| {
             Ok((
                 id.to_owned(),
-                serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: "runtime_projects",
                     id: id.to_owned(),
                 })?,
@@ -156,7 +156,7 @@ impl ProjectsRepository {
             .optional()?;
         raw.map(|raw| {
             let record: ProjectRecord =
-                serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: "runtime_projects",
                     id: id.to_owned(),
                 })?;
@@ -184,7 +184,7 @@ impl ProjectsRepository {
             .map(|row| {
                 let (id, raw) = row?;
                 let project: ProjectRecord =
-                    serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                    studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                         object: "runtime_projects",
                         id: id.clone(),
                     })?;
@@ -210,7 +210,7 @@ impl ProjectsRepository {
             "SELECT json_extract(intent.value,'$.request') FROM runtime_projects,json_each(record,'$.locationIntents') AS intent WHERE runtime_projects.id=?1 AND intent.key=?2",
             params![project,operation], |row|row.get(0),
         ).optional()?;
-        raw.map(|raw| serde_json::from_str(&raw))
+        raw.map(|raw| studio_json::from_str(&raw))
             .transpose()
             .map_err(Into::into)
     }
@@ -231,7 +231,7 @@ impl ProjectsRepository {
         }
         let changed=tx.execute(
             "UPDATE runtime_projects SET record=json_patch(record,json_object('locationIntents',json_object(?2,json_object('request',json(?3))))) WHERE id=?1 AND json_extract(record,'$.removal') IS NULL",
-            params![project,operation,serde_json::to_string(request)?],
+            params![project,operation,studio_json::to_string(request)?],
         )?;
         if changed == 0 {
             return Err(StoreError::InvalidStoredRecord {
@@ -270,7 +270,7 @@ impl ProjectsRepository {
             .map(|row| {
                 let (id, raw) = row?;
                 let mut value =
-                    serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                    studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                         object: "runtime_agents",
                         id: id.clone(),
                     })?;
@@ -318,14 +318,14 @@ impl ProjectsRepository {
                 registration
             );
         }
-        let record = serde_json::to_string(&project)?;
+        let record = studio_json::to_string(&project)?;
         let stored: String = transaction.query_row(
             "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record RETURNING record",
             params![project.id, record],
             |row| row.get(0),
         )?;
-        let record = serde_json::value::RawValue::from_string(stored)?;
+        let record = studio_json::value::RawValue::from_string(stored)?;
         SyncDocumentsRepository::put_entity(
             transaction,
             "project",
@@ -341,7 +341,7 @@ impl ProjectsRepository {
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| StoreError::SchemaMismatch("project id is invalid".to_owned()))?;
-        let record = serde_json::to_string(project)?;
+        let record = studio_json::to_string(project)?;
         transaction.execute(
             "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
@@ -363,13 +363,13 @@ impl ProjectsRepository {
         id: &str,
         patch: &T,
     ) -> StoreResult<()> {
-        let patch = serde_json::to_string(patch)?;
+        let patch = studio_json::to_string(patch)?;
         let (record, hidden): (String, bool) = transaction.query_row(
             "UPDATE runtime_projects SET record=json_patch(record,json(?2)) WHERE id=?1 AND json_extract(record,'$.removal') IS NULL RETURNING record,json_type(record,'$.sidebarHidden')='true'",
             params![id, patch],
             |row| Ok((row.get(0)?, row.get::<_, Option<bool>>(1)?.unwrap_or(false))),
         )?;
-        let record = serde_json::value::RawValue::from_string(record)?;
+        let record = studio_json::value::RawValue::from_string(record)?;
         SyncDocumentsRepository::put_entity(transaction, "project", id, record, hidden)?;
         Ok(())
     }
@@ -511,7 +511,7 @@ impl ProjectsRepository {
             .optional()?;
         raw.map(|raw| {
             let mut record =
-                serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: "runtime_agents",
                     id: id.to_owned(),
                 })?;
@@ -530,7 +530,7 @@ impl ProjectsRepository {
             )
             .optional()?
             .map(|raw| {
-                serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+                studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: "runtime_sidebar_order",
                     id: "current".to_owned(),
                 })
@@ -543,7 +543,7 @@ impl ProjectsRepository {
         transaction.execute(
             "INSERT INTO runtime_sidebar_order(id,record) VALUES ('current',?1) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            [serde_json::to_string(value)?],
+            [studio_json::to_string(value)?],
         )?;
         let workspace_exists = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM sync_entities \
@@ -583,11 +583,11 @@ mod tests {
             CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
         let tx = db.transaction().unwrap();
         let original: ProjectLive =
-            serde_json::from_str(r#"{"id":"p","path":"/p","name":"Old","sidebarHidden":true}"#)
+            studio_json::from_str(r#"{"id":"p","path":"/p","name":"Old","sidebarHidden":true}"#)
                 .unwrap();
         ProjectsRepository::put_live(&tx, &original).unwrap();
         let update: ProjectLive =
-            serde_json::from_str(r#"{"id":"p","path":"/p","name":null}"#).unwrap();
+            studio_json::from_str(r#"{"id":"p","path":"/p","name":null}"#).unwrap();
         ProjectsRepository::put_live(&tx, &update).unwrap();
         let saved: String = tx
             .query_row(
@@ -596,7 +596,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let saved: Value = serde_json::from_str(&saved).unwrap();
+        let saved: Value = studio_json::from_str(&saved).unwrap();
         assert_eq!(saved["name"], Value::Null);
         assert_eq!(saved["sidebarHidden"], true);
     }
@@ -609,7 +609,7 @@ mod tests {
             CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
             CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
         let tx = db.transaction().unwrap();
-        let project: ProjectLive = serde_json::from_str(
+        let project: ProjectLive = studio_json::from_str(
             r#"{"id":"p","path":"/p","name":null,"peerTeams":[],"locations":null}"#,
         )
         .unwrap();
@@ -621,7 +621,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let value: Value = serde_json::from_str(&saved).unwrap();
+        let value: Value = studio_json::from_str(&saved).unwrap();
         assert_eq!(
             value,
             json!({"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":null})
@@ -698,7 +698,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("durable project tombstone");
-        let record: Value = serde_json::from_str(&record).expect("project");
+        let record: Value = studio_json::from_str(&record).expect("project");
         assert_eq!(record["removal"]["reason"], "delete");
         assert_eq!(record["removal"]["sequence"], 17);
         assert!(!ProjectsRepository::is_destructive_removal(&tx, "p", 18).expect("other lifetime"));

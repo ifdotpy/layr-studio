@@ -32,7 +32,7 @@ fn serve(channel: UnixStream, config: ConnectionConfig) -> Result<(), String> {
         let permits = Arc::new(tokio::sync::Semaphore::new(64));
         let mut requests = tokio::task::JoinSet::new();
         let mut background = tokio::task::JoinSet::new();
-        let (events, mut event_receiver) = tokio::sync::mpsc::channel::<serde_json::Value>(64);
+        let (events, mut event_receiver) = tokio::sync::mpsc::channel::<studio_json::Value>(64);
         let mut views = crate::views::Views::new(
             backend.clone(),
             events,
@@ -89,7 +89,7 @@ fn serve(channel: UnixStream, config: ConnectionConfig) -> Result<(), String> {
                 Voice(Request),
                 Immediate(Response),
             }
-            let work = match serde_json::from_slice::<Request>(&bytes) {
+            let work = match studio_json::from_slice::<Request>(&bytes) {
                 Ok(request) if audio_request(&request) && !claim_audio(&mut audio_lease) => {
                     Work::Immediate(Response::failure(
                         request.id, "audio_busy", "Another client connection owns audio. Close that connection before using audio here.",
@@ -139,7 +139,7 @@ fn serve(channel: UnixStream, config: ConnectionConfig) -> Result<(), String> {
                 };
                 write_packet(
                     &writer,
-                    serde_json::to_value(response).expect("response serialization"),
+                    studio_json::to_value(response).expect("response serialization"),
                 )
                 .await
             });
@@ -209,7 +209,7 @@ fn compute(request: &Request) -> Response {
 }
 
 /// `STUDIO_CORE_TRACE=1` logs each packet size and time since start to stderr.
-fn trace(packet: &serde_json::Value, size: usize) {
+fn trace(packet: &studio_json::Value, size: usize) {
     static START: std::sync::OnceLock<Option<std::time::Instant>> = std::sync::OnceLock::new();
     let Some(start) =
         START.get_or_init(|| env::var_os("STUDIO_CORE_TRACE").map(|_| std::time::Instant::now()))
@@ -236,9 +236,9 @@ fn trace(packet: &serde_json::Value, size: usize) {
 
 async fn write_packet(
     writer: &Arc<tokio::sync::Mutex<tokio::net::unix::OwnedWriteHalf>>,
-    mut packet: serde_json::Value,
+    mut packet: studio_json::Value,
 ) -> io::Result<()> {
-    let mut bytes = serde_json::to_vec(&packet)?;
+    let mut bytes = studio_json::to_vec(&packet)?;
     trace(&packet, bytes.len());
     if bytes.len() > protocol::MAX_MESSAGE {
         eprintln!(
@@ -256,11 +256,11 @@ async fn write_packet(
             .as_object_mut()
             .expect("response object")
             .remove("result");
-        packet["error"] = serde_json::to_value(crate::backend::error(
+        packet["error"] = studio_json::to_value(crate::backend::error(
             "response_size",
             "The response exceeds the UI transport limit.",
         ))?;
-        bytes = serde_json::to_vec(&packet)?;
+        bytes = studio_json::to_vec(&packet)?;
     }
     let mut writer = writer.lock().await;
     for (flag, part) in protocol::fragments(&bytes)? {
@@ -346,7 +346,7 @@ mod audio_ownership_tests {
             (host, worker)
         };
         let call = |socket: &mut UnixStream, id: &str| -> Response {
-            let bytes = serde_json::to_vec(&Request { id: id.into(), method: "view.subscribe".into(), params: serde_json::json!({"subscription":id,"topic":"microphone","capture":"isolated-capture"}) }).unwrap();
+            let bytes = studio_json::to_vec(&Request { id: id.into(), method: "view.subscribe".into(), params: studio_json::json!({"subscription":id,"topic":"microphone","capture":"isolated-capture"}) }).unwrap();
             for (flag, bytes) in protocol::fragments(&bytes).unwrap() {
                 socket
                     .write_all(&((bytes.len() + 1) as u32).to_le_bytes())
@@ -361,7 +361,7 @@ mod audio_ownership_tests {
                 let mut frame = vec![0; u32::from_le_bytes(header) as usize];
                 socket.read_exact(&mut frame).unwrap();
                 if let Some(bytes) = assembler.push(&frame).unwrap() {
-                    return serde_json::from_slice(&bytes).unwrap();
+                    return studio_json::from_slice(&bytes).unwrap();
                 }
             }
         };
@@ -372,7 +372,7 @@ mod audio_ownership_tests {
         drop(other);
         other_worker.join().unwrap().unwrap();
         assert!(
-            crate::media::attach(&serde_json::json!("isolated-capture")).is_err(),
+            crate::media::attach(&studio_json::json!("isolated-capture")).is_err(),
             "unrelated disconnect must retain the owner's subscriber"
         );
         // A malformed packet must still run cleanup and release ownership.
@@ -399,7 +399,7 @@ mod audio_ownership_tests {
                 audio_request(&Request {
                     id: "test".into(),
                     method: method.into(),
-                    params: serde_json::Value::Null
+                    params: studio_json::Value::Null
                 }),
                 "{method}"
             );
@@ -408,13 +408,13 @@ mod audio_ownership_tests {
             assert!(audio_request(&Request {
                 id: "test".into(),
                 method: "view.subscribe".into(),
-                params: serde_json::json!({"topic":topic})
+                params: studio_json::json!({"topic":topic})
             }));
         }
         assert!(!audio_request(&Request {
             id: "test".into(),
             method: "preferences.raw_all".into(),
-            params: serde_json::Value::Null
+            params: studio_json::Value::Null
         }));
     }
 }

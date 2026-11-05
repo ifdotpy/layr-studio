@@ -40,7 +40,7 @@ struct StateOwnerMarker {
     runtime: String,
 }
 
-fn decode_marker(bytes: &[u8]) -> Result<StateOwnerMarker, serde_json::Error> {
+fn decode_marker(bytes: &[u8]) -> Result<StateOwnerMarker, studio_json::Error> {
     struct Object;
     impl<'de> serde::de::Visitor<'de> for Object {
         type Value = StateOwnerMarker;
@@ -53,7 +53,7 @@ fn decode_marker(bytes: &[u8]) -> Result<StateOwnerMarker, serde_json::Error> {
             StateOwnerMarker::deserialize(serde::de::value::MapAccessDeserializer::new(map))
         }
     }
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let mut deserializer = studio_json::Deserializer::from_slice(bytes);
     let marker = deserializer.deserialize_map(Object)?;
     deserializer.end()?;
     Ok(marker)
@@ -73,10 +73,10 @@ pub(crate) fn claim(root: &Path, claim: &StateOwnerClaim) -> StoreResult<()> {
     match fs::read(&marker) {
         Ok(bytes) => {
             let prior = decode_marker(&bytes).map_err(|error| match error.classify() {
-                serde_json::error::Category::Syntax | serde_json::error::Category::Eof => {
+                studio_json::error::Category::Syntax | studio_json::error::Category::Eof => {
                     owner_error("the state owner marker is malformed")
                 }
-                serde_json::error::Category::Data | serde_json::error::Category::Io => {
+                studio_json::error::Category::Data | studio_json::error::Category::Io => {
                     owner_error("the state directory has an unknown owner or another state format")
                 }
             })?;
@@ -106,7 +106,7 @@ fn write_marker(root: &Path, marker: &Path, backend_build: &str) -> io::Result<(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let mut body = serde_json::to_vec(&StateOwnerMarker {
+    let mut body = studio_json::to_vec(&StateOwnerMarker {
         backend_build: backend_build.to_owned(),
         format_version: STATE_FORMAT_VERSION,
         runtime: "rust".to_owned(),
@@ -153,7 +153,7 @@ impl PrivateMode for fs::OpenOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     fn build(byte: char) -> StateOwnerClaim {
         StateOwnerClaim {
@@ -162,7 +162,7 @@ mod tests {
     }
 
     fn marker(root: &Path) -> Value {
-        serde_json::from_slice(&fs::read(root.join(STATE_OWNER_FILE)).expect("test fixture"))
+        studio_json::from_slice(&fs::read(root.join(STATE_OWNER_FILE)).expect("test fixture"))
             .expect("test fixture")
     }
 

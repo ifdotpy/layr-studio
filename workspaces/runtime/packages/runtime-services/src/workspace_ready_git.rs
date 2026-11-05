@@ -18,11 +18,11 @@ use crate::workspace_ready::{
     GitObservation, ProvisionEffect, Reservation, WorkspaceActor, WorkspaceDecision,
     decide_workspace, recovery, unsupported,
 };
-use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use studio_json::{Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::workspace_ready::WorkspacePaths;
 use studio_runtime_store::workspace_ready::{
@@ -564,7 +564,7 @@ async fn provision_journal(
         .await?)
 }
 fn actor(snapshot: &WorkspaceSnapshot) -> Result<WorkspaceActor, WorkspaceError> {
-    serde_json::from_value(snapshot.agent.value()).map_err(|_| WorkspaceError::InvalidRecord)
+    studio_json::from_value(snapshot.agent.value()).map_err(|_| WorkspaceError::InvalidRecord)
 }
 fn observe(
     snapshot: WorkspaceSnapshot,
@@ -631,7 +631,7 @@ fn observe(
         .ok_or(WorkspaceError::InvalidRecord)?;
     let plan = if let Some(operation) = journal {
         context.journaled = true;
-        serde_json::from_value(operation["plan"].clone())
+        studio_json::from_value(operation["plan"].clone())
             .map_err(|_| WorkspaceError::InvalidRecord)?
     } else {
         let source = &context.snapshot.agent.value();

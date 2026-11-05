@@ -3,9 +3,9 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::hmac;
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_schema::multi_server_protocol::{
     ACCESS_PROTOCOL_VERSION, PersistedAccessInvite,
 };
@@ -343,7 +343,7 @@ pub async fn manage(
     store.transaction_with(move |tx| -> Result<AccessSnapshot, MultiServerError> {
         match &body {
             ManagementRequest::Settings { auto_pair, .. } => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto_pair.value().copied().unwrap_or(false))])?; audit_write(tx,"local",&actor,"settings")?; }
-            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(serde_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![serde_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
+            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(studio_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![studio_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
             ManagementRequest::Alias { server_id, request_id, alias } => {
                 let server = server_id.as_str();
                 let request = request_id.as_str();
@@ -377,7 +377,7 @@ pub async fn manage(
                         let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
                         peer.alias = Field::Value(alias_value);
-                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?, server])?;
+                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![studio_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?, server])?;
                     }
                     tx.execute("INSERT INTO runtime_access_alias_requests VALUES(?,?,?)", rusqlite::params![request,target,alias])?;
                     audit_write(tx,target,&actor,"alias")?;
@@ -504,11 +504,11 @@ pub async fn create_invite(
                 .to_owned()
                 .try_into()
                 .map_err(invalid_invite)?,
-            expires: serde_json::Number::from(now as i64 + INVITATION_TTL_SECONDS)
+            expires: studio_json::Number::from(now as i64 + INVITATION_TTL_SECONDS)
                 .try_into()
                 .map_err(invalid_invite)?,
             created: Field::Value(
-                serde_json::Number::from_f64(now)
+                studio_json::Number::from_f64(now)
                     .ok_or_else(|| {
                         MultiServerError::Refused("Invalid local invitation time".into())
                     })?
@@ -530,7 +530,7 @@ pub async fn create_invite(
             .transaction_with(move |tx| {
                 tx.execute(
                 "INSERT INTO runtime_access_invites(id,request_id,hash,record) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![invite_id, request_id, fingerprint, serde_json::to_string(&invite_for_write)?],
+                rusqlite::params![invite_id, request_id, fingerprint, studio_json::to_string(&invite_for_write)?],
             )?;
                 audit_write(tx, "local", &actor, "create_invite")?;
                 Ok::<_, StoreError>(())
@@ -575,7 +575,7 @@ pub async fn create_invite(
 fn invite_fingerprint(
     body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
 ) -> Result<String, MultiServerError> {
-    let value = serde::Serialize::serialize(body, serde_json::value::Serializer)
+    let value = serde::Serialize::serialize(body, studio_json::value::Serializer)
         .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
     let canonical = crate::remote_transport::canonical_json(&value)
         .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
@@ -654,7 +654,7 @@ fn server_aliases(
                 );
                 tx.execute(
                     "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
-                    rusqlite::params![serde_json::to_string(&saved)?, id],
+                    rusqlite::params![studio_json::to_string(&saved)?, id],
                 )?;
             }
             alias
@@ -717,7 +717,7 @@ fn stored(
     .transpose()
 }
 fn decode_client(table: &str, id: &str, raw: &str) -> Result<PersistedAccessClient, StoreError> {
-    let client = serde_json::from_str::<
+    let client = studio_json::from_str::<
         studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
     >(raw)
     .map_err(|_| invalid(table, id, "record"))?
@@ -725,7 +725,7 @@ fn decode_client(table: &str, id: &str, raw: &str) -> Result<PersistedAccessClie
     Ok(client)
 }
 fn decode_invite(id: &str, raw: &str) -> Result<PersistedAccessInvite, StoreError> {
-    let invite = serde_json::from_str::<
+    let invite = studio_json::from_str::<
         studio_runtime_schema::http_ingress::Object<PersistedAccessInvite>,
     >(raw)
     .map_err(|_| invalid("runtime_access_invites", id, "record"))?
@@ -771,14 +771,14 @@ mod tests {
     use super::MultiServerError;
     use crate::federation_credentials::Credentials;
     use serde::Deserialize;
-    use serde_json::json;
     use std::sync::Arc;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     async fn create_invite(
         store: Arc<RuntimeStore>,
-        identity: &serde_json::Value,
-        body: &serde_json::Value,
+        identity: &studio_json::Value,
+        body: &studio_json::Value,
         actor: &str,
         user: Option<&str>,
     ) -> Result<studio_runtime_schema::multi_server_access::InvitationResponse, MultiServerError>
@@ -790,8 +790,8 @@ mod tests {
     }
     async fn manage(
         store: &RuntimeStore,
-        identity: &serde_json::Value,
-        body: &serde_json::Value,
+        identity: &studio_json::Value,
+        body: &studio_json::Value,
         actor: &str,
     ) -> Result<studio_runtime_schema::multi_server_access::AccessSnapshot, MultiServerError> {
         let request =
@@ -806,8 +806,8 @@ mod tests {
 
         let wire =
             r#"{"requestId":"stored-1","label":"Café","grant":"observe","action":"create_invite"}"#;
-        let old_body: serde_json::Value = serde_json::from_str(wire).unwrap();
-        let typed: ManagementRequest = serde_json::from_str(wire).unwrap();
+        let old_body: studio_json::Value = studio_json::from_str(wire).unwrap();
+        let typed: ManagementRequest = studio_json::from_str(wire).unwrap();
         let old_bytes = crate::remote_transport::canonical_json(&old_body).unwrap();
         assert_eq!(
             old_bytes,
@@ -822,16 +822,16 @@ mod tests {
 
         let missing = r#"{"action":"create_invite","requestId":"r"}"#;
         let null = r#"{"action":"create_invite","requestId":"r","label":null}"#;
-        let missing_body: ManagementRequest = serde_json::from_str(missing).unwrap();
-        let null_body: ManagementRequest = serde_json::from_str(null).unwrap();
-        let serialized = serde_json::to_string(&missing_body).unwrap();
-        let serialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        let missing_body: ManagementRequest = studio_json::from_str(missing).unwrap();
+        let null_body: ManagementRequest = studio_json::from_str(null).unwrap();
+        let serialized = studio_json::to_string(&missing_body).unwrap();
+        let serialized: studio_json::Value = studio_json::from_str(&serialized).unwrap();
         assert_eq!(
             serialized,
             json!({"action":"create_invite","requestId":"r"})
         );
         for (wire, typed) in [(missing, &missing_body), (null, &null_body)] {
-            let old: serde_json::Value = serde_json::from_str(wire).unwrap();
+            let old: studio_json::Value = studio_json::from_str(wire).unwrap();
             let old = crate::remote_transport::canonical_json(&old).unwrap();
             assert_eq!(
                 super::invite_fingerprint(typed).unwrap(),
@@ -917,8 +917,8 @@ mod tests {
         .await
         .expect("exact invitation retry reuses durable invite");
         assert_eq!(
-            serde_json::to_vec(&first).unwrap(),
-            serde_json::to_vec(&retry).unwrap()
+            studio_json::to_vec(&first).unwrap(),
+            studio_json::to_vec(&retry).unwrap()
         );
         assert_eq!(first.invitation.tailscale_user, "owner@example.test");
         assert!(!first.invitation.token.is_empty());
@@ -933,8 +933,8 @@ mod tests {
             })
             .await
             .expect("stored invitation reads");
-        let stored_token_hash: serde_json::Value =
-            serde_json::from_str(&stored_token_hash).expect("stored invitation JSON");
+        let stored_token_hash: studio_json::Value =
+            studio_json::from_str(&stored_token_hash).expect("stored invitation JSON");
         assert_eq!(
             data_encoding::HEXLOWER
                 .decode(
@@ -1043,8 +1043,8 @@ mod tests {
             .await
             .expect("exact alias retry returns the saved state");
         assert_eq!(
-            serde_json::to_vec(&retry).unwrap(),
-            serde_json::to_vec(&first).unwrap()
+            studio_json::to_vec(&retry).unwrap(),
+            studio_json::to_vec(&first).unwrap()
         );
 
         let changed =

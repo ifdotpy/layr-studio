@@ -4,7 +4,7 @@ pub use crate::relocation::RelocationError as LocationError;
 use crate::relocation::{invalid, timestamp, validate};
 use rusqlite::{OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 #[cfg(test)]
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 pub use studio_runtime_schema::persistence::RemoteOutcome as LocationOutcome;
@@ -82,7 +82,7 @@ mod receipt_tests {
         };
         let original = json!({"action":"add_location","path":"/München/新","project":"/München","server":"peer"});
         assert_eq!(
-            serde_json::to_string(&wire).unwrap(),
+            studio_json::to_string(&wire).unwrap(),
             canonical_json(&original)
         );
     }
@@ -107,20 +107,21 @@ mod receipt_tests {
         let request =
             r#"{"action":"add_location","path":"/remote","project":"/home","server":"peer"}"#;
         let valid = format!(r#"{{"project":"/home","request":{request},"location":null}}"#);
-        assert!(serde_json::from_str::<LocationPayload>(&valid).is_ok());
+        assert!(studio_json::from_str::<LocationPayload>(&valid).is_ok());
         let extra = format!(r#"{{"project":"/home","request":{request},"extra":true}}"#);
-        assert!(serde_json::from_str::<LocationPayload>(&extra).is_err());
+        assert!(studio_json::from_str::<LocationPayload>(&extra).is_err());
         let array = format!(r#"{{"project":"/home","request":{request},"location":[]}}"#);
-        assert!(serde_json::from_str::<LocationPayload>(&array).is_err());
+        assert!(studio_json::from_str::<LocationPayload>(&array).is_err());
         assert!(
-            serde_json::from_str::<LocationPayload>(r#"{"project":"/home","request":[]}"#).is_err()
+            studio_json::from_str::<LocationPayload>(r#"{"project":"/home","request":[]}"#)
+                .is_err()
         );
     }
 
     #[test]
     fn outbox_size_includes_receipt() {
         let body = json!({"extra":"x".repeat(3 * 1024 * 1024)}).to_string();
-        let outbox = json!({"id":"request","server":"peer","body":serde_json::from_str::<Value>(&body).expect("body"),"state":"complete","result":null});
+        let outbox = json!({"id":"request","server":"peer","body":studio_json::from_str::<Value>(&body).expect("body"),"state":"complete","result":null});
         let mut receipt = studio_runtime_store::multi_server_delivery::RemoteReply {
             request_id: "request".into(),
             outcome: LocationOutcome::NotApplied,
@@ -129,11 +130,11 @@ mod receipt_tests {
             waiting_for: None,
         };
         let outbox_len = outbox.to_string().len();
-        let empty_receipt_len = serde_json::to_vec(&receipt).expect("receipt").len();
+        let empty_receipt_len = studio_json::to_vec(&receipt).expect("receipt").len();
         receipt.error = Some("x".repeat(
             crate::relocation::MAX_RECORD_BYTES + 1 - (outbox_len - 4) - empty_receipt_len,
         ));
-        let receipt_len = serde_json::to_vec(&receipt).expect("receipt").len();
+        let receipt_len = studio_json::to_vec(&receipt).expect("receipt").len();
         assert!(
             outbox_len < crate::relocation::MAX_RECORD_BYTES
                 && receipt_len < crate::relocation::MAX_RECORD_BYTES
@@ -157,7 +158,7 @@ mod receipt_tests {
         now: f64,
     ) -> Result<(), LocationError> {
         let encoded = receipt.to_string();
-        let receipt = serde_json::from_str(&encoded).expect("receipt");
+        let receipt = studio_json::from_str(&encoded).expect("receipt");
         complete_snapshot_in_transaction(
             tx,
             raw["id"].as_str().expect("id"),
@@ -176,17 +177,18 @@ mod receipt_tests {
             r#"{"serverId":"peer","gitOrigin":null}"#,
             r#"{"serverId":"peer","gitOrigin":"origin"}"#,
         ] {
-            let parsed: LocationValue = serde_json::from_str(raw).expect("location value");
-            let actual: Value =
-                serde_json::from_str(&serde_json::to_string(&parsed).expect("serialize location"))
-                    .expect("serialized value");
+            let parsed: LocationValue = studio_json::from_str(raw).expect("location value");
+            let actual: Value = studio_json::from_str(
+                &studio_json::to_string(&parsed).expect("serialize location"),
+            )
+            .expect("serialized value");
             assert_eq!(
                 actual,
-                serde_json::from_str::<Value>(raw).expect("expected value")
+                studio_json::from_str::<Value>(raw).expect("expected value")
             );
         }
         assert!(
-            serde_json::from_str::<LocationResult>(r#"{"requestId":"request","outcome":"other"}"#)
+            studio_json::from_str::<LocationResult>(r#"{"requestId":"request","outcome":"other"}"#)
                 .is_err()
         );
     }
@@ -203,7 +205,7 @@ mod receipt_tests {
                 "b5c0f952f316204ce5bdef1a5d08f89fe93d3078338d7ee544d3bfddd551cd45",
             ),
         ] {
-            let args: LocationIngress = serde_json::from_str(args).expect("valid arguments");
+            let args: LocationIngress = studio_json::from_str(args).expect("valid arguments");
             assert_eq!(
                 LocationRequest::parse(args, Some("local-id"))
                     .expect("request")
@@ -216,29 +218,29 @@ mod receipt_tests {
             r#"{"action":"add_location","project":"/project","server":"peer"}"#,
             r#"{"action":"remove_location","project":"/project","server":"peer","path":"/remote"}"#,
         ] {
-            assert!(serde_json::from_str::<LocationIngress>(invalid).is_err());
+            assert!(studio_json::from_str::<LocationIngress>(invalid).is_err());
         }
     }
 
     #[test]
     fn managed_location_snapshot_accepts_unsigned_payload() {
-        let fixture: Value =
-            serde_json::from_str(include_str!("../tests/relocation/oracle.json")).expect("fixture");
+        let fixture: Value = studio_json::from_str(include_str!("../tests/relocation/oracle.json"))
+            .expect("fixture");
         let case = &fixture["cases"][0];
         let mut raw = case["outbox"].clone();
         raw["body"]["payload"]
             .as_object_mut()
             .expect("payload")
             .remove("signature");
-        let outbox: Outbox = serde_json::from_str(&raw.to_string()).expect("outbox");
+        let outbox: Outbox = studio_json::from_str(&raw.to_string()).expect("outbox");
         CompletionSnapshot::from_outbox(outbox, Some(&case["project"]))
             .expect("managed request has no wire signature");
     }
 
     #[test]
     fn hidden_project_completes_pending_location_once() {
-        let fixture: Value =
-            serde_json::from_str(include_str!("../tests/relocation/oracle.json")).expect("fixture");
+        let fixture: Value = studio_json::from_str(include_str!("../tests/relocation/oracle.json"))
+            .expect("fixture");
         let case = &fixture["cases"][0];
         let raw = case["outbox"].clone();
         let key = raw["id"].as_str().expect("operation").to_owned();
@@ -484,10 +486,10 @@ pub fn complete_snapshot_in_transaction(
     now: f64,
 ) -> Result<(), LocationError> {
     let body_value: Value =
-        serde_json::from_str(body).map_err(|_| invalid("runtime_server_outbox", "/body"))?;
+        studio_json::from_str(body).map_err(|_| invalid("runtime_server_outbox", "/body"))?;
     let outbox =
         json!({"id":id,"server":server,"body":body_value,"state":"complete","result":null});
-    let receipt_len = serde_json::to_vec(response)
+    let receipt_len = studio_json::to_vec(response)
         .map_err(studio_runtime_store::StoreError::from)?
         .len();
     validate_outbox_size(&outbox, receipt_len)?;
@@ -497,7 +499,7 @@ pub fn complete_snapshot_in_transaction(
         &outbox,
     )?;
     let body: Envelope =
-        serde_json::from_str(body).map_err(|_| invalid("runtime_server_outbox", "/body"))?;
+        studio_json::from_str(body).map_err(|_| invalid("runtime_server_outbox", "/body"))?;
     let project_id = &body.payload.project;
     let project = ProjectsRepository::get(tx, project_id)?;
     let snapshot = CompletionSnapshot::from_outbox(
@@ -515,7 +517,7 @@ pub fn complete_snapshot_in_transaction(
         value: response
             .value
             .as_ref()
-            .map(|value| serde_json::from_str(value.get()))
+            .map(|value| studio_json::from_str(value.as_str()))
             .transpose()
             .map_err(studio_runtime_store::StoreError::from)?
             .flatten(),
@@ -859,7 +861,7 @@ impl LocationRequest {
             server: self.server.clone(),
         }
     }
-    pub(crate) fn signature(&self) -> Result<String, serde_json::Error> {
+    pub(crate) fn signature(&self) -> Result<String, studio_json::Error> {
         Ok(sha256_hex(
             studio_runtime_schema::json_compat::python_json_compact_serialized(&self.wire())?
                 .as_bytes(),

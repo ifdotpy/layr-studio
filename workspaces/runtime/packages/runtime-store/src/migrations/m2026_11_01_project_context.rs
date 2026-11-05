@@ -1,7 +1,7 @@
 use crate::{StoreResult, SyncDocumentsRepository};
 use rusqlite::Transaction;
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_schema::project_projection::{ProjectReadiness, ProjectSync, ProjectVault};
 
@@ -14,7 +14,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let payload: String = row.get(1)?;
-        let Ok(mut payload) = serde_json::from_str::<Value>(&payload) else {
+        let Ok(mut payload) = studio_json::from_str::<Value>(&payload) else {
             continue;
         };
         let Some(value) = payload.get_mut("value").and_then(Value::as_object_mut) else {
@@ -49,7 +49,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn drops_invalid_context_and_keeps_valid_context_idempotently() {
@@ -74,7 +74,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first, second);
-        let value: Value = serde_json::from_str(&first).unwrap();
+        let value: Value = studio_json::from_str(&first).unwrap();
         assert_eq!(value["value"]["layrReadiness"]["state"], "ready");
         assert_eq!(value["value"]["vault"]["state"], "none");
         assert!(value["value"].get("layrSync").is_none());
