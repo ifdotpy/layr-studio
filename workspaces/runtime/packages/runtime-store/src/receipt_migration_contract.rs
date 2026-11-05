@@ -32,7 +32,7 @@ pub fn import_result<R: Serialize>(
     envelope: &ResultEnvelope<R>,
     created: i64,
 ) -> Result<()> {
-    let result = serde_json::to_string(envelope)
+    let result = studio_json::to_string(envelope)
         .map_err(|_| unclassifiable("request_results", id, signature))?;
     let existing: Option<(String, String)> = tx
         .query_row(

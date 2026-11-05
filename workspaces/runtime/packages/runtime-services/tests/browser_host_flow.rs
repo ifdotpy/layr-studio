@@ -5,12 +5,12 @@
 //! client is the phone browser, which cannot reach the tool's loopback port.
 #![cfg(unix)]
 
-use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Approval, ApprovalState, BrowserCard, BrowserOutcome, BrowserPhase, BrowserRedirect,
     BrowserSource, Request,
@@ -367,7 +367,7 @@ async fn a_phone_signs_in_a_kubelogin_style_command_with_a_pasted_redirect() {
         card(&store).0.state,
         ApprovalState::Answered { .. }
     ));
-    let queue: Value = serde_json::from_slice(
+    let queue: Value = studio_json::from_slice(
         &std::fs::read(dir.path().join("browser-host/browser/requests.json")).expect("test step"),
     )
     .expect("test step");

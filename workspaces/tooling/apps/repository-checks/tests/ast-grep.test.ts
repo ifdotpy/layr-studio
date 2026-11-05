@@ -12,14 +12,14 @@ const fixtures: readonly (readonly [string, string, string, string])[] = [
   [
     "rust-json-value-roundtrip",
     "rs",
-    'let x = serde_json::from_value(json!({"a": 1}));',
-    "let x = serde_json::from_value(value);",
+    'let x = studio_json::from_value(json!({"a": 1}));',
+    "let x = studio_json::from_value(value);",
   ],
   [
     "rust-json-string-roundtrip",
     "rs",
-    "let x = serde_json::from_str(&serde_json::to_string(value)?);",
-    "let x = serde_json::from_str(&source);",
+    "let x = studio_json::from_str(&studio_json::to_string(value)?);",
+    "let x = studio_json::from_str(&source);",
   ],
   [
     "rust-json-dispatch",

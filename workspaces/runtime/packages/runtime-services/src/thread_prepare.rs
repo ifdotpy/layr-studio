@@ -22,7 +22,7 @@
 
 use crate::provider_adapter::adapter;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::sha256_hex;
 
@@ -1161,9 +1161,9 @@ mod archive_finished_catalog_tests {
             tools: Vec<ToolDefinition>,
         }
         let bundled: Bundled =
-            serde_json::from_str(include_str!("account_worker/preparation-resources.json"))
+            studio_json::from_str(include_str!("account_worker/preparation-resources.json"))
                 .expect("bundled preparation resources parse");
-        let legacy: Vec<ToolDefinition> = serde_json::from_str(include_str!(
+        let legacy: Vec<ToolDefinition> = studio_json::from_str(include_str!(
             "../../../../../.agents/skills/codex-workspace/references/native-tools.json"
         ))
         .expect("native tool catalog parses");
@@ -1248,7 +1248,7 @@ mod vm_catalog_tests {
         struct Bundled {
             tools: Vec<ToolDefinition>,
         }
-        serde_json::from_str::<Bundled>(include_str!("account_worker/preparation-resources.json"))
+        studio_json::from_str::<Bundled>(include_str!("account_worker/preparation-resources.json"))
             .unwrap()
             .tools
     }

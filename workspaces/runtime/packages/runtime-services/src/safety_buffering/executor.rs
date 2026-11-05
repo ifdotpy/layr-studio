@@ -16,12 +16,12 @@ use crate::{
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json, value::RawValue};
 use std::{
     collections::BTreeMap,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use studio_json::{OwnedRawJson as RawValue, Value, json};
 use studio_runtime_providers::{Method, RequestId};
 use studio_runtime_schema::persistence::{RequestIdentity, SafetyRetryCertainty};
 use studio_runtime_store::request_results::{Admission, AdmittedRequest, RequestResults};
@@ -58,15 +58,15 @@ struct SafetyOperation {
     dispatch: Dispatch,
     scope: crate::account_session_runtime::ConnectionScope,
     receipts: BTreeMap<String, Vec<StageReceipt>>,
-    responses: BTreeMap<String, Box<RawValue>>,
+    responses: BTreeMap<String, RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rpc_method: Option<Method>,
     #[serde(skip_serializing_if = "Option::is_none")]
     operation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    request_params: Option<Box<RawValue>>,
+    request_params: Option<RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    input: Option<Box<RawValue>>,
+    input: Option<RawValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     new_thread_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,7 +123,7 @@ struct StageReceipt {
     #[serde(skip_serializing_if = "Option::is_none")]
     not_sent_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Box<RawValue>>,
+    result: Option<RawValue>,
 }
 
 #[derive(Deserialize)]
@@ -345,7 +345,7 @@ pub async fn execute_action(
                     )
                     .map_err(|_| Error::InvalidStoredState)?;
                     let signature =
-                        serde_json::to_string(&initial).map_err(|_| Error::InvalidStoredState)?;
+                        studio_json::to_string(&initial).map_err(|_| Error::InvalidStoredState)?;
                     let Admission::Fresh(admission) = RequestResults::admit(
                         tx,
                         &identity,
@@ -587,7 +587,7 @@ async fn drive(
             };
             operation.responses.insert(
                 stage.as_str().into(),
-                serde_json::value::to_raw_value(&body).map_err(|_| Error::InvalidStoredState)?,
+                studio_json::to_raw_value(&body).map_err(|_| Error::InvalidStoredState)?,
             );
             operation.dispatch.state = DispatchState::Received;
             body
@@ -670,12 +670,12 @@ async fn request_for_stage(
                     source_thread_id: thread.clone(),
                     turn_id: operation.initial.turn_id.clone(),
                     model: operation.initial.model.clone(),
-                    input: serde_json::from_str(
+                    input: studio_json::from_str(
                         operation
                             .input
                             .as_ref()
                             .ok_or(Error::InvalidStoredState)?
-                            .get(),
+                            .as_str(),
                     )
                     .map_err(|_| Error::InvalidStoredState)?,
                 },
@@ -711,7 +711,7 @@ async fn persist_intent(
     operation.rpc_method = Some(method);
     operation.operation_id = Some(operation_id.to_owned());
     operation.request_params =
-        Some(serde_json::value::to_raw_value(params).map_err(|_| Error::InvalidStoredState)?);
+        Some(studio_json::to_raw_value(params).map_err(|_| Error::InvalidStoredState)?);
     operation.initial.updated = unix_seconds();
     let mut pending = operation.clone();
     let reservation_params = params.clone();
@@ -918,8 +918,7 @@ async fn advance_stage(
                         return Err(Error::ProviderRejected);
                     }
                     operation.input = Some(
-                        serde_json::value::to_raw_value(&input)
-                            .map_err(|_| Error::InvalidStoredState)?,
+                        studio_json::to_raw_value(&input).map_err(|_| Error::InvalidStoredState)?,
                     );
                     operation.initial.stage = if stage == Stage::Items {
                         Stage::Interrupt
@@ -1149,9 +1148,7 @@ async fn persist_stage_receipt(
         not_sent_reason: receipt
             .not_sent_reason()
             .map(|reason| format!("{reason:?}")),
-        result: Some(
-            serde_json::value::to_raw_value(&result).map_err(|_| Error::InvalidStoredState)?,
-        ),
+        result: Some(studio_json::to_raw_value(&result).map_err(|_| Error::InvalidStoredState)?),
     };
     let id = operation.initial.id.clone();
     let expected_agent = operation.initial.agent.clone();
@@ -1193,8 +1190,7 @@ async fn persist_stage_receipt(
                 if let Some(value) = reply.as_ref() {
                     current.responses.insert(
                         stage.as_str().into(),
-                        serde_json::value::to_raw_value(value)
-                            .map_err(|_| Error::InvalidStoredState)?,
+                        studio_json::to_raw_value(value).map_err(|_| Error::InvalidStoredState)?,
                     );
                 }
                 if certainty_unknown {
@@ -1268,7 +1264,7 @@ fn recorded_written_response(
     operation
         .responses
         .get(stage.as_str())
-        .map(|raw| serde_json::from_str(raw.get()).map_err(|_| Error::InvalidStoredState))
+        .map(|raw| studio_json::from_str(raw.as_str()).map_err(|_| Error::InvalidStoredState))
         .transpose()
 }
 
@@ -1409,7 +1405,7 @@ struct PublicReceipt<'a> {
 fn operation_public(operation: &SafetyOperation) -> Result<Value, Error> {
     let initial = &operation.initial;
     let error = operation.error.as_deref();
-    serde_json::to_value(PublicReceipt {
+    studio_json::to_value(PublicReceipt {
         id: &initial.id,
         stage: initial.stage,
         model: &initial.model,
@@ -1428,7 +1424,7 @@ fn operation_public(operation: &SafetyOperation) -> Result<Value, Error> {
 }
 
 fn store_operation(tx: &Transaction<'_>, operation: &SafetyOperation) -> Result<(), Error> {
-    let record = serde_json::to_string(operation).map_err(|_| Error::InvalidStoredState)?;
+    let record = studio_json::to_string(operation).map_err(|_| Error::InvalidStoredState)?;
     tx.execute("INSERT INTO runtime_safety_retries(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record", params![operation.initial.id, record])?;
     Ok(())
 }
@@ -1453,7 +1449,7 @@ fn read_retry(tx: &Transaction<'_>, id: &str) -> Result<Option<SafetyOperation>,
         .optional()?;
     raw.map(|raw| {
         let operation: SafetyOperation =
-            serde_json::from_str(&raw).map_err(|_| Error::InvalidStoredState)?;
+            studio_json::from_str(&raw).map_err(|_| Error::InvalidStoredState)?;
         let initial = &operation.initial;
         if [
             &initial.id,
@@ -1525,22 +1521,22 @@ mod initial_receipt_test {
         struct Stored {
             admission: AdmittedRequest,
         }
-        let operation: SafetyOperation = serde_json::from_str(STORED).unwrap();
-        let round_trip = serde_json::to_string(&operation).unwrap();
-        let before: Value = serde_json::from_str(STORED).unwrap();
-        let after: Value = serde_json::from_str(&round_trip).unwrap();
+        let operation: SafetyOperation = studio_json::from_str(STORED).unwrap();
+        let round_trip = studio_json::to_string(&operation).unwrap();
+        let before: Value = studio_json::from_str(STORED).unwrap();
+        let after: Value = studio_json::from_str(&round_trip).unwrap();
         assert_eq!(before, after);
         let agent =
             json!({"id":"agent", "epoch":7, "accountKey":"acct", "nativeSafetyRetry":before});
         let held = super::super::decide_restart(&agent, Some(&before), 1793154123.0)
             .unwrap()
             .unwrap();
-        let held_operation: SafetyOperation = serde_json::from_str(&held.to_string()).unwrap();
-        assert_eq!(held, serde_json::to_value(held_operation).unwrap());
-        let initial: SafetyInitialReceipt = serde_json::from_str(STORED).unwrap();
-        let stored: Stored = serde_json::from_str(STORED).unwrap();
+        let held_operation: SafetyOperation = studio_json::from_str(&held.to_string()).unwrap();
+        assert_eq!(held, studio_json::to_value(held_operation).unwrap());
+        let initial: SafetyInitialReceipt = studio_json::from_str(STORED).unwrap();
+        let stored: Stored = studio_json::from_str(STORED).unwrap();
         assert_eq!(
-            serde_json::to_string(&initial).unwrap(),
+            studio_json::to_string(&initial).unwrap(),
             stored.admission.signature()
         );
     }
@@ -1549,7 +1545,7 @@ mod initial_receipt_test {
         for stage in [Stage::Fork, Stage::Start] {
             let dir = tempfile::tempdir().unwrap();
             let store = Arc::new(RuntimeStore::open(Some(dir.path())).await.unwrap());
-            let mut stale: SafetyOperation = serde_json::from_str(STORED).unwrap();
+            let mut stale: SafetyOperation = studio_json::from_str(STORED).unwrap();
             stale.initial.stage = stage;
             let initial = stale.clone();
             store.transaction_with(move |tx| {
@@ -1597,7 +1593,7 @@ mod initial_receipt_test {
     async fn current_start_preparation_failure_is_terminal() {
         let dir = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
-        let mut operation: SafetyOperation = serde_json::from_str(STORED).unwrap();
+        let mut operation: SafetyOperation = studio_json::from_str(STORED).unwrap();
         operation.initial.stage = Stage::Start;
         let saved = operation.clone();
         store.transaction_with(move |tx| {
@@ -1617,7 +1613,7 @@ mod initial_receipt_test {
     async fn dispatched_start_ignores_preparation_failure_and_accepts_receipt() {
         let dir = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
-        let mut operation: SafetyOperation = serde_json::from_str(STORED).unwrap();
+        let mut operation: SafetyOperation = studio_json::from_str(STORED).unwrap();
         operation.initial.stage = Stage::Start;
         operation.dispatch.state = DispatchState::Intent;
         let saved = operation.clone();

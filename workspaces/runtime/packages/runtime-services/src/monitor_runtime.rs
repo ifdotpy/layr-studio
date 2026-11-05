@@ -5,7 +5,7 @@
 
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, EventWriteRepository, MonitorsRepository, QueueEvent,
     QueueEventId, RuntimeStore, SchedulerRepository, StartupRecoveryRepository, Table, Transaction,
@@ -190,7 +190,7 @@ fn retained_question(
         )
         .optional()
         .map_err(studio_runtime_store::StoreError::from)?;
-    let agent = match raw.map(|raw| serde_json::from_str::<Value>(&raw)) {
+    let agent = match raw.map(|raw| studio_json::from_str::<Value>(&raw)) {
         None => return Ok(false),
         Some(Ok(agent)) if agent.is_object() => agent,
         Some(_) => {
@@ -321,7 +321,7 @@ pub fn snapshot(
     let actor = AgentRepository::get(transaction, &AgentId::from(agent_id))?
         .ok_or(MonitorError::Refused("Unknown agent"))?;
     let actor_value =
-        serde_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
+        studio_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
     let snapshot = MonitorSnapshot::checked_owned(row, actor_value)?;
     Ok((snapshot, actor))
 }
@@ -869,7 +869,7 @@ pub fn apply_with_rule(
     // Validate before any write, including all optional fields preserved from Python.
     let after = MonitorSnapshot::checked_stored(
         &decision.record,
-        serde_json::to_value(actor).map_err(studio_runtime_store::StoreError::from)?,
+        studio_json::to_value(actor).map_err(studio_runtime_store::StoreError::from)?,
     )?;
     for effect in &decision.effects {
         match effect {
@@ -879,7 +879,7 @@ pub fn apply_with_rule(
                     actor,
                     id.clone(),
                     "monitor_output",
-                    serde_json::to_string(payload)
+                    studio_json::to_string(payload)
                         .map_err(studio_runtime_store::StoreError::from)?,
                     now,
                 )?;
@@ -1000,7 +1000,7 @@ fn exit_event(
         return Ok(());
     }
     let mut payload =
-        serde_json::to_value(payload).map_err(studio_runtime_store::StoreError::from)?;
+        studio_json::to_value(payload).map_err(studio_runtime_store::StoreError::from)?;
     if monitor.shell_pressure_cleanup.is_some() {
         payload["stopCause"] = json!("memory_pressure");
         payload["message"] = json!(format!(
@@ -1316,7 +1316,7 @@ pub async fn settle_unanswered(
             let recovery = policy::restart_recovery(&before, now)?;
             let recovering = MonitorSnapshot::checked_stored(
                 &recovery.record,
-                serde_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?,
+                studio_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?,
             )?;
             let loss = policy::restart_lost(&recovering, &reason, now)?;
             apply(tx, &before, &actor, &loss, now)
@@ -1494,7 +1494,7 @@ pub async fn stored_create_result(
         .transaction_with(move |tx| {
             let actor = event_write::checked_agent(tx, &actor_id)?;
             let actor_value =
-                serde_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
+                studio_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
             let record =
                 policy::create_record(&actor_value, &request, &request_id, &log_root, now)?;
             match MonitorsRepository::get(tx, &record.id)? {
@@ -1530,7 +1530,7 @@ pub fn create_in_transaction(
     let actor = event_write::checked_agent(tx, actor_id)?;
     event_write::refuse_remote(&actor)?;
     let actor_value =
-        serde_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
+        studio_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
     let record = policy::create_record(&actor_value, request, request_id, log_root, now)?;
     let id = record.id.as_str();
     if let Some(previous) = MonitorsRepository::get(tx, id)? {
@@ -1775,7 +1775,7 @@ mod recovery_selection_tests {
     #[test]
     fn receipt_pivot_late_monitor_result_commits_exit_behind_output_without_replay_cache() {
         use crate::account_worker::retained::{ProviderCallIntent, RequestResult};
-        use serde_json::json;
+        use studio_json::json;
         use studio_runtime_schema::persistence::{REQUEST_RESULT_TTL_MS, RequestIdentity};
         use studio_runtime_store::request_results::{Admission, RequestResults, ResultEnvelope};
         let mut db = Connection::open_in_memory().expect("database");

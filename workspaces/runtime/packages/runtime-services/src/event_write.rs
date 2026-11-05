@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use studio_runtime_process::clock::monotonic_ns;
 
 use rusqlite::OptionalExtension;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::annotation_command::AnnotationData;
 use studio_runtime_schema::delivery::DeliveryMoment;
 use studio_runtime_schema::persistence::{RequestIdentity, RequestReferenceKind};
@@ -36,7 +36,7 @@ pub fn replay_request<R: serde::de::DeserializeOwned>(
     now_ms: i64,
 ) -> Result<Option<ResultEnvelope<R>>, RequestResultError> {
     RequestResults::replay(connection, id, signature, now_ms)?
-        .map(|stored| serde_json::from_str(&stored.result).map_err(Into::into))
+        .map(|stored| studio_json::from_str(&stored.result).map_err(Into::into))
         .transpose()
 }
 
@@ -105,7 +105,7 @@ pub fn begin_request<R: serde::de::DeserializeOwned>(
         match RequestResults::admit(transaction, &request_identity(&key)?, signature, now_ms)? {
             Admission::Fresh(admitted) => CallerAdmission::Fresh(admitted),
             Admission::Replay(saved) => {
-                let saved: ResultEnvelope<R> = serde_json::from_str(&saved.result)?;
+                let saved: ResultEnvelope<R> = studio_json::from_str(&saved.result)?;
                 CallerAdmission::Replay(saved.reply)
             }
         },
@@ -258,7 +258,7 @@ pub fn annotate(
             "INSERT INTO runtime_annotations(id,record) VALUES(?1,?2)",
             rusqlite::params![
                 id,
-                serde_json::to_string(&record).map_err(studio_runtime_store::StoreError::from)?
+                studio_json::to_string(&record).map_err(studio_runtime_store::StoreError::from)?
             ],
         )
         .map_err(studio_runtime_store::StoreError::from)?;
@@ -389,7 +389,7 @@ fn enqueue(
     };
     if let Some((server, link, is_anchor)) = remote_owner(agent)? {
         let request_id = match metadata.extensions.get("remoteRequestId") {
-            Some(raw) => serde_json::from_str::<String>(raw.0.get())
+            Some(raw) => studio_json::from_str::<String>(raw.0.as_str())
                 .ok()
                 .filter(|root| !root.is_empty())
                 .ok_or(EventWriteError::Conflict("Remote event outcome is unknown"))?,
@@ -405,7 +405,7 @@ fn enqueue(
                 metadata.extensions.insert(
                     "remoteRequestId".into(),
                     studio_runtime_schema::raw_json::RawJson(
-                        serde_json::value::to_raw_value(&root)
+                        studio_json::to_raw_value(&root)
                             .map_err(studio_runtime_store::StoreError::from)?,
                     ),
                 );
@@ -430,7 +430,7 @@ fn enqueue(
                 .map_err(studio_runtime_store::StoreError::from)?;
             let link_record: Value = link_raw
                 .as_deref()
-                .and_then(|raw| serde_json::from_str(raw).ok())
+                .and_then(|raw| studio_json::from_str(raw).ok())
                 .ok_or(EventWriteError::Conflict("Remote event link is invalid"))?;
             if link_record.get("side").and_then(Value::as_str) != Some("remote")
                 || link_record.get("server").and_then(Value::as_str) != Some(server.as_str())
@@ -495,7 +495,7 @@ fn enqueue(
             .map_err(studio_runtime_store::StoreError::from)?;
         let link_record: Value = link_raw
             .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
+            .and_then(|raw| studio_json::from_str(raw).ok())
             .ok_or(EventWriteError::Conflict("Remote event link is invalid"))?;
         if link_record.get("side").and_then(Value::as_str) != Some("remote")
             || link_record.get("home").and_then(Value::as_str) != Some(server.as_str())
@@ -653,7 +653,7 @@ fn queue_agent(connection: &Transaction<'_>, agent: &AgentRecord) -> Result<(), 
     updated.status = AgentStatus::Queued;
     AgentRepository::put(connection, &updated)?;
     let projection =
-        serde_json::to_value(&updated).map_err(studio_runtime_store::StoreError::from)?;
+        studio_json::to_value(&updated).map_err(studio_runtime_store::StoreError::from)?;
     crate::agents_create::publish_agent(connection, &projection)?;
     Ok(())
 }
@@ -737,7 +737,7 @@ mod tests {
     use super::{
         AnnotationWrite, EventWriteError, annotate, enqueue_event, enqueue_recovery_event,
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn pending_recovery_matches_typed_identity() {
@@ -1341,7 +1341,7 @@ mod tests {
                 Ok((row.get(0)?, row.get(1)?))
             })
             .expect("stable outbox row");
-        let body: Value = serde_json::from_str(&body).expect("outbox envelope JSON");
+        let body: Value = studio_json::from_str(&body).expect("outbox envelope JSON");
         let root = body["requestId"].as_str().expect("root");
         assert_eq!(uuid::Uuid::parse_str(root).unwrap().get_version_num(), 7);
         assert_eq!(
@@ -1368,7 +1368,7 @@ mod tests {
             .query_row("SELECT json_extract(payload,'$.record.body') FROM runtime_outbox WHERE kind='remote_delivery'", [], |r| r.get(0))
             .expect("same outbox");
         assert_eq!(
-            serde_json::from_str::<Value>(&retry).unwrap()["requestId"],
+            studio_json::from_str::<Value>(&retry).unwrap()["requestId"],
             root
         );
         let count: i64 = connection

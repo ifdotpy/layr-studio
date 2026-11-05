@@ -2,9 +2,9 @@
 
 use crate::router::HttpState;
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_services::resource_notify::{self, BoundedSource};
 use studio_runtime_services::usage::PricingRefreshOutcome;
 use studio_runtime_store::{ObservedTable, RuntimeStore, StoreError, SyncDocumentsRepository};
@@ -410,7 +410,7 @@ fn agent_cost_source(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result
         root: row.get(offset + 1)?,
         deleted: row.get(offset + 2)?,
         // Unknown legacy records must still trigger conservative refreshes.
-        fields: serde_json::from_str(&record).ok(),
+        fields: studio_json::from_str(&record).ok(),
     })
 }
 
@@ -555,8 +555,8 @@ pub(crate) struct CostSnapshot<T> {
 
 fn cost_summary(value: Value) -> Result<Value, StoreError> {
     let snapshot: CostSnapshot<crate::generated::AccountCostEntityDto> =
-        serde_json::from_value(value)?;
-    Ok(serde_json::to_value(snapshot.public)?)
+        studio_json::from_value(value)?;
+    Ok(studio_json::to_value(snapshot.public)?)
 }
 
 fn saved_cost(
@@ -729,7 +729,7 @@ async fn settle_cost_worker_failure(state: &HttpState, key: &str) -> Result<(), 
     let key = key.to_owned();
     state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?.transaction_with(move |tx| {
         let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='accountCost' AND id=?1 AND deleted=0", [&key], |row| row.get(0))?;
-        let mut value: Value = serde_json::from_str::<Value>(&raw)?["value"].clone();
+        let mut value: Value = studio_json::from_str::<Value>(&raw)?["value"].clone();
         value["refreshing"] = json!(false);
         value["stale"] = json!(true);
         value["error"] = json!("Local cost refresh worker failed");
@@ -797,7 +797,7 @@ async fn seed_session_roots(state: &HttpState) -> Result<(), StoreError> {
                 .map(|row| {
                     let (id, saved) = row?;
                     let value = match saved {
-                        Some(saved) => serde_json::from_str::<Value>(&saved)?["value"].clone(),
+                        Some(saved) => studio_json::from_str::<Value>(&saved)?["value"].clone(),
                         None => json!({"rootId":id,"totalUSD":null,"pricedSamples":0,
                         "breakdown":{"models":{},"providers":{}},"unknownModels":[],
                         "estimated":true,"pricingState":"loading","cacheAgeSeconds":0,
@@ -854,7 +854,7 @@ async fn publish_session_roots(
         studio_runtime_store::analytics::take_cost_read_witness();
         let rows = ids.into_iter().map(|id| {
         let value=studio_runtime_services::costs::session_cost_with_account_profiles(&source,&id,&profiles)
-        .and_then(|cost| serde_json::to_value(cost).map_err(|_| studio_runtime_services::costs::CostsError::Computation))
+        .and_then(|cost| studio_json::to_value(cost).map_err(|_| studio_runtime_services::costs::CostsError::Computation))
         .unwrap_or_else(|error| {
             // A completed pricing attempt with no usable catalog is an unavailable
             // estimate (ready + null total), rather than work still loading.
@@ -1151,7 +1151,7 @@ mod tests {
     async fn state() -> (tempfile::TempDir, HttpState) {
         let root = tempfile::tempdir().expect("isolated source state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
-        let policy=studio_runtime_services::account_policy::AccountPolicyState::from_startup(Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture","label":"Source account","source":"fixture","provider":"codex","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),[]).expect("policy");
+        let policy=studio_runtime_services::account_policy::AccountPolicyState::from_startup(Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture","label":"Source account","source":"fixture","provider":"codex","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),[]).expect("policy");
         let state = HttpState::new(
             "token".into(),
             "workspace".into(),
@@ -1184,7 +1184,7 @@ mod tests {
                     [collection, id],
                     |row| row.get(0),
                 )?;
-                Ok(serde_json::from_str::<Value>(&raw)?["value"].clone())
+                Ok(studio_json::from_str::<Value>(&raw)?["value"].clone())
             })
             .expect("published source entity")
     }
@@ -1533,7 +1533,7 @@ mod tests {
         );
         let artifact = root.path().join("model-pricing/models-dev-v1.json");
         let mut saved: Value =
-            serde_json::from_slice(&tokio::fs::read(&artifact).await.expect("artifact"))
+            studio_json::from_slice(&tokio::fs::read(&artifact).await.expect("artifact"))
                 .expect("artifact JSON");
         saved["lastAttemptAt"] = json!(1);
         saved["fetchedAtEpoch"] = json!(1);
@@ -1843,7 +1843,7 @@ mod tests {
                     .lines()
                     .find_map(|line| line.strip_prefix("data: "))
                     .expect("event data");
-                let event: Value = serde_json::from_str(data).expect("resource event");
+                let event: Value = studio_json::from_str(data).expect("resource event");
                 for entry in event["resourceVersions"]
                     .as_array()
                     .expect("resource entries")
@@ -1866,7 +1866,7 @@ mod tests {
         })
         .await
         .expect("first unreserved interest dispatches and publishes completion over SSE");
-        let cache_value: Value = serde_json::from_slice(
+        let cache_value: Value = studio_json::from_slice(
             &tokio::fs::read(cache.join("claude-costs.json"))
                 .await
                 .expect("actual scanner saved cache"),
@@ -2282,8 +2282,9 @@ mod tests {
         let store = state.store.as_ref().unwrap();
         store
             .transaction(|tx| {
-                let old =
-                    serde_json::from_str(r#"{"accountKey":"default","data":{"accountId":"old"}}"#)?;
+                let old = studio_json::from_str(
+                    r#"{"accountKey":"default","data":{"accountId":"old"}}"#,
+                )?;
                 SyncDocumentsRepository::put_entity(
                     tx,
                     "rateLimit",
@@ -2302,8 +2303,9 @@ mod tests {
         assert_eq!(*refresh.0.lock().unwrap(), ["default"]);
         store
             .transaction(|tx| {
-                let new =
-                    serde_json::from_str(r#"{"accountKey":"default","data":{"accountId":"new"}}"#)?;
+                let new = studio_json::from_str(
+                    r#"{"accountKey":"default","data":{"accountId":"new"}}"#,
+                )?;
                 SyncDocumentsRepository::put_entity(
                     tx,
                     "rateLimit",
@@ -2347,7 +2349,7 @@ mod tests {
         let mut snapshot = state.account_policy.as_ref().expect("policy").accounts();
         snapshot
             .logins
-            .push(serde_json::from_str(r#"{"requestId":"id","accountKey":"account","status":"pending","verificationUrl":"https://login.invalid/private-only","userCode":"private-code"}"#).unwrap());
+            .push(studio_json::from_str(r#"{"requestId":"id","accountKey":"account","status":"pending","verificationUrl":"https://login.invalid/private-only","userCode":"private-code"}"#).unwrap());
         put(
             state.store.as_ref().expect("store"),
             "accounts",
@@ -2472,7 +2474,7 @@ mod tests {
         assert!(value["error"].as_str().is_some());
         state.account_policy = Some(Arc::new(
             studio_runtime_services::account_policy::AccountPolicyState::from_startup(
-                Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{},"logins":{}}).to_string().as_bytes()),
+                Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{},"logins":{}}).to_string().as_bytes()),
                 [],
             )
             .expect("empty accounts"),
@@ -2547,12 +2549,12 @@ mod tests {
         let runtime = Arc::new(
             NativeRuntime::new(canonical_root.as_path(), Arc::new(NoProbe)).expect("runtime"),
         );
-        let corpus: Value = serde_json::from_str(include_str!(
+        let corpus: Value = studio_json::from_str(include_str!(
             "../../runtime-services/tests/native_runtime_state.json"
         ))
         .expect("maintained historical status corpus");
         let original = &corpus["rotation"];
-        let bytes = serde_json::to_vec(original).expect("historical status bytes");
+        let bytes = studio_json::to_vec(original).expect("historical status bytes");
         let path = runtime.status_path();
         tokio::fs::create_dir_all(path.parent().expect("status directory"))
             .await
@@ -2604,7 +2606,7 @@ mod tests {
 
         let mut malformed = original.clone();
         malformed["accounts"]["default"]["targetVersion"] = json!(42);
-        let malformed_bytes = serde_json::to_vec(&malformed).expect("malformed known field");
+        let malformed_bytes = studio_json::to_vec(&malformed).expect("malformed known field");
         tokio::fs::write(&path, &malformed_bytes)
             .await
             .expect("isolated malformed status");

@@ -46,7 +46,7 @@ pub fn configured(state_dir: &Path) -> Result<Option<CanonicalPath>, WorktreeRoo
         Err(error) => return Err(WorktreeRootError::Read(error)),
     };
     let configuration: Configuration =
-        serde_json::from_slice(&bytes).map_err(|_| WorktreeRootError::Invalid)?;
+        studio_json::from_slice(&bytes).map_err(|_| WorktreeRootError::Invalid)?;
     if !configuration.root.is_absolute() {
         return Err(WorktreeRootError::Invalid);
     }
@@ -142,7 +142,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).expect("link creates");
         std::fs::write(
             state.path().join(WORKTREE_ROOT_FILE),
-            serde_json::json!({ "root": link }).to_string(),
+            studio_json::json!({ "root": link }).to_string(),
         )
         .expect("configuration writes");
         let root = configured(state.path())
@@ -173,7 +173,7 @@ mod tests {
         let missing = state.path().join("absent");
         std::fs::write(
             state.path().join(WORKTREE_ROOT_FILE),
-            serde_json::json!({ "root": missing }).to_string(),
+            studio_json::json!({ "root": missing }).to_string(),
         )
         .expect("writes");
         assert!(matches!(

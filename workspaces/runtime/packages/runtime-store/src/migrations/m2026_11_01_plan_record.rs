@@ -1,6 +1,6 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_plans")? {
@@ -11,7 +11,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(&raw) else {
+        let Ok(Value::Object(mut fields)) = studio_json::from_str::<Value>(&raw) else {
             continue;
         };
         let original = fields.clone();
@@ -41,11 +41,11 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 fields.remove("native");
             }
         }
-        let normalized = serde_json::to_string(&fields)?;
+        let normalized = studio_json::to_string(&fields)?;
         if fields != original
-            || (serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
+            || (studio_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
                 .is_err()
-                && serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(
+                && studio_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(
                     &normalized,
                 )
                 .is_ok())
@@ -80,7 +80,7 @@ mod tests {
         let raw: String = tx
             .query_row("SELECT record FROM runtime_plans", [], |r| r.get(0))
             .unwrap();
-        let plan: PlanRecord = serde_json::from_str(&raw).unwrap();
+        let plan: PlanRecord = studio_json::from_str(&raw).unwrap();
         assert_eq!(plan.value()["text"], "new");
     }
 
@@ -122,7 +122,7 @@ mod tests {
             .query_row("SELECT record FROM runtime_plans", [], |row| row.get(0))
             .unwrap();
         assert_eq!(first, second);
-        let record: PlanRecord = serde_json::from_str(&first).unwrap();
+        let record: PlanRecord = studio_json::from_str(&first).unwrap();
         assert_eq!(record.value()["native"]["threadId"], "t");
         assert!(record.value().get("unused").is_none());
         assert!(record.value()["native"].get("extension").is_none());

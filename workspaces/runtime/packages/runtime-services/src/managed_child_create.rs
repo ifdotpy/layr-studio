@@ -8,8 +8,8 @@
 
 use crate::event_write;
 use rusqlite::{OptionalExtension, Transaction};
-use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -550,9 +550,13 @@ pub(crate) async fn spawn_agents(
     event_write::assert_delegation(&root)
         .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
     let root_value = root.value();
-    let parent_cwd = parent_value.get("cwd").and_then(Value::as_str).ok_or(
-        crate::managed_host_tools::Error::Invalid("Select a project directory"),
-    )?;
+    let parent_cwd =
+        actor_record
+            .cwd
+            .as_deref()
+            .ok_or(crate::managed_host_tools::Error::Invalid(
+                "Select a project directory",
+            ))?;
     let parent_account = parent_value
         .get("accountKey")
         .and_then(Value::as_str)
@@ -569,7 +573,7 @@ pub(crate) async fn spawn_agents(
         .await?;
     for (index, raw_spec) in specs.iter().enumerate() {
         let spec: studio_runtime_schema::creation_intent::CreationIntent =
-            serde_json::from_value(raw_spec.clone()).map_err(|_| {
+            studio_json::from_value(raw_spec.clone()).map_err(|_| {
                 crate::managed_host_tools::Error::Invalid("Invalid worker creation settings")
             })?;
         let profile =
@@ -1213,7 +1217,7 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
             let Some((run_id, raw_run)) = run else {
                 return Ok(());
             };
-            let Ok(run) = serde_json::from_str::<Value>(&raw_run) else {
+            let Ok(run) = studio_json::from_str::<Value>(&raw_run) else {
                 return Ok(());
             };
             if active_turn.is_none()
@@ -1235,7 +1239,7 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
                     |row| row.get(0),
                 )
                 .optional()?;
-            let previous: Option<Value> = previous.and_then(|raw| serde_json::from_str(&raw).ok());
+            let previous: Option<Value> = previous.and_then(|raw| studio_json::from_str(&raw).ok());
             let effect_run = previous
                 .as_ref()
                 .and_then(|value| value.get("runId"))
@@ -1324,7 +1328,7 @@ fn can_delegate(
 }
 
 fn project_child(record: &Value, task_id: Option<&str>, worktree: bool) -> Value {
-    let mut output = serde_json::Map::new();
+    let mut output = studio_json::Map::new();
     for field in [
         "id",
         "name",
@@ -1536,9 +1540,13 @@ pub(crate) async fn request_review(
     let parent_value = actor_record.value();
     let root = Box::new(stored_root(store, actor_record.root_id.clone()).await?);
     let root_value = root.value();
-    let parent_cwd = parent_value.get("cwd").and_then(Value::as_str).ok_or(
-        crate::managed_host_tools::Error::Invalid("Select a project directory"),
-    )?;
+    let parent_cwd =
+        actor_record
+            .cwd
+            .as_deref()
+            .ok_or(crate::managed_host_tools::Error::Invalid(
+                "Select a project directory",
+            ))?;
     let mut directory_path = args
         .get("cwd")
         .and_then(Value::as_str)
@@ -1553,9 +1561,13 @@ pub(crate) async fn request_review(
         })?
         .to_string_lossy()
         .into_owned();
-    let plan = crate::native_review::ReviewPlan::from_records(
-        parent_value.clone(),
-        root_value.clone(),
+    crate::native_actions::bounded(&parent_value, "review.actor")
+        .and_then(|()| crate::native_actions::validate_agent(&parent_value))
+        .and_then(|()| crate::native_actions::validate_agent(&root_value))
+        .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid native review request"))?;
+    let plan = crate::native_review::ReviewPlan::from_checked_records(
+        &actor_record,
+        &root,
         args.clone(),
         request_id.to_owned(),
         directory.clone(),
@@ -1776,7 +1788,7 @@ mod vm_review_identity_tests {
         Error, WorkerBase, host_project_cwd, resolve_child_base, validate_vm_parent_workspace,
         vm_review_guest_ids,
     };
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn worker_recheck_refusal_reports_its_cause() {

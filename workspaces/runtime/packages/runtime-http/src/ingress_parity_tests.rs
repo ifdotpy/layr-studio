@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Method, Request},
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use tower::ServiceExt;
 
 // Named validators do not expose format assertions or production pattern options.
@@ -299,105 +299,105 @@ fn opted_in_ingress_matches_schema() {
         for body in cases {
             let decoded = match name {
                 "NativeActionRequest" => {
-                    serde_json::from_value::<Object<generated::NativeActionRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::NativeActionRequest>>(body.clone())
                         .is_ok()
                 }
-                "ClaudeAddStartRequest" => {
-                    serde_json::from_value::<Object<generated::ClaudeAddStartRequest>>(body.clone())
-                        .is_ok()
-                }
+                "ClaudeAddStartRequest" => studio_json::from_value::<
+                    Object<generated::ClaudeAddStartRequest>,
+                >(body.clone())
+                .is_ok(),
                 "ClaudeCancelRequest" => {
-                    serde_json::from_value::<Object<generated::ClaudeCancelRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::ClaudeCancelRequest>>(body.clone())
                         .is_ok()
                 }
                 "ClaudeCodeRequest" => {
-                    serde_json::from_value::<Object<generated::ClaudeCodeRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::ClaudeCodeRequest>>(body.clone())
                         .is_ok()
                 }
                 "ClaudeStartRequest" => {
-                    serde_json::from_value::<Object<generated::ClaudeStartRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::ClaudeStartRequest>>(body.clone())
                         .is_ok()
                 }
-                "ProjectSecretsListRequest" => serde_json::from_value::<
+                "ProjectSecretsListRequest" => studio_json::from_value::<
                     Object<generated::ProjectSecretsListRequest>,
                 >(body.clone())
                 .is_ok(),
-                "ProjectSecretSetRequest" => serde_json::from_value::<
+                "ProjectSecretSetRequest" => studio_json::from_value::<
                     Object<generated::ProjectSecretSetRequest>,
                 >(body.clone())
                 .is_ok(),
-                "ProjectSecretRemoveRequest" => serde_json::from_value::<
+                "ProjectSecretRemoveRequest" => studio_json::from_value::<
                     Object<generated::ProjectSecretRemoveRequest>,
                 >(body.clone())
                 .is_ok(),
                 "VaultLoginRequest" => {
-                    serde_json::from_value::<Object<generated::VaultLoginRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VaultLoginRequest>>(body.clone())
                         .is_ok()
                 }
                 "VaultPullRequest" => {
-                    serde_json::from_value::<Object<generated::VaultPullRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VaultPullRequest>>(body.clone())
                         .is_ok()
                 }
-                "VaultSetupFactsRequest" => serde_json::from_value::<
+                "VaultSetupFactsRequest" => studio_json::from_value::<
                     Object<generated::VaultSetupFactsRequest>,
                 >(body.clone())
                 .is_ok(),
                 "MacSyncConfigRequest" => {
-                    serde_json::from_value::<Object<generated::MacSyncConfigRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::MacSyncConfigRequest>>(body.clone())
                         .is_ok()
                 }
-                "MacSyncResolveRequest" => {
-                    serde_json::from_value::<Object<generated::MacSyncResolveRequest>>(body.clone())
-                        .is_ok()
-                }
+                "MacSyncResolveRequest" => studio_json::from_value::<
+                    Object<generated::MacSyncResolveRequest>,
+                >(body.clone())
+                .is_ok(),
                 "VaultSetupRequest" => {
-                    serde_json::from_value::<Object<generated::VaultSetupRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VaultSetupRequest>>(body.clone())
                         .is_ok()
                 }
                 "VaultUnlockRequest" => {
-                    serde_json::from_value::<Object<generated::VaultUnlockRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VaultUnlockRequest>>(body.clone())
                         .is_ok()
                 }
                 "IdRequest" => {
-                    serde_json::from_value::<Object<generated::IdRequest>>(body.clone()).is_ok()
+                    studio_json::from_value::<Object<generated::IdRequest>>(body.clone()).is_ok()
                 }
                 "McpReconnectRequest" => {
-                    serde_json::from_value::<Object<generated::McpReconnectRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::McpReconnectRequest>>(body.clone())
                         .is_ok()
                 }
                 "ProjectDeleteRequest" => {
-                    serde_json::from_value::<Object<generated::ProjectDeleteRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::ProjectDeleteRequest>>(body.clone())
                         .is_ok()
                 }
-                "CheckpointCaptureRequest" => serde_json::from_value::<
+                "CheckpointCaptureRequest" => studio_json::from_value::<
                     Object<generated::CheckpointCaptureRequest>,
                 >(body.clone())
                 .is_ok(),
                 "VoiceRecordsRequest" => {
-                    serde_json::from_value::<Object<generated::VoiceRecordsRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VoiceRecordsRequest>>(body.clone())
                         .is_ok()
                 }
-                "CheckpointPreviewRequest" => serde_json::from_value::<
+                "CheckpointPreviewRequest" => studio_json::from_value::<
                     Object<generated::CheckpointPreviewRequest>,
                 >(body.clone())
                 .is_ok(),
-                "CheckpointRestoreRequest" => serde_json::from_value::<
+                "CheckpointRestoreRequest" => studio_json::from_value::<
                     Object<generated::CheckpointRestoreRequest>,
                 >(body.clone())
                 .is_ok(),
                 "VoiceEndRequest" => {
-                    serde_json::from_value::<Object<generated::VoiceEndRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VoiceEndRequest>>(body.clone())
                         .is_ok()
                 }
                 "VoiceStartRequest" => {
-                    serde_json::from_value::<Object<generated::VoiceStartRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VoiceStartRequest>>(body.clone())
                         .is_ok()
                 }
                 "VoiceStatusRequest" => {
-                    serde_json::from_value::<Object<generated::VoiceStatusRequest>>(body.clone())
+                    studio_json::from_value::<Object<generated::VoiceStatusRequest>>(body.clone())
                         .is_ok()
                 }
-                _ => serde_json::from_value::<Object<generated::WebPushSubscribeRequest>>(
+                _ => studio_json::from_value::<Object<generated::WebPushSubscribeRequest>>(
                     body.clone(),
                 )
                 .is_ok(),
@@ -489,37 +489,37 @@ fn named_patterns_match_openapi() {
             let wire = json!(value);
             let ok = match (schema, field) {
                 ("ProjectSecretsListRequest", _) => {
-                    serde_json::from_value::<ProjectId>(wire.clone()).is_ok()
+                    studio_json::from_value::<ProjectId>(wire.clone()).is_ok()
                 }
                 ("ProjectSecretSetRequest", "name") => {
-                    serde_json::from_value::<SecretName>(wire.clone()).is_ok()
+                    studio_json::from_value::<SecretName>(wire.clone()).is_ok()
                 }
                 ("ProjectSecretSetRequest", _) => {
-                    serde_json::from_value::<SecretRequestId>(wire.clone()).is_ok()
+                    studio_json::from_value::<SecretRequestId>(wire.clone()).is_ok()
                 }
                 ("VaultLoginRequest", "requestId") => {
-                    serde_json::from_value::<VaultRequestId>(wire.clone()).is_ok()
+                    studio_json::from_value::<VaultRequestId>(wire.clone()).is_ok()
                 }
                 ("VaultLoginRequest", _) => {
-                    serde_json::from_value::<AwsProfileName>(wire.clone()).is_ok()
+                    studio_json::from_value::<AwsProfileName>(wire.clone()).is_ok()
                 }
-                ("VaultSetupRequest", "prefix") => serde_json::from_value::<
+                ("VaultSetupRequest", "prefix") => studio_json::from_value::<
                     studio_runtime_schema::resource_ref::VaultPrefix,
                 >(wire.clone())
                 .is_ok(),
-                ("VaultSetupRequest", _) => serde_json::from_value::<Region>(wire.clone()).is_ok(),
-                ("AccountGroupRequest", _) => serde_json::from_value::<
+                ("VaultSetupRequest", _) => studio_json::from_value::<Region>(wire.clone()).is_ok(),
+                ("AccountGroupRequest", _) => studio_json::from_value::<
                     Option<studio_runtime_schema::project_ingress::AccountGroup>,
                 >(wire.clone())
                 .is_ok(),
-                ("RenameServer", _) => serde_json::from_value::<
+                ("RenameServer", _) => studio_json::from_value::<
                     BoundedPattern<studio_runtime_schema::multi_server_ingress::ServerLabel, 1, 80>,
                 >(wire.clone())
                 .is_ok(),
                 ("ClaudeCancelRequest", _) => {
-                    serde_json::from_value::<BoundedPattern<Uuid, 36, 36>>(wire.clone()).is_ok()
+                    studio_json::from_value::<BoundedPattern<Uuid, 36, 36>>(wire.clone()).is_ok()
                 }
-                _ => serde_json::from_value::<Option<BoundedPattern<NonWhitespace, 1, 32>>>(
+                _ => studio_json::from_value::<Option<BoundedPattern<NonWhitespace, 1, 32>>>(
                     wire.clone(),
                 )
                 .is_ok(),

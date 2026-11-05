@@ -1,7 +1,7 @@
 //! Source-complete Canvas transitions retained until their supported source/restore formats retire.
 use crate::{StoreError, StoreResult, Transaction};
 use rusqlite::OptionalExtension;
-use serde_json::Value;
+use studio_json::Value;
 
 pub(super) fn preflight_retired(db: &rusqlite::Connection) -> StoreResult<()> {
     // These are exactly the JSON record families the retired-wait/cache SQL
@@ -24,7 +24,7 @@ pub(super) fn preflight_retired(db: &rusqlite::Connection) -> StoreResult<()> {
         while let Some(row) = rows.next()? {
             let id: i64 = row.get(0)?;
             let raw: String = row.get(1)?;
-            serde_json::from_str::<Value>(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+            studio_json::from_str::<Value>(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                 object: table,
                 id: id.to_string(),
             })?;
@@ -39,7 +39,7 @@ pub(super) fn preflight_workspace(db: &rusqlite::Connection) -> StoreResult<()> 
     }
     let raw: Option<String> = db.query_row("SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [], |row| row.get(0)).optional()?;
     if let Some(raw) = raw {
-        let envelope: Value = serde_json::from_str(&raw)?;
+        let envelope: Value = studio_json::from_str(&raw)?;
         if envelope
             .pointer("/value/rateLimitsByAccount")
             .is_some_and(|value| !value.is_null() && !value.is_object())

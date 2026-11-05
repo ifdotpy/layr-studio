@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use super::{LOCK_SAMPLE_LIMIT, Ring, quantiles, try_with_state};
 
@@ -658,7 +658,7 @@ fn admission_metric(samples: &StoreAdmissionSamples) -> Value {
 }
 
 fn profile_metrics(profiles: &BTreeMap<DatabaseKind, (u64, Ring)>) -> Value {
-    let mut result = serde_json::Map::new();
+    let mut result = studio_json::Map::new();
     for (database, (count, ring)) in profiles {
         let samples = ring.snapshot().1;
         result.insert(

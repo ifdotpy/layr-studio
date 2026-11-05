@@ -26,11 +26,11 @@ use crate::{
         self, Acceptance, Action, Admission, Delivery, NativeError, NativeRequest, Outcome, Request,
     },
 };
-use serde_json::{Value, json};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::persistence::NativeReviewThreadStatus;

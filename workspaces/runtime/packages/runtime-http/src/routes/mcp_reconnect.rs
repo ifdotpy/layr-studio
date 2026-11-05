@@ -1,7 +1,7 @@
 //! Human-authorized, durable reconnect of one server on one retained session.
 use crate::generated::{McpReconnectResponse, McpReconnectResponseStatus};
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
 use studio_runtime_services::account_session_runtime::ConnectionScope;
@@ -82,7 +82,7 @@ async fn execute(
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     // Retained receipts use the canonical JSON object encoding, including its
     // key ordering and normalized UUID. Keep those bytes across typed adapters.
-    let signature = serde_json::to_value(&body)
+    let signature = studio_json::to_value(&body)
         .map_err(|_| ApiError::internal())?
         .to_string();
     let id = body.id.as_str().to_owned();

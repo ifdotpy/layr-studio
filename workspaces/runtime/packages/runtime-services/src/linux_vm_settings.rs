@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::http_bounded_ingress as bounds;
 use thiserror::Error;
 
@@ -42,7 +42,7 @@ pub enum SettingsError {
     #[error("VM settings could not be read or written.")]
     Io(#[source] std::io::Error),
     #[error("VM settings are invalid.")]
-    Json(#[source] serde_json::Error),
+    Json(#[source] studio_json::Error),
 }
 
 impl VmSettings {
@@ -183,7 +183,7 @@ pub fn get_settings(vm_dir: &Path) -> Result<VmSettings, SettingsError> {
         let path = vm_dir.join(name);
         match fs::read(&path) {
             Ok(bytes) => {
-                return serde_json::from_slice::<VmSettings>(&bytes)
+                return studio_json::from_slice::<VmSettings>(&bytes)
                     .map_err(SettingsError::Json)?
                     .validate();
             }
@@ -244,7 +244,7 @@ fn set_validated_settings(
     let config = vm_dir.join("config.json");
     if config.exists() {
         let previous: VmSettings =
-            serde_json::from_slice(&fs::read(&config).map_err(SettingsError::Io)?)
+            studio_json::from_slice(&fs::read(&config).map_err(SettingsError::Io)?)
                 .map_err(SettingsError::Json)?;
         if settings.system_disk_bytes < previous.system_disk_bytes
             || settings.data_disk_bytes < previous.data_disk_bytes
@@ -277,7 +277,7 @@ fn resize_disk(path: &Path, size: u64) -> Result<(), SettingsError> {
 }
 
 fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<(), SettingsError> {
-    let bytes = serde_json::to_vec(value).map_err(SettingsError::Json)?;
+    let bytes = studio_json::to_vec(value).map_err(SettingsError::Json)?;
     crate::atomic_file::replace(path, &bytes, Some(0o600), false).map_err(SettingsError::Io)
 }
 

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json, extract::State};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::command::{
     Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow, DeleteResult,
     LeadMessageResult,
@@ -123,7 +123,7 @@ async fn command(
             let mut data = body.0;
             data.insert("id".into(), Value::String(id.clone()));
             let data = Value::Object(data);
-            serde_json::from_value::<crate::generated::AnswerBody>(data.clone())
+            studio_json::from_value::<crate::generated::AnswerBody>(data.clone())
                 .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "Invalid answer"))?;
             let start = begin(&state, &principal, &request, now_ms).await?;
             let result = answer_approval(
@@ -213,7 +213,7 @@ async fn command(
                         collection: "messageReceipt".into(),
                         id: request.id.as_str().to_owned(),
                         seq: 0,
-                        payload: serde_json::to_value(&receipt).map_err(ApiError::json)?,
+                        payload: studio_json::to_value(&receipt).map_err(ApiError::json)?,
                     });
                     match finished {
                         Some(reference) => reference,
@@ -310,8 +310,8 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
-    use serde_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_schema::persistence::{REQUEST_RESULT_TTL_MS, RequestIdentity};
     use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
     use studio_runtime_services::commands::CommandError;
@@ -361,7 +361,7 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body");
-        (status, serde_json::from_slice(&bytes).expect("JSON"))
+        (status, studio_json::from_slice(&bytes).expect("JSON"))
     }
 
     fn withdraw(id: &str, number: u64, message: &str) -> Value {
@@ -491,16 +491,16 @@ mod tests {
         cases.push(send);
         for case in cases {
             let schema = validator.is_valid(&case);
-            let typed = serde_json::from_str::<CommandRequest>(&case.to_string()).is_ok();
+            let typed = studio_json::from_str::<CommandRequest>(&case.to_string()).is_ok();
             assert_eq!(typed, schema, "{case}");
         }
     }
 
     #[test]
     fn unflagged_send_serializes_without_changing_fingerprint() {
-        let request: studio_runtime_schema::command::CommandRequest = serde_json::from_str(r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}}"#).expect("request");
+        let request: studio_runtime_schema::command::CommandRequest = studio_json::from_str(r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}}"#).expect("request");
         assert_eq!(
-            serde_json::to_string(&request.command).expect("serialize"),
+            studio_json::to_string(&request.command).expect("serialize"),
             r#"{"kind":"send","target":"workspace","body":{"text":"hello","assets":[]}}"#
         );
     }
@@ -661,7 +661,7 @@ mod tests {
         let id = RequestIdentity::issue_root();
         let request = json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello","asTextFile":true}});
         let typed: studio_runtime_schema::command::CommandRequest =
-            serde_json::from_str(&request.to_string()).expect("command");
+            studio_json::from_str(&request.to_string()).expect("command");
         store
             .transaction_with_error(move |tx| {
                 studio_runtime_services::commands::begin(tx, &Principal::Owner, &typed, now_ms())
@@ -1294,7 +1294,7 @@ mod tests {
         // The owner's command id must be a UUIDv7, as the HTTP edge requires.
         let id = RequestIdentity::issue_root();
         let request: studio_runtime_schema::command::CommandRequest =
-            serde_json::from_value(withdraw(&id, 1, "a")).expect("request");
+            studio_json::from_value(withdraw(&id, 1, "a")).expect("request");
         let now = now_ms();
         store
             .transaction_with_error(move |tx| {
@@ -1341,7 +1341,7 @@ mod tests {
             })
             .await
             .expect("server draft");
-        let draft: Value = serde_json::from_str(&draft).expect("draft JSON");
+        let draft: Value = studio_json::from_str(&draft).expect("draft JSON");
         assert_eq!(draft["text"], "A");
     }
 
@@ -1385,7 +1385,7 @@ mod tests {
             })
             .await
             .expect("server draft");
-        let draft: Value = serde_json::from_str(&draft).expect("draft JSON");
+        let draft: Value = studio_json::from_str(&draft).expect("draft JSON");
         assert_eq!(draft["text"], "A");
         assert_eq!(draft["session"], "workspace");
         assert_eq!(draft["device"], "server");
@@ -1421,7 +1421,7 @@ mod tests {
         let (_app, store, _directory) = app_with_queue().await;
         let before = agent_status(&store).await;
         let request: studio_runtime_schema::command::CommandRequest =
-            serde_json::from_value(stop(&RequestIdentity::issue_root(), 1)).expect("stop");
+            studio_json::from_value(stop(&RequestIdentity::issue_root(), 1)).expect("stop");
         let now = now_ms();
         let outcome = store
             .transaction_with_error(move |tx| {

@@ -2,7 +2,7 @@
 //! receipt and storage owners; an unrecognized status supplies no decision.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 /// Studio terminal outcomes shared by native Codex and the Claude bridge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -132,15 +132,15 @@ pub const CLAUDE_STEER_COMPLETION_RECEIPTS: &str = "steerCompletionReceipts";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn projection_keeps_raw_payload_and_unknown_outcomes_unsettled() {
         for status in [json!("uncertain"), json!("future"), Value::Null, json!(3)] {
             let turn = json!({"id":"turn","status":status,"future":{"receipt":42}});
-            let original = serde_json::to_vec(&turn).expect("receipt");
+            let original = studio_json::to_vec(&turn).expect("receipt");
             assert!(TurnLifecycle::observe("mirror-thread", &turn).is_none());
-            assert_eq!(serde_json::to_vec(&turn).expect("receipt"), original);
+            assert_eq!(studio_json::to_vec(&turn).expect("receipt"), original);
         }
         let running = json!({"id":"turn","status":"inProgress"});
         assert_eq!(
@@ -175,7 +175,7 @@ mod tests {
             ThreadActivity::observe(&claude),
             Some(ThreadActivity::Active)
         );
-        assert!(serde_json::from_value::<CodexThreadStatus>(claude).is_err());
+        assert!(studio_json::from_value::<CodexThreadStatus>(claude).is_err());
         assert!(ThreadActivity::observe(&json!({"type":"future"})).is_none());
         let thread =
             json!({"id":"mirror-thread","status":{"type":"future"},"nativeId":"native-session"});
@@ -232,7 +232,7 @@ mod tests {
                 .to_value()
         }
         let vendor: Value =
-            serde_json::from_str(include_str!("schemas/codex/lifecycle.schema.json"))
+            studio_json::from_str(include_str!("schemas/codex/lifecycle.schema.json"))
                 .expect("vendor leaves");
         for (name, mut generated) in [
             ("TurnStatus", schema::<CodexTurnStatus>()),

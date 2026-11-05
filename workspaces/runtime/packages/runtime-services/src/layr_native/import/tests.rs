@@ -377,7 +377,7 @@ mod tests {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -644,7 +644,7 @@ mod lifecycle_tests {
             super::super::run(&state, &main, &["show", "head:code"]).expect("history"),
             "plain folder"
         );
-        let receipt: serde_json::Value = serde_json::from_slice(
+        let receipt: studio_json::Value = studio_json::from_slice(
             &fs::read(
                 state
                     .join(super::super::NATIVE_LAYR_DIRECTORY)
@@ -671,14 +671,14 @@ mod lifecycle_tests {
     #[test]
     #[ignore = "operator-selected read-only size report for real projects"]
     fn native_import_real_projects_dry_run() {
-        let paths: Vec<PathBuf> = serde_json::from_str(
+        let paths: Vec<PathBuf> = studio_json::from_str(
             &std::env::var("STUDIO_NATIVE_LAYR_DRY_RUN_PROJECTS").expect("project list"),
         )
         .expect("JSON paths");
         let state = PathBuf::from(
             std::env::var_os("STUDIO_NATIVE_LAYR_DRY_RUN_STATE").expect("state path"),
         );
-        let without_git: Vec<PathBuf> = serde_json::from_str(
+        let without_git: Vec<PathBuf> = studio_json::from_str(
             &std::env::var("STUDIO_NATIVE_LAYR_DRY_RUN_WITHOUT_GIT")
                 .unwrap_or_else(|_| "[]".into()),
         )
@@ -695,7 +695,7 @@ mod lifecycle_tests {
                 Ok(report) => report,
                 Err(error) => json!({"source":project,"error":error.to_string()}),
             };
-            println!("{}", serde_json::to_string(&report).expect("report"));
+            println!("{}", studio_json::to_string(&report).expect("report"));
             reports.push(report);
         }
         let output = PathBuf::from(
@@ -703,7 +703,7 @@ mod lifecycle_tests {
         );
         fs::write(
             output,
-            serde_json::to_vec_pretty(&reports).expect("reports"),
+            studio_json::to_vec_pretty(&reports).expect("reports"),
         )
         .expect("write report outside projects");
     }

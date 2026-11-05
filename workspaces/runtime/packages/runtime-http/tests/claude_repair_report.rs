@@ -5,7 +5,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use tower::ServiceExt;
 
 async fn get(app: &axum::Router, path: &str, origin: Option<&str>) -> (u16, Value) {
@@ -33,7 +33,7 @@ async fn get(app: &axum::Router, path: &str, origin: Option<&str>) -> (u16, Valu
         .unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 
 #[tokio::test]

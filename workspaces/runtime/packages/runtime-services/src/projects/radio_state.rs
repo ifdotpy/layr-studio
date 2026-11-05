@@ -25,7 +25,7 @@ impl Serialize for Room {
 impl Room {
     pub(super) fn checked(id: &str, raw: &str) -> Result<Self, ProjectsError> {
         let record: studio_runtime_schema::room_record::RoomRecord =
-            serde_json::from_str(raw).map_err(|_| invalid(id))?;
+            studio_json::from_str(raw).map_err(|_| invalid(id))?;
         Self::from_record(id, record)
     }
     fn from_record(
@@ -75,7 +75,7 @@ pub(super) fn rooms(db: &Connection) -> Result<Vec<Room>, ProjectsError> {
     for row in rows {
         let (id, raw) = row?;
         let record: studio_runtime_schema::room_record::RoomRecord =
-            serde_json::from_str(&raw).map_err(|_| invalid(&id))?;
+            studio_json::from_str(&raw).map_err(|_| invalid(&id))?;
         if record.id != id {
             return Err(invalid(&id));
         }
@@ -103,7 +103,7 @@ pub(super) fn policy(
     prepared: &PreparedHost,
     recipient: &str,
 ) -> Result<RadioAuthorizationSnapshot, ProjectsError> {
-    let value = serde_json::to_string(room).map_err(studio_runtime_store::StoreError::from)?;
+    let value = studio_json::to_string(room).map_err(studio_runtime_store::StoreError::from)?;
     let inputs = RadioAuthorizationRecords {
         recipient_id: if recipient.is_empty() {
             room.members()
@@ -164,8 +164,8 @@ pub(super) fn save(
     prepared: &PreparedHost,
     now: f64,
 ) -> Result<(), ProjectsError> {
-    room.record.updated = serde_json::Number::from_f64(now).map_or(Field::Null, Field::Value);
-    let raw = serde_json::to_string(&*room).map_err(studio_runtime_store::StoreError::from)?;
+    room.record.updated = studio_json::Number::from_f64(now).map_or(Field::Null, Field::Value);
+    let raw = studio_json::to_string(&*room).map_err(studio_runtime_store::StoreError::from)?;
     db.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room.id(),raw])?;
     publish_radio_room(db, room, prepared)
 }
@@ -272,7 +272,7 @@ fn room_context(
                 seq: studio_runtime_schema::room_record::ChatSequence::from_i64(seq)
                     .ok_or_else(|| invalid(id))?,
                 text: text.chars().take(180).collect(),
-                created: serde_json::Number::from_f64(created).ok_or_else(|| invalid(id))?,
+                created: studio_json::Number::from_f64(created).ok_or_else(|| invalid(id))?,
                 sender,
             })
         })
@@ -389,11 +389,13 @@ mod projection_tests {
     #[test]
     fn radio_requires_canonical_direct_and_active_fields() {
         let canonical = r#"{"teamId":"t","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"seen":{},"direct":false}"#;
-        assert!(serde_json::from_str::<Radio>(canonical).is_ok());
+        assert!(studio_json::from_str::<Radio>(canonical).is_ok());
         assert!(
-            serde_json::from_str::<Radio>(&canonical.replace(",\"direct\":false", "")).is_err()
+            studio_json::from_str::<Radio>(&canonical.replace(",\"direct\":false", "")).is_err()
         );
-        assert!(serde_json::from_str::<Radio>(&canonical.replace("\"active\":null,", "")).is_err());
+        assert!(
+            studio_json::from_str::<Radio>(&canonical.replace("\"active\":null,", "")).is_err()
+        );
     }
 
     #[test]
@@ -402,9 +404,9 @@ mod projection_tests {
             r#"{"id":"a","name":null,"deletedAt":0,"cwd":"/p"}"#,
             r#"{"id":"b","name":"B","isLead":true,"deletedAt":false}"#,
         ] {
-            let value: Value = serde_json::from_str(raw).expect("projection JSON");
+            let value: Value = studio_json::from_str(raw).expect("projection JSON");
             let expected: crate::submit_gates::AgentAuthorityRow =
-                serde_json::from_str(raw).expect("typed agent");
+                studio_json::from_str(raw).expect("typed agent");
             assert_eq!(
                 agent_projection(&value).expect("agent projection"),
                 expected
@@ -412,9 +414,9 @@ mod projection_tests {
         }
         assert!(agent_projection(&json!({"id":"a","isLead":"yes"})).is_err());
         let raw = r#"{"id":"t","name":"Team","members":["a","b"]}"#;
-        let value: Value = serde_json::from_str(raw).expect("projection JSON");
+        let value: Value = studio_json::from_str(raw).expect("projection JSON");
         let expected: crate::submit_gates::PeerTeamRow =
-            serde_json::from_str(raw).expect("typed team");
+            studio_json::from_str(raw).expect("typed team");
         assert_eq!(team_projection(&value).expect("team projection"), expected);
         assert!(team_projection(&json!({"id":"t","name":"T","members":[null]})).is_err());
     }

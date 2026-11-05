@@ -4,7 +4,6 @@ use crate::{
     native::{self, ConnectionConfig},
     protocol::{self, NativeFrame, NativeResponse, Request},
 };
-use serde_json::Value;
 use std::{
     collections::HashMap,
     sync::{
@@ -12,6 +11,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+use studio_json::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot},
@@ -66,7 +66,7 @@ impl Client {
                     else {
                         continue;
                     };
-                    let response = match serde_json::from_slice::<NativeFrame>(&bytes)
+                    let response = match studio_json::from_slice::<NativeFrame>(&bytes)
                         .map_err(|error| error.to_string())?
                     {
                         NativeFrame::Event(value) => {
@@ -139,7 +139,7 @@ impl Client {
         {
             return Err("Invalid client request identity or method.".into());
         }
-        let encoded = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+        let encoded = studio_json::to_vec(&request).map_err(|error| error.to_string())?;
         drop(protocol::fragments(&encoded).map_err(|error| error.to_string())?);
         let _bytes = self
             .bytes
@@ -188,7 +188,7 @@ impl Drop for Client {
 mod tests {
     use super::*;
     use crate::protocol::NativeOutcome;
-    use serde_json::json;
+    use studio_json::json;
     fn request(id: &str, method: &str, params: Value) -> Request {
         Request {
             id: id.into(),
@@ -358,7 +358,7 @@ mod tests {
         let event =
             json!({"event":"changed", "id":"unexpected", "result":null, "payload":[1,null]});
         for value in [event.clone(), json!({"id":"unexpected", "result":null})] {
-            let encoded = serde_json::to_vec(&value).unwrap();
+            let encoded = studio_json::to_vec(&value).unwrap();
             peer.write_u32_le((encoded.len() + 1) as u32).await.unwrap();
             peer.write_u8(0).await.unwrap();
             peer.write_all(&encoded).await.unwrap();
@@ -377,7 +377,7 @@ mod tests {
         let text = symbol.repeat(protocol::MAX_FRAME / symbol.len() + 1);
         let command = request("cancelled-wait", "markdown.parse", json!({"text": text}));
         assert!(
-            protocol::fragments(&serde_json::to_vec(&command).unwrap())
+            protocol::fragments(&studio_json::to_vec(&command).unwrap())
                 .unwrap()
                 .count()
                 > 1,

@@ -487,7 +487,7 @@ async fn wait_for_link_event(
         },
         _ = tokio::time::sleep_until(retry), if retry_at.is_some() => LinkEvent::Retry,
         line = link.events.next_line(), if link.events_open => match line {
-            Ok(Some(line)) => serde_json::from_str::<PeerLinkConnected>(&line)
+            Ok(Some(line)) => studio_json::from_str::<PeerLinkConnected>(&line)
                 .map_or(LinkEvent::Retry, |event| LinkEvent::Connected(event.connected)),
             _ => {
                 events_closed = true;
@@ -513,7 +513,7 @@ fn publish(advert: &RwLock<Option<String>>, value: Option<String>) {
 }
 
 async fn update_peers(link: &mut RunningLink, peers: &[String]) -> std::io::Result<()> {
-    let mut update = serde_json::to_vec(&PeerUpdate { peers }).map_err(std::io::Error::other)?;
+    let mut update = studio_json::to_vec(&PeerUpdate { peers }).map_err(std::io::Error::other)?;
     update.push(b'\n');
     link.stdin.write_all(&update).await?;
     link.stdin.flush().await?;
@@ -715,7 +715,7 @@ async fn wait_ready_or_cancel(
             return None;
         }
     };
-    let ready: PeerLinkReady = match serde_json::from_str::<PeerLinkReady>(&ready_line) {
+    let ready: PeerLinkReady = match studio_json::from_str::<PeerLinkReady>(&ready_line) {
         Ok(ready) if ready.is_valid() => ready,
         _ => {
             drop(stdin);
@@ -860,13 +860,13 @@ mod tests {
     #[test]
     fn ready_contract_checks_required_typed_fields_and_accepts_additions() {
         let ready: PeerLinkReady =
-            serde_json::from_str(r#"{"ready":true,"port":4621,"protocolVersion":2}"#)
+            studio_json::from_str(r#"{"ready":true,"port":4621,"protocolVersion":2}"#)
                 .expect("additive readiness fields remain compatible");
         assert!(ready.is_valid());
-        let unready: PeerLinkReady = serde_json::from_str(r#"{"ready":false,"port":4621}"#)
+        let unready: PeerLinkReady = studio_json::from_str(r#"{"ready":false,"port":4621}"#)
             .expect("unready readiness response parses");
         assert!(!unready.is_valid());
-        assert!(serde_json::from_str::<PeerLinkReady>(r#"{"ready":"yes","port":4621}"#).is_err());
+        assert!(studio_json::from_str::<PeerLinkReady>(r#"{"ready":"yes","port":4621}"#).is_err());
     }
 
     #[tokio::test]

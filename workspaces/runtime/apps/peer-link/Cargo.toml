@@ -15,7 +15,7 @@ iroh = "=1.3.0"
 rustls.workspace = true
 rustls-pki-types.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+studio-json = { path = "../../packages/json" }
 tokio = { workspace = true, features = ["io-std"] }
 
 [dev-dependencies]

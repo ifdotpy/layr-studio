@@ -58,7 +58,7 @@ impl WorkspaceFilesRepository {
         }
         connection.execute(
             "INSERT INTO runtime_assets(id,record) VALUES (?1,?2)",
-            params![id, serde_json::to_string(record)?],
+            params![id, studio_json::to_string(record)?],
         )?;
         Ok(())
     }
@@ -76,11 +76,11 @@ mod tests {
         db.execute_batch("CREATE TABLE runtime_assets(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
         let root = tempfile::tempdir().unwrap();
-        let record = serde_json::json!({"id":"asset","agent":"a","name":"file","path":root.path().join("file"),"mime":"text/plain","image":false,"size":1.0,"hash":"h","created":0.0,"future":{"keep":true}});
+        let record = studio_json::json!({"id":"asset","agent":"a","name":"file","path":root.path().join("file"),"mime":"text/plain","image":false,"size":1.0,"hash":"h","created":0.0,"future":{"keep":true}});
         let typed = crate::TranscriptAssetRecord::from_value(record.clone()).unwrap();
         assert!(WorkspaceFilesRepository::insert_asset(&db, "other", &typed).is_err());
         let mut invalid = record.clone();
-        invalid["image"] = serde_json::json!("bad");
+        invalid["image"] = studio_json::json!("bad");
         assert!(crate::TranscriptAssetRecord::from_value(invalid).is_err());
         assert_eq!(
             db.query_row("SELECT count(*) FROM runtime_assets", [], |row| row
@@ -105,7 +105,7 @@ mod tests {
             .expect("asset table creates");
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("a.txt");
-        db.execute("INSERT INTO runtime_assets VALUES('asset',?1)", [serde_json::json!({"id":"asset","agent":"agent","name":"a.txt","path":path,"mime":"text/plain","image":false,"size":1,"hash":"h","created":0}).to_string()]).unwrap();
+        db.execute("INSERT INTO runtime_assets VALUES('asset',?1)", [studio_json::json!({"id":"asset","agent":"agent","name":"a.txt","path":path,"mime":"text/plain","image":false,"size":1,"hash":"h","created":0}).to_string()]).unwrap();
 
         let asset = WorkspaceFilesRepository::asset(&db, "asset")
             .expect("asset query works")
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(asset.id().as_ref(), "asset");
         assert_eq!(
             asset.into_value(),
-            serde_json::json!({
+            studio_json::json!({
                 "id": "asset",
                 "agent": "agent",
                 "name": "a.txt",

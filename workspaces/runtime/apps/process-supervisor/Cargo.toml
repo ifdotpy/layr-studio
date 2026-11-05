@@ -19,7 +19,7 @@ studio-test-deps = { path = "../../packages/test-deps" }
 notify.workspace = true
 rusqlite.workspace = true
 studio-runtime-store = { path = "../../packages/runtime-store", features = ["test-support"] }
-serde_json.workspace = true
+studio-json = { path = "../../packages/json" }
 tempfile.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

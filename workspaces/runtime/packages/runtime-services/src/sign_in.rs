@@ -17,7 +17,7 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::RuntimeStore;
 use tokio::sync::{mpsc, watch};
 
@@ -34,7 +34,7 @@ pub const COMMIT_WAITS_MS: [u64; 5] = [50, 200, 500, 1000, 2000];
 
 fn contract() -> &'static Value {
     static VALUE: OnceLock<Value> = OnceLock::new();
-    VALUE.get_or_init(|| serde_json::from_str(CONTRACT).unwrap_or(Value::Null))
+    VALUE.get_or_init(|| studio_json::from_str(CONTRACT).unwrap_or(Value::Null))
 }
 
 /// The longest wait for the bridge to queue a link (contract `submitSeconds`).
@@ -228,7 +228,7 @@ async fn committed(store: &RuntimeStore, note: &MessageLinks) -> Option<Option<V
         })
         .await
         .ok()?;
-    let item: Value = serde_json::from_str(&rows.0?).ok()?;
+    let item: Value = studio_json::from_str(&rows.0?).ok()?;
     if item.get("streaming") != Some(&Value::Bool(false)) {
         return None;
     }
@@ -242,7 +242,7 @@ async fn committed(store: &RuntimeStore, note: &MessageLinks) -> Option<Option<V
     }
     let agent = rows
         .1
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+        .and_then(|raw| studio_json::from_str::<Value>(&raw).ok());
     Some(agent.filter(|agent| {
         !studio_runtime_store::truthy(agent.get("deletedAt"))
             && agent.get("role").and_then(Value::as_str) != Some("reviewer")
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn the_catalog_and_the_results_follow_the_contract() {
         let catalog: Value =
-            serde_json::from_str(include_str!("account_worker/preparation-resources.json"))
+            studio_json::from_str(include_str!("account_worker/preparation-resources.json"))
                 .expect("catalog");
         let tools: Vec<&Value> = catalog["tools"]
             .as_array()
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn the_host_bridge_refuses_an_unknown_method() {
         assert!(
-            serde_json::from_str::<crate::browser_host::ControlRequest>(
+            studio_json::from_str::<crate::browser_host::ControlRequest>(
                 r#"{"id":"request","method":"browser.unknown","params":{}}"#
             )
             .is_err()

@@ -9,18 +9,18 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut rows = query.query([])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
-        let mut value: serde_json::Value = serde_json::from_str(&row.get::<_, String>(1)?)?;
+        let mut value: studio_json::Value = studio_json::from_str(&row.get::<_, String>(1)?)?;
         // The retired Python backend saved "open" replies; they mean work is in progress.
         if let Some(responses) = value["responses"].as_array_mut() {
             for response in responses {
                 if response["status"] == "open" {
-                    response["status"] = serde_json::json!("in_progress");
+                    response["status"] = studio_json::json!("in_progress");
                 }
             }
         }
         let raw = value.to_string();
         let record: studio_runtime_schema::complaint_record::ComplaintRecord =
-            serde_json::from_str(&raw)?;
+            studio_json::from_str(&raw)?;
         if record.id != id {
             return Err(crate::StoreError::InvalidStoredRecord {
                 object: "complaints",
@@ -58,7 +58,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        let value: studio_json::Value = studio_json::from_str(&stored).unwrap();
         assert!(value.get("legacyStatus").is_none());
         assert!(value.get("legacyLeadReadAt").is_none());
         assert_eq!(value["responses"][0]["status"], "in_progress");
@@ -74,7 +74,7 @@ mod tests {
         let original = "  fingerprint \u{e9}\\line  ";
         let raw = format!(
             r#"{{"id":"c","text":{},"status":"open"}}"#,
-            serde_json::to_string(original).unwrap()
+            studio_json::to_string(original).unwrap()
         );
         db.execute("INSERT INTO runtime_complaints VALUES('c',?1)", [&raw])
             .unwrap();
@@ -88,7 +88,7 @@ mod tests {
             )
             .unwrap();
         let record: studio_runtime_schema::complaint_record::ComplaintRecord =
-            serde_json::from_str(&raw).unwrap();
+            studio_json::from_str(&raw).unwrap();
         assert_eq!(record.text.as_deref(), Some(original));
         tx.execute("INSERT INTO runtime_complaints VALUES('unknown', '{\"id\":\"unknown\",\"status\":\"open\",\"future\":true}')", []).unwrap();
         assert!(super::apply(&tx).is_err());

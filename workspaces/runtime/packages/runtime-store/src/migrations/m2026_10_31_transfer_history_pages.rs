@@ -2,8 +2,8 @@
 //! A record keeps the receipt and a digest; the reply body is a payload blob.
 use crate::{MAX_INLINE_READ_REPLY_BYTES, StoreResult, sha256_hex};
 use rusqlite::{Transaction, params};
-use serde_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_account_transfers")? {
@@ -22,7 +22,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     let mut moved = 0u64;
     for (id, raw) in rows {
-        let record: Value = serde_json::from_str(&raw)?;
+        let record: Value = studio_json::from_str(&raw)?;
         let Some(members) = record["members"].as_object() else {
             continue;
         };
@@ -34,7 +34,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 let Some(body) = receipt.pointer("/result/value") else {
                     continue;
                 };
-                let bytes = serde_json::to_vec(body)?;
+                let bytes = studio_json::to_vec(body)?;
                 if bytes.len() <= MAX_INLINE_READ_REPLY_BYTES {
                     continue;
                 }
@@ -104,11 +104,11 @@ mod tests {
             })
             .unwrap();
         assert!(raw.len() < MAX_INLINE_READ_REPLY_BYTES);
-        let moved: Value = serde_json::from_str(&raw).unwrap();
+        let moved: Value = studio_json::from_str(&raw).unwrap();
         let page = &moved["members"]["z"]["providerReadReceipts"]["turns:0"];
         assert_eq!(page["receipt"]["operation"], "o");
         assert!(page["result"].get("value").is_none());
-        let bytes = serde_json::to_vec(&big).unwrap();
+        let bytes = studio_json::to_vec(&big).unwrap();
         assert_eq!(page["result"]["valueBlob"]["sha256"], sha256_hex(&bytes));
         assert_eq!(
             std::fs::read(

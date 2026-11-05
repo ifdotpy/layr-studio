@@ -6,7 +6,6 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
 use std::{
     path::Path,
     process::Command,
@@ -15,6 +14,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use studio_runtime_services::account_session_runtime::*;
@@ -104,7 +104,7 @@ async fn post(app: &axum::Router, path: &str, body: Value) -> (u16, Value) {
         .unwrap();
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    (status, studio_json::from_slice(&bytes).unwrap())
 }
 async fn update_agent(store: &RuntimeStore, key: &'static str, value: Value) {
     store
@@ -295,7 +295,7 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
             |row| row.get(0),
         )
         .unwrap();
-    let agent: Value = serde_json::from_str(&agent).unwrap();
+    let agent: Value = studio_json::from_str(&agent).unwrap();
     assert_eq!(agent["threadId"], "restored");
     assert_eq!(agent["status"], "paused");
     let projected: String = db
@@ -305,7 +305,7 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
             |row| row.get(0),
         )
         .unwrap();
-    let projected: Value = serde_json::from_str(&projected).unwrap();
+    let projected: Value = studio_json::from_str(&projected).unwrap();
     assert_eq!(projected["value"]["threadId"], "restored");
     assert!(projected["value"]["workspaceOperation"].is_null());
     let (status, replay) = post(&app, "/api/checkpoint/restore", restore_body.clone()).await;
@@ -326,7 +326,7 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
     assert_eq!(replay, json!({"status":"restored","checkpoint":checkpoint}));
     let future: String = db.query_row("SELECT json_extract(record,'$.future') FROM runtime_workspace_operations WHERE json_extract(record,'$.kind')='restore'", [], |row| row.get(0)).unwrap();
     assert_eq!(
-        serde_json::from_str::<Value>(&future).unwrap(),
+        studio_json::from_str::<Value>(&future).unwrap(),
         json!({"opaque":true})
     );
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);

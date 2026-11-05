@@ -1,16 +1,16 @@
 //! Typed persisted complaints and their generated schema.
 
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 /// A complaint timestamp in seconds since the Unix epoch, retaining its JSON number representation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
-pub struct ComplaintSeconds(serde_json::Number);
+pub struct ComplaintSeconds(studio_json::Number);
 
 impl ComplaintSeconds {
     pub fn from_seconds(seconds: f64) -> Option<Self> {
-        serde_json::Number::from_f64(seconds).map(Self)
+        studio_json::Number::from_f64(seconds).map(Self)
     }
 
     pub fn seconds(&self) -> Option<f64> {
@@ -102,8 +102,8 @@ pub struct ComplaintRecord {
 }
 
 impl ComplaintRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        Self::deserialize(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        Ok(Self::deserialize(value)?)
     }
     pub fn id(&self) -> &String {
         &self.id
@@ -118,7 +118,7 @@ impl ComplaintRecord {
         self.text.as_deref()
     }
     pub fn into_value(self) -> Value {
-        self.serialize(serde_json::value::Serializer)
+        self.serialize(studio_json::value::Serializer)
             .expect("complaint fields are JSON serializable")
     }
 }
@@ -127,7 +127,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(ComplaintRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-complaint-record.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -143,28 +143,28 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn canonical_complaint_rejects_missing_fields_and_unknown_status() {
         let raw = r#"{"id":"c","leadId":"l","author":"a","text":"raw text","recipient":"lead","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]}"#;
-        assert!(serde_json::from_str::<ComplaintRecord>(raw).is_ok());
-        assert!(serde_json::from_str::<ComplaintRecord>(r#"{"id":"c"}"#).is_err());
-        assert!(serde_json::from_str::<ComplaintRecord>(&raw.replace("open", "unknown")).is_err());
+        assert!(studio_json::from_str::<ComplaintRecord>(raw).is_ok());
+        assert!(studio_json::from_str::<ComplaintRecord>(r#"{"id":"c"}"#).is_err());
+        assert!(studio_json::from_str::<ComplaintRecord>(&raw.replace("open", "unknown")).is_err());
     }
 
     #[test]
     fn complaint_receipt_serialization_keeps_historical_field_order() {
         let raw = r#"{"id":"c","leadId":"l","author":"user","text":"hello","recipient":"lead","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]}"#;
-        let record: ComplaintRecord = serde_json::from_str(raw).unwrap();
+        let record: ComplaintRecord = studio_json::from_str(raw).unwrap();
         assert_eq!(
-            serde_json::to_string(&record).unwrap(),
+            studio_json::to_string(&record).unwrap(),
             r#"{"id":"c","author":"user","leadId":"l","status":"open","text":"hello","created":1.0,"readAt":null,"recipient":"lead","responses":[],"updated":1.0,"version":1}"#
         );
         let raw = r#"{"id":"c","leadId":"l","author":"user","text":"hello","recipient":"lead","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[{"id":"r","author":"a","text":"done","status":"resolved","at":2.0}]}"#;
-        let record: ComplaintRecord = serde_json::from_str(raw).unwrap();
+        let record: ComplaintRecord = studio_json::from_str(raw).unwrap();
         assert_eq!(
-            serde_json::to_string(&record).unwrap(),
+            studio_json::to_string(&record).unwrap(),
             r#"{"id":"c","author":"user","leadId":"l","status":"open","text":"hello","created":1.0,"readAt":null,"recipient":"lead","responses":[{"at":2.0,"author":"a","id":"r","status":"resolved","text":"done"}],"updated":1.0,"version":1}"#
         );
     }
@@ -193,7 +193,7 @@ mod tests {
                 false,
             ),
         ] {
-            let parsed: Result<ComplaintRecord, _> = serde_json::from_str(&value.to_string());
+            let parsed: Result<ComplaintRecord, _> = studio_json::from_str(&value.to_string());
             assert_eq!(parsed.is_ok(), valid, "{value}");
             assert_eq!(
                 crate::validate("PersistedComplaintRecord", &value).unwrap(),

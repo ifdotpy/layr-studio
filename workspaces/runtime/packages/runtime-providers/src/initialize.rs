@@ -1,6 +1,6 @@
 //! Single owner of the provider `initialize` request parameters.
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 /// Client names Studio reports to a provider peer in `initialize`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

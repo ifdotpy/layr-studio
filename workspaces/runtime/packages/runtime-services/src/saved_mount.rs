@@ -1,6 +1,6 @@
 //! Host-saved VM share observations, independent of the OS mount table.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 fn text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Ok(Value::deserialize(d)?.as_str().map(str::to_owned))
@@ -64,7 +64,7 @@ impl SavedMountFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn saved_mount_writer_matches_historical_json_bytes() {
@@ -80,11 +80,11 @@ mod tests {
             at: json!(12.5),
         };
         assert_eq!(
-            serde_json::to_string(&saved).unwrap(),
+            studio_json::to_string(&saved).unwrap(),
             json!({"projectId":"p","name":"app","path":"/view","port":50123}).to_string()
         );
         assert_eq!(
-            serde_json::to_string(&failure).unwrap(),
+            studio_json::to_string(&failure).unwrap(),
             json!({"projectId":null,"error":"failed","at":12.5}).to_string()
         );
     }

@@ -7,7 +7,7 @@
 //! row. A row that is not recognized stays in its old table untouched. The old
 //! tables are created as before, but nothing writes them any more.
 use rusqlite::{Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::OutboxStatus;
 
 use crate::StoreResult;
@@ -62,7 +62,7 @@ fn move_access_requests(tx: &Transaction<'_>) -> StoreResult<()> {
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (rowid, server, request, signature, record) in rows {
-        let Ok(record) = serde_json::from_str::<Value>(&record) else {
+        let Ok(record) = studio_json::from_str::<Value>(&record) else {
             continue;
         };
         let (Some("unknown"), Some(created), true) = (
@@ -123,7 +123,7 @@ fn move_server_fetches(tx: &Transaction<'_>) -> StoreResult<()> {
             "fetching" => OutboxStatus::Submitted,
             _ => continue,
         };
-        let Ok(admission) = serde_json::from_str::<Value>(&admission) else {
+        let Ok(admission) = studio_json::from_str::<Value>(&admission) else {
             continue;
         };
         if !admission.is_object() {
@@ -194,7 +194,7 @@ fn move_server_requests(tx: &Transaction<'_>) -> StoreResult<()> {
             "running" => OutboxStatus::Submitted,
             _ => continue,
         };
-        let Ok(admission) = serde_json::from_str::<Value>(&admission) else {
+        let Ok(admission) = studio_json::from_str::<Value>(&admission) else {
             continue;
         };
         if !admission.is_object() {
@@ -237,7 +237,7 @@ fn move_federation_messages(tx: &Transaction<'_>) -> StoreResult<()> {
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (rowid, id, peer, record) in rows {
-        let Ok(record) = serde_json::from_str::<Value>(&record) else {
+        let Ok(record) = studio_json::from_str::<Value>(&record) else {
             continue;
         };
         let Some(signature) = record
@@ -294,7 +294,7 @@ mod tests {
         .expect("old schema");
         db.execute(
             "INSERT INTO runtime_access_outbound VALUES('peer','access-1','hash-1',?1)",
-            [json!({"outcome":"unknown","created":2.5,"admission":serde_json::from_str::<Value>(ADMISSION).unwrap()}).to_string()],
+            [json!({"outcome":"unknown","created":2.5,"admission":studio_json::from_str::<Value>(ADMISSION).unwrap()}).to_string()],
         )
         .unwrap();
         db.execute(

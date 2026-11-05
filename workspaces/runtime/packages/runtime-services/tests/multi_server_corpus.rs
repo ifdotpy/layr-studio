@@ -2,9 +2,9 @@
 
 use crate::multi_server_fixtures as common;
 use common::*;
-use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_services::multi_server_auth::{
     AccessSnapshot, OwnerObservation, SignedRequest, authorize_at,
 };
@@ -68,9 +68,7 @@ fn message_command(
 }
 
 fn applied(value: &Value) -> ExchangeOutcome {
-    ExchangeOutcome::Applied(AppliedReply::new(
-        serde_json::value::to_raw_value(value).unwrap(),
-    ))
+    ExchangeOutcome::Applied(AppliedReply::new(studio_json::to_raw_value(value).unwrap()))
 }
 
 /// Restore receipt owners captured after the historical migration.
@@ -128,9 +126,9 @@ struct SigningData {
 pub fn current_pair(root: &str, nonce: &str, now: i64) -> SignedRequest {
     let data: SigningData = typed_data();
     let mut body: PairBody =
-        serde_json::from_str(&data.auth.first().expect("pair case").raw).expect("pair body");
+        studio_json::from_str(&data.auth.first().expect("pair case").raw).expect("pair body");
     body.request_id = root.to_owned();
-    let raw = serde_json::to_vec(&body).expect("pair JSON");
+    let raw = studio_json::to_vec(&body).expect("pair JSON");
     current_signed(
         "/api/multi-server/v1/pair",
         &body.client_id,
@@ -148,9 +146,9 @@ pub fn current_auto_pair(root: &str, nonce: &str, now: i64) -> SignedRequest {
         .iter()
         .find(|case| case.name == "auto-pair")
         .expect("auto pair case");
-    let mut body: AutoPairBody = serde_json::from_str(&case.raw).expect("auto pair body");
+    let mut body: AutoPairBody = studio_json::from_str(&case.raw).expect("auto pair body");
     body.request_id = root.to_owned();
-    let raw = serde_json::to_vec(&body).expect("auto pair JSON");
+    let raw = studio_json::to_vec(&body).expect("auto pair JSON");
     current_signed(
         "/api/multi-server/v1/auto-pair",
         &body.server_id,
@@ -220,7 +218,7 @@ async fn real_invite_snapshot_pair_and_revoke() {
         .await
         .unwrap();
     let request: ManagementRequest =
-        serde_json::from_str(r#"{"action":"create_invite","requestId":"real-invite"}"#).unwrap();
+        studio_json::from_str(r#"{"action":"create_invite","requestId":"real-invite"}"#).unwrap();
     let created = multi_server::create_invite(
         Arc::clone(&store),
         &identity,
@@ -239,7 +237,7 @@ async fn real_invite_snapshot_pair_and_revoke() {
     );
 
     let data: SigningData = typed_data();
-    let mut body: PairBody = serde_json::from_str(&data.auth.first().unwrap().raw).unwrap();
+    let mut body: PairBody = studio_json::from_str(&data.auth.first().unwrap().raw).unwrap();
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
     body.request_id = request_id.clone();
     body.invite_id = invitation.invite_id.clone();
@@ -252,7 +250,7 @@ async fn real_invite_snapshot_pair_and_revoke() {
         &request_id,
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         now,
-        &serde_json::to_vec(&body).unwrap(),
+        &studio_json::to_vec(&body).unwrap(),
     );
     let boundary = MultiServerBoundary::new(identity.clone(), Arc::new(Owner)).unwrap();
     assert!(
@@ -269,9 +267,9 @@ async fn real_invite_snapshot_pair_and_revoke() {
             .iter()
             .any(|client| client.id.as_str() == body.client_id)
     );
-    let revoke: ManagementRequest = serde_json::from_str(&format!(
+    let revoke: ManagementRequest = studio_json::from_str(&format!(
         r#"{{"action":"revoke","requestId":"revoke-test","clientId":{}}}"#,
-        serde_json::to_string(&body.client_id).unwrap()
+        studio_json::to_string(&body.client_id).unwrap()
     ))
     .unwrap();
     let snapshot = multi_server::manage(&store, &identity, &revoke, "local")
@@ -348,7 +346,7 @@ async fn peer_delivery_replays_same_identity_after_lost_receipt_and_restart_once
             Box::pin(async move {
                 assert_eq!(server, "peer-server");
                 let id = envelope.request_id.clone();
-                let bytes = serde_json::to_vec(envelope).expect("envelope bytes");
+                let bytes = studio_json::to_vec(envelope).expect("envelope bytes");
                 let mut seen = self.seen.lock().unwrap();
                 if let Some(previous) = seen.get(&id) {
                     assert_eq!(previous, &bytes, "replay keeps exact identity and content");
@@ -671,7 +669,7 @@ async fn paired_project_location_read_uses_the_fake_peer_transport() {
     let ExchangeOutcome::Applied(value) = outcome else {
         panic!("expected applied location read")
     };
-    let value: Value = serde_json::from_str(value.value.get()).unwrap();
+    let value: Value = studio_json::from_str(value.value.as_str()).unwrap();
     assert_eq!(value["gitOrigin"], "example.invalid/team/repo");
     assert_eq!(value["matches"], json!([]));
     // A browsed folder is reported in its resolved form.
@@ -698,7 +696,7 @@ async fn paired_project_location_read_uses_the_fake_peer_transport() {
     let ExchangeOutcome::Applied(folders) = folders else {
         panic!("expected applied folder browse")
     };
-    let folders: Value = serde_json::from_str(folders.value.get()).unwrap();
+    let folders: Value = studio_json::from_str(folders.value.as_str()).unwrap();
     assert_eq!(folders["path"], browse.to_string_lossy().as_ref());
     assert_eq!(folders["directories"].as_array().unwrap().len(), 1);
     assert_eq!(folders["directories"][0]["name"], "visible-child");
@@ -1546,7 +1544,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         request: typed::Request::BrowserOpen(card),
         delivery: None,
         detail: typed::Detail {
-            params: typed::ProviderObject(serde_json::Map::new()),
+            params: typed::ProviderObject(studio_json::Map::new()),
             preview: None,
             answer_error: None,
             host_close_reason: None,
@@ -1590,7 +1588,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         .expect("valid callback relayed");
     let expected_result = expected["valid"].clone();
     let actual_result: Value =
-        serde_json::from_str(first.to_reply(&root_id).value.unwrap().get()).unwrap();
+        studio_json::from_str(first.to_reply(&root_id).value.unwrap().as_str()).unwrap();
     assert_eq!(actual_result, expected_result);
     let replay = driver
         .receive("peer-server", &typed_request(&envelope), now + 1)
@@ -1707,7 +1705,7 @@ async fn rust_remote_event_outbox_row_matches_python_queue_writer() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .unwrap();
-    let envelope: EventEnvelope = serde_json::from_str(&body).unwrap();
+    let envelope: EventEnvelope = studio_json::from_str(&body).unwrap();
     assert_eq!(
         (server.as_str(), state.as_str(), attempts),
         ("peer-server", "queued", 0)
@@ -1784,7 +1782,7 @@ async fn compact_exec_is_rejected_before_any_incoming_claim() {
     let (_root, store) = store().await;
     let wire = ExecWire::new(None);
     let driver = exec_driver(&store, wire);
-    let request = serde_json::from_str::<studio_runtime_services::orchestration_wire::OrchestrationRequest>(
+    let request = studio_json::from_str::<studio_runtime_services::orchestration_wire::OrchestrationRequest>(
         r#"{"requestId":"compact","operation":[],"action":"exec","payload":{"actor":"lead","receiptDigest":"old"}}"#,
     ).unwrap();
     let error = driver
@@ -1843,7 +1841,10 @@ async fn python_exec_receipt_row_probes_once_and_settles_from_the_reply() {
         // The migration preserves the old root and assigns the probe an operation.
         reply.request_id = "python-exec".into();
         let expected = if name == "applied" || name == "commandNotApplied" {
-            Some(serde_json::from_str::<RemoteReply>(reply.value.as_ref().unwrap().get()).unwrap())
+            Some(
+                studio_json::from_str::<RemoteReply>(reply.value.as_ref().unwrap().as_str())
+                    .unwrap(),
+            )
         } else {
             None
         };
@@ -1894,7 +1895,7 @@ async fn python_exec_receipt_row_probes_once_and_settles_from_the_reply() {
         if let Some(expected) = expected {
             assert_eq!(pending, 0, "{name}: settled row removed");
             let saved: ResultEnvelope<SavedRemoteReply> =
-                serde_json::from_str(&saved.expect("saved reply")).unwrap();
+                studio_json::from_str(&saved.expect("saved reply")).unwrap();
             let actual = saved.reply.response;
             assert_eq!(
                 (
@@ -1911,8 +1912,8 @@ async fn python_exec_receipt_row_probes_once_and_settles_from_the_reply() {
                 ),
                 "{name}: exact reply"
             );
-            let json = |raw: Option<Box<serde_json::value::RawValue>>| {
-                raw.map(|value| serde_json::from_str::<Value>(value.get()).unwrap())
+            let json = |raw: Option<studio_json::OwnedRawJson>| {
+                raw.map(|value| studio_json::from_str::<Value>(value.as_str()).unwrap())
             };
             assert_eq!(
                 json(actual.value),
@@ -1982,7 +1983,7 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
             |row| row.get(0),
         )
         .expect("pending command receipt");
-    let body: ReceiptBody = serde_json::from_str(&body).expect("typed compact receipt");
+    let body: ReceiptBody = studio_json::from_str(&body).expect("typed compact receipt");
     assert_eq!(
         (&body.request_id, body.action.as_str(), &body.operation),
         (&root, "exec", &Vec::<String>::new())
@@ -2135,7 +2136,7 @@ async fn exec_receipt_probes_are_answered_like_the_python_receiver() {
     for case in cases {
         let name = &case.name;
         if case.insert_exec == Some(true) {
-            let record = serde_json::to_string(&data.exec_receipt.late_record).unwrap();
+            let record = studio_json::to_string(&data.exec_receipt.late_record).unwrap();
             store
                 .transaction_with(move |tx| {
                     tx.execute(
@@ -2177,8 +2178,8 @@ async fn exec_receipt_probes_are_answered_like_the_python_receiver() {
                     if name == "legacy" {
                         assert!(matches!(outcome, studio_runtime_services::multi_server_orchestration::ExchangeOutcome::NotApplied(_)), "unproven principal is refused");
                     } else {
-                        let raw = serde_json::to_string(&outcome.to_reply(&key)).unwrap();
-                        let actual: ExpectedReply = serde_json::from_str(&raw).unwrap();
+                        let raw = studio_json::to_string(&outcome.to_reply(&key)).unwrap();
+                        let actual: ExpectedReply = studio_json::from_str(&raw).unwrap();
                         assert_eq!(actual, expected, "{name}: exact outcome");
                     }
                 }
@@ -2309,8 +2310,8 @@ async fn exec_event_owner_checks_accept_the_receipt_form_like_python() {
             ),
             "{name}"
         );
-        let json = |raw: Option<Box<serde_json::value::RawValue>>| {
-            raw.map(|value| serde_json::from_str::<Value>(value.get()).unwrap())
+        let json = |raw: Option<studio_json::OwnedRawJson>| {
+            raw.map(|value| studio_json::from_str::<Value>(value.as_str()).unwrap())
         };
         assert_eq!(
             json(actual.value),
@@ -2563,7 +2564,7 @@ async fn frozen_python_signature_matches_rust_for_multi_server_requests() {
         verified: bool,
     }
     let expected: FrozenSignature =
-        serde_json::from_str(include_str!("multi_server/signature.json"))
+        studio_json::from_str(include_str!("multi_server/signature.json"))
             .expect("frozen Python signature");
     assert!(expected.verified);
     assert_eq!(rust_signature, expected.python_signature);
@@ -2587,7 +2588,7 @@ fn malformed_stored_rows_are_located_without_panics() {
     for field in ["id", "clientId", "kind", "publicKey", "status"] {
         for value in [Value::Null, json!(9), json!([]), json!({})] {
             let mut client: Value =
-                serde_json::from_str(data["client"].as_str().expect("client")).expect("JSON");
+                studio_json::from_str(data["client"].as_str().expect("client")).expect("JSON");
             client[field] = value;
             let error = AccessSnapshot::from_records(
                 "peer-server",
@@ -2644,7 +2645,10 @@ fn discovery_includes_local_other_port_and_only_online_owner_nodes() {
         "https://local.fixture.ts.net",
     )
     .expect("status");
-    assert_eq!(serde_json::json!(snapshot.candidates()), data["candidates"]);
+    assert_eq!(
+        studio_json::json!(snapshot.candidates()),
+        data["candidates"]
+    );
     let decision = studio_runtime_services::multi_server_discovery::decide_probe(
         &snapshot,
         "https://peer.fixture.ts.net",
@@ -3365,7 +3369,7 @@ async fn queried_status_crosses_service_dispatch() {
         )
         .expect("client");
     assert_eq!(
-        serde_json::from_str::<Value>(&stored).expect("client JSON"),
+        studio_json::from_str::<Value>(&stored).expect("client JSON"),
         case["expected"]["clientWrite"]
     );
 }
@@ -3459,7 +3463,7 @@ fn refusal(error: studio_runtime_services::multi_server_auth::AccessError) -> Va
             status,
             code,
             message,
-        } => serde_json::json!({"status":status,"code":code,"error":message}),
+        } => studio_json::json!({"status":status,"code":code,"error":message}),
         other @ studio_runtime_services::multi_server_auth::AccessError::Stored { .. }
         | other @ studio_runtime_services::multi_server_auth::AccessError::Store(_)
         | other @ studio_runtime_services::multi_server_auth::AccessError::Sqlite(_) => {

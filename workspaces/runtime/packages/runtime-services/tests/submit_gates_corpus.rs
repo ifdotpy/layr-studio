@@ -1,6 +1,6 @@
 //! Pure gates against captured legacy decisions.
-use serde_json::{Value, json};
 use std::time::{Duration, Instant};
+use studio_json::{Value, json};
 use studio_runtime_services::submit_gates::{
     AuthorizationRecords, AuthorizationSnapshot, CatalogIdentity, CatalogObservation,
     ExecutionDenial, ExecutionSettings, ExecutionSnapshot, authorize_events, select_execution,
@@ -88,7 +88,7 @@ fn catalog(case: &Value, now: Instant) -> Option<CatalogObservation> {
                 } else if model.get("access_programs").is_some() {
                     projected["access_programs"] = Value::Null;
                 }
-                serde_json::from_value(projected).expect("model capabilities")
+                studio_json::from_value(projected).expect("model capabilities")
             })
             .collect(),
     })
@@ -100,7 +100,7 @@ fn rust(case: &Value, records: Option<&Value>) -> Value {
     match case["gate"].as_str().expect("gate") {
         "authorization" => {
             let records: AuthorizationRecords =
-                serde_json::from_value(records.expect("Python-written rows").clone())
+                studio_json::from_value(records.expect("Python-written rows").clone())
                     .expect("rows");
             let snapshot = match AuthorizationSnapshot::from_records(&records) {
                 Ok(snapshot) => snapshot,
@@ -158,7 +158,7 @@ fn rust(case: &Value, records: Option<&Value>) -> Value {
         }
         "validation" => {
             let settings: ExecutionSettings =
-                serde_json::from_value(case["settings"].clone()).expect("typed settings");
+                studio_json::from_value(case["settings"].clone()).expect("typed settings");
             match validate_execution(
                 &settings,
                 &catalog(case, Instant::now()).expect("catalog"),
@@ -292,7 +292,7 @@ fn patched(seed: &Value, witness: &Value) -> Value {
 #[test]
 fn submit_gates_python_corpus() {
     let fixtures: Value =
-        serde_json::from_str(include_str!("submit_gates/cases.json")).expect("corpus");
+        studio_json::from_str(include_str!("submit_gates/cases.json")).expect("corpus");
     let mut oracle = CapturedExpectations::new();
     let mut count = 0;
     for witness in fixtures["witnesses"].as_array().expect("witnesses") {
@@ -319,9 +319,10 @@ fn submit_gates_python_corpus() {
                         let mut case = fixtures["seeds"]["authorization"].clone();
                         case["records"]["agents"]["sender"]["rootId"] = root.clone();
                         case["records"]["agents"]["sender"]["deletedAt"] = json!(deleted);
-                        let mut payload: Value =
-                            serde_json::from_str(case["events"][0]["text"].as_str().expect("text"))
-                                .expect("payload");
+                        let mut payload: Value = studio_json::from_str(
+                            case["events"][0]["text"].as_str().expect("text"),
+                        )
+                        .expect("payload");
                         payload["sender"] = sender.clone();
                         case["events"][0]["text"] = json!(payload.to_string());
                         if broadcast {
@@ -370,7 +371,7 @@ fn submit_gates_python_corpus() {
 #[test]
 fn malformed_settings_fail_closed_at_typed_boundary() {
     let fixtures: Value =
-        serde_json::from_str(include_str!("submit_gates/cases.json")).expect("fixtures");
+        studio_json::from_str(include_str!("submit_gates/cases.json")).expect("fixtures");
     for value in [json!("yes"), json!(0), json!({})] {
         let mut case = fixtures["seeds"]["execution"].clone();
         case["current"]["fastMode"] = value;

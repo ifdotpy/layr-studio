@@ -45,7 +45,7 @@ impl crate::provider_callbacks::tools::StatusWatchPort for ImmediateStatus {
         Box::pin(async {
             Ok(crate::provider_callbacks::tools::RulesActionResult {
                 value: studio_runtime_schema::raw_json::RawJson(
-                    serde_json::value::to_raw_value(&Value::Null).expect("JSON"),
+                    studio_json::to_raw_value(&Value::Null).expect("JSON"),
                 ),
                 cancel_monitor_ids: Vec::new(),
             })
@@ -316,7 +316,7 @@ async fn scenario_callback_delivery_preserves_uncertainty(
             assert_eq!(retained, 0, "the delivered read owner is removed");
         } else {
             let owner: CallbackTask<crate::provider_callbacks::CallbackOwner> =
-                serde_json::from_str(&raw.expect("uncertain owner is retained")).unwrap();
+                studio_json::from_str(&raw.expect("uncertain owner is retained")).unwrap();
             let token = owner.payload.admission.as_ref().unwrap();
             let saved = studio_runtime_store::request_results::RequestResults::replay(
                 &db,

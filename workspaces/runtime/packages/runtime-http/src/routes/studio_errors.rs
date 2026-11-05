@@ -97,12 +97,12 @@ inventory::submit! {
 mod strict_dismiss_tests {
     #[test]
     fn dismiss_body_is_closed_and_bounded() {
-        assert!(serde_json::from_str::<super::DismissRequest>(r#"{"id":"a"}"#).is_ok());
-        assert!(serde_json::from_str::<super::DismissRequest>(r#"{"ids":["a"]}"#).is_ok());
-        assert!(serde_json::from_str::<super::DismissRequest>(r#"{"ids":[]}"#).is_err());
-        assert!(serde_json::from_str::<super::DismissRequest>(r#"{"id":"a","extra":1}"#).is_err());
+        assert!(studio_json::from_str::<super::DismissRequest>(r#"{"id":"a"}"#).is_ok());
+        assert!(studio_json::from_str::<super::DismissRequest>(r#"{"ids":["a"]}"#).is_ok());
+        assert!(studio_json::from_str::<super::DismissRequest>(r#"{"ids":[]}"#).is_err());
+        assert!(studio_json::from_str::<super::DismissRequest>(r#"{"id":"a","extra":1}"#).is_err());
         assert!(
-            serde_json::from_str::<super::DismissRequest>(r#"{"id":"a","ids":["b"]}"#).is_err()
+            studio_json::from_str::<super::DismissRequest>(r#"{"id":"a","ids":["b"]}"#).is_err()
         );
     }
 }

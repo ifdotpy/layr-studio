@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{RuntimeStore, VoiceRepository};
 use thiserror::Error;
 

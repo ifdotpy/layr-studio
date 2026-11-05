@@ -216,11 +216,11 @@ pub trait ProviderDiagnosticsPort: Send + Sync {
 
 #[derive(Clone, Debug)]
 pub struct ProviderDiagnosticsSnapshot {
-    pub native_accounts: serde_json::Value,
+    pub native_accounts: studio_json::Value,
     pub studio_loaded_threads: u64,
-    pub queues: serde_json::Map<String, serde_json::Value>,
+    pub queues: studio_json::Map<String, studio_json::Value>,
     /// Each account worker's wake and start state, keyed like `native_accounts`.
-    pub account_workers: serde_json::Value,
+    pub account_workers: studio_json::Value,
 }
 
 /// Supervisor status is owned by runtime-server, which injects this snapshot
@@ -234,7 +234,7 @@ pub struct SupervisorDiagnosticsSnapshot {
     pub mode: bool,
     pub fallback: bool,
     pub notice: Option<String>,
-    pub health: Option<serde_json::Value>,
+    pub health: Option<studio_json::Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,7 +276,7 @@ impl Ring {
     }
 }
 
-fn quantiles(values: &[u64], include_p99: bool, divisor: f64) -> serde_json::Value {
+fn quantiles(values: &[u64], include_p99: bool, divisor: f64) -> studio_json::Value {
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
     let at = |percent: usize| -> f64 {
@@ -289,14 +289,14 @@ fn quantiles(values: &[u64], include_p99: bool, divisor: f64) -> serde_json::Val
             .unwrap_or_default() as f64
             / divisor
     };
-    let mut summary = serde_json::json!({
+    let mut summary = studio_json::json!({
         "samples": sorted.len(),
         "p50": at(50),
         "p95": at(95),
         "max": sorted.last().copied().unwrap_or_default() as f64 / divisor,
     });
     if include_p99 {
-        summary["p99"] = serde_json::json!(at(99));
+        summary["p99"] = studio_json::json!(at(99));
     }
     summary
 }

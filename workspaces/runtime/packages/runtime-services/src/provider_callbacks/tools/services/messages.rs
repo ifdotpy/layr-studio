@@ -18,10 +18,10 @@ mod typed_message_tests {
     #[test]
     fn repeated_typed_messages_have_the_same_signature() {
         let first: crate::orchestration_worker::WorkerMessage =
-            serde_json::from_str(r#"{"target":"parent","text":"hello","importance":"progress"}"#)
+            studio_json::from_str(r#"{"target":"parent","text":"hello","importance":"progress"}"#)
                 .unwrap();
         let retry: crate::orchestration_worker::WorkerMessage =
-            serde_json::from_str(r#"{"importance":"progress","text":"hello","target":"parent"}"#)
+            studio_json::from_str(r#"{"importance":"progress","text":"hello","target":"parent"}"#)
                 .unwrap();
         assert_eq!(
             super::message_signature(&first).unwrap(),
@@ -32,7 +32,7 @@ mod typed_message_tests {
     #[test]
     fn message_signature_keeps_legacy_bytes() {
         let body =
-            serde_json::from_str(r#"{"target":"parent","text":"雪","importance":"progress"}"#)
+            studio_json::from_str(r#"{"target":"parent","text":"雪","importance":"progress"}"#)
                 .unwrap();
         assert_eq!(
             super::message_signature(&body).unwrap(),
@@ -93,7 +93,7 @@ fn saved_private_message(
             "runtime_chat_messages/identity".into(),
         ));
     }
-    let deliveries = serde_json::from_str(&deliveries)
+    let deliveries = studio_json::from_str(&deliveries)
         .map_err(|_| CallbackError::Stored("runtime_chat_messages/deliveries".into()))?;
     Ok(Some(ChatSendReply {
         id: id.to_owned(),
@@ -144,7 +144,7 @@ pub(super) fn agent_rows(
     rows.into_iter()
         .map(|(id, raw)| {
             let value: AgentAuthorityRow =
-                serde_json::from_str(&raw).map_err(|_| records::invalid("runtime_agents", &id))?;
+                studio_json::from_str(&raw).map_err(|_| records::invalid("runtime_agents", &id))?;
             if value.id.as_deref() != Some(id.as_str()) {
                 return Err(records::invalid("runtime_agents", &id).into());
             }
@@ -181,7 +181,7 @@ fn message_projects(
             continue;
         }
         let project: ProjectAuthorityRow =
-            serde_json::from_str(&raw).map_err(|_| records::invalid("runtime_projects", &id))?;
+            studio_json::from_str(&raw).map_err(|_| records::invalid("runtime_projects", &id))?;
         if project.id() != Some(id.as_str()) {
             return Err(records::invalid("runtime_projects", &id).into());
         }
@@ -380,7 +380,7 @@ pub(super) fn send(
     args: &Value,
     id: &str,
     now: f64,
-) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let args =
         <crate::orchestration_worker::WorkerMessage as serde::Deserialize>::deserialize(args)
             .map_err(|_| CallbackError::Invalid("Invalid message arguments"))?;
@@ -401,7 +401,7 @@ pub(crate) fn send_remote_worker(
     args: &crate::orchestration_worker::WorkerMessage,
     id: &str,
     now: f64,
-) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let actor = records::get(tx, "runtime_agents", sender)?
         .ok_or(CallbackError::Invalid("The remote worker is unavailable"))?;
     if actor["id"] != sender
@@ -421,7 +421,7 @@ fn send_as_actor(
     id: &str,
     now: f64,
     resolve_direct: bool,
-) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let mut resolved_args = args.clone();
     let prepared = if let Some(supplied) = Some(args.target.as_str()).filter(|target| {
         resolve_direct
@@ -647,7 +647,7 @@ fn send_as_actor(
     if !broadcast
         && let Some(reply) = saved_private_message(tx, id, who, &room_id, &signature, now_ms)?
     {
-        return serde_json::value::to_raw_value(&reply).map_err(Into::into);
+        return studio_json::to_raw_value(&reply).map_err(Into::into);
     }
     let admitted = match event_write::begin_request::<ChatSendReply>(
         tx,
@@ -656,7 +656,7 @@ fn send_as_actor(
         now_ms,
     )? {
         event_write::CallerAdmission::Replay(reply) => {
-            return serde_json::value::to_raw_value(&reply).map_err(Into::into);
+            return studio_json::to_raw_value(&reply).map_err(Into::into);
         }
         event_write::CallerAdmission::Fresh(admitted) => admitted,
     };
@@ -675,7 +675,7 @@ fn send_as_actor(
         }
         room = previous;
     }
-    room.updated = serde_json::Number::from_f64(now).map_or(
+    room.updated = studio_json::Number::from_f64(now).map_or(
         studio_runtime_schema::queue_command::Field::Null,
         studio_runtime_schema::queue_command::Field::Value,
     );
@@ -780,7 +780,7 @@ fn send_as_actor(
             },
         )?;
     }
-    serde_json::value::to_raw_value(&result).map_err(Into::into)
+    studio_json::to_raw_value(&result).map_err(Into::into)
 }
 
 /// Python `codex_user_messages.send_to_user`: a lead's message to the user is a
@@ -794,7 +794,7 @@ fn send_to_user(
     text: &str,
     id: &str,
     now: f64,
-) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let key = crate::event_write::python_strip(id);
     if id.chars().count() > 200 || key.is_empty() {
         return Err(CallbackError::Invalid(
@@ -818,7 +818,7 @@ fn send_to_user(
         chrono::Utc::now().timestamp_millis(),
     )? {
         event_write::CallerAdmission::Replay(reply) => {
-            return serde_json::value::to_raw_value(&reply).map_err(Into::into);
+            return studio_json::to_raw_value(&reply).map_err(Into::into);
         }
         event_write::CallerAdmission::Fresh(admitted) => admitted,
     };
@@ -860,7 +860,7 @@ fn send_to_user(
         recipient: UserRecipient::User,
     };
     event_write::settle_request(tx, &admitted, Some(who), &result)?;
-    serde_json::value::to_raw_value(&result).map_err(Into::into)
+    studio_json::to_raw_value(&result).map_err(Into::into)
 }
 
 fn radio_guard_error(error: crate::projects::ProjectsError) -> CallbackError {
@@ -1120,7 +1120,7 @@ mod prefix_tests {
         db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
         for id in ["/fixture", "/removed-b", "/removed-c", "/removed-d"] {
-            let row = serde_json::json!({"id":id,"removal":{"deletedAt":1,"reason":"removed","requestId":"request","sequence":1}});
+            let row = studio_json::json!({"id":id,"removal":{"deletedAt":1,"reason":"removed","requestId":"request","sequence":1}});
             db.execute(
                 "INSERT INTO runtime_projects VALUES(?1,?2)",
                 rusqlite::params![id, row.to_string()],
@@ -1128,7 +1128,7 @@ mod prefix_tests {
             .unwrap();
         }
         let agent =
-            serde_json::from_str(r#"{"id":"sender","rootId":"sender","cwd":"/fixture"}"#).unwrap();
+            studio_json::from_str(r#"{"id":"sender","rootId":"sender","cwd":"/fixture"}"#).unwrap();
         let tx = db.transaction().unwrap();
         let projects = super::message_projects(&tx, &[agent], "sender").unwrap();
         assert_eq!(projects.len(), 1);
@@ -1141,19 +1141,19 @@ mod prefix_tests {
             r#"{"id":"m","room":"private:a:b","deliveries":{"b":{"status":"queued","error":null}}}"#,
             r#"{"id":"m","room":"broadcast:a","deliveries":{},"refused":{"b":"invalid"}}"#,
         ] {
-            let reply: super::ChatSendReply = serde_json::from_str(raw).unwrap();
-            let encoded = serde_json::to_string(&reply).unwrap();
+            let reply: super::ChatSendReply = studio_json::from_str(raw).unwrap();
+            let encoded = studio_json::to_string(&reply).unwrap();
             assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
-                serde_json::from_str::<serde_json::Value>(raw).unwrap()
+                studio_json::from_str::<studio_json::Value>(&encoded).unwrap(),
+                studio_json::from_str::<studio_json::Value>(raw).unwrap()
             );
         }
         let raw = r#"{"id":"m","room":"user:a","recipient":"user"}"#;
-        let reply: super::UserSendReply = serde_json::from_str(raw).unwrap();
-        let encoded = serde_json::to_string(&reply).unwrap();
+        let reply: super::UserSendReply = studio_json::from_str(raw).unwrap();
+        let encoded = studio_json::to_string(&reply).unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
-            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+            studio_json::from_str::<studio_json::Value>(&encoded).unwrap(),
+            studio_json::from_str::<studio_json::Value>(raw).unwrap()
         );
     }
 

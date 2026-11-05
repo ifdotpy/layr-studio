@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,
 };
@@ -396,7 +396,7 @@ mod tests {
         envelope["signature"] =
             json!(identity.sign(&transport::federation_message_signing_bytes(&envelope).unwrap()));
         let body = json!({"envelope": envelope});
-        let raw = serde_json::to_vec(&body).unwrap();
+        let raw = studio_json::to_vec(&body).unwrap();
         let nonce = transport::new_nonce().unwrap();
         let unsigned = SignedRequest {
             action: FederationAction::Message,
@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(receipt["result"]["accepted"], json!(true));
         let events = lead_events(&store);
         assert_eq!(events.len(), 1);
-        let text: Value = serde_json::from_str(&events[0].1).unwrap();
+        let text: Value = studio_json::from_str(&events[0].1).unwrap();
         assert_eq!(text["source"], "peer_lead");
         assert_eq!(text["untrusted"], json!(true));
         assert_eq!(text["text"], "hello lead");

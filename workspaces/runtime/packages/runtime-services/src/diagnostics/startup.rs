@@ -5,7 +5,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use super::try_with_state;
 

@@ -2,8 +2,8 @@
 use studio_runtime_schema::provider_kind::ProviderKind;
 
 use rusqlite::params;
-use serde_json::{Value, json};
 use std::{fs, path::PathBuf, process::Command, sync::Arc};
+use studio_json::{Value, json};
 use studio_runtime_services::{agent_move, project_locations};
 use studio_runtime_store::{
     AgentId, AgentMoveRepository, AgentRecord, AgentRepository, ProjectLocationsRepository,
@@ -30,7 +30,7 @@ impl Fixture {
         } else {
             include_str!("relocation/oracle.json")
         };
-        let mut data: Value = serde_json::from_str(corpus).expect("frozen relocation corpus");
+        let mut data: Value = studio_json::from_str(corpus).expect("frozen relocation corpus");
         // Relocation consumes canonical records after startup migration. These
         // historical cases belong to Codex; keep every other oracle field intact.
         for case in data["cases"].as_array_mut().expect("cases") {
@@ -137,7 +137,7 @@ impl Fixture {
                 #[derive(serde::Deserialize)]
                 struct ToolOwner { admitted: studio_runtime_store::request_results::AdmittedRequest }
                 let raw: String = tx.query_row("SELECT record FROM runtime_tool_requests WHERE id=?1", [text(record,"id")], |row| row.get(0))?;
-                let parent = serde_json::from_str::<ToolOwner>(&raw).expect("owner token").admitted;
+                let parent = studio_json::from_str::<ToolOwner>(&raw).expect("owner token").admitted;
                 let location=parent.derive_result("project-location", &["location"], &studio_runtime_store::sha256_hex(studio_runtime_schema::json_compat::python_json_compact(&outbox["body"]["payload"]["request"]).as_bytes()));
                 let result = &outbox["result"];
                 let outcome = match text(result, "outcome") {
@@ -190,7 +190,7 @@ fn full() -> bool {
 
 fn snapshot(store: &RuntimeStore) -> Value {
     let db = store.test_reader().expect("read state");
-    let mut result = serde_json::Map::new();
+    let mut result = studio_json::Map::new();
     for table in [
         "runtime_projects",
         "request_results",
@@ -211,7 +211,7 @@ fn snapshot(store: &RuntimeStore) -> Value {
                     // Record key order is not a contract: startup rewrites it.
                     let cell = row.get_ref(index)?;
                     let record = if let rusqlite::types::ValueRef::Text(bytes) = cell {
-                        serde_json::from_slice::<Value>(bytes)
+                        studio_json::from_slice::<Value>(bytes)
                             .ok()
                             .filter(|value| value.is_object() || value.is_array())
                     } else {
@@ -296,7 +296,7 @@ fn complete_location_in_fixture(
             "Different location envelope",
         ));
     }
-    let typed = serde_json::from_str(&receipt.to_string())
+    let typed = studio_json::from_str(&receipt.to_string())
         .map_err(studio_runtime_store::StoreError::from)?;
     project_locations::complete_snapshot_in_transaction(
         tx,
@@ -422,7 +422,7 @@ async fn python_location_and_move_corpus_through_consumers() {
                 assert_eq!(json!(result.reply), case["expected"]["registration"]);
                 if !case["project"].is_null() {
                     let payload:String=db.query_row("SELECT payload FROM sync_entities WHERE collection='project' AND id='/home-project'",[],|r|r.get(0)).expect("project sync published");
-                    let payload: Value = serde_json::from_str(&payload).expect("payload");
+                    let payload: Value = studio_json::from_str(&payload).expect("payload");
                     assert_eq!(
                         payload["value"]["locations"],
                         case["expected"]["project"]["locations"]
@@ -815,7 +815,7 @@ async fn malformed_and_foreign_receipts_refuse_without_writes() {
 fn generated_tool_json(mut value: Value) -> Value {
     for pointer in ["/contentItems/0/text", "/result/contentItems/0/text"] {
         if let Some(text) = value.pointer(pointer).and_then(Value::as_str) {
-            let decoded = serde_json::from_str(text).expect("generated receipt text");
+            let decoded = studio_json::from_str(text).expect("generated receipt text");
             *value.pointer_mut(pointer).expect("receipt text exists") = decoded;
         }
     }
@@ -1054,7 +1054,7 @@ async fn relocation_process_stop_child() {
     };
     let path = PathBuf::from(path);
     let input: Value =
-        serde_json::from_slice(&fs::read(path.join("command.json")).expect("command"))
+        studio_json::from_slice(&fs::read(path.join("command.json")).expect("command"))
             .expect("input");
     let store = RuntimeStore::open(Some(&path))
         .await

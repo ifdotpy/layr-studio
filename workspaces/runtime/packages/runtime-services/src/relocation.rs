@@ -1,6 +1,6 @@
 //! Shared identities and checked JSON boundary for relocation decisions.
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::StoreError;
 use thiserror::Error;
 use uuid::Uuid;
@@ -39,7 +39,7 @@ pub(crate) fn checked<T: DeserializeOwned>(
     value: &Value,
 ) -> Result<T, RelocationError> {
     validate(schema, object, value)?;
-    serde_json::from_value(value.clone()).map_err(|_| invalid(object, "record"))
+    studio_json::from_value(value.clone()).map_err(|_| invalid(object, "record"))
 }
 
 pub(crate) fn validate(

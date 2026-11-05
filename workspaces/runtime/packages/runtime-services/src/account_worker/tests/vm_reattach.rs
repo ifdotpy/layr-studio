@@ -878,7 +878,7 @@ record.execution_settings_account_key = serde::Deserialize::deserialize(json!("d
                 "SELECT COUNT(*) FROM runtime_events WHERE agent=?1 AND epoch=?2 \
                  AND id IN (SELECT value FROM json_each(?3)) \
                  AND status='delivered' AND turn_id='vm-turn'",
-                rusqlite::params![actor,epoch,serde_json::to_string(&record.start_attempt.as_ref().unwrap().events).unwrap()],
+                rusqlite::params![actor,epoch,studio_json::to_string(&record.start_attempt.as_ref().unwrap().events).unwrap()],
                 |row|row.get(0),
             )?;
             assert_eq!(members,1,"the saved attempt owns its exact delivered input and turn");

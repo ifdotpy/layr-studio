@@ -2,7 +2,7 @@
 //! with `safety`) reaches the client view of the chat.
 
 use crate::entity_publication::test_support::{chat_view, seed_chat, store};
-use serde_json::json;
+use studio_json::json;
 
 #[tokio::test]
 async fn a_safety_retry_receipt_reaches_the_client() {
@@ -14,7 +14,7 @@ async fn a_safety_retry_receipt_reaches_the_client() {
             "cwd":"/fixture","accountKey":"default","isLead":true,"autoWake":false}),
     )
     .await;
-    let mut operation: super::SafetyOperation = serde_json::from_str(r#"{
+    let mut operation: super::SafetyOperation = studio_json::from_str(r#"{
         "id":"safety-chat:turn-1", "agent":"safety-chat", "stage":"turns", "turnId":"turn-1",
         "threadId":"thread", "sourceThreadId":"thread", "attemptId":"attempt", "rootRequestId":"root",
         "connectionId":"connection", "epoch":1, "accountKey":"default", "model":"gpt-6", "created":1.0,

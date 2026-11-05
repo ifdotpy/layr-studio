@@ -52,7 +52,7 @@ fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 }
 
 pub(crate) fn normalize_nullable_counter(
-    schema: &mut serde_json::Value,
+    schema: &mut studio_json::Value,
     name: &str,
     label: &str,
     default: bool,
@@ -64,13 +64,13 @@ pub(crate) fn normalize_nullable_counter(
     let kind = value_object
         .get_mut("type")
         .ok_or_else(|| format!("{name} has no type"))?;
-    if *kind != serde_json::json!(["integer", "null"]) {
+    if *kind != studio_json::json!(["integer", "null"]) {
         return Err(format!("{name} must be a nullable integer"));
     }
     *kind = "integer".into();
-    *prop = serde_json::json!({"anyOf":[value,{"type":"null"}]});
+    *prop = studio_json::json!({"anyOf":[value,{"type":"null"}]});
     if default {
-        object(prop)?.insert("default".into(), serde_json::Value::Null);
+        object(prop)?.insert("default".into(), studio_json::Value::Null);
     }
     title(prop, label)
 }
@@ -206,7 +206,7 @@ pub struct AgentEntityUsageResumeDto {
     pub due_at: Option<f64>,
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 11], String> {
     use crate::agent_entity_nested::{nullable as normalize_nullable, object, property, title};
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
@@ -236,7 +236,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
         let prop = property(&mut retry, name)?;
         title(prop, label)?;
         if name == "updatedAt"
-            && object(prop)?.remove("format") != Some(serde_json::json!("double"))
+            && object(prop)?.remove("format") != Some(studio_json::json!("double"))
         {
             return Err("updatedAt must use the double number format".into());
         }
@@ -245,25 +245,25 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     let cause = property(&mut retry, "cause")?;
     let variants = object(cause)?
         .get_mut("anyOf")
-        .and_then(serde_json::Value::as_array_mut)
+        .and_then(studio_json::Value::as_array_mut)
         .ok_or("capacity retry cause must be nullable")?;
     if variants.len() != 2
         || variants
             .first()
             .and_then(|v| v.get("$ref"))
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             != Some("#/components/schemas/CapacityContinuationCause")
-        || variants.get(1) != Some(&serde_json::json!({"type":"null"}))
+        || variants.get(1) != Some(&studio_json::json!({"type":"null"}))
     {
         return Err("capacity retry cause must reference its owner and null".into());
     }
     let reference = variants
         .first_mut()
-        .and_then(serde_json::Value::as_object_mut)
+        .and_then(studio_json::Value::as_object_mut)
         .and_then(|v| v.get_mut("$ref"))
         .ok_or("missing capacity retry cause reference")?;
     *reference = "#/components/schemas/CapacityRetryCause".into();
-    object(cause)?.insert("default".into(), serde_json::Value::Null);
+    object(cause)?.insert("default".into(), studio_json::Value::Null);
     let mut retry_cause = CapacityContinuationCause::json_schema(&mut generator).to_value();
     title(&mut retry_cause, "CapacityRetryCause")?;
     let mut resume = AgentEntityUsageResumeDto::json_schema(&mut generator).to_value();
@@ -288,7 +288,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
         let prop = property(&mut resume, name)?;
         title(prop, label)?;
         if name == "updatedAt"
-            && object(prop)?.remove("format") != Some(serde_json::json!("double"))
+            && object(prop)?.remove("format") != Some(studio_json::json!("double"))
         {
             return Err("updatedAt must use the double number format".into());
         }
@@ -317,28 +317,28 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     let phase = property(&mut release, "phase")?;
     let variants = object(phase)?
         .get_mut("anyOf")
-        .and_then(serde_json::Value::as_array_mut)
+        .and_then(studio_json::Value::as_array_mut)
         .ok_or("release phase must be nullable")?;
     if variants.len() != 2
         || variants
             .first()
             .and_then(|v| v.get("$ref"))
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             != Some("#/components/schemas/NativeReleasePhase")
-        || variants.get(1) != Some(&serde_json::json!({"type":"null"}))
+        || variants.get(1) != Some(&studio_json::json!({"type":"null"}))
     {
         return Err("release phase must reference its owner and null".into());
     }
-    object(phase)?.insert("default".into(), serde_json::Value::Null);
+    object(phase)?.insert("default".into(), studio_json::Value::Null);
     let mut release_phase =
         crate::persistence::NativeReleasePhase::json_schema(&mut generator).to_value();
     title(&mut release_phase, "NativeReleasePhase")?;
     let entries = object(&mut release_phase)?
         .get_mut("enum")
-        .and_then(serde_json::Value::as_array_mut)
+        .and_then(studio_json::Value::as_array_mut)
         .ok_or("release phases must be an enum")?;
-    if entries.get(2).and_then(serde_json::Value::as_str) != Some("unknown")
-        || entries.get(3).and_then(serde_json::Value::as_str) != Some("released")
+    if entries.get(2).and_then(studio_json::Value::as_str) != Some("unknown")
+        || entries.get(3).and_then(studio_json::Value::as_str) != Some("released")
     {
         return Err("release phase order changed".into());
     }
@@ -357,7 +357,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
         ("turnId", "Turnid"),
     ] {
         let prop = property(&mut buffering, name)?;
-        if name == "at" && object(prop)?.remove("format") != Some(serde_json::json!("double")) {
+        if name == "at" && object(prop)?.remove("format") != Some(studio_json::json!("double")) {
             return Err("buffering at must use double format".into());
         }
         title(prop, label)?;
@@ -376,12 +376,12 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     let kind = list_object
         .get_mut("type")
         .ok_or("retiredEvents missing type")?;
-    if *kind != serde_json::json!(["array", "null"]) {
+    if *kind != studio_json::json!(["array", "null"]) {
         return Err("retiredEvents must be a nullable array".into());
     }
     *kind = "array".into();
     *prop =
-        serde_json::json!({"anyOf":[list,{"type":"null"}],"default":null,"title":"Retiredevents"});
+        studio_json::json!({"anyOf":[list,{"type":"null"}],"default":null,"title":"Retiredevents"});
     let mut converted = ConvertedFromLeadDto::json_schema(&mut generator).to_value();
     title(&mut converted, "ConvertedFromLeadDto")?;
     object(&mut converted)?.insert(
@@ -397,7 +397,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     ] {
         let prop = property(&mut converted, name)?;
         let obj = object(prop)?;
-        if name == "at" && obj.remove("format") != Some(serde_json::json!("double")) {
+        if name == "at" && obj.remove("format") != Some(studio_json::json!("double")) {
             return Err("conversion at must use double format".into());
         }
         if name == "by" {
@@ -433,11 +433,11 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn schemas_match_published_components() {
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }
@@ -445,20 +445,20 @@ mod tests {
     #[test]
     fn retry_and_resume_enforce_presence_and_round_trip_nulls() {
         let retry = json!({"id":"r","threadId":null,"epoch":1.0,"accountKey":null,"status":"scheduled","updatedAt":1.0,"dueAt":null,"reason":null,"cause":"diskFull"});
-        let parsed: AgentEntityCapacityRetryDto = serde_json::from_value(retry.clone()).unwrap();
-        assert_eq!(serde_json::to_value(parsed).unwrap(), retry);
+        let parsed: AgentEntityCapacityRetryDto = studio_json::from_value(retry.clone()).unwrap();
+        assert_eq!(studio_json::to_value(parsed).unwrap(), retry);
         for bad in [
             json!({"id":"r"}),
             json!({"id":"r","threadId":null,"epoch":-1,"accountKey":null,"status":"scheduled","updatedAt":1.0,"dueAt":null}),
         ] {
-            assert!(serde_json::from_value::<AgentEntityCapacityRetryDto>(bad).is_err());
+            assert!(studio_json::from_value::<AgentEntityCapacityRetryDto>(bad).is_err());
         }
         let resume = json!({"id":"r","status":"waiting","cause":"limit","reason":null,"updatedAt":1.0,"plannedAt":null,"dueAt":null});
-        let parsed: AgentEntityUsageResumeDto = serde_json::from_value(resume.clone()).unwrap();
-        assert_eq!(serde_json::to_value(parsed).unwrap(), resume);
+        let parsed: AgentEntityUsageResumeDto = studio_json::from_value(resume.clone()).unwrap();
+        assert_eq!(studio_json::to_value(parsed).unwrap(), resume);
         let mut missing = resume;
         missing.as_object_mut().unwrap().remove("reason");
-        assert!(serde_json::from_value::<AgentEntityUsageResumeDto>(missing).is_err());
+        assert!(studio_json::from_value::<AgentEntityUsageResumeDto>(missing).is_err());
     }
     #[derive(JsonSchema)]
     struct ChangedReadState {
@@ -503,12 +503,12 @@ mod tests {
     #[test]
     fn context_and_read_state_reject_missing_or_out_of_range_counters() {
         assert!(
-            serde_json::from_value::<ContextUsageDto>(json!({"tokens": null, "window": null}))
+            studio_json::from_value::<ContextUsageDto>(json!({"tokens": null, "window": null}))
                 .is_ok()
         );
-        assert!(serde_json::from_value::<ContextUsageDto>(json!({"tokens": null})).is_err());
+        assert!(studio_json::from_value::<ContextUsageDto>(json!({"tokens": null})).is_err());
         assert!(
-            serde_json::from_value::<ReadStateDto>(
+            studio_json::from_value::<ReadStateDto>(
                 json!({"threadId":"t", "turnId":"u", "read":true, "revision":-1})
             )
             .is_err()
@@ -518,22 +518,23 @@ mod tests {
     #[test]
     fn buffering_and_attempt_keep_their_distinct_null_rules() {
         let buffering: NativeSafetyBufferingRecord =
-            serde_json::from_str(r#"{"dismissed":false}"#).unwrap();
+            studio_json::from_str(r#"{"dismissed":false}"#).unwrap();
         assert_eq!(
-            serde_json::to_value(buffering).unwrap(),
+            studio_json::to_value(buffering).unwrap(),
             json!({"dismissed": false})
         );
         assert!(
-            serde_json::from_value::<NativeSafetyBufferingRecord>(json!({"dismissed": null}))
+            studio_json::from_value::<NativeSafetyBufferingRecord>(json!({"dismissed": null}))
                 .is_err()
         );
-        let attempt: AgentStartAttempt = serde_json::from_str(r#"{"retiredEvents":null}"#).unwrap();
+        let attempt: AgentStartAttempt =
+            studio_json::from_str(r#"{"retiredEvents":null}"#).unwrap();
         assert_eq!(
-            serde_json::to_value(attempt).unwrap(),
+            studio_json::to_value(attempt).unwrap(),
             json!({"retiredEvents": null})
         );
         assert!(
-            serde_json::from_value::<ConvertedFromLeadDto>(
+            studio_json::from_value::<ConvertedFromLeadDto>(
                 json!({"requestId":"r","by":"agent","at":1,"oldRootId":"old","rootId":"new"})
             )
             .is_err()

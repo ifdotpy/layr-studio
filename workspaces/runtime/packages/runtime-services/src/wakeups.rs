@@ -1,6 +1,6 @@
 //! Complaint response state for orchestration context.
 use crate::continuation::text;
-use serde_json::Value;
+use studio_json::Value;
 
 /// Python's `Runtime.complaint_needs_response`: the responsible side has not answered.
 pub(crate) fn needs_response(c: &Value) -> bool {

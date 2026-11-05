@@ -61,7 +61,7 @@ mod tests {
             &tx,
             "rule",
             "r",
-            serde_json::json!({"id":"r"}),
+            studio_json::json!({"id":"r"}),
             false,
         )
         .expect("other entity");

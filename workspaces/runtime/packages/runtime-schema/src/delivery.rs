@@ -113,12 +113,12 @@ pub fn serialize_recipient_deliveries<S: serde::Serializer>(
 mod message_send_status_tests {
     #[test]
     fn device_only_buffered_status_is_not_a_server_status() {
-        assert!(serde_json::from_str::<super::MessageSendStatus>("\"buffered\"").is_err());
+        assert!(studio_json::from_str::<super::MessageSendStatus>("\"buffered\"").is_err());
     }
 
     #[test]
     fn unknown_message_send_status_is_rejected() {
-        assert!(serde_json::from_str::<super::MessageSendStatus>("\"future-status\"").is_err());
+        assert!(studio_json::from_str::<super::MessageSendStatus>("\"future-status\"").is_err());
     }
 }
 
@@ -228,7 +228,7 @@ impl DeliveryMoment {
     pub fn for_event(
         kind: &str,
         text: &str,
-        metadata: Option<&serde_json::Value>,
+        metadata: Option<&studio_json::Value>,
     ) -> Result<Self, InvalidDeliveryMoment> {
         if let Some(delivery) = Self::metadata_delivery(metadata)? {
             return Ok(delivery);
@@ -253,7 +253,7 @@ impl DeliveryMoment {
             importance: Option<String>,
         }
         if kind == "agent_message"
-            && serde_json::from_str::<crate::http_ingress::Object<Importance>>(text)
+            && studio_json::from_str::<crate::http_ingress::Object<Importance>>(text)
                 .ok()
                 .and_then(|value| value.0.importance)
                 .as_deref()
@@ -267,7 +267,7 @@ impl DeliveryMoment {
 
     /// Resolve parsed message arguments without serializing their importance.
     /// Explicit timing uses the same compatibility codec as persisted events.
-    pub fn for_message(args: &serde_json::Value) -> Result<Self, InvalidDeliveryMoment> {
+    pub fn for_message(args: &studio_json::Value) -> Result<Self, InvalidDeliveryMoment> {
         Ok(Self::metadata_delivery(Some(args))?.unwrap_or_else(|| Self::message_default(args)))
     }
 
@@ -281,11 +281,11 @@ impl DeliveryMoment {
             .unwrap_or_else(|| Ok(Self::importance_default(importance)))
     }
 
-    fn message_default(message: &serde_json::Value) -> Self {
+    fn message_default(message: &studio_json::Value) -> Self {
         Self::importance_default(
             message
                 .get("importance")
-                .and_then(serde_json::Value::as_str),
+                .and_then(studio_json::Value::as_str),
         )
     }
 
@@ -298,7 +298,7 @@ impl DeliveryMoment {
     }
 
     fn metadata_delivery(
-        metadata: Option<&serde_json::Value>,
+        metadata: Option<&studio_json::Value>,
     ) -> Result<Option<Self>, InvalidDeliveryMoment> {
         // Derived serde structs also accept sequences; persisted metadata is a
         // JSON object (or the historical null), never a positional record.
@@ -337,10 +337,10 @@ mod tests {
     fn canonical_serialization_and_parsing_agree() {
         assert_eq!(DeliveryMoment::default(), DeliveryMoment::CurrentTurn);
         for moment in DeliveryMoment::ALL {
-            let value = serde_json::json!(moment.as_str());
-            assert_eq!(serde_json::to_value(moment).expect("serialize"), value);
+            let value = studio_json::json!(moment.as_str());
+            assert_eq!(studio_json::to_value(moment).expect("serialize"), value);
             assert_eq!(
-                serde_json::from_value::<DeliveryMoment>(value).expect("deserialize"),
+                studio_json::from_value::<DeliveryMoment>(value).expect("deserialize"),
                 moment
             );
             assert_eq!(moment.as_str().parse(), Ok(moment));
@@ -352,7 +352,7 @@ mod tests {
         for (legacy, moment) in LEGACY_DELIVERY_MOMENTS {
             assert_eq!(DeliveryMoment::parse_legacy(legacy), Ok(moment));
             assert!(DeliveryMoment::parse(legacy).is_err());
-            assert!(serde_json::from_value::<DeliveryMoment>(serde_json::json!(legacy)).is_err());
+            assert!(studio_json::from_value::<DeliveryMoment>(studio_json::json!(legacy)).is_err());
         }
         for invalid in ["", "unknown", "CURRENT_TURN", " next_turn"] {
             assert!(DeliveryMoment::parse_legacy(invalid).is_err());
@@ -367,7 +367,7 @@ mod tests {
             delivery: Option<DeliveryMoment>,
         }
         let missing: Request =
-            serde_json::from_value(serde_json::json!({})).expect("omitted delivery");
+            studio_json::from_value(studio_json::json!({})).expect("omitted delivery");
         assert_eq!(
             missing.delivery.unwrap_or_default(),
             DeliveryMoment::CurrentTurn
@@ -377,29 +377,29 @@ mod tests {
             .into_iter()
             .chain(LEGACY_DELIVERY_MOMENTS)
         {
-            let parsed: Request = serde_json::from_value(serde_json::json!({"delivery":value}))
+            let parsed: Request = studio_json::from_value(studio_json::json!({"delivery":value}))
                 .expect("supported timing");
             assert_eq!(parsed.delivery, Some(expected));
         }
         for value in [
-            serde_json::json!("unknown"),
-            serde_json::json!(null),
-            serde_json::json!(7),
-            serde_json::json!({}),
-            serde_json::json!([]),
+            studio_json::json!("unknown"),
+            studio_json::json!(null),
+            studio_json::json!(7),
+            studio_json::json!({}),
+            studio_json::json!([]),
         ] {
             assert!(
-                serde_json::from_value::<Request>(serde_json::json!({"delivery":value})).is_err()
+                studio_json::from_value::<Request>(studio_json::json!({"delivery":value})).is_err()
             );
         }
     }
 
     #[test]
     fn managed_message_schema_accepts_supported_input_and_rejects_unknown_values() {
-        let openapi = serde_json::from_slice(include_bytes!("../../runtime-http/openapi.json"))
+        let openapi = studio_json::from_slice(include_bytes!("../../runtime-http/openapi.json"))
             .expect("OpenAPI");
         let registry = crate::registry_for_document(&openapi).expect("request registry");
-        let schema = serde_json::json!({"$ref":format!("{}#/components/schemas/ManagedMessageBody", crate::OPENAPI_URI)});
+        let schema = studio_json::json!({"$ref":format!("{}#/components/schemas/ManagedMessageBody", crate::OPENAPI_URI)});
         let validator = jsonschema::options()
             .with_registry(&registry)
             .build(&schema)
@@ -409,17 +409,17 @@ mod tests {
             .into_iter()
             .chain(LEGACY_DELIVERY_MOMENTS.map(|(name, _)| name))
         {
-            assert!(validator.is_valid(&serde_json::json!({
+            assert!(validator.is_valid(&studio_json::json!({
                 "id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello", "delivery":value
             })), "{value}");
         }
-        let mut body = serde_json::json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello"});
+        let mut body = studio_json::json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello"});
         assert!(validator.is_valid(&body), "default remains optional");
         for count in [
             crate::shared_values::MAX_TURN_ATTACHMENTS,
             crate::shared_values::MAX_TURN_ATTACHMENTS + 1,
         ] {
-            body["assets"] = serde_json::json!(vec!["asset-id"; count]);
+            body["assets"] = studio_json::json!(vec!["asset-id"; count]);
             assert_eq!(
                 validator.is_valid(&body),
                 count <= crate::shared_values::MAX_TURN_ATTACHMENTS
@@ -427,9 +427,9 @@ mod tests {
         }
         body.as_object_mut().expect("body object").remove("assets");
         for value in [
-            serde_json::json!("unknown"),
-            serde_json::json!(null),
-            serde_json::json!(7),
+            studio_json::json!("unknown"),
+            studio_json::json!(null),
+            studio_json::json!(7),
         ] {
             body["delivery"] = value;
             assert!(!validator.is_valid(&body));
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn event_defaults_follow_message_intent_and_explicit_timing_wins() {
-        use serde_json::json;
+        use studio_json::json;
         for (kind, text, expected) in [
             (
                 "agent_message",
@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn parsed_messages_resolve_timing_without_a_serialization_round_trip() {
-        use serde_json::json;
+        use studio_json::json;
         for (importance, expected) in [
             ("progress", DeliveryMoment::NextTurn),
             ("question", DeliveryMoment::CurrentTurn),

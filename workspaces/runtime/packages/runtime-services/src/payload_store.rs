@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::workspace_files;
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     MAX_USER_ATTACHMENT_BYTES as MAX_UPLOAD_BYTES, USER_ATTACHMENT_LIMIT_LABEL,
 };
@@ -40,7 +40,7 @@ pub enum PayloadStoreError {
     #[error("Payload storage database failed")]
     Store(#[from] StoreError),
     #[error("Payload storage JSON failed")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("A server timestamp could not be created")]
     Clock,
     #[error("An upload identity could not be created")]
@@ -293,7 +293,7 @@ pub(crate) fn valid_asset_record(
 mod tests {
     use std::fs;
 
-    use serde_json::json;
+    use studio_json::json;
 
     use super::{
         MAX_UPLOAD_BYTES, asset_reference_id, atomic_write, valid_asset_record,
@@ -362,7 +362,7 @@ mod tests {
             "hash": "a".repeat(64),
             "created": 1.0,
         });
-        let valid = |value: &serde_json::Value| {
+        let valid = |value: &studio_json::Value| {
             studio_runtime_store::TranscriptAssetRecord::from_value(value.clone())
                 .is_ok_and(|asset| valid_asset_record(&asset, id, root.path()))
         };

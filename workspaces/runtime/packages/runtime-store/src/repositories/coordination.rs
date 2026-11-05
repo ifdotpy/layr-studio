@@ -1,7 +1,7 @@
 //! Durable Canvas chat, edge and message rows.
 
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::json;
+use studio_json::json;
 
 use crate::StoreResult;
 use crate::records::{AgentRecord, Table};
@@ -99,7 +99,7 @@ impl CoordinationRepository {
 
     pub fn agents(
         connection: &rusqlite::Connection,
-    ) -> StoreResult<Vec<(String, serde_json::Value)>> {
+    ) -> StoreResult<Vec<(String, studio_json::Value)>> {
         Ok(Table::<AgentRecord>::new(connection)
             .list()?
             .into_iter()

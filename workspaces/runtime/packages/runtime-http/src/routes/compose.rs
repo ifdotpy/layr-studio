@@ -105,7 +105,7 @@ mod tests {
 
     use axum::Json;
     use axum::http::{Method, Request, StatusCode};
-    use serde_json::json;
+    use studio_json::json;
     use tower::ServiceExt;
 
     use crate::schema::operations;
@@ -114,11 +114,11 @@ mod tests {
     use crate::router::HttpState;
     use crate::routes::manifest::{OperationStatus, RouteGroup};
 
-    async fn get_handler() -> Json<serde_json::Value> {
+    async fn get_handler() -> Json<studio_json::Value> {
         Json(json!({"ok":true}))
     }
 
-    async fn post_handler() -> Json<serde_json::Value> {
+    async fn post_handler() -> Json<studio_json::Value> {
         Json(json!({"ok":true}))
     }
 

@@ -15,13 +15,13 @@ pub(crate) fn identity(email: &str, organization: Option<&str>, account: Option<
     }
     format!(
         "{PREFIX}{}",
-        serde_json::json!([email, organization, account])
+        studio_json::json!([email, organization, account])
     )
 }
 
 fn tuple(value: &str) -> Option<(String, Option<String>, Option<String>)> {
     let tuple: (String, Option<String>, Option<String>) =
-        serde_json::from_str(value.strip_prefix(PREFIX)?).ok()?;
+        studio_json::from_str(value.strip_prefix(PREFIX)?).ok()?;
     (!tuple.0.is_empty()
         && tuple.1.as_ref().is_none_or(|v| !v.trim().is_empty())
         && tuple.2.as_ref().is_none_or(|v| !v.trim().is_empty()))
@@ -64,7 +64,7 @@ pub(crate) fn earlier_forms(current: &str) -> Vec<String> {
         for account in accounts {
             forms.push(format!(
                 "{PREFIX}{}",
-                serde_json::json!([email, organization, account])
+                studio_json::json!([email, organization, account])
             ));
         }
     }
@@ -106,13 +106,13 @@ pub(crate) fn organization_mismatch(
     expected_name: Option<&str>,
     observed: Option<&str>,
     observed_name: Option<&str>,
-) -> Option<serde_json::Value> {
+) -> Option<studio_json::Value> {
     let (_, old_org, _) = tuple(expected?)?;
     let (_, new_org, _) = tuple(observed?)?;
     if old_org.is_none() || new_org.is_none() || old_org == new_org {
         return None;
     }
-    Some(serde_json::json!({
+    Some(studio_json::json!({
         "expected": organization(expected, expected_name)?,
         "observed": organization(observed, observed_name)?,
     }))
@@ -143,7 +143,7 @@ pub(crate) fn with_native_identity(mut metadata: AuthMetadata, path: &Path) -> A
         Err(_) => return AuthMetadata::error(Some("parser")),
     };
     let config: Config =
-        match serde_json::from_reader(file.take(super::auth_cache::CREDENTIAL_READ_LIMIT_BYTES)) {
+        match studio_json::from_reader(file.take(super::auth_cache::CREDENTIAL_READ_LIMIT_BYTES)) {
             Ok(config) => config,
             Err(_) => return AuthMetadata::error(Some("parser")),
         };
@@ -192,11 +192,11 @@ pub(crate) fn with_native_identity(mut metadata: AuthMetadata, path: &Path) -> A
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn shared_claude_identity_contract() {
-        let cases: Value = serde_json::from_str(include_str!("claude_identity_cases.json"))
+        let cases: Value = studio_json::from_str(include_str!("claude_identity_cases.json"))
             .expect("identity cases parse");
         let identities = cases["identities"]
             .as_array()

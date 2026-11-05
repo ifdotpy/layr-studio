@@ -14,8 +14,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 
 use crate::linux_vm_guest::{GuestError, GuestRpc};
 
@@ -90,7 +90,7 @@ impl GuestPayload {
             let Ok(manifest) = std::fs::read(folder.join("manifest.json")) else {
                 continue;
             };
-            let manifest: Value = serde_json::from_slice(&manifest).map_err(io::Error::other)?;
+            let manifest: Value = studio_json::from_slice(&manifest).map_err(io::Error::other)?;
             let names = manifest["files"].as_object().into_iter().flatten();
             for name in names
                 .map(|(name, _)| name.as_str())
@@ -152,7 +152,7 @@ fn request_id(kind: &str, parts: &[&str]) -> String {
 fn signature(key: &str, operation: &str, manifest: &Value) -> String {
     use ring::hmac;
     // The broker signs the canonical JSON of the operation and the manifest: sorted keys,
-    // no spaces. `serde_json` maps keep sorted keys.
+    // no spaces. `studio_json` maps keep sorted keys.
     let body = json!({"operationId": operation, "files": manifest}).to_string();
     let tag = hmac::sign(
         &hmac::Key::new(hmac::HMAC_SHA256, key.as_bytes()),

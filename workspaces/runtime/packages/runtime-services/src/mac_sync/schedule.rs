@@ -10,7 +10,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 
 use super::{MacSyncError, error_reason, read_json, round::ProjectSync, sync_status};
@@ -432,7 +432,7 @@ fn read_events(
         let Ok(line) = line else {
             return;
         };
-        let Ok(event) = serde_json::from_str::<Value>(&line) else {
+        let Ok(event) = studio_json::from_str::<Value>(&line) else {
             continue;
         };
         let (lock, ready) = &*shared;

@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 pub(crate) use studio_runtime_schema::approvals::BrowserRedirect;
 use studio_runtime_schema::approvals::{
     AgentId, Answer, Approval, ApprovalId, ApprovalState, BrowserCard, BrowserOutcome,
@@ -333,7 +333,7 @@ fn refusal(
     let Some(raw) = raw else {
         return Ok(Some("The chat does not exist".into()));
     };
-    let agent: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    let agent: Value = studio_json::from_str(&raw).unwrap_or(Value::Null);
     if python_truthy(agent.get("deletedAt")) {
         return Ok(Some("The chat was deleted".into()));
     }
@@ -435,7 +435,7 @@ pub async fn apply(
                                         request: Request::BrowserOpen(card),
                                         delivery: None,
                                         detail: Detail {
-                                            params: ProviderObject(serde_json::Map::new()),
+                                            params: ProviderObject(studio_json::Map::new()),
                                             preview: None,
                                             answer_error: None,
                                             host_close_reason: None,
@@ -762,7 +762,7 @@ pub(crate) mod fixture {
             request: Request::BrowserOpen(card),
             delivery: None,
             detail: Detail {
-                params: ProviderObject(serde_json::Map::new()),
+                params: ProviderObject(studio_json::Map::new()),
                 preview: None,
                 answer_error: None,
                 host_close_reason: None,

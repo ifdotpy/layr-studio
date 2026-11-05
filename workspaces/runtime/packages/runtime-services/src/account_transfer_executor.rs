@@ -23,7 +23,6 @@ use crate::{
         StoredField,
     },
 };
-use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     fs,
@@ -34,6 +33,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::RuntimeStore;
@@ -92,7 +92,7 @@ fn copy_native_history(
         .ok_or(TransferError::Refused(
             "Native history has no complete session metadata",
         ))?;
-    let metadata: Value = serde_json::from_slice(&bytes[..first_end])
+    let metadata: Value = studio_json::from_slice(&bytes[..first_end])
         .map_err(|_| TransferError::Refused("Native history metadata is invalid"))?;
     let header = crate::analytics_history::SessionHeader::from_value(&metadata);
     if !header
@@ -172,14 +172,14 @@ fn copy_native_history(
         }
     }
     let manifest_path = target_root.join(".studio-account-imports.json");
-    let mut manifest: serde_json::Map<String, Value> = if manifest_path.exists() {
-        serde_json::from_slice(
+    let mut manifest: studio_json::Map<String, Value> = if manifest_path.exists() {
+        studio_json::from_slice(
             &fs::read(&manifest_path)
                 .map_err(|_| TransferError::Refused("Native import manifest is unreadable"))?,
         )
         .map_err(|_| TransferError::Refused("Native import manifest is invalid"))?
     } else {
-        serde_json::Map::new()
+        studio_json::Map::new()
     };
     let relative_destination = destination.strip_prefix(&target_root).map_err(|_| {
         TransferError::Refused("Native history destination escaped its account home")
@@ -200,7 +200,7 @@ fn copy_native_history(
     ));
     fs::write(
         &temporary_manifest,
-        serde_json::to_vec(&Value::Object(manifest))
+        studio_json::to_vec(&Value::Object(manifest))
             .map_err(|_| TransferError::Refused("Could not encode native import manifest"))?,
     )
     .map_err(|_| TransferError::Refused("Could not publish native import manifest"))?;
@@ -410,7 +410,7 @@ mod reconnect_read_tests {
             .await
             .expect("replay the durable reply");
         assert_eq!(
-            serde_json::to_value(&receipt.scope).expect("scope"),
+            studio_json::to_value(&receipt.scope).expect("scope"),
             expected["receipt"]["scope"]
         );
         assert_eq!(
@@ -427,8 +427,8 @@ mod reconnect_read_tests {
             .await
             .expect("operation");
         assert_eq!(
-            serde_json::to_vec(&after).unwrap(),
-            serde_json::to_vec(&before).unwrap()
+            studio_json::to_vec(&after).unwrap(),
+            studio_json::to_vec(&before).unwrap()
         );
     }
 
@@ -525,8 +525,8 @@ mod reconnect_read_tests {
             .await
             .expect("operation");
         assert_eq!(
-            serde_json::to_vec(&after).unwrap(),
-            serde_json::to_vec(&before).unwrap()
+            studio_json::to_vec(&after).unwrap(),
+            studio_json::to_vec(&before).unwrap()
         );
         store.transaction(|tx| {
             let mut operation = studio_runtime_store::AccountTransferRepository::get(tx, "move")?.unwrap();
@@ -573,7 +573,7 @@ mod reconnect_read_tests {
                     studio_runtime_store::AccountTransferRepository::put(
                         tx,
                         "move",
-                        &serde_json::to_string(&changed).unwrap(),
+                        &studio_json::to_string(&changed).unwrap(),
                     )
                 })
                 .await
@@ -691,7 +691,7 @@ async fn session_reply(
             studio_runtime_store::transfer_record::ProviderResult::Inline {
                 value: Some(value),
                 ..
-            } => serde_json::from_str(value.get())
+            } => studio_json::from_str(value.as_str())
                 .map_err(|_| TransferError::Refused("Invalid saved provider receipt"))?,
             studio_runtime_store::transfer_record::ProviderResult::Blob { .. } => {
                 return Err(TransferError::Refused("Invalid saved provider receipt"));
@@ -1687,7 +1687,7 @@ mod destination_settings_tests {
 
     #[test]
     fn same_provider_preserves_and_normalizes_queued_settings() {
-        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","fastMode":true,"workerDefaults":{"model":"child"},"pendingSettings":{"model":"model-a","fastMode":true},"pendingSettingsAccountKey":"target"}"#).unwrap();
+        let agent = studio_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","fastMode":true,"workerDefaults":{"model":"child"},"pendingSettings":{"model":"model-a","fastMode":true},"pendingSettingsAccountKey":"target"}"#).unwrap();
         let catalog = CatalogObservation {
             identity: CatalogIdentity {
                 account_key: "target".into(),
@@ -1771,7 +1771,7 @@ mod destination_settings_tests {
 
     #[test]
     fn transfer_keeps_worker_defaults_naming_another_account() {
-        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"codex-login","model":"gpt-6.1-sol"}}"#).unwrap();
+        let agent = studio_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"codex-login","model":"gpt-6.1-sol"}}"#).unwrap();
         let result = destination_settings(
             &agent,
             "source",
@@ -1793,7 +1793,7 @@ mod destination_settings_tests {
 
     #[test]
     fn transfer_moves_worker_defaults_naming_source_account() {
-        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"source","model":"model-a"}}"#).unwrap();
+        let agent = studio_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"source","model":"model-a"}}"#).unwrap();
         let result = destination_settings(
             &agent,
             "source",
@@ -1829,7 +1829,7 @@ mod destination_settings_tests {
             decision
                 .agents
                 .into_iter()
-                .map(|(id, agent)| (id, serde_json::to_string(&agent).unwrap())),
+                .map(|(id, agent)| (id, studio_json::to_string(&agent).unwrap())),
         )
         .unwrap();
         let catalog = CatalogObservation {
@@ -1889,7 +1889,7 @@ mod destination_settings_tests {
             }],
         };
         let result = destination_settings(
-            &serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"source-model"}"#).unwrap(),
+            &studio_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"source-model"}"#).unwrap(),
             "source",
             ProviderKind::Claude,
             ProviderKind::Codex,
@@ -1998,7 +1998,7 @@ mod destination_settings_tests {
                 .unwrap(),
                 copied
             );
-            let manifest: Value = serde_json::from_slice(
+            let manifest: Value = studio_json::from_slice(
                 &fs::read(target.join(".studio-account-imports.json")).unwrap(),
             )
             .unwrap();
@@ -2039,9 +2039,10 @@ mod destination_settings_tests {
             history.to_str().unwrap(),
         )
         .unwrap();
-        let manifest: Value =
-            serde_json::from_slice(&fs::read(target.join(".studio-account-imports.json")).unwrap())
-                .unwrap();
+        let manifest: Value = studio_json::from_slice(
+            &fs::read(target.join(".studio-account-imports.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             manifest["sessions/.studio-imports/golden.jsonl"]["sha256"],
             "62e246317762ee0bc6d9090a820ce23f01c74a1aab542d3fb1034928e31edc4d"
@@ -2083,11 +2084,11 @@ mod destination_settings_tests {
             fs::read(&first).expect("copied history is readable"),
             fs::read(&history).expect("source history is readable")
         );
-        let manifest: Value = serde_json::from_slice(
+        let manifest: Value = studio_json::from_slice(
             &fs::read(target.join(".studio-account-imports.json")).expect("manifest exists"),
         )
         .expect("manifest is valid");
-        assert_eq!(manifest.as_object().map(serde_json::Map::len), Some(1));
+        assert_eq!(manifest.as_object().map(studio_json::Map::len), Some(1));
         assert_eq!(
             manifest["sessions/.studio-imports/source-thread.jsonl"]["threadId"],
             "source-thread"
@@ -2136,11 +2137,11 @@ mod destination_settings_tests {
             .expect("second import thread joins")
             .expect("second import succeeds");
 
-        let manifest: Value = serde_json::from_slice(
+        let manifest: Value = studio_json::from_slice(
             &fs::read(target.join(".studio-account-imports.json")).expect("manifest exists"),
         )
         .expect("manifest is valid");
-        assert_eq!(manifest.as_object().map(serde_json::Map::len), Some(2));
+        assert_eq!(manifest.as_object().map(studio_json::Map::len), Some(2));
         assert_eq!(
             fs::read(target.join("sessions/.studio-imports/first.jsonl"))
                 .expect("first copy exists"),
@@ -2198,11 +2199,11 @@ mod destination_settings_tests {
             destination == fs::read(first).expect("first source readable")
                 || destination == fs::read(second).expect("second source readable")
         );
-        let manifest: Value = serde_json::from_slice(
+        let manifest: Value = studio_json::from_slice(
             &fs::read(target.join(".studio-account-imports.json")).expect("manifest exists"),
         )
         .expect("manifest is valid");
-        assert_eq!(manifest.as_object().map(serde_json::Map::len), Some(1));
+        assert_eq!(manifest.as_object().map(studio_json::Map::len), Some(1));
     }
 }
 
@@ -2214,8 +2215,8 @@ mod retained_executor_tests {
     use crate::account_session_runtime::{
         AccountSessionError, ConnectionScope, ProviderRequest, SessionReceipt,
     };
-    use serde_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::{RequestId, RequestTicket};
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository};
 
@@ -2528,7 +2529,7 @@ mod retained_executor_tests {
                     )
                     .expect("test fixture operation succeeds");
                 let operation: Value =
-                    serde_json::from_str(&raw).expect("test fixture operation succeeds");
+                    studio_json::from_str(&raw).expect("test fixture operation succeeds");
                 assert!(
                     operation["members"]["lead"]["providerReadIntents"]
                         .get(&request.operation)
@@ -2761,7 +2762,7 @@ mod retained_executor_tests {
             account_home: "/tmp/source".into(),
             shared_home: String::new(),
             filesystem_inputs: None,
-            claude_account_pin: serde_json::Value::Null,
+            claude_account_pin: studio_json::Value::Null,
             account_driver: None,
             account_session: None,
             guest_rpc: None,
@@ -2861,7 +2862,7 @@ mod retained_executor_tests {
                 },"logins":{},"deleteReceipts":{}});
             fs::write(
                 &registry_path,
-                serde_json::to_vec(&registry).expect("fixture registry"),
+                studio_json::to_vec(&registry).expect("fixture registry"),
             )
             .expect("save fixture account metadata");
             let driver = crate::account_driver::AccountDriver::open(&registry_path)
@@ -2886,7 +2887,7 @@ mod retained_executor_tests {
             account_home: "/tmp/target".into(),
             shared_home: String::new(),
             filesystem_inputs: None,
-            claude_account_pin: serde_json::Value::Null,
+            claude_account_pin: studio_json::Value::Null,
             account_driver,
             account_session: Some(session.clone()),
             guest_rpc: None,
@@ -2997,7 +2998,7 @@ mod retained_executor_tests {
             account_home: "/tmp/target".into(),
             shared_home: String::new(),
             filesystem_inputs: None,
-            claude_account_pin: serde_json::Value::Null,
+            claude_account_pin: studio_json::Value::Null,
             account_driver: None,
             account_session: Some(session.clone()),
             guest_rpc: None,
@@ -3037,7 +3038,7 @@ mod retained_executor_tests {
             )
             .expect("test fixture operation succeeds");
         let operation: Value =
-            serde_json::from_str(&operation).expect("test fixture operation succeeds");
+            studio_json::from_str(&operation).expect("test fixture operation succeeds");
         let intent = operation["members"]["lead"]["providerReadIntents"]
             .as_object()
             .expect("test fixture operation succeeds");
@@ -3368,7 +3369,7 @@ mod retained_executor_tests {
                 |row| row.get(0),
             )
             .expect("transfer outcome is durable");
-        let saved: Value = serde_json::from_str(&saved).expect("saved transfer is valid");
+        let saved: Value = studio_json::from_str(&saved).expect("saved transfer is valid");
         assert_eq!(saved["members"]["lead"]["phase"], "unknown");
         assert_eq!(
             saved["members"]["lead"]["providerReceipts"][0]["certainty"],
@@ -3490,7 +3491,7 @@ mod retained_executor_tests {
 #[allow(clippy::unwrap_used)]
 mod claude_move_import_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn export() -> Value {
         json!({

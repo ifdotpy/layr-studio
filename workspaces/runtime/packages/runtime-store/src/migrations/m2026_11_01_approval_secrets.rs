@@ -66,24 +66,24 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         }
         tx.execute(
             "UPDATE approvals SET answer=?2 WHERE id=?1",
-            (approval.id.as_str(), serde_json::to_string(answer)?),
+            (approval.id.as_str(), studio_json::to_string(answer)?),
         )?;
         if sync_exists {
             for collection in ["request", "questionHistory"] {
                 let raw: Option<String> = tx.query_row("SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0", (collection, approval.id.as_str()), |row| row.get(0)).optional()?;
                 if let Some(raw) = raw {
-                    let mut envelope: serde_json::Value = serde_json::from_str(&raw)?;
+                    let mut envelope: studio_json::Value = studio_json::from_str(&raw)?;
                     let value = envelope
                         .get_mut("value")
-                        .and_then(serde_json::Value::as_object_mut)
+                        .and_then(studio_json::Value::as_object_mut)
                         .ok_or(StoreError::RecordContract("invalid approval projection"))?;
                     let state = value
                         .get_mut("state")
-                        .and_then(serde_json::Value::as_object_mut)
+                        .and_then(studio_json::Value::as_object_mut)
                         .ok_or(StoreError::RecordContract("invalid approval state"))?;
                     state.insert(
                         "answer".into(),
-                        serde::Serialize::serialize(&*answer, serde_json::value::Serializer)?,
+                        serde::Serialize::serialize(&*answer, studio_json::value::Serializer)?,
                     );
                     SyncDocumentsRepository::put_entity(
                         tx,
@@ -102,7 +102,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::approvals::{Answer, ApprovalId, ApprovalState};
 
     #[tokio::test]
@@ -122,7 +122,7 @@ mod tests {
             SyncDocumentsRepository::put_entity(tx, "questionHistory", "s", &approval, false)?;
             apply(tx)?;
             let row = approvals::get(tx, &ApprovalId("s".into()))?.unwrap();
-            let stored = serde_json::to_string(&row)?;
+            let stored = studio_json::to_string(&row)?;
             assert!(!stored.contains("sensitive-value"));
             assert!(stored.contains("public-value"));
             let projection: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='questionHistory' AND id='s'", [], |r| r.get(0))?;
@@ -156,7 +156,7 @@ mod tests {
             SyncDocumentsRepository::put_entity(tx, "questionHistory", "s", &approval, false)?;
             apply(tx)?;
             let row = approvals::get(tx, &ApprovalId("s".into()))?.unwrap();
-            let stored = serde_json::to_string(&row)?;
+            let stored = studio_json::to_string(&row)?;
             assert!(!stored.contains("sensitive-value"));
             Ok::<_, StoreError>(())
         }).await.unwrap();

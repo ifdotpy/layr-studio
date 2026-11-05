@@ -30,12 +30,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     for (id, raw) in rows {
         if matches!(
-            serde_json::from_str::<StoredTransferHold>(&raw),
+            studio_json::from_str::<StoredTransferHold>(&raw),
             Ok(StoredTransferHold::Unreadable { .. })
         ) {
             continue;
         }
-        let result = serde_json::from_str::<TransferRecord>(&raw).and_then(|record| {
+        let result = studio_json::from_str::<TransferRecord>(&raw).and_then(|record| {
             if record.id != id {
                 return Err(serde::de::Error::custom("transfer id does not match row"));
             }
@@ -43,7 +43,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         });
         let reason = match result {
             Ok(record) => {
-                let value = serde::Serialize::serialize(&(record), serde_json::value::Serializer)?;
+                let value = serde::Serialize::serialize(&(record), studio_json::value::Serializer)?;
                 if studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
                     .map_err(StoreError::SchemaValidation)?
                 {
@@ -53,7 +53,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
             Err(error) => error.to_string(),
         };
-        let held = serde_json::to_string(&StoredTransferHold::Unreadable {
+        let held = studio_json::to_string(&StoredTransferHold::Unreadable {
             reason: reason.clone(),
             original: raw.clone(),
         })?;
@@ -65,9 +65,9 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             && let Ok(LegacyOwner {
                 lead_id: Some(lead),
                 status,
-            }) = serde_json::from_str::<LegacyOwner>(&raw)
+            }) = studio_json::from_str::<LegacyOwner>(&raw)
         {
-            let marker = serde_json::to_string(&UnreadableTransferSummary {
+            let marker = studio_json::to_string(&UnreadableTransferSummary {
                 kind: UnreadableTransferKind::Unreadable,
                 reason,
                 original: None,

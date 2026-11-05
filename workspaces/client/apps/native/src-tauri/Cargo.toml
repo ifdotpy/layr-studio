@@ -22,7 +22,7 @@ tauri = { version = "=2.12.5", features = [] }
 studio-client-core = { path = "../../../packages/client-core" }
 libc.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+studio-json = { path = "../../../../runtime/packages/json" }
 sha2.workspace = true
 tokio.workspace = true
 

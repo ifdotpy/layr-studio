@@ -1,5 +1,5 @@
 //! Pure native notice decisions. The adapter supplies checked stored records and time.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::provider_errors::{KnownCodexErrorKind, known_error_kind};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::sha256_hex;
@@ -241,7 +241,7 @@ pub(super) fn decide(
                 .unwrap_or(&fallback);
             let typed: studio_runtime_schema::provider_errors::AgentError =
                 serde::Deserialize::deserialize(raw_error.clone())?;
-            let error = serde::Serialize::serialize(&typed, serde_json::value::Serializer)?;
+            let error = serde::Serialize::serialize(&typed, studio_json::value::Serializer)?;
             let error_kind = known_error_kind(&error);
             let policy = matches!(
                 error_kind,
@@ -532,7 +532,7 @@ pub(super) fn object_keys(text: &str) -> Option<Vec<String>> {
             Ok(keys)
         }
     }
-    serde_json::Deserializer::from_str(text)
+    studio_json::Deserializer::from_str(text)
         .deserialize_map(Keys)
         .ok()
 }
@@ -599,14 +599,14 @@ pub(crate) fn account_notice(
     } else {
         let record = json!({"id":key,"accountKey":account,"connectionId":connection,"message":text,"details":params["details"],"at":at});
         tx.execute_cached("INSERT INTO runtime_native_notices(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![key,serde_json::to_string(&record)?]).map_err(StoreError::from)?;
+            params![key,studio_json::to_string(&record)?]).map_err(StoreError::from)?;
         tx.execute_cached("DELETE FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 AND id NOT IN (SELECT id FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 ORDER BY json_extract(record,'$.at') DESC LIMIT ?2)", params![account, ACCOUNT_NOTICE_LIMIT]).map_err(StoreError::from)?;
     }
     // Preserve unrelated volatile sources and other accounts' notices. Replace
     // only this connection owner's portion of the existing renderer projection.
     let workspace: Option<String> = tx.query_row_cached("SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [], |row| row.get(0)).optional().map_err(StoreError::from)?;
     if let Some(raw) = workspace {
-        let workspace: Value = serde_json::from_str(&raw)
+        let workspace: Value = studio_json::from_str(&raw)
             .map_err(|_| super::stored("sync_entities", "workspace:current"))?;
         let mut notices = match &workspace["value"]["nativeNotices"] {
             Value::Null => Vec::new(),
@@ -631,7 +631,7 @@ pub(crate) fn account_notice(
             .map_err(StoreError::from)?
         {
             let (id, raw) = row.map_err(StoreError::from)?;
-            let record: Value = serde_json::from_str(&raw)
+            let record: Value = studio_json::from_str(&raw)
                 .map_err(|_| super::stored("runtime_native_notices", &id))?;
             if record["id"] != id
                 || !record["message"].is_string()
@@ -657,7 +657,7 @@ pub(crate) fn account_notice(
 #[cfg(test)]
 mod provider_label_tests {
     use super::{error_message, provider_label};
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn provider_identity_unknown_notice_uses_generic_label() {

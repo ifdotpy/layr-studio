@@ -1,10 +1,10 @@
 // Register every integration test module here; the tooling witness checks coverage.
-fn task_record(value: &serde_json::Value) -> studio_runtime_store::TaskRecord {
+fn task_record(value: &studio_json::Value) -> studio_runtime_store::TaskRecord {
     let mut canonical = value.clone();
     if canonical.get("name").is_none() {
         canonical["name"] = canonical["type"].clone();
     }
-    serde_json::from_str(&canonical.to_string()).expect("canonical task fixture")
+    studio_json::from_str(&canonical.to_string()).expect("canonical task fixture")
 }
 mod account_login_registry_cleanup;
 mod account_login_session_start;
@@ -135,8 +135,8 @@ pub(crate) use callback_fixtures::frozen as recovery_fixtures;
 pub(crate) mod agent_view_fixtures;
 
 fn rule_snapshot(
-    rule: &serde_json::Value,
-    owner: serde_json::Value,
+    rule: &studio_json::Value,
+    owner: studio_json::Value,
 ) -> Result<
     studio_runtime_services::rules_engine::RuleSnapshot,
     studio_runtime_services::rules_engine::RuleError,

@@ -221,7 +221,7 @@ async fn a_vm_reviewer_reads_layr_through_one_exact_guest_request() {
     let args = json!({"args": ["--line", "main", "diff", "s1", "s2"]});
     let first = fixture.call(REVIEWER, "read-1", args.clone()).await;
     assert_eq!(first["success"], true, "{first}");
-    let answer: Value = serde_json::from_str(&text(&first)).unwrap();
+    let answer: Value = studio_json::from_str(&text(&first)).unwrap();
     assert_eq!(
         answer,
         json!({"exitCode": 0, "stdout": "diff text\n", "stderr": "note"})
@@ -271,7 +271,7 @@ async fn a_guest_reason_reaches_the_reviewer() {
     let result = fixture
         .call(REVIEWER, "read-2", json!({"args": ["status"]}))
         .await;
-    let answer: Value = serde_json::from_str(&text(&result)).unwrap();
+    let answer: Value = studio_json::from_str(&text(&result)).unwrap();
     assert_eq!(
         answer,
         json!({"exitCode": null, "stdout": "", "stderr": "\u{fffd}x", "reason": "timeout"})
@@ -339,7 +339,7 @@ fn layr_read_keeps_the_python_argument_rules() {
     ] {
         assert_eq!(
             accepted(args.clone()),
-            Ok(serde_json::from_value(args).unwrap())
+            Ok(studio_json::from_value(args).unwrap())
         );
     }
     let shape = "Supply args as 1 to 64 strings";

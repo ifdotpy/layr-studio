@@ -5,11 +5,11 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::sync_views;
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
@@ -49,7 +49,7 @@ async fn call(
         .unwrap();
     let code = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (code, serde_json::from_slice(&bytes).unwrap())
+    (code, studio_json::from_slice(&bytes).unwrap())
 }
 
 #[test]

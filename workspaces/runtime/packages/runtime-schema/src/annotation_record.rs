@@ -2,7 +2,7 @@
 use crate::queue_command::Field;
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use studio_json::{Number, Value};
 
 #[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
@@ -51,8 +51,8 @@ pub fn valid_line(value: &Value) -> bool {
 }
 
 impl AnnotationRecord {
-    pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
-        serde_json::from_value(value)
+    pub fn from_value(value: Value) -> Result<Self, studio_json::Error> {
+        studio_json::from_value(value)
     }
     pub fn id(&self) -> &String {
         &self.0.id
@@ -75,7 +75,7 @@ impl AnnotationRecord {
     }
     pub fn value(&self) -> Value {
         // Every field is already serializable JSON data.
-        serde_json::to_value(self).expect("annotation fields are JSON serializable")
+        studio_json::to_value(self).expect("annotation fields are JSON serializable")
     }
     pub fn into_value(self) -> Value {
         self.value()
@@ -86,7 +86,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(AnnotationRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-annotation-record.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -99,7 +99,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn schema_and_typed_annotations_accept_the_same_shapes() {
@@ -116,7 +116,7 @@ mod tests {
             (json!(["a"]), false),
         ] {
             assert_eq!(
-                serde_json::from_value::<AnnotationRecord>(value.clone()).is_ok(),
+                studio_json::from_value::<AnnotationRecord>(value.clone()).is_ok(),
                 valid,
                 "{value}"
             );

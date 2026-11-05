@@ -1,8 +1,8 @@
 //! Persisted workspace operation and its open provider evidence.
 use crate::{json_object::JsonObject, queue_command::Field};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use std::ops::{Deref, DerefMut};
+use studio_json::{Map, Value};
 
 macro_rules! wire_enum {
     ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
@@ -97,7 +97,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(WorkspaceOperationRecord).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-workspace-operation-record.schema.json"
     ))
     .map_err(|error| error.to_string())?;
@@ -110,7 +110,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn operation_wire_matches_schema_and_preserves_presence_and_extensions() {
@@ -134,7 +134,7 @@ mod tests {
                 let mut input = base.clone();
                 input[field] = value.clone();
                 let typed = WorkspaceOperationRecord::deserialize(&input).unwrap();
-                assert_eq!(serde_json::to_value(typed).unwrap(), input);
+                assert_eq!(studio_json::to_value(typed).unwrap(), input);
             }
         }
         for (key, value) in [
@@ -158,7 +158,7 @@ mod tests {
             let decoded = WorkspaceOperationRecord::deserialize(&input);
             assert_eq!(decoded.is_ok(), expected, "{input}");
             if let Ok(decoded) = decoded {
-                assert_eq!(serde_json::to_value(decoded).unwrap(), input);
+                assert_eq!(studio_json::to_value(decoded).unwrap(), input);
             }
         }
         assert!(
@@ -167,7 +167,7 @@ mod tests {
         );
         let mut decoded = WorkspaceOperationRecord::deserialize(&base).unwrap();
         assert!(decoded.set_extension("phase", json!("failed")).is_err());
-        assert_eq!(serde_json::to_value(&decoded).unwrap(), base);
+        assert_eq!(studio_json::to_value(&decoded).unwrap(), base);
         decoded
             .set_extension("future", json!({"opaque":true}))
             .unwrap();

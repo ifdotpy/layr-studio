@@ -4,9 +4,9 @@
 use std::net::IpAddr;
 
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 #[cfg(test)]
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_schema::multi_server_access::{
     AccessClientKind, AccessClientStatus, PersistedAccessClient,
 };
@@ -29,7 +29,7 @@ pub const MAX_OBSERVATION_BYTES: usize = 1024 * 1024;
 /// fields remain evidence for each caller's existing admission policy.
 pub mod tailscale_observation {
     use serde::{Deserialize, Deserializer, de::DeserializeOwned};
-    use serde_json::Value;
+    use studio_json::Value;
 
     fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
         Value::deserialize(d).map(Some)
@@ -182,7 +182,7 @@ pub(crate) fn stored_client(
     if raw.len() > remote_transport::MAX_RESPONSE_BYTES {
         return Err(invalid("record size".into()));
     }
-    let mut decoder = serde_json::Deserializer::from_str(raw);
+    let mut decoder = studio_json::Deserializer::from_str(raw);
     let decoded: studio_runtime_schema::http_ingress::Object<PersistedAccessClient> =
         serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
             let path = error.path().to_string();
@@ -270,7 +270,7 @@ impl SignedRequest {
             values.push(value.clone());
         }
         let path = target.split('?').next().unwrap_or_default();
-        let invalid = |error: serde_json::Error| {
+        let invalid = |error: studio_json::Error| {
             let message = if error.is_syntax() || error.is_eof() {
                 "Invalid JSON request"
             } else {
@@ -281,35 +281,35 @@ impl SignedRequest {
         let body =
             match (method, path) {
                 ("POST", PAIR_PATH) => SignedBody::Pair(
-                    serde_json::from_slice::<
+                    studio_json::from_slice::<
                         studio_runtime_schema::http_ingress::Object<DevicePairRequest>,
                     >(raw)
                     .map_err(invalid)?
                     .0,
                 ),
                 ("POST", AUTO_PAIR_PATH) => SignedBody::Auto(
-                    serde_json::from_slice::<
+                    studio_json::from_slice::<
                         studio_runtime_schema::http_ingress::Object<AutoPairRequest>,
                     >(raw)
                     .map_err(invalid)?
                     .0,
                 ),
                 ("POST", NAME_PATH) => SignedBody::Rename(
-                    serde_json::from_slice::<
+                    studio_json::from_slice::<
                         studio_runtime_schema::http_ingress::Object<RenameServer>,
                     >(raw)
                     .map_err(invalid)?
                     .0,
                 ),
                 ("POST", "/api/multi-server") => SignedBody::Management(
-                    serde_json::from_slice::<
+                    studio_json::from_slice::<
                         studio_runtime_schema::http_ingress::Object<ManagementRequest>,
                     >(raw)
                     .map_err(invalid)?
                     .0,
                 ),
                 ("POST", "/api/servers/orchestration") => SignedBody::Orchestration(Box::new(
-                    serde_json::from_slice::<
+                    studio_json::from_slice::<
                         studio_runtime_schema::http_ingress::Object<
                             crate::orchestration_wire::OrchestrationRequest,
                         >,
@@ -319,7 +319,7 @@ impl SignedRequest {
                 )),
                 _ => {
                     if !raw.is_empty() {
-                        serde_json::from_slice::<serde::de::IgnoredAny>(raw).map_err(invalid)?;
+                        studio_json::from_slice::<serde::de::IgnoredAny>(raw).map_err(invalid)?;
                     }
                     SignedBody::Other
                 }
@@ -719,7 +719,7 @@ impl AccessSnapshot {
                 if v.len() > remote_transport::MAX_RESPONSE_BYTES {
                     return Err(invalid("record size".into()));
                 }
-                let mut decoder = serde_json::Deserializer::from_str(v);
+                let mut decoder = studio_json::Deserializer::from_str(v);
                 let decoded: studio_runtime_schema::http_ingress::Object<PersistedAccessInvite> =
                     serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
                         let path = error.path().to_string();
@@ -886,7 +886,7 @@ pub fn authorize_at(
             .cloned()
             .map(|mut v| {
                 v.last_access = Field::Value(
-                    serde_json::Number::from_f64(now)
+                    studio_json::Number::from_f64(now)
                         .ok_or_else(|| refused(400, "invalid_request", "Invalid request time"))?,
                 );
                 Ok::<_, AccessError>(v)
@@ -1155,7 +1155,7 @@ mod snapshot_tests {
         let snapshot = AccessSnapshot::from_records("c", None, "i", Some(&raw), false).unwrap();
         check_invite(snapshot.invite(), "secret", Some("owner"), 1.0).unwrap();
         assert_eq!(
-            serde_json::to_string(snapshot.invite().unwrap()).unwrap(),
+            studio_json::to_string(snapshot.invite().unwrap()).unwrap(),
             format!(
                 r#"{{"inviteId":"i","status":"open","expires":9007199254740993,"tokenHash":"{}","tailscaleUser":"owner","grant":"observe"}}"#,
                 digest(b"secret")

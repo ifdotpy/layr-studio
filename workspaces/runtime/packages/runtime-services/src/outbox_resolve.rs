@@ -25,7 +25,7 @@ pub struct Entry {
     pub owner_kind: OwnerKind,
     pub owner_id: String,
     pub status: OutboxStatus,
-    pub payload: serde_json::Value,
+    pub payload: studio_json::Value,
 }
 
 const NOT_RESENT: &str = "This entry cannot be sent again. Discard it or mark it delivered.";
@@ -33,7 +33,7 @@ const STEER_NOT_RESENT: &str = "A steer is never sent again. Discard it or mark 
 
 /// The chat of an agent-owned entry, or `None`. A missing entry has no chat.
 pub fn owner_chat(tx: &Transaction<'_>, id: &str) -> Result<Option<String>, CommandError> {
-    let row: Option<OutboxRow<serde_json::Value>> = Outbox::get(tx, id)?;
+    let row: Option<OutboxRow<studio_json::Value>> = Outbox::get(tx, id)?;
     Ok(row
         .filter(|row| row.owner_kind == OwnerKind::Agent)
         .map(|row| row.owner_id))
@@ -41,7 +41,7 @@ pub fn owner_chat(tx: &Transaction<'_>, id: &str) -> Result<Option<String>, Comm
 
 /// Step 2 for `resolve`, read part.
 pub fn read(tx: &Transaction<'_>, id: &str) -> Result<Entry, CommandError> {
-    let row: OutboxRow<serde_json::Value> =
+    let row: OutboxRow<studio_json::Value> =
         Outbox::get(tx, id)?.ok_or(CommandError::Missing("This outbox entry does not exist"))?;
     Ok(Entry {
         id: row.id,
@@ -98,7 +98,7 @@ fn retry_allowed(entry: &Entry) -> Result<(), CommandError> {
 }
 
 /// A remote entry: a server request follows its action, other families their rule.
-fn remote_retry_safe(payload: &serde_json::Value) -> bool {
+fn remote_retry_safe(payload: &studio_json::Value) -> bool {
     let Some(effect) = payload["effect"].as_str().and_then(wire::<RemoteEffect>) else {
         return false;
     };
@@ -252,7 +252,7 @@ fn settle_entity(
 mod tests {
     use super::*;
 
-    fn entry(kind: OutboxKind, payload: serde_json::Value) -> Entry {
+    fn entry(kind: OutboxKind, payload: studio_json::Value) -> Entry {
         Entry {
             id: "entry".into(),
             kind,
@@ -266,18 +266,18 @@ mod tests {
     #[test]
     fn a_steer_is_never_retried() {
         let error = decide(
-            &entry(OutboxKind::Steer, serde_json::json!({})),
+            &entry(OutboxKind::Steer, studio_json::json!({})),
             ResolveAction::Retry,
         )
         .expect_err("steer");
         assert!(matches!(error, CommandError::Invalid(STEER_NOT_RESENT)));
         decide(
-            &entry(OutboxKind::Steer, serde_json::json!({})),
+            &entry(OutboxKind::Steer, studio_json::json!({})),
             ResolveAction::Discard,
         )
         .expect("discard a steer");
         decide(
-            &entry(OutboxKind::Steer, serde_json::json!({})),
+            &entry(OutboxKind::Steer, studio_json::json!({})),
             ResolveAction::Delivered,
         )
         .expect("mark a steer delivered");
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn a_provider_call_may_be_retried() {
         decide(
-            &entry(OutboxKind::ProviderCall, serde_json::json!({})),
+            &entry(OutboxKind::ProviderCall, studio_json::json!({})),
             ResolveAction::Retry,
         )
         .expect("retry");
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn a_server_request_is_retried_only_for_a_replay_safe_action() {
         let request = |action: &str| {
-            serde_json::json!({
+            studio_json::json!({
                 "effect": "server_request",
                 "record": {"body": {"action": action}}
             })
@@ -306,14 +306,14 @@ mod tests {
 
     #[test]
     fn an_access_request_is_never_retried() {
-        let payload = serde_json::json!({"effect": "access_request", "record": {}});
+        let payload = studio_json::json!({"effect": "access_request", "record": {}});
         assert!(!remote_retry_safe(&payload));
     }
 
     #[test]
     fn a_local_kind_has_no_resolution() {
         let error = decide(
-            &entry(OutboxKind::ManagedTool, serde_json::json!({})),
+            &entry(OutboxKind::ManagedTool, studio_json::json!({})),
             ResolveAction::Delivered,
         )
         .expect_err("local");
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn only_an_unknown_entry_can_be_resolved() {
-        let mut pending = entry(OutboxKind::ProviderCall, serde_json::json!({}));
+        let mut pending = entry(OutboxKind::ProviderCall, studio_json::json!({}));
         pending.status = OutboxStatus::Pending;
         let error = decide(&pending, ResolveAction::Delivered).expect_err("pending");
         assert!(matches!(error, CommandError::Conflict(_)));

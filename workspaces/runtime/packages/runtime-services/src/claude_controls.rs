@@ -3,7 +3,7 @@ pub mod service;
 pub mod store;
 use crate::event_write::{request_signature, truthy};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 pub use studio_runtime_schema::claude_controls::{ControlError, ControlOutcome};
 pub(crate) use studio_runtime_schema::claude_permissions::PERMISSION_MODES;
 use studio_runtime_schema::workspace_operation::{
@@ -43,7 +43,7 @@ struct Operation {
     phase: OperationPhase,
     #[serde(flatten)]
     extensions: OperationExtensions,
-    result: Option<Box<serde_json::value::RawValue>>,
+    result: Option<studio_json::OwnedRawJson>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,7 +61,7 @@ fn operation_kind(request: &ControlRequest) -> OperationKind {
 // saved semantic JSON, including opaque extensions and missing versus null.
 fn control_evidence(record: &WorkspaceOperationRecord) -> Result<Value> {
     record
-        .serialize(serde_json::value::Serializer)
+        .serialize(studio_json::value::Serializer)
         .map_err(|_| ControlError::Invalid("operation".into()))
 }
 #[derive(Clone)]
@@ -98,8 +98,8 @@ impl ControlSnapshot {
             return Err(ControlError::Conflict);
         }
         Ok(match &op.extensions.final_response {
-            Some(ControlOutcome::Ok) => Some(Ok(serde_json::from_str(
-                op.result.as_ref().ok_or(ControlError::Unknown)?.get(),
+            Some(ControlOutcome::Ok) => Some(Ok(studio_json::from_str(
+                op.result.as_ref().ok_or(ControlError::Unknown)?.as_str(),
             )
             .map_err(|_| ControlError::Unknown)?)),
             Some(ControlOutcome::Err(error)) => Some(Err(error.clone())),
@@ -113,7 +113,7 @@ impl ControlSnapshot {
             .as_ref()
             .map(|o| {
                 validate("PersistedClaudeControlRecord", o)?;
-                serde_json::from_value(o.clone())
+                studio_json::from_value(o.clone())
                     .map_err(|_| ControlError::Invalid("operation".into()))
             })
             .transpose()?;
@@ -135,7 +135,7 @@ impl ControlSnapshot {
                 let extensions =
                     OperationExtensions::deserialize(serde::de::value::MapDeserializer::<
                         _,
-                        serde_json::Error,
+                        studio_json::error::Error,
                     >::new(
                         op.extensions()
                             .iter()
@@ -163,7 +163,7 @@ impl ControlSnapshot {
                         .result
                         .value()
                         .filter(|v| !v.is_null())
-                        .map(serde_json::value::to_raw_value)
+                        .map(studio_json::to_raw_value)
                         .transpose()
                         .map_err(|_| ControlError::Invalid("operation".into()))?,
                 })
@@ -303,7 +303,7 @@ impl ControlSnapshot {
         }
         let (ControlRequest::Settings { settings, .. }, service::MutationReply::Settings(reply)) =
             (request, &result);
-        let expected = serde_json::to_value(settings).map_err(|_| ControlError::Unknown)?;
+        let expected = studio_json::to_value(settings).map_err(|_| ControlError::Unknown)?;
         let expected = expected.as_object().ok_or(ControlError::Unknown)?;
         if studio_runtime_schema::claude_controls::CLAUDE_SETTINGS_WIRE_FIELDS
             .iter()
@@ -401,14 +401,14 @@ mod tests {
                     .operation
                     .unwrap()
                     .result
-                    .as_deref()
-                    .map(|v| v.get().to_owned()),
+                    .as_ref()
+                    .map(|v| v.as_str().to_owned()),
                 legacy
                     .operation
                     .unwrap()
                     .result
-                    .as_deref()
-                    .map(|v| v.get().to_owned())
+                    .as_ref()
+                    .map(|v| v.as_str().to_owned())
             );
         }
         let mut invalid = base;
@@ -429,7 +429,7 @@ mod tests {
                 "7ef66fdf13bb4634469324e10d82fe6dba891d3c3819f6445d6e1b862ec561df",
             ),
         ] {
-            let request: ControlRequest = serde_json::from_value(body).expect("command");
+            let request: ControlRequest = studio_json::from_value(body).expect("command");
             assert_eq!(request.operation_id(), "claude-control:one");
             assert_eq!(signature(&request), expected);
         }

@@ -5,11 +5,11 @@ use axum::{
     http::Request,
 };
 use fixture::*;
-use serde_json::{Value, json};
 use std::sync::{
     Arc, Condvar, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::claude_login::{
     AUTHORIZATION_NOT_CONFIRMED, FAILED, ports::LoginEvent,
@@ -84,7 +84,7 @@ async fn call(app: &axum::Router, method: &str, path: &str, body: Option<Value>)
         .expect("valid fixture");
     (
         status,
-        serde_json::from_slice(&bytes).expect("valid fixture"),
+        studio_json::from_slice(&bytes).expect("valid fixture"),
     )
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

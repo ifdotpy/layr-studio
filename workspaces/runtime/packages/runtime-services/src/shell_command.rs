@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use studio_json::Value;
 
 /// Port of `codex_shell.monitor_command` (codex_shell.py:41-91): command/exec applies account shell
 /// environment policy but accepts argv and does not perform the native exec

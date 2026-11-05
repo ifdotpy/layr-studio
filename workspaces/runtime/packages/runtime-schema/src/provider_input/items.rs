@@ -4,7 +4,7 @@
 
 use schemars::JsonSchema;
 use serde::Serialize;
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

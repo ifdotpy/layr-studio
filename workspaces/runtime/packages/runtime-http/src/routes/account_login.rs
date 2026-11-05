@@ -291,7 +291,7 @@ async fn set_start_throttle(
         body.pause_seconds.get() as u64,
         body.max_running_turns.get() as u64,
     )
-    .ok_or_else(|| ApiError::validation(vec![serde_json::json!("body")]))?;
+    .ok_or_else(|| ApiError::validation(vec![studio_json::json!("body")]))?;
     run_mutation(state, move |driver| {
         driver.set_start_throttle(&body.account_key, throttle)
     })
@@ -529,7 +529,7 @@ async fn codex_login_cancel(
         driver.terminal_login_receipt(&body.login_id)
     })
     .await?;
-    serde_json::from_value(receipt)
+    studio_json::from_value(receipt)
         .map(|receipt| Json(LoginResponse::Generated(receipt)))
         .map_err(|_| ApiError::internal())
 }
@@ -553,7 +553,7 @@ async fn claude_profile(
             })?;
         let home = current
             .get("home")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .map(std::path::PathBuf::from)
             .unwrap_or_default();
         let normalize = |options| {
@@ -563,7 +563,7 @@ async fn claude_profile(
         let previous = normalize(
             current
                 .get("claudeOptions")
-                .and_then(serde_json::Value::as_object)
+                .and_then(studio_json::Value::as_object)
                 .cloned()
                 .unwrap_or_default(),
         )?;
@@ -667,7 +667,7 @@ mod tests {
             .await
             .expect("error body");
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body).expect("JSON error")["error"],
+            studio_json::from_slice::<studio_json::Value>(&body).expect("JSON error")["error"],
             "Runtime unavailable: account-driver/runtime"
         );
     }
@@ -702,7 +702,7 @@ mod tests {
             .await
             .expect("error body");
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body).expect("JSON error")["error"],
+            studio_json::from_slice::<studio_json::Value>(&body).expect("JSON error")["error"],
             "Runtime unavailable: account-driver/runtime"
         );
     }
@@ -738,7 +738,7 @@ mod tests {
             .await
             .expect("error body");
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body).expect("JSON error")["error"],
+            studio_json::from_slice::<studio_json::Value>(&body).expect("JSON error")["error"],
             "Not implemented: requires provider-session/codex-login"
         );
     }
@@ -764,7 +764,7 @@ mod tests {
         let path = directory.join("registry.json");
         std::fs::write(
             &path,
-            serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/fixture","label":"Codex","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes(),
+            studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":"/fixture","label":"Codex","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes(),
         )
         .expect("fixture registry");
         let driver = Arc::new(AccountDriver::open(path).expect("validated registry"));
@@ -823,7 +823,7 @@ mod strict_account_body_tests {
     use serde::de::DeserializeOwned;
 
     fn valid<T: DeserializeOwned>(body: &str) -> bool {
-        serde_json::from_str::<T>(body).is_ok()
+        studio_json::from_str::<T>(body).is_ok()
     }
 
     #[test]

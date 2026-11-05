@@ -5,7 +5,7 @@
 //! and durable input receipt interpretation.
 
 use futures_util::future::BoxFuture;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::RuntimeStore;
 
 use crate::managed_child_create::ManagedCreationEnvironmentError as CreationError;
@@ -249,7 +249,7 @@ pub(crate) trait MonitorCreatePort: Send + Sync {
         args: &'a Value,
         request_id: &'a str,
         now: f64,
-    ) -> BoxFuture<'a, Result<Box<serde_json::value::RawValue>, Error>>;
+    ) -> BoxFuture<'a, Result<studio_json::OwnedRawJson, Error>>;
 }
 
 pub(crate) trait InterruptPort: Send + Sync {
@@ -321,7 +321,7 @@ pub(crate) fn work_action_tool(tool: &str, args: &Value) -> bool {
 
 /// Python `task_brief`.
 fn task_brief(task: &Value) -> Value {
-    let mut brief = serde_json::Map::new();
+    let mut brief = studio_json::Map::new();
     for key in ["id", "title", "owner", "status", "version", "blockedBy"] {
         brief.insert(key.into(), task.get(key).cloned().unwrap_or(Value::Null));
     }
@@ -332,7 +332,7 @@ fn task_brief(task: &Value) -> Value {
         .get("archive")
         .filter(|v| studio_runtime_store::truthy(Some(v)))
     {
-        let mut kept = serde_json::Map::new();
+        let mut kept = studio_json::Map::new();
         for key in ["status", "reason"] {
             if let Some(value) = archive.get(key).filter(|value| !value.is_null()) {
                 kept.insert(key.into(), value.clone());
@@ -634,7 +634,7 @@ pub(super) async fn dispatch(
             if let Err(error) = authorize_monitor_input(store_ref, actor, monitor_id).await {
                 return refused_before_write(error);
             }
-            let result = match serde_json::from_value(args.clone()) {
+            let result = match studio_json::from_value(args.clone()) {
                 Ok(input) => {
                     port.input(MonitorInputRequest {
                         caller_id: actor_id,
@@ -839,7 +839,7 @@ async fn lifecycle_management(
             move |tx| {
                 let args = super::services::manage::resolved_args(tx, &actor_value, &args)
                     .map_err(callback_refusal)?;
-                let request: LifecycleRequest = serde_json::from_value(args)
+                let request: LifecycleRequest = studio_json::from_value(args)
                     .map_err(|_| Error::Invalid("Invalid agent lifecycle arguments"))?;
                 Ok::<_, Error>(match request {
                     LifecycleRequest::Archive {
@@ -911,7 +911,7 @@ async fn lifecycle_management(
         )
         .await
         .and_then(|result| {
-            serde_json::to_value(result)
+            studio_json::to_value(result)
                 .map_err(|error| crate::agent_management::ManagementError::Store(error.into()))
         }),
     };
@@ -1168,7 +1168,7 @@ fn written(value: &Value, signals: Vec<WakeSignal>) -> DispatchedOperation {
 mod tests {
     use super::managed_input_receipt;
     use crate::managed_host_tools::{DispatchedOperation, OperationResult};
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn maintenance_report_dispatches_for_an_active_lead() {
@@ -1333,7 +1333,7 @@ mod tests {
             let wire = format!(
                 r#"{{"id":"stable-input","agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","created":0,"method":"command/exec/write","params":{{"processId":"watch","deltaBase64":"eA==","closeStdin":false}},"status":"{status}","response":{{"ok":true}}}}"#
             );
-            let attempt = serde_json::from_str(&wire).unwrap();
+            let attempt = studio_json::from_str(&wire).unwrap();
             let result = managed_input_receipt(&attempt);
             assert!(matches!(
                 (status, result),

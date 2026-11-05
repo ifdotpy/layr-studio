@@ -1,7 +1,7 @@
 //! Fields of the removed team token budget. The frozen Python oracles still carry
 //! them; current builds neither write nor publish them, so the corpus comparisons
 //! drop them from both sides.
-use serde_json::Value;
+use studio_json::Value;
 
 const FIELDS: [&str; 4] = [
     "tokenBudget",

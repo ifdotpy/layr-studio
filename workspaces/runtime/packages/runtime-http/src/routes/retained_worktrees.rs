@@ -1,6 +1,6 @@
 //! The worktrees that cleanup kept for workers of a team, including deleted workers.
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AgentId, AgentIndexedReads, AgentRepository};
 
 use super::{
@@ -41,7 +41,7 @@ async fn retained_worktrees(
                 AgentIndexedReads::team_records(connection, &root_id).map_err(ApiError::stored)?;
             let retained_worktrees = members
                 .iter()
-                .filter_map(|(_, raw)| serde_json::from_str::<Value>(raw).ok())
+                .filter_map(|(_, raw)| studio_json::from_str::<Value>(raw).ok())
                 .filter_map(|member| {
                     let mut value =
                         studio_runtime_services::sync_views::retained_worktree_entity(&member)?;

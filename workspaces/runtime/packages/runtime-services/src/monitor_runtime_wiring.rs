@@ -13,7 +13,7 @@ use std::time::Duration;
 use studio_runtime_schema::studio_errors::MonitorRecoveryReason;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::{ObservedTable, RuntimeStore, TableChange};
 use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore, SemaphorePermit, watch};
 use tokio::task::JoinHandle;
@@ -383,7 +383,7 @@ impl MonitorRuntime {
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
         let full = hints.full;
-        let rows = serde_json::to_string(&hints.rows.iter().collect::<Vec<_>>())
+        let rows = studio_json::to_string(&hints.rows.iter().collect::<Vec<_>>())
             .map_err(|_| MonitorError::Refused("Monitor agent hints could not be encoded"))?;
         self.store
             .read_async(
@@ -2048,7 +2048,7 @@ mod tests {
                      ON CONFLICT(id) DO UPDATE SET record=excluded.record",
                     rusqlite::params![
                         id,
-                        serde_json::json!({"compactions":0,"id":id,"rootId":id,"epoch":0,"status":"idle",
+                        studio_json::json!({"compactions":0,"id":id,"rootId":id,"epoch":0,"status":"idle",
                             "provider":provider})
                         .to_string()
                     ],
@@ -2073,7 +2073,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_monitors(id,record) VALUES ('m',?1)",
                     [
-                        serde_json::json!({"id":"m","agent":"claude-agent","status":"running"})
+                        studio_json::json!({"id":"m","agent":"claude-agent","status":"running"})
                             .to_string(),
                     ],
                 )?;
@@ -2106,7 +2106,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('r',?1)",
                     [
-                        serde_json::json!({"id":"r","agent":"codex-agent","status":"active"})
+                        studio_json::json!({"id":"r","agent":"codex-agent","status":"active"})
                             .to_string(),
                     ],
                 )?;
@@ -2139,7 +2139,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES ('worker',?1)",
                     [
-                        serde_json::json!({"compactions":0,"id":"worker","rootId":"codex-agent","epoch":0,
+                        studio_json::json!({"compactions":0,"id":"worker","rootId":"codex-agent","epoch":0,
                         "status":"idle","provider":"codex"})
                         .to_string(),
                     ],
@@ -2223,7 +2223,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES ('owner',?1)",
                     [
-                        serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
                             "id":"owner","rootId":"owner","epoch":0,"status":"ready",
                             "autoWake":true,"accountKey":"default","threadId":"thread"
                         })
@@ -2267,7 +2267,7 @@ mod tests {
         insert_active_owner(&store).await;
         store.transaction_with(|tx| {
             tx.execute("INSERT INTO runtime_monitors(id,record) VALUES ('watch',?1)",
-                [serde_json::json!({"id":"watch","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","outputEventIds":["event"]}).to_string()])?;
+                [studio_json::json!({"id":"watch","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","outputEventIds":["event"]}).to_string()])?;
             tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES ('event','owner','user','invalid','pending',0,0)", [])?;
             Ok::<_,studio_runtime_store::StoreError>(())
         }).await.unwrap();
@@ -2293,7 +2293,7 @@ mod tests {
         insert_active_owner(&store).await;
         store.transaction_with(|tx| {
             tx.execute("INSERT INTO runtime_monitors(id,record) VALUES ('watch',?1)",
-                [serde_json::json!({"id":"watch","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}).to_string()])?;
+                [studio_json::json!({"id":"watch","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}).to_string()])?;
             Ok::<_,studio_runtime_store::StoreError>(())
         }).await.unwrap();
         let runtime = MonitorRuntime::new(Arc::clone(&store), port, Arc::new(Notify::new()));
@@ -2342,7 +2342,7 @@ mod tests {
         insert_active_owner(&store).await;
         store.transaction_with(|tx| {
             tx.execute("INSERT INTO runtime_monitors(id,record) VALUES ('watch',?1)",
-                [serde_json::json!({"id":"watch","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}).to_string()])?;
+                [studio_json::json!({"id":"watch","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}).to_string()])?;
             Ok::<_,studio_runtime_store::StoreError>(())
         }).await.unwrap();
         let runtime = Arc::new(MonitorRuntime::new(
@@ -2415,7 +2415,7 @@ mod tests {
             Some(MonitorError::InvalidResultReceipt("json"))
         ));
 
-        let malformed_rule = serde_json::from_str::<studio_runtime_store::RuleRecord>(
+        let malformed_rule = studio_json::from_str::<studio_runtime_store::RuleRecord>(
             r#"{ "agent": "agent-without-id" }"#,
         )
         .expect_err("persisted rule without string id");
@@ -2539,7 +2539,7 @@ mod tests {
             .transaction_with(move |tx| {
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('file-rule',?1)",
-                    [crate::rules_engine::complete_test_rule(serde_json::json!({
+                    [crate::rules_engine::complete_test_rule(studio_json::json!({
                         "id":"file-rule","agent":"owner","epoch":0,"name":"watch",
                         "kind":"file","status":"active","intervalSeconds":30,
                         "nextAt":9_000_000_000_000_000.0,"created":1.0,"command":"true",
@@ -2549,7 +2549,7 @@ mod tests {
                     .to_string()],
                 )?;
                 tx.execute("INSERT INTO runtime_rules(id,record) VALUES ('paused-rule',?1)",
-                    [crate::rules_engine::complete_test_rule(serde_json::json!({"id":"paused-rule","agent":"owner","epoch":0,"name":"paused",
+                    [crate::rules_engine::complete_test_rule(studio_json::json!({"id":"paused-rule","agent":"owner","epoch":0,"name":"paused",
                         "kind":"file","status":"paused","intervalSeconds":30,
                         "nextAt":9_000_000_000_000_000.0,"created":1.0,"command":"true",
                         "text":"","path":state_directory.join("ignored").to_string_lossy(),"inFlight":false})).to_string()])?;
@@ -2599,7 +2599,7 @@ mod tests {
                         "INSERT INTO runtime_monitors(id,record) VALUES (?1,?2)",
                         (
                             &id,
-                            crate::monitor_policy::complete_test_monitor(serde_json::json!({
+                            crate::monitor_policy::complete_test_monitor(studio_json::json!({
                                 "id":id,"agent":"owner","epoch":0,"status":"lost","created":1.0,
                                 "finished":90.0,"operation":{"agent":"owner","epoch":0,
                                     "accountKey":"default","connectionId":"old"},
@@ -2657,7 +2657,7 @@ mod tests {
                         "INSERT INTO runtime_monitors(id,record) VALUES (?1,?2)",
                         (
                             &id,
-                            crate::monitor_policy::complete_test_monitor(serde_json::json!({
+                            crate::monitor_policy::complete_test_monitor(studio_json::json!({
                                 "id":id,"agent":"owner","epoch":0,"status":"running",
                                 "created":activity_at,"activityAt":activity_at,
                                 "activityGeneration":1,"stallWakeGeneration":0,
@@ -2696,7 +2696,7 @@ mod tests {
             store.transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_monitors(id,record) VALUES ('monitor',?1) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-                    [crate::monitor_policy::complete_test_monitor(serde_json::json!({
+                    [crate::monitor_policy::complete_test_monitor(studio_json::json!({
                         "id":"monitor","agent":"owner","epoch":0,"status":"running",
                         "created":0.0,"activityAt":0.0,"activityGeneration":1,
                         "stallWakeGeneration":0,"stallTimeoutSeconds":50,"livenessCommand":"true"
@@ -2727,7 +2727,7 @@ mod tests {
                         "INSERT INTO runtime_monitors(id,record) VALUES (?1,?2)",
                         (
                             &id,
-                            crate::monitor_policy::complete_test_monitor(serde_json::json!({
+                            crate::monitor_policy::complete_test_monitor(studio_json::json!({
                                 "id":id,"agent":"owner","epoch":0,"status":"running",
                                 "operation":{"agent":"owner","epoch":0,"accountKey":"default","connectionId":"test"},
                                 "created":100.0,"activityAt":100.0,
@@ -2799,7 +2799,7 @@ mod tests {
                         "INSERT INTO runtime_monitors(id,record) VALUES (?1,?2)",
                         (
                             &id,
-                            crate::monitor_policy::complete_test_monitor(serde_json::json!({
+                            crate::monitor_policy::complete_test_monitor(studio_json::json!({
                                 "id":id,"agent":"owner","epoch":0,"status":"running",
                                 "created":activity_at,"activityAt":activity_at,
                                 "activityGeneration":1,"stallWakeGeneration":0,
@@ -2952,7 +2952,7 @@ mod tests {
         let db = rusqlite::Connection::open_in_memory().expect("database");
         db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval'); INSERT INTO runtime_agents VALUES('a','{\"autoWake\":true,\"epoch\":1}');").expect("schema");
         for i in 0..50 {
-            let record = serde_json::json!({"status":"running", "agent":"a", "epoch":1, "created":10.0, "activityAt":10.0, "activityGeneration":1, "outputMatchesPending":{}, "outputMatchExcerpts":{"example":"x".repeat(4096)}});
+            let record = studio_json::json!({"status":"running", "agent":"a", "epoch":1, "created":10.0, "activityAt":10.0, "activityGeneration":1, "outputMatchesPending":{}, "outputMatchExcerpts":{"example":"x".repeat(4096)}});
             db.execute(
                 "INSERT INTO runtime_monitors VALUES(?1,?2,'running')",
                 rusqlite::params![format!("m{i}"), record.to_string()],
@@ -3023,11 +3023,11 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES ('owner',?1)",
-                    [serde_json::json!({"id":"owner","provider":studio_runtime_schema::ProviderKind::Codex,"epoch":1,"autoWake":true}).to_string()],
+                    [studio_json::json!({"id":"owner","provider":studio_runtime_schema::ProviderKind::Codex,"epoch":1,"autoWake":true}).to_string()],
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_monitors(id,record) VALUES ('watch',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"watch","agent":"owner","epoch":1,"status":"running",
                         "created":90.0,"activityAt":100.0,"activityGeneration":2,
                         "stallWakeGeneration":0,"stallTimeoutSeconds":50
@@ -3036,7 +3036,7 @@ mod tests {
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('rule',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"rule","agent":"owner","epoch":1,"status":"active",
                         "kind":"interval","inFlight":false,"nextAt":130.0
                     })
@@ -3060,7 +3060,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES ('owner',?1)",
                     [
-                        serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
                             "id":"owner","rootId":"owner","epoch":1,"status":"interrupted",
                             "autoWake":true,"accountKey":"default","threadId":"thread",
                             "nativeFailureHold":{"reason":"pending"},
@@ -3072,7 +3072,7 @@ mod tests {
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('rule',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"rule","agent":"owner","epoch":1,"status":"active",
                         "kind":"interval","inFlight":false,"nextAt":1.0
                     })
@@ -3098,7 +3098,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES ('owner',?1)",
                     [
-                        serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
                             "id":"owner","rootId":"owner","epoch":1,"status":"ready",
                             "autoWake":true,"accountKey":"default","threadId":"thread",
                             "nativeFailureHold":{},
@@ -3110,7 +3110,7 @@ mod tests {
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('rule',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"rule","agent":"owner","epoch":1,"status":"active",
                         "kind":"interval","inFlight":false,"nextAt":1.0
                     })
@@ -3136,7 +3136,7 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_monitors(id,record) VALUES ('legacy-monitor',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"legacy-monitor","agent":"owner","epoch":0,
                         "status":"running","created":100.0,"activityAt":100.0,
                         "activityGeneration":1,"stallWakeGeneration":0
@@ -3162,7 +3162,7 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_monitors(id,record) VALUES ('legacy-probe',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"legacy-probe","agent":"owner","epoch":0,
                         "status":"running","created":100.0,"activityAt":100.0,
                         "activityGeneration":1,"stallWakeGeneration":0,
@@ -3194,7 +3194,7 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('legacy-file-rule',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"legacy-file-rule","agent":"owner","epoch":0,
                         "status":"active","kind":"file","inFlight":false,
                         "created":100.0,"nextAt":5000.0,"fileGeneration":1,
@@ -3221,7 +3221,7 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('low-rule',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"low-rule","agent":"owner","epoch":0,"status":"active",
                         "kind":"low_workers","inFlight":false,"nextAt":1.0,
                         "minimumWorkers":1,"durationMinutes":30,"lowSince":100.0,
@@ -3256,7 +3256,7 @@ mod tests {
                 tx.execute(
                     "INSERT INTO runtime_agents(id,record) VALUES ('worker',?1)",
                     [
-                        serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
                             "id":"worker","rootId":"owner","epoch":0,
                             "status":"running","isLead":false
                         })
@@ -3265,7 +3265,7 @@ mod tests {
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('low-rule',?1)",
-                    [crate::rules_engine::complete_test_rule(serde_json::json!({
+                    [crate::rules_engine::complete_test_rule(studio_json::json!({
                         "id":"low-rule","agent":"owner","epoch":0,"name":"workers",
                         "status":"active","kind":"low_workers","intervalSeconds":60,
                         "nextAt":1.0,"created":1.0,"command":"","text":"worker alert",
@@ -3320,7 +3320,7 @@ mod tests {
                 tx.execute(
                     "UPDATE runtime_agents SET record=?1 WHERE id='worker'",
                     [
-                        serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
                             "id":"worker","rootId":"owner","epoch":0,
                             "status":"completed","isLead":false
                         })
@@ -3380,7 +3380,7 @@ mod tests {
             .transaction_with(move |tx| {
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('low-rule',?1)",
-                    [crate::rules_engine::complete_test_rule(serde_json::json!({
+                    [crate::rules_engine::complete_test_rule(studio_json::json!({
                         "id":"low-rule","agent":"owner","epoch":0,"name":"workers",
                         "status":"active","kind":"low_workers","intervalSeconds":60,
                         "nextAt":1.0,"created":1.0,"command":"","text":"worker alert",
@@ -3459,7 +3459,7 @@ mod tests {
             .transaction_with(|tx| {
                 tx.execute(
                     "INSERT INTO runtime_monitors(id,record) VALUES ('cancel',?1)",
-                    [serde_json::json!({
+                    [studio_json::json!({
                         "id":"cancel","status":"running","cancelRequested":true,
                         "cancelDispatch":{"status":"pending"}
                     })
@@ -3482,8 +3482,8 @@ mod tests {
         assert!(super::filesystem_event_needs_rescan(&event));
     }
 
-    fn lost_monitor(id: &str, now: f64) -> serde_json::Value {
-        crate::monitor_policy::complete_test_monitor(serde_json::json!({
+    fn lost_monitor(id: &str, now: f64) -> studio_json::Value {
+        crate::monitor_policy::complete_test_monitor(studio_json::json!({
             "id":id,"agent":"owner","epoch":0,"status":"running","command":"true",
             "reattachRecovery":{"accountKey":"default","epoch":0,"status":"running","startedAt":now},
             "error":"Server restarted. Command outcome unknown; not rerun."
@@ -3507,7 +3507,7 @@ mod tests {
                 }
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('paused',?1)",
-                    [crate::rules_engine::complete_test_rule(serde_json::json!({
+                    [crate::rules_engine::complete_test_rule(studio_json::json!({
                         "id":"paused","agent":"owner","epoch":0,"status":"paused","kind":"interval",
                         "inFlight":false,"created":100.0,"nextAt":5000.0,"name":"paused",
                         "intervalSeconds":60,"command":"true","text":""

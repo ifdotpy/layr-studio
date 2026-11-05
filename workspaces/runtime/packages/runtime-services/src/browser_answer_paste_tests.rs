@@ -3,9 +3,9 @@
 use super::{BrowserAnswerContext, BrowserAnswerError, answer};
 use crate::browser_cards::fixture;
 use crate::linux_vm_guest::{GuestError, GuestRpc};
-use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Answer, Approval, ApprovalState, BrowserCard, BrowserOutcome, BrowserPhase, BrowserRedirect,
     CloseReason, Decision, Timestamp,

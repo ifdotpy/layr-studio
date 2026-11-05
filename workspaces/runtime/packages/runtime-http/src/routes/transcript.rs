@@ -375,10 +375,10 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("body");
-        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+        let value: studio_json::Value = studio_json::from_slice(&bytes).expect("JSON");
         assert_eq!(
             value,
-            serde_json::json!({"hash":blob.hash,"size":text.len(),"text":text})
+            studio_json::json!({"hash":blob.hash,"size":text.len(),"text":text})
         );
     }
     #[test]
@@ -395,7 +395,7 @@ mod tests {
     }
     #[test]
     fn transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor() {
-        let page = serde_json::from_value(serde_json::json!({"items":[
+        let page = studio_json::from_value(studio_json::json!({"items":[
             {"id":"parent","role":"assistant","text":"Earlier"},
             {"id":"reasoning:synthetic","role":"reasoning","text":""},
             {"id":"newest","role":"assistant","text":"Latest"}

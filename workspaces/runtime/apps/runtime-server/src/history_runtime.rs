@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::account_driver::AccountDriver;
 use studio_runtime_services::analytics_history::{
     ANALYTICS_DATABASE, BLOCKING_TASK, HistoryClock, HistoryCollector, HistoryError,
@@ -948,7 +948,7 @@ fn read_settled_tombstones(root: &Path) -> Result<BTreeMap<String, Value>, Histo
     let mut settled = BTreeMap::new();
     for row in rows {
         let (agent, deleted_at) = row.map_err(|_| HistoryError::read(ANALYTICS_DATABASE))?;
-        let deleted_at = serde_json::from_str(&deleted_at)
+        let deleted_at = studio_json::from_str(&deleted_at)
             .map_err(|_| HistoryError::read(ANALYTICS_DATABASE))?;
         settled.insert(agent, deleted_at);
     }
@@ -969,7 +969,7 @@ fn retire_settled(
         {
             let id = actor.id().as_ref().to_owned();
             runtime.collector.schedule.remove(&id);
-            runtime.settled.insert(id, serde_json::json!(deleted_at));
+            runtime.settled.insert(id, studio_json::json!(deleted_at));
             actors.remove(index);
             row_ids.remove(index);
         } else {
@@ -1068,7 +1068,7 @@ mod tests {
     fn checked_registry_profiles_keep_listing_and_history_rules() {
         use super::{history_profile, history_profile_homes};
         use studio_runtime_services::account_policy::AccountPolicyState;
-        let registry = serde_json::json!({"version":2,"defaultAccountKey":"a","accounts":{
+        let registry = studio_json::json!({"version":2,"defaultAccountKey":"a","accounts":{
             "a":{"id":"a","home":"/a","provider":"codex","label":"A","source":"CLI","status":"ready"},
             "changed":{"id":"changed","home":"/changed","provider":"codex","label":"C","source":"CLI","status":"changed"},
             "error":{"id":"error","home":"/error","provider":"codex","label":"E","source":"CLI","status":"error"},
@@ -1091,7 +1091,7 @@ mod tests {
     }
 
     use super::*;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use tempfile::tempdir;
 
     fn typed_actor(mut value: Value) -> AgentRecord {
@@ -1720,7 +1720,7 @@ mod tests {
         let account_path = root.path().join("accounts.json");
         std::fs::write(
             &account_path,
-            serde_json::json!({
+            studio_json::json!({
                 "version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
                 "defaultAccountKey": "default",
                 "accounts": {"default": {"provider":studio_runtime_schema::ProviderKind::Codex,
@@ -1810,7 +1810,7 @@ mod tests {
         ];
         let mut bytes = Vec::new();
         for record in records {
-            bytes.extend(serde_json::to_vec(&record).expect("rollout record"));
+            bytes.extend(studio_json::to_vec(&record).expect("rollout record"));
             bytes.push(b'\n');
         }
         std::fs::write(&rollout, &bytes).expect("fixture rollout");
@@ -1829,7 +1829,7 @@ mod tests {
         ];
         let mut second_bytes = Vec::new();
         for record in second_records {
-            second_bytes.extend(serde_json::to_vec(&record).expect("recovery rollout record"));
+            second_bytes.extend(studio_json::to_vec(&record).expect("recovery rollout record"));
             second_bytes.push(b'\n');
         }
         std::fs::write(&second_rollout, &second_bytes).expect("fixture recovery rollout");
@@ -1904,7 +1904,7 @@ mod tests {
             "thread_id":"history-thread","response_id":"history-response-2",
             "usage":{"input_tokens":28,"output_tokens":3,"total_tokens":31},"thread_token_usage":{"input_tokens":51,"output_tokens":3,"total_tokens":54}
         }});
-        let mut append_bytes = serde_json::to_vec(&appended).expect("appended rollout record");
+        let mut append_bytes = studio_json::to_vec(&appended).expect("appended rollout record");
         append_bytes.push(b'\n');
         use std::io::Write;
         std::fs::OpenOptions::new()
@@ -1981,7 +1981,7 @@ mod tests {
         ];
         let mut bytes = Vec::new();
         for record in records {
-            bytes.extend(serde_json::to_vec(&record).expect("rollout record"));
+            bytes.extend(studio_json::to_vec(&record).expect("rollout record"));
             bytes.push(b'\n');
         }
         std::fs::write(&rollout, bytes).expect("fixture rollout");

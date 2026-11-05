@@ -1,6 +1,6 @@
 //! Deterministic witnesses for bounded monitor wakes and missed one-shot rules.
 use crate::monitor_fixtures as fixtures;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     monitor_policy::{self, Effect, Operation},
     rules_engine::TickObservation,
@@ -57,7 +57,7 @@ fn monitor_bucket_admits_then_suppresses_and_refills() {
             b"READY\n",
             2000.0 + f64::from(second),
         ));
-        record = serde_json::from_str(&serde_json::to_string(&record).expect("serialize budget"))
+        record = studio_json::from_str(&studio_json::to_string(&record).expect("serialize budget"))
             .expect("persisted budget");
     }
     assert_eq!(
@@ -194,7 +194,7 @@ const ONCE_RULE: &str = r#"{"id":"once","agent":"owner","epoch":1,"name":"Once",
 
 fn once() -> (Value, Value) {
     (
-        serde_json::from_str(ONCE_RULE).expect("rule fixture"),
+        studio_json::from_str(ONCE_RULE).expect("rule fixture"),
         json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"owner","rootId":"owner","epoch":1,"status":"idle","autoWake":true,"isLead":true}),
     )
 }
@@ -209,7 +209,7 @@ fn overdue_once_rule_emits_missed_event_without_command_and_stays_pending() {
     assert!(decision.check.is_none(), "a missed one-shot must not run");
     let wake = decision.wake.expect("missed notice");
     assert_eq!(wake.kind, "rule_missed");
-    let payload: Value = serde_json::from_str(&wake.text).expect("payload");
+    let payload: Value = studio_json::from_str(&wake.text).expect("payload");
     assert_eq!(payload["rule"], "once");
     assert_eq!(payload["dueAt"], 2000.0);
     assert_eq!(payload["delaySeconds"], 61.0);
@@ -289,7 +289,7 @@ async fn monitor_output_receipt_commits_excerpt_budget_and_pause_across_restart(
     let store = fixtures::store(root.path(), "flood").await;
     let id = case["before"]["id"].as_str().expect("id").to_owned();
     let operation: Operation =
-        serde_json::from_value(case["before"]["operation"].clone()).expect("operation");
+        studio_json::from_value(case["before"]["operation"].clone()).expect("operation");
     case["before"]["outputPatterns"] = json!(["READY"]);
     case["before"]["log"] = json!(monitor_output::log_root(store.root()).join(format!("{id}.log")));
     let mut initial = fixtures::monitor(root.path());
@@ -426,7 +426,7 @@ async fn missed_once_rule_is_atomic_durable_and_owner_can_resume_or_delete() {
     let root = fixtures::tempdir();
     let store = RuntimeStore::open(Some(root.path())).await.expect("store");
     let (_, mut owner) = once();
-    let rule: RuleRecord = serde_json::from_str(ONCE_RULE).expect("rule fixture");
+    let rule: RuleRecord = studio_json::from_str(ONCE_RULE).expect("rule fixture");
     owner["cwd"] = json!(root.path());
     store
         .transaction(move |tx| {
@@ -501,7 +501,7 @@ async fn missed_once_rule_is_atomic_durable_and_owner_can_resume_or_delete() {
     )
     .await
     .expect("owner resume");
-    let resumed: Value = serde_json::from_str(resumed.value.0.get()).unwrap();
+    let resumed: Value = studio_json::from_str(resumed.value.0.as_str()).unwrap();
     assert_eq!(resumed["status"], "active");
     let due = resumed["nextAt"].as_f64().expect("new due time");
     rules_tick::tick_batch(&store, 0, due, &LocalRuleFiles, &monitor)
@@ -520,7 +520,7 @@ async fn missed_once_rule_is_atomic_durable_and_owner_can_resume_or_delete() {
     .await
     .expect("owner cancel");
     assert_eq!(
-        serde_json::from_str::<Value>(deleted.value.0.get()).unwrap()["deleted"],
+        studio_json::from_str::<Value>(deleted.value.0.as_str()).unwrap()["deleted"],
         "once"
     );
 }

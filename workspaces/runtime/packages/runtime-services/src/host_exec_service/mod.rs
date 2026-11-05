@@ -17,8 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::OptionalExtension;
-use serde_json::value::RawValue;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 
 mod clone_ffi;
 mod command;
@@ -107,10 +106,10 @@ use operation::{Op, State};
 
 #[derive(serde::Deserialize)]
 struct IncomingFrame {
-    id: Option<Box<serde_json::value::RawValue>>,
-    token: Option<Box<serde_json::value::RawValue>>,
-    method: Option<Box<serde_json::value::RawValue>>,
-    params: Option<Box<serde_json::value::RawValue>>,
+    id: Option<studio_json::OwnedRawJson>,
+    token: Option<studio_json::OwnedRawJson>,
+    method: Option<studio_json::OwnedRawJson>,
+    params: Option<studio_json::OwnedRawJson>,
 }
 
 #[derive(serde::Serialize)]
@@ -139,7 +138,7 @@ struct HealthParams {}
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SettingsFile {
     slots: Option<i64>,
-    disk_budget_gi_b: Option<serde_json::Number>,
+    disk_budget_gi_b: Option<studio_json::Number>,
     mac_only: Option<Vec<String>>,
 }
 
@@ -592,7 +591,7 @@ impl HostService {
             "The host command does not exist",
             "not_found",
         )?;
-        let mut value: Op = serde_json::from_str(&fs::read_to_string(path)?).map_err(|_| {
+        let mut value: Op = studio_json::from_str(&fs::read_to_string(path)?).map_err(|_| {
             HostExecError::new("invalid_status", "The host command status is invalid")
         })?;
         if value.state == State::Running && !self.inner().commands.contains(identity) {
@@ -642,7 +641,7 @@ impl HostService {
             })?;
         let mut events = Vec::new();
         for row in rows {
-            events.push(serde_json::from_str(&row?)?);
+            events.push(studio_json::from_str(&row?)?);
         }
         Ok(events)
     }
@@ -661,7 +660,7 @@ impl HostService {
         if slots::project_folder_name(project_id) {
             match fs::read_to_string(&path) {
                 Ok(text) => {
-                    fields = serde_json::from_str(&text).map_err(|error| {
+                    fields = studio_json::from_str(&text).map_err(|error| {
                         invalid(format!("{shown} is not readable JSON: {error}"))
                     })?;
                 }
@@ -745,7 +744,7 @@ impl HostService {
             (None, Some(items)) => items,
             (None, None) => {
                 let map: std::collections::BTreeMap<String, Option<protocol::ManifestEntry>> =
-                    serde_json::from_str(&fs::read_to_string(path)?)?;
+                    studio_json::from_str(&fs::read_to_string(path)?)?;
                 map.into_iter().collect()
             }
         };
@@ -996,22 +995,22 @@ impl HostService {
     #[cfg(test)]
     pub(crate) async fn request(self: &Arc<Self>, request: &Value) -> Option<Value> {
         let response = self
-            .request_frame(&serde_json::to_vec(request).ok()?)
+            .request_frame(&studio_json::to_vec(request).ok()?)
             .await?;
-        serde_json::from_str(&response).ok()
+        studio_json::from_str(&response).ok()
     }
 
     async fn request_frame(self: &Arc<Self>, bytes: &[u8]) -> Option<String> {
-        let request: IncomingFrame = serde_json::from_slice(bytes).ok()?;
+        let request: IncomingFrame = studio_json::from_slice(bytes).ok()?;
         let identity = request.id.clone();
         match self.answer(request).await {
             Ok(value) => Some(value),
-            Err(Failure::Refused(error)) => serde_json::to_string(&ErrorResponse {
+            Err(Failure::Refused(error)) => studio_json::to_string(&ErrorResponse {
                 id: identity,
                 error: &error,
             })
             .ok(),
-            Err(Failure::Unexpected(_)) => serde_json::to_string(&ErrorResponse {
+            Err(Failure::Unexpected(_)) => studio_json::to_string(&ErrorResponse {
                 id: identity,
                 error: &HostExecError::new("invalid_request", "Invalid host request"),
             })
@@ -1023,13 +1022,13 @@ impl HostService {
         let id = request
             .id
             .as_ref()
-            .and_then(|id| serde_json::from_str::<String>(id.get()).ok())
+            .and_then(|id| studio_json::from_str::<String>(id.as_str()).ok())
             .filter(|id| !id.is_empty() && id.chars().count() <= 128)
             .ok_or_else(|| HostExecError::new(INVALID, "Invalid request ID"))?;
         let token = request
             .token
             .as_ref()
-            .and_then(|token| serde_json::from_str::<String>(token.get()).ok());
+            .and_then(|token| studio_json::from_str::<String>(token.as_str()).ok());
         let matches = token.as_deref().is_some_and(|token| {
             use subtle::ConstantTimeEq;
             bool::from(token.as_bytes().ct_eq(self.token.as_bytes()))
@@ -1038,97 +1037,97 @@ impl HostService {
         let method = request
             .method
             .as_ref()
-            .and_then(|method| serde_json::from_str::<String>(method.get()).ok())
+            .and_then(|method| studio_json::from_str::<String>(method.as_str()).ok())
             .ok_or_else(|| HostExecError::new(INVALID, "Invalid request"))?;
         let raw = request
             .params
-            .as_deref()
-            .map_or("{}", serde_json::value::RawValue::get);
+            .as_ref()
+            .map_or("{}", studio_json::OwnedRawJson::as_str);
         let digest = receipt_digest(&method, raw);
         let params = match method.as_str() {
             "health" => {
-                let _: HealthParams = serde_json::from_str(raw)
+                let _: HealthParams = studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?;
                 FrameParams::Health
             }
             "service.retire" => FrameParams::Retire(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "run" => FrameParams::Run(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "manifest" => FrameParams::Manifest(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "prime" => FrameParams::Prime(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "sync.mode" => FrameParams::SyncMode(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "sync.clone" => FrameParams::SyncClone(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "sync.delete" => FrameParams::Sync(SyncOperation::Delete(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             )),
             "sync.entry" => FrameParams::Sync(SyncOperation::Entry(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             )),
             "sync.chunk" => FrameParams::Sync(SyncOperation::Chunk(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             )),
             "sync.commit" => FrameParams::Sync(SyncOperation::Commit(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             )),
             "sync.batch" => FrameParams::SyncBatch(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "result.manifest" => FrameParams::ResultManifest(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "status" => FrameParams::Status(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "list" => FrameParams::List(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "acquire" => FrameParams::Acquire(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "release" => FrameParams::Release(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "recover" => FrameParams::Recover(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "cancel" => FrameParams::Cancel(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "attach" => FrameParams::Attach(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             "read" => FrameParams::Read(
-                serde_json::from_str(raw)
+                studio_json::from_str(raw)
                     .map_err(|_| HostExecError::new(INVALID, "Invalid request"))?,
             ),
             _ => return Err(HostExecError::new(INVALID, "Unknown host method").into()),
@@ -1138,7 +1137,7 @@ impl HostService {
                 let inner = self.inner();
                 (inner.commands.len(), inner.active.len())
             };
-            return Ok(serde_json::to_string(&Response {
+            return Ok(studio_json::to_string(&Response {
                 id: &id,
                 result: json!({
                 "protocol": PROTOCOL, "buildId": self.build_id, "pid": std::process::id(),
@@ -1162,7 +1161,7 @@ impl HostService {
                 "busy",
             )?;
             self.inner().retiring = true;
-            return Ok(serde_json::to_string(&Response {
+            return Ok(studio_json::to_string(&Response {
                 id: &id,
                 result: json!({
                 "state": "retiring", "buildId": self.build_id, "pid": std::process::id()}),
@@ -1172,7 +1171,7 @@ impl HostService {
             self.inner().reading += 1;
             let result = self.dispatch_frame(&params).await;
             self.inner().reading -= 1;
-            return Ok(serde_json::to_string(&Response {
+            return Ok(studio_json::to_string(&Response {
                 id: &id,
                 result: result?,
             })?);
@@ -1219,7 +1218,7 @@ impl HostService {
                     "The request has no proven result; inspect its operation",
                 )
             })?;
-            serde_json::from_str::<&RawValue>(&response)?;
+            studio_json::from_str::<studio_json::RawJson<'_>>(&response)?;
             return Ok(response);
         }
         let (sender, mut receiver) = tokio::sync::watch::channel(None);
@@ -1228,15 +1227,15 @@ impl HostService {
         let task_id = id.clone();
         tokio::spawn(async move {
             let result = match service.dispatch_frame(&params).await {
-                Ok(value) => serde_json::to_string(&Response {
+                Ok(value) => studio_json::to_string(&Response {
                     id: &task_id,
                     result: value,
                 }),
-                Err(Failure::Refused(error)) => serde_json::to_string(&ErrorResponse {
+                Err(Failure::Refused(error)) => studio_json::to_string(&ErrorResponse {
                     id: &task_id,
                     error: &error,
                 }),
-                Err(Failure::Unexpected(message)) => serde_json::to_string(&ErrorResponse {
+                Err(Failure::Unexpected(message)) => studio_json::to_string(&ErrorResponse {
                     id: &task_id,
                     error: &HostExecError::new("outcome_unknown", truncate(&message)),
                 }),

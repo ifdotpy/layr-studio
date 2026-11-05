@@ -1,7 +1,7 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
-use serde_json::value::RawValue;
 use std::collections::BTreeMap;
+use studio_json::OwnedRawJson as RawValue;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut query = tx.prepare("SELECT id,record FROM runtime_agents WHERE json_valid(record)")?;
@@ -11,43 +11,43 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut changed = false;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: BTreeMap<String, Box<RawValue>> = serde_json::from_str(&raw)?;
+        let mut record: BTreeMap<String, RawValue> = studio_json::from_str(&raw)?;
         let old_max = record.remove("maxAgents");
         let old_explicit = record.remove("maxAgentsExplicit");
         if old_max.is_none()
             && old_explicit.is_none()
             && record.get("capacity").is_some_and(|value| {
-                serde_json::from_str::<crate::AgentCapacity>(value.get()).is_ok()
+                studio_json::from_str::<crate::AgentCapacity>(value.as_str()).is_ok()
             })
         {
             continue;
         }
         let max = old_max.as_ref().and_then(|raw| {
-            serde_json::from_str::<studio_runtime_schema::AgentCounter>(raw.get()).ok()
+            studio_json::from_str::<studio_runtime_schema::AgentCounter>(raw.as_str()).ok()
         });
         let explicit = old_explicit
             .as_ref()
-            .and_then(|raw| serde_json::from_str::<bool>(raw.get()).ok())
+            .and_then(|raw| studio_json::from_str::<bool>(raw.as_str()).ok())
             .unwrap_or_else(|| {
                 old_explicit.is_none()
                     && old_max
                         .as_ref()
-                        .and_then(|raw| serde_json::from_str::<i64>(raw.get()).ok())
+                        .and_then(|raw| studio_json::from_str::<i64>(raw.as_str()).ok())
                         .unwrap_or(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS)
                         != studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
             });
         let kind = if explicit { "explicit" } else { "automatic" };
         let limit = max.map_or(
-            serde_json::json!(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS),
-            |value| serde_json::json!(value),
+            studio_json::json!(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS),
+            |value| studio_json::json!(value),
         );
         record.insert(
             "capacity".into(),
-            RawValue::from_string(serde_json::json!({"kind":kind,"max":limit}).to_string())?,
+            RawValue::from_string(studio_json::json!({"kind":kind,"max":limit}).to_string())?,
         );
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![studio_json::to_string(&record)?, id],
         )?;
         changed = true;
     }
@@ -77,7 +77,7 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap();
-            let capacity: crate::AgentCapacity = serde_json::from_str(&raw).unwrap();
+            let capacity: crate::AgentCapacity = studio_json::from_str(&raw).unwrap();
             assert_eq!(capacity, crate::AgentCapacity::default());
         }
     }
@@ -138,10 +138,10 @@ mod tests {
                     r.get(0)
                 })
                 .unwrap();
-            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let value: studio_json::Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(
                 value["capacity"],
-                serde_json::json!({"kind":kind,"max":max}),
+                studio_json::json!({"kind":kind,"max":max}),
                 "{id}"
             );
             assert!(value.get("maxAgents").is_none() && value.get("maxAgentsExplicit").is_none());
@@ -196,10 +196,10 @@ mod tests {
                     r.get(0)
                 })
                 .unwrap();
-            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let value: studio_json::Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(
                 value["capacity"],
-                serde_json::json!({"kind":"explicit","max":64}),
+                studio_json::json!({"kind":"explicit","max":64}),
                 "{id}"
             );
         }

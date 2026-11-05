@@ -4,8 +4,8 @@ use crate::event_write::{self, EventWriteError};
 use crate::event_write::{CallerAdmission, RequestKey};
 use crate::monitor_policy::MonitorError;
 use crate::monitor_runtime::{MonitorAdmission, WorkspaceAdmission};
-use serde_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::RequestIdentity;
 use studio_runtime_store::WorkItemRecord;
 use studio_runtime_store::{AgentRecord, AgentRepository, Transaction, WorkItemsRepository};
@@ -472,7 +472,7 @@ mod tests {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok::<_, studio_runtime_store::StoreError>(
                     rows.into_iter()
-                        .map(|r| serde_json::from_str(&r).expect("event JSON parses"))
+                        .map(|r| studio_json::from_str(&r).expect("event JSON parses"))
                         .collect(),
                 )
             })

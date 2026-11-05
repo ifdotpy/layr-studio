@@ -68,7 +68,7 @@ fn capacity_max_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"type":"integer", "minimum":0, "maximum":crate::shared_values::MAX_SAFE_INTEGER})
 }
 
-pub(crate) fn capacity_schema() -> serde_json::Value {
+pub(crate) fn capacity_schema() -> studio_json::Value {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();

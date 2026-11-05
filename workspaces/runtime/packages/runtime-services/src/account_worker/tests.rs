@@ -1302,7 +1302,7 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
         json_extract_safe,
         "held owner remains safe for SQL consumers"
     );
-    let projected: Value = serde_json::from_str(&projected).expect("held agent projection JSON");
+    let projected: Value = studio_json::from_str(&projected).expect("held agent projection JSON");
     assert_eq!(projected["value"]["status"], "failed");
     assert_eq!(projected["value"]["autoWake"], false);
     assert_eq!(projected["value"]["rootId"], bad_id);
@@ -1316,7 +1316,7 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
         stored_record, original_record,
         "held row bytes remain untouched"
     );
-    let held: Value = serde_json::from_str(&stored_record).expect("original JSON row");
+    let held: Value = studio_json::from_str(&stored_record).expect("original JSON row");
     let message = diagnostic;
     assert!(
         message.contains(&format!("runtime_agents/{bad_id}")),
@@ -2134,7 +2134,7 @@ impl crate::provider_callbacks::tools::StatusWatchPort for GatedShutdownStatus {
         Box::pin(async move {
             Ok(crate::provider_callbacks::tools::RulesActionResult {
                 value: studio_runtime_schema::raw_json::RawJson(
-                    serde_json::value::to_raw_value(&Value::Null).expect("JSON"),
+                    studio_json::to_raw_value(&Value::Null).expect("JSON"),
                 ),
                 cancel_monitor_ids: Vec::new(),
             })
@@ -2221,7 +2221,7 @@ impl crate::provider_callbacks::tools::StatusWatchPort for SameAccountProviderSt
         Box::pin(async move {
             Ok(crate::provider_callbacks::tools::RulesActionResult {
                 value: studio_runtime_schema::raw_json::RawJson(
-                    serde_json::value::to_raw_value(&Value::Null).expect("JSON"),
+                    studio_json::to_raw_value(&Value::Null).expect("JSON"),
                 ),
                 cancel_monitor_ids: Vec::new(),
             })
@@ -2319,7 +2319,7 @@ async fn managed_callback_same_account_provider_request_is_written_without_block
     let tool_result_text = callback.value["result"]["contentItems"][0]["text"]
         .as_str()
         .expect("managed tool result text");
-    let tool_result: Value = serde_json::from_str(tool_result_text)
+    let tool_result: Value = studio_json::from_str(tool_result_text)
         .unwrap_or_else(|error| panic!("managed tool result JSON {tool_result_text:?}: {error}"));
     assert_eq!(tool_result["providerRequest"], "written");
     // The finalization time is wall-clock, not the session-relative journal clock.
@@ -2434,7 +2434,7 @@ async fn shutdown_drains_completed_managed_callback_and_writes_response() {
 
     let callback = peer.next_write().await;
     assert_eq!(callback.value["id"], "managed-callback-during-shutdown");
-    let result: Value = serde_json::from_str(
+    let result: Value = studio_json::from_str(
         callback.value["result"]["contentItems"][0]["text"]
             .as_str()
             .expect("managed tool result text"),
@@ -3515,7 +3515,7 @@ async fn committed_batch_replay_after_mid_batch_ack_loss_is_exactly_once() {
             .run(move |store| async move {
                 store.transaction_with(move |tx| {
                     let saved = studio_runtime_store::account_state::streams(tx,"default")?
-                        .map(|raw|serde_json::from_str::<Value>(&raw)).transpose().map_err(StoreError::from)?
+                        .map(|raw|studio_json::from_str::<Value>(&raw)).transpose().map_err(StoreError::from)?
                         .unwrap_or_else(||json!({"metadata":{"entries":[],"closed":[]}}));
                     let metadata = &saved["metadata"];
                     Ok(json!({
@@ -3652,7 +3652,7 @@ fn current_stream_base_count(tx: &studio_runtime_store::Connection) -> Result<us
     let Some(raw) = studio_runtime_store::account_state::streams(tx, "default")? else {
         return Ok(0);
     };
-    let saved: Value = serde_json::from_str(&raw).map_err(StoreError::from)?;
+    let saved: Value = studio_json::from_str(&raw).map_err(StoreError::from)?;
     Ok(saved["metadata"]["entries"]
         .as_array()
         .expect("current stream entries")
@@ -3789,7 +3789,7 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
             let raw =
                 studio_runtime_store::account_state::streams(&store.test_reader()?, "default")?
                     .expect("current stream owner");
-            let saved: Value = serde_json::from_str(&raw).map_err(StoreError::from)?;
+            let saved: Value = studio_json::from_str(&raw).map_err(StoreError::from)?;
             Ok(saved["metadata"]["entries"]
                 .as_array()
                 .expect("stream entries")
@@ -5526,7 +5526,7 @@ async fn vm_claude_refresh_copies_rotation_to_active_guest_without_restart() {
                     file["data"].as_str().unwrap(),
                 )
                 .expect("credential fixture is base64");
-                serde_json::from_slice::<Value>(&bytes).expect("credential fixture is JSON")
+                studio_json::from_slice::<Value>(&bytes).expect("credential fixture is JSON")
             })
             .collect::<Vec<_>>();
         assert!(

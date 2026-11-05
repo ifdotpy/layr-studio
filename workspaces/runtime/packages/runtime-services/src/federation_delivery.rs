@@ -6,10 +6,10 @@ use crate::federation_messaging::{
 use crate::remote_transport::{self as transport, RemoteIdentity};
 use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use studio_json::{Value, json};
 use studio_runtime_schema::delivery::DeliveryMoment;
 use studio_runtime_store::federation_messaging::{
     FederationMessagingRepository as Repo, FederationTable as Table,
@@ -215,7 +215,7 @@ pub async fn pair_peer(
                     |row| row.get(0),
                 )
                 .optional()?;
-            raw.map(|raw| serde_json::from_str::<PairingPeer>(&raw))
+            raw.map(|raw| studio_json::from_str::<PairingPeer>(&raw))
                 .transpose()
                 .map_err(|_| {
                     StoreError::SchemaMismatch("invalid federation peer record".to_owned())
@@ -611,7 +611,7 @@ pub async fn send_message(
     key: &str,
     delivery: DeliveryMoment,
     now: f64,
-) -> Result<Box<serde_json::value::RawValue>> {
+) -> Result<studio_json::OwnedRawJson> {
     let identity = transport::load_federation_identity(&store).await?;
     let identity = Arc::new(identity);
     let sender = sender.to_owned();
@@ -634,7 +634,7 @@ pub async fn user_message(
     key: &str,
     delivery: DeliveryMoment,
     now: f64,
-) -> Result<Box<serde_json::value::RawValue>> {
+) -> Result<studio_json::OwnedRawJson> {
     let text = crate::event_write::python_strip(text);
     if text.is_empty() || text.chars().count() > core::MAX_MESSAGE || key.len() > 4096 {
         return Err(Error::Invalid("message"));
@@ -676,7 +676,7 @@ pub fn send_message_in_transaction(
     key: &str,
     delivery: DeliveryMoment,
     now: f64,
-) -> Result<Box<serde_json::value::RawValue>> {
+) -> Result<studio_json::OwnedRawJson> {
     let text = crate::event_write::python_strip(text);
     if text.is_empty() || text.chars().count() > core::MAX_MESSAGE || key.len() > 4096 {
         return Err(Error::Invalid("message"));
@@ -722,7 +722,7 @@ pub fn send_message_in_transaction(
     )? {
         CallerAdmission::Fresh(admitted) => admitted,
         CallerAdmission::Replay(saved) => {
-            return serde_json::value::to_raw_value(&saved)
+            return studio_json::to_raw_value(&saved)
                 .map_err(|error| StoreError::from(error).into());
         }
     };
@@ -780,7 +780,7 @@ pub fn send_message_in_transaction(
             error: None,
         },
     )]);
-    tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,?2,?3,?4,?5,?6)", params![message_id, room_id, sender, text, now, serde_json::to_string(&deliveries).map_err(StoreError::from)?]).map_err(StoreError::from)?;
+    tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,?2,?3,?4,?5,?6)", params![message_id, room_id, sender, text, now, studio_json::to_string(&deliveries).map_err(StoreError::from)?]).map_err(StoreError::from)?;
     let event = json!({"room":room_id,"message_id":message_id,"sender":sender,"sender_name":name,"text":text,"untrusted_remote":false,"authority":"room-data-only"});
     for member in room["localMembers"]
         .as_array()
@@ -820,13 +820,13 @@ pub fn send_message_in_transaction(
         status: studio_runtime_schema::delivery::MessageSendStatus::Queued,
     };
     crate::event_write::settle_request(tx, &admitted, Some(sender), &reply)?;
-    serde_json::value::to_raw_value(&reply).map_err(|error| StoreError::from(error).into())
+    studio_json::to_raw_value(&reply).map_err(|error| StoreError::from(error).into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::delivery_deadlines_by_peer;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::RuntimeStore;
 
     #[tokio::test]

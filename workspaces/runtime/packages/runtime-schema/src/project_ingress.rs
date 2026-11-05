@@ -162,16 +162,16 @@ mod tests {
 
     #[test]
     fn account_group_uses_shared_pattern() {
-        assert!(serde_json::from_str::<AccountGroup>(r#""team_1""#).is_ok());
-        assert!(serde_json::from_str::<AccountGroup>(r#""Team""#).is_err());
-        assert!(serde_json::from_str::<AccountGroup>(r#""""#).is_err());
+        assert!(studio_json::from_str::<AccountGroup>(r#""team_1""#).is_ok());
+        assert!(studio_json::from_str::<AccountGroup>(r#""Team""#).is_err());
+        assert!(studio_json::from_str::<AccountGroup>(r#""""#).is_err());
         assert!(AccountGroup::is_valid("a-1"));
     }
 
     #[test]
     fn project_groups_obey_ingress_limit() {
         let groups = vec!["group"; crate::shared_values::ACCOUNT_GROUPS_MAX + 1];
-        let body = serde_json::json!({"path":"/project", "account_groups":groups});
+        let body = studio_json::json!({"path":"/project", "account_groups":groups});
         assert!(ProjectWrite::deserialize(body).is_err());
     }
 }

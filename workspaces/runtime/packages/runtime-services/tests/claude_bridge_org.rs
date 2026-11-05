@@ -1,4 +1,4 @@
-use serde_json::json;
+use studio_json::json;
 
 #[test]
 fn bridge_launch_pins_organization_and_refuses_another_organization() {
@@ -8,7 +8,7 @@ fn bridge_launch_pins_organization_and_refuses_another_organization() {
     };
     let metadata = |org| {
         auth_metadata_from_output(
-            &serde_json::to_vec(&json!({
+            &studio_json::to_vec(&json!({
                 "loggedIn":true,"authMethod":"claude.ai","email":"fixture@example.test",
                 "orgId":org,"accountUuid":"account-a","subscriptionType":"max"
             }))

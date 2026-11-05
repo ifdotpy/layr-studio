@@ -3,7 +3,7 @@
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use thiserror::Error;
 
 pub const TAIL_CHARS: usize = studio_runtime_schema::shared_values::MONITOR_OUTPUT_TAIL_CODEPOINTS;
@@ -272,7 +272,7 @@ impl MonitorSnapshot {
             return Err(invalid("agent"));
         }
         crate::monitor_matches::validate(&typed).map_err(invalid)?;
-        let actor: Actor = serde_json::from_value(actor).map_err(|_| invalid("agent"))?;
+        let actor: Actor = studio_json::from_value(actor).map_err(|_| invalid("agent"))?;
         if typed.agent != actor.id {
             return Err(invalid("agent/id"));
         }
@@ -764,7 +764,7 @@ pub fn begin_input(
     now: f64,
 ) -> Result<Decision, MonitorError> {
     snapshot.check_operation(operation)?;
-    let mut value = serde_json::to_value(input).map_err(studio_runtime_store::StoreError::from)?;
+    let mut value = studio_json::to_value(input).map_err(studio_runtime_store::StoreError::from)?;
     value["id"] = json!(snapshot.id());
     if input.rows.is_none() {
         remove(&mut value, "rows");
@@ -1291,17 +1291,17 @@ mod ownership_bench {
     #[test]
     #[ignore = "manual Callgrind fixture"]
     fn snapshot_callgrind_50() {
-        let actor = studio_runtime_store::AgentRecord::from_value(serde_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"running","autoWake":true})).expect("agent").value();
+        let actor = studio_runtime_store::AgentRecord::from_value(studio_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"running","autoWake":true})).expect("agent").value();
         let excerpts = (0..16)
             .map(|i| {
                 (
                     format!("pattern-{i}"),
-                    serde_json::json!({"excerpt":"x".repeat(100),"logOffset":0}),
+                    studio_json::json!({"excerpt":"x".repeat(100),"logOffset":0}),
                 )
             })
-            .collect::<serde_json::Map<_, _>>();
+            .collect::<studio_json::Map<_, _>>();
         let fixture = super::complete_test_monitor(
-            serde_json::json!({"bytes":1,"outputMatchExcerpts":excerpts}),
+            studio_json::json!({"bytes":1,"outputMatchExcerpts":excerpts}),
         );
         let borrowed = std::env::var_os("STUDIO_BENCH_BORROWED_MONITOR").is_some();
         for _ in 0..100 {

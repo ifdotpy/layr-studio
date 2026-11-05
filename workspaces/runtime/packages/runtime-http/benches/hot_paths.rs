@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use axum::response::sse::Event;
 use gungraun::{Dhat, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_http::routes::sse_event;
 
 fn payload() -> Value {

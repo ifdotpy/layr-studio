@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::{
     Action, Frame, InitializationStatus, Lifecycle, MAX_FRAME_BYTES, Method, ProviderKind,
     RequestFrame, RequestId, RequestOutcome, RequestTicket, ResponseBody, SessionState,
@@ -42,7 +42,7 @@ fn outgoing(actions: &[Action]) -> Vec<Value> {
         .iter()
         .filter_map(|action| match action {
             Action::Write(frame) => {
-                serde_json::from_slice(&encode_line(frame).expect("valid write")).ok()
+                studio_json::from_slice(&encode_line(frame).expect("valid write")).ok()
             }
             Action::Resolve { .. }
             | Action::Dispatch(_)
@@ -373,7 +373,7 @@ fn claude_cancel_removes_pending_and_orphan_and_duplicate_responses_are_ignored(
     let release = session.cancel(&active).expect("scripted test operation");
     assert!(
         outgoing(&release).iter().any(|frame| frame["id"]
-            == serde_json::to_value(&queued.id).expect("scripted test operation"))
+            == studio_json::to_value(&queued.id).expect("scripted test operation"))
     );
     let orphan = Frame::Response {
         id: active.id,
@@ -719,7 +719,7 @@ fn provider_frames_are_passed_to_dispatch_in_order_without_method_filtering() {
         json!({"method":"future/notice","params":{"opaque":true}}),
     ];
     for value in messages {
-        let line = serde_json::to_vec(&value).expect("scripted test operation");
+        let line = studio_json::to_vec(&value).expect("scripted test operation");
         let studio_runtime_providers::DecodedJournalPayload::Frame(frame) =
             studio_runtime_providers::decode_journal_entry(1, 1, line).payload
         else {
@@ -746,7 +746,7 @@ fn all_recorded_replay_fixture_frames_parse_through_the_session() {
             continue;
         }
         let value: Value =
-            serde_json::from_slice(&std::fs::read(&path).expect("fixture")).expect("JSON");
+            studio_json::from_slice(&std::fs::read(&path).expect("fixture")).expect("JSON");
         // RPC replies have a dedicated session witness below.
         if path.file_name().expect("name") == "codex-rpc-replies.json" {
             continue;
@@ -764,7 +764,7 @@ fn all_recorded_replay_fixture_frames_parse_through_the_session() {
             path.display()
         );
         for expected_frame in expected {
-            let mut bytes = serde_json::to_vec(&expected_frame).expect("scripted test operation");
+            let mut bytes = studio_json::to_vec(&expected_frame).expect("scripted test operation");
             bytes.push(b'\n');
             let studio_runtime_providers::DecodedJournalPayload::Frame(frame) =
                 studio_runtime_providers::decode_journal_entry(1, 1, bytes).payload
@@ -772,7 +772,7 @@ fn all_recorded_replay_fixture_frames_parse_through_the_session() {
                 panic!("fixture frame must decode");
             };
             assert_eq!(
-                serde_json::from_slice::<Value>(
+                studio_json::from_slice::<Value>(
                     &studio_runtime_providers::encode_line(&frame).expect("frame encodes")
                 )
                 .expect("encoded frame is JSON"),
@@ -792,7 +792,7 @@ fn all_recorded_replay_fixture_frames_parse_through_the_session() {
 
 #[test]
 fn recorded_rpc_reply_templates_match_session_request_ids_and_methods() {
-    let fixture: Value = serde_json::from_str(include_str!(
+    let fixture: Value = studio_json::from_str(include_str!(
         "fixtures/provider-replay/codex-rpc-replies.json"
     ))
     .expect("scripted test operation");
@@ -815,7 +815,7 @@ fn recorded_rpc_reply_templates_match_session_request_ids_and_methods() {
 
         let mut response = reply["message"].clone();
         response["id"] = json!(ticket.id);
-        let line = serde_json::to_vec(&response).expect("scripted test operation");
+        let line = studio_json::to_vec(&response).expect("scripted test operation");
         let studio_runtime_providers::DecodedJournalPayload::Frame(frame) =
             studio_runtime_providers::decode_journal_entry(1, 1, line).payload
         else {
@@ -843,7 +843,7 @@ fn missing_and_orphan_reply_assertions_are_exercised_by_session_state() {
             Method::TurnStart,
         ),
     ] {
-        let transcript: Value = serde_json::from_str(fixture).expect("scripted test operation");
+        let transcript: Value = studio_json::from_str(fixture).expect("scripted test operation");
         let expected = &transcript["expectedMissingReplies"][0];
         let mut session = state(false);
         for method in preceding {
@@ -856,7 +856,7 @@ fn missing_and_orphan_reply_assertions_are_exercised_by_session_state() {
             .expect("scripted test operation");
         assert_eq!(
             ticket.id,
-            serde_json::from_value(expected["id"].clone()).expect("fixture id")
+            studio_json::from_value(expected["id"].clone()).expect("fixture id")
         );
         assert_eq!(expected["method"], missing.as_str());
         assert_eq!(outgoing(&actions)[0]["id"], expected["id"]);
@@ -870,7 +870,7 @@ fn missing_and_orphan_reply_assertions_are_exercised_by_session_state() {
             .and_then(|a| a.first())
         {
             let orphan_frame = Frame::Response {
-                id: serde_json::from_value(orphan["id"].clone()).expect("fixture orphan id"),
+                id: studio_json::from_value(orphan["id"].clone()).expect("fixture orphan id"),
                 body: ResponseBody::Result(orphan["result"].clone()),
                 fields: Default::default(),
             };
@@ -989,7 +989,7 @@ fn rejecting_unsent_retires_expired_queue_and_releases_next_serialized_request()
         assert_eq!(writes.len(), 1);
         assert_eq!(
             writes[0]["id"],
-            serde_json::to_value(&third.id).expect("id")
+            studio_json::to_value(&third.id).expect("id")
         );
         assert!(
             session

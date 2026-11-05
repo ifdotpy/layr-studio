@@ -10,16 +10,16 @@ mod protocol_v2;
 #[allow(clippy::unwrap_used)]
 mod admission {
     use super::process_support::*;
-    use serde_json::{Value, json};
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
+    use studio_json::{Value, json};
     use studio_runtime_process::{CursorRequest, EventCursor, HealthRequest, SupervisorHandle};
 
     fn exchange(socket: &mut BufReader<UnixStream>, request: Value) -> Value {
         writeln!(socket.get_mut(), "{request}").unwrap();
         let mut response = String::new();
         socket.read_line(&mut response).unwrap();
-        serde_json::from_str(&response).unwrap()
+        studio_json::from_str(&response).unwrap()
     }
 
     fn connect(state: &DisposableState) -> BufReader<UnixStream> {

@@ -170,7 +170,7 @@ impl OperationReceipt {
         receipt
     }
     fn bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self).map_err(|e| NativeLayrError::Refused(e.to_string()))
+        studio_json::to_vec(self).map_err(|e| NativeLayrError::Refused(e.to_string()))
     }
 }
 
@@ -368,7 +368,7 @@ fn operation_with_recovery(
     if path.exists() {
         // Parse the complete JSON value first: duplicates retain the last key,
         // and ignored data still observes JSON number and nesting limits.
-        let value: Value = serde_json::from_slice(&fs::read(&path)?)
+        let value: Value = studio_json::from_slice(&fs::read(&path)?)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         let receipt: OperationReceipt = if value.is_object() {
             <OperationReceipt as serde::Deserialize>::deserialize(value)
@@ -520,7 +520,7 @@ fn settle_pending_save(
     let mut oldest = u64::MAX;
     let mut saved = false;
     for line in log.lines().filter(|line| !line.trim().is_empty()) {
-        let record: Value = serde_json::from_str(line)
+        let record: Value = studio_json::from_str(line)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         let time = record["time"].as_u64().ok_or_else(unknown)?;
         records += 1;
@@ -585,7 +585,7 @@ fn admit_git_policy_in_store(
 ) -> Result<()> {
     let ready_path = settings::metadata(state_dir, root).join(format!("{project}.json"));
     if without_git && ready_path.exists() {
-        let receipt: Value = serde_json::from_slice(&fs::read(&ready_path)?)
+        let receipt: Value = studio_json::from_slice(&fs::read(&ready_path)?)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         if receipt["withoutGit"] != true {
             return Err(NativeLayrError::Refused("This project was already imported with Git metadata. The --without-git option cannot change an existing import.".into()));
@@ -816,7 +816,7 @@ pub(super) fn prepare_files_reporting(
             },
         )?;
     }
-    let imported: Value = serde_json::from_slice(&fs::read(&ready_path)?)
+    let imported: Value = studio_json::from_slice(&fs::read(&ready_path)?)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     let (start, cache_warning) = if imported["mapped"] == true {
         super::mapping::cached_main_start(state_dir, &main)?
@@ -1057,7 +1057,7 @@ fn working_state(state_dir: &Path, cwd: &Path) -> Result<String> {
 /// Repairs each folder overlay at a quiet point: a folder that a build tool made again is a cache.
 fn repair_caches(state_dir: &Path, cwd: &Path) -> Result<()> {
     let overlays: Vec<Value> =
-        serde_json::from_str(&run(state_dir, cwd, &["overlay", "list", "--json"])?)
+        studio_json::from_str(&run(state_dir, cwd, &["overlay", "list", "--json"])?)
             .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     for overlay in overlays.iter().filter(|overlay| needs_repair(overlay)) {
         run(
@@ -1084,7 +1084,7 @@ pub(super) fn prepare_files(state_dir: &Path, record: &Value) -> Result<Value> {
 #[cfg(test)]
 mod repair_tests {
     use super::needs_repair;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn only_a_plain_folder_overlay_is_repaired() {
@@ -1229,7 +1229,7 @@ pub fn merge(
         Some(&|| {
             let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
             let status: Value =
-                serde_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
+                studio_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
                     .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
             if !["staged", "unstaged", "untracked", "conflicts"]
                 .iter()
@@ -1548,10 +1548,10 @@ esac
     fn native_layr_receipt_encoding_preserves_opaque_json_values() {
         for raw in [
             "null",
-            r#"{"$serde_json::private::Number":"1"}"#,
+            &format!(r#"{{"{}":"1"}}"#, studio_json::NUMBER_TOKEN),
             r#"{"nested":[1,null,{"x":true}]}"#,
         ] {
-            let value: Value = serde_json::from_str(raw).unwrap();
+            let value: Value = studio_json::from_str(raw).unwrap();
             // A fixed start time keeps the byte-exact encoding comparable.
             let started = |mut receipt: OperationReceipt| {
                 receipt.started_at = Some(7);
@@ -1659,13 +1659,14 @@ esac
             replay("duplicate", &intent).unwrap(),
             json!({"opaque":[1,null]})
         );
-        let special: Value = serde_json::from_str(
-            r#"{"kind":"inspect","data":{"$serde_json::private::Number":"1"}}"#,
-        )
+        let special: Value = studio_json::from_str(&format!(
+            r#"{{"kind":"inspect","data":{{"{}":"1"}}}}"#,
+            studio_json::NUMBER_TOKEN
+        ))
         .unwrap();
-        write("number_key", br#"{"intent":{"kind":"inspect","data":{"$serde_json::private::Number":"1"}},"status":"completed","result":{"$serde_json::private::Number":"1"}}"#);
+        write("number_key", format!(r#"{{"intent":{{"kind":"inspect","data":{{"{0}":"1"}}}},"status":"completed","result":{{"{0}":"1"}}}}"#, studio_json::NUMBER_TOKEN).as_bytes());
         let expected: Value =
-            serde_json::from_str(r#"{"$serde_json::private::Number":"1"}"#).unwrap();
+            studio_json::from_str(&format!(r#"{{"{}":"1"}}"#, studio_json::NUMBER_TOKEN)).unwrap();
         assert_eq!(replay("number_key", &special).unwrap(), expected);
         for (id, raw) in [
             (
@@ -1984,7 +1985,8 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 "{}.json",
                 studio_runtime_store::sha256_hex(b"line:worker")
             ));
-        let receipt: Value = serde_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        let receipt: Value =
+            studio_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
         assert_eq!(receipt["intent"]["start"], "requested");
         let commands = std::fs::read_to_string(root.join("commands")).unwrap();
         assert!(commands.contains("line new worker requested"));
@@ -2166,7 +2168,7 @@ mod progress_tests {
         use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
         use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, StoreError};
         let (_dir, store) = crate::entity_publication::test_support::store().await;
-        let expected = serde_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"a","rootId":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
+        let expected = studio_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"a","rootId":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
         let inserted = expected.clone();
         store
             .transaction_with(move |tx| -> Result<(), StoreError> {
@@ -2224,12 +2226,12 @@ mod progress_tests {
     }
     #[test]
     fn progress_guard_rejects_a_changed_workspace_or_inactive_agent() {
-        let expected = serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
+        let expected = studio_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
         assert!(super::progress_guard(&expected, &expected));
         for changed in [
-            serde_json::json!({"id":"a","epoch":3,"status":"starting","cwd":"/one","autoWake":true}),
-            serde_json::json!({"id":"a","epoch":2,"status":"running","cwd":"/one","autoWake":true}),
-            serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/other","autoWake":true}),
+            studio_json::json!({"id":"a","epoch":3,"status":"starting","cwd":"/one","autoWake":true}),
+            studio_json::json!({"id":"a","epoch":2,"status":"running","cwd":"/one","autoWake":true}),
+            studio_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/other","autoWake":true}),
         ] {
             assert!(!super::progress_guard(&changed, &expected));
         }

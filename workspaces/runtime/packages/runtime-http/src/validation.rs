@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::body::Bytes;
 use jsonschema::{Draft, Registry as SchemaRegistry, Validator};
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::{OPENAPI_URI, shared_values::MAX_SAFE_INTEGER};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -307,7 +307,7 @@ impl Registry {
                 })?;
             stored_schemas.insert(name.to_owned(), validator);
         }
-        let draft_payload: Value = serde_json::from_slice(include_bytes!(
+        let draft_payload: Value = studio_json::from_slice(include_bytes!(
             "../draft-payload.schema.json"
         ))
         .map_err(|error| CompileError {
@@ -571,7 +571,7 @@ impl Registry {
 
     #[cfg(test)]
     pub(crate) fn validated_stored(&self, schema: &str, raw: &str) -> Option<Value> {
-        let value = serde_json::from_str(raw).ok()?;
+        let value = studio_json::from_str(raw).ok()?;
         self.validate_stored(schema, &value).then_some(value)
     }
 }
@@ -1109,12 +1109,12 @@ fn validate_part(
             .and_then(|bytes| {
                 #[cfg(test)]
                 OPAQUE_BODY_SCAN_COUNT.with(|count| count.set(count.get() + 1));
-                serde_json::from_slice::<&serde_json::value::RawValue>(bytes).ok()
+                studio_json::from_slice::<studio_json::RawJson<'_>>(bytes).ok()
             })
             .and_then(|raw| {
                 opaque_integer_precision_error(
                     &part.schema,
-                    raw,
+                    &raw,
                     &part.definitions,
                     &mut Vec::new(),
                     &mut BTreeSet::new(),
@@ -1143,7 +1143,7 @@ pub(crate) fn opaque_body_scan_count() -> usize {
 
 fn opaque_integer_precision_error(
     schema: &Value,
-    raw: &serde_json::value::RawValue,
+    raw: &studio_json::RawJson<'_>,
     definitions: &Map<String, Value>,
     location: &mut Vec<Value>,
     resolving: &mut BTreeSet<String>,
@@ -1163,7 +1163,7 @@ fn opaque_integer_precision_error(
     }
 
     if let Ok(object) =
-        serde_json::from_str::<BTreeMap<String, &serde_json::value::RawValue>>(raw.get())
+        studio_json::from_str::<BTreeMap<String, studio_json::RawJson<'_>>>(raw.as_str())
     {
         let properties = schema.get("properties").and_then(Value::as_object);
         if let Some(properties) = properties {
@@ -1208,7 +1208,7 @@ fn opaque_integer_precision_error(
     }
     if let (Some(items), Ok(array)) = (
         schema.get("items"),
-        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.get()),
+        studio_json::from_str::<Vec<studio_json::RawJson<'_>>>(raw.as_str()),
     ) {
         for (index, child) in array.iter().enumerate() {
             location.push(Value::String(index.to_string()));
@@ -1235,17 +1235,16 @@ fn opaque_integer_precision_error(
 }
 
 fn unsafe_integer_location(
-    raw: &serde_json::value::RawValue,
+    raw: &studio_json::RawJson<'_>,
     location: &mut Vec<Value>,
 ) -> Option<Vec<Value>> {
-    let raw_text = raw.get();
+    let raw_text = raw.as_str();
     if raw_text.starts_with('{') {
         let values =
-            serde_json::from_str::<BTreeMap<String, &serde_json::value::RawValue>>(raw_text)
-                .ok()?;
+            studio_json::from_str::<BTreeMap<String, studio_json::RawJson<'_>>>(raw_text).ok()?;
         for (name, child) in values {
             location.push(Value::String(name));
-            let result = unsafe_integer_location(child, location);
+            let result = unsafe_integer_location(&child, location);
             location.pop();
             if result.is_some() {
                 return result;
@@ -1253,7 +1252,7 @@ fn unsafe_integer_location(
         }
         None
     } else if raw_text.starts_with('[') {
-        let values = serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw_text).ok()?;
+        let values = studio_json::from_str::<Vec<studio_json::RawJson<'_>>>(raw_text).ok()?;
         for (index, child) in values.iter().enumerate() {
             location.push(Value::String(index.to_string()));
             let result = unsafe_integer_location(child, location);
@@ -1407,12 +1406,12 @@ fn convert_parameter_branch(
             }
             let number = text
                 .parse::<i64>()
-                .map(serde_json::Number::from)
-                .or_else(|_| text.parse::<u64>().map(serde_json::Number::from));
+                .map(studio_json::Number::from)
+                .or_else(|_| text.parse::<u64>().map(studio_json::Number::from));
             number.map(|number| *value = Value::Number(number)).is_ok()
         }
         Some("number") => text
-            .parse::<serde_json::Number>()
+            .parse::<studio_json::Number>()
             .map(|number| *value = Value::Number(number))
             .is_ok(),
         Some("boolean") => match text.as_bytes() {
@@ -1474,7 +1473,7 @@ mod tests {
         compile_part, schema_registry,
     };
     use axum::http::{HeaderMap, HeaderValue};
-    use serde_json::{Map, Value, json};
+    use studio_json::{Map, Value, json};
 
     #[test]
     fn terminal_bodies_use_only_typed_ingress() {
@@ -1498,7 +1497,7 @@ mod tests {
     #[test]
     fn named_schema_draft_push_matches_shared_compatibility_fixtures() {
         let registry = Registry::compile(&[]).expect("HTTP schemas compile");
-        let cases: Vec<Value> = serde_json::from_str(include_str!(
+        let cases: Vec<Value> = studio_json::from_str(include_str!(
             "../../../../client/contracts/draft-compatibility.json"
         ))
         .expect("shared draft fixtures are JSON");
@@ -1687,7 +1686,11 @@ mod tests {
         .expect("request schemas compile");
 
         let magic_key: Value = crate::json_body::parse_bounded(
-            br#"{"prompt":"x","concurrency":{"$serde_json::private::Number":"1"}}"#,
+            format!(
+                r#"{{"prompt":"x","concurrency":{{"{}":"1"}}}}"#,
+                studio_json::NUMBER_TOKEN
+            )
+            .as_bytes(),
             1024,
         )
         .expect("magic key is valid JSON");
@@ -1706,7 +1709,7 @@ mod tests {
         );
 
         let object: Value = crate::json_body::parse_bounded(
-            br#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{"answers":{"$serde_json::private::Number":"1"}}}"#,
+            format!(r#"{{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{{"answers":{{"{}":"1"}}}}}}"#, studio_json::NUMBER_TOKEN).as_bytes(),
             1024,
         )
         .expect("magic key object parses");
@@ -1723,13 +1726,10 @@ mod tests {
                 .is_ok(),
             "the same key remains ordinary object data where objects are allowed"
         );
-        assert_eq!(
-            object["body"]["answers"]["$serde_json::private::Number"],
-            "1"
-        );
+        assert_eq!(object["body"]["answers"][studio_json::NUMBER_TOKEN], "1");
 
         let almost_integer: Value =
-            serde_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)
+            studio_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)
                 .expect("valid JSON number");
         assert!(
             registry
@@ -2056,7 +2056,7 @@ mod tests {
                     ..RawRequest::default()
                 },
             )
-            .expect_err("an integer outside the serde_json exact range is rejected");
+            .expect_err("an integer outside the studio_json exact range is rejected");
         assert_eq!(error.location, vec![json!("query"), json!("after")]);
     }
 
@@ -2099,13 +2099,13 @@ mod tests {
             let raw_body = format!(
                 "{{\"requestId\":\"r\",\"action\":\"event\",\"operation\":[],\"payload\":{{\"key\":{integer}}}}}"
             );
-            let raw: &serde_json::value::RawValue =
-                serde_json::from_slice(raw_body.as_bytes()).expect("raw body parses");
-            let top: BTreeMap<String, &serde_json::value::RawValue> =
-                serde_json::from_str(raw.get()).expect("raw object parses");
-            let payload: BTreeMap<String, &serde_json::value::RawValue> =
-                serde_json::from_str(top["payload"].get()).expect("raw payload parses");
-            assert!(super::unsafe_integer_literal(payload["key"].get()));
+            let raw: studio_json::RawJson<'_> =
+                studio_json::from_slice(raw_body.as_bytes()).expect("raw body parses");
+            let top: BTreeMap<String, studio_json::RawJson<'_>> =
+                studio_json::from_str(raw.as_str()).expect("raw object parses");
+            let payload: BTreeMap<String, studio_json::RawJson<'_>> =
+                studio_json::from_str(top["payload"].as_str()).expect("raw payload parses");
+            assert!(super::unsafe_integer_literal(payload["key"].as_str()));
             let operation = registry
                 .operations
                 .get("POST /api/servers/orchestration")
@@ -2114,14 +2114,14 @@ mod tests {
             assert_eq!(
                 super::opaque_integer_precision_error(
                     &part.schema,
-                    raw,
+                    &raw,
                     &part.definitions,
                     &mut Vec::new(),
                     &mut BTreeSet::new(),
                 ),
                 Some(vec![json!("payload"), json!("key")]),
             );
-            let body: Value = serde_json::from_str(&raw_body).expect("JSON integer parses");
+            let body: Value = studio_json::from_str(&raw_body).expect("JSON integer parses");
             let error = registry
                 .validate_route(
                     "POST",
@@ -2143,7 +2143,7 @@ mod tests {
         let safe_raw_body = format!(
             r#"{{"requestId":"r","action":"event","operation":[],"payload":{{"key":{MAX_SAFE_INTEGER}}}}}"#
         );
-        let safe_body = serde_json::from_str(&safe_raw_body).expect("safe integer parses");
+        let safe_body = studio_json::from_str(&safe_raw_body).expect("safe integer parses");
         assert!(
             registry
                 .validate_route(
@@ -2159,7 +2159,7 @@ mod tests {
         );
         let large_fraction = r#"{"requestId":"r","action":"event","operation":[],"payload":{"key":18446744073709551616.5}}"#;
         let fractional_body =
-            serde_json::from_str(large_fraction).expect("large fractional JSON number parses");
+            studio_json::from_str(large_fraction).expect("large fractional JSON number parses");
         assert!(
             registry
                 .validate_route(
@@ -2198,7 +2198,7 @@ mod tests {
         let compiled = compile_for_test(&document, "/fixture", &operation)
             .expect("fixture request schema compiles");
         let raw_body = r#"{"opaque":1,"count":9007199254740992}"#;
-        let body: Value = serde_json::from_str(raw_body).expect("JSON body parses");
+        let body: Value = studio_json::from_str(raw_body).expect("JSON body parses");
         assert!(
             super::validate_part(
                 compiled.body.as_ref().expect("body schema exists"),

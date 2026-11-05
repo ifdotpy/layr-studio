@@ -5,9 +5,9 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Instant;
+use studio_json::Value;
 use studio_runtime_services::analytics::{self, AnalyticsOptions};
 use studio_runtime_services::costs::{self, CostsError};
 
@@ -128,7 +128,7 @@ async fn analytics_read(
         move || {
             let value = analytics::read(&store, &options)?;
             if export {
-                Ok(ReadBody::Export(serde_json::to_vec(&value)?))
+                Ok(ReadBody::Export(studio_json::to_vec(&value)?))
             } else {
                 Ok(ReadBody::Json(value))
             }
@@ -283,11 +283,11 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, extract::ConnectInfo, http::Request};
-    use serde_json::{Value, json};
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
     };
+    use studio_json::{Value, json};
     use studio_runtime_store::{
         RuntimeStore, StoreError,
         analytics_capture::{AnalyticsCaptureRepository, CaptureTable},
@@ -365,7 +365,7 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
             .await
             .expect("bounded body");
-        let value: Value = serde_json::from_slice(&bytes).expect("JSON");
+        let value: Value = studio_json::from_slice(&bytes).expect("JSON");
         // Only the response is a usage sample; the cumulative stays provisional
         // and the gap is unknown usage, not a zero sample.
         assert_eq!(value["summary"]["usageSamples"], json!(1), "{value}");

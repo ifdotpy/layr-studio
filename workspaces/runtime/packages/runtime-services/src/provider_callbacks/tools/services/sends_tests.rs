@@ -18,7 +18,7 @@ fn admitted_request(tx: &Transaction<'_>, id: &str) -> Result<AdmittedRequest, S
         [id],
         |row| row.get(0),
     )?;
-    Ok(serde_json::from_str(&raw)?)
+    Ok(studio_json::from_str(&raw)?)
 }
 
 fn replace_cached_result(tx: &Transaction<'_>, id: &str, result: Value) -> Result<(), StoreError> {
@@ -31,11 +31,11 @@ fn replace_cached_result(tx: &Transaction<'_>, id: &str, result: Value) -> Resul
     )
     .map_err(StoreError::RequestResult)?
     .unwrap();
-    let mut envelope: ResultEnvelope<ToolResultRecord> = serde_json::from_str(&stored.result)?;
+    let mut envelope: ResultEnvelope<ToolResultRecord> = studio_json::from_str(&stored.result)?;
     envelope.reply = ToolResultRecord::from_value(result)?;
     tx.execute(
         "UPDATE request_results SET result=?1 WHERE id=?2",
-        params![serde_json::to_string(&envelope)?, token.id()],
+        params![studio_json::to_string(&envelope)?, token.id()],
     )?;
     Ok(())
 }
@@ -84,7 +84,7 @@ async fn message_resolves_queued_worker_name() {
         let snapshot = super::super::super::storage::snapshot(tx, &context)?;
         assert_eq!(messages::resolve_target(tx, &snapshot, "queued-reviewer")?, worker);
         let sent = messages::send(tx, &snapshot, &json!({"target":"queued-reviewer","text":"hello"}), &RequestIdentity::issue_root(), request_time())?;
-        let sent: Value = serde_json::from_str(sent.get())?;
+        let sent: Value = studio_json::from_str(sent.as_str())?;
         assert!(sent["deliveries"].as_object().unwrap().contains_key(&worker));
         tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.name','queued-reviewer') WHERE id=?1", [&context.agent])?;
         for error in [messages::resolve_target(tx, &snapshot, "queued-reviewer").unwrap_err(), messages::send(tx, &snapshot, &json!({"target":"queued-reviewer","text":"hello"}), &RequestIdentity::issue_root(), request_time()).unwrap_err()] {
@@ -155,10 +155,10 @@ async fn message_delivers_between_user_grouped_leads() {
         tx.execute("INSERT INTO runtime_projects(id,record) VALUES('peer-project',?1)", [json!({"id":"peer-project","path":"/peer-project","peerTeams":[{"id":"peers","name":"Peers","members":[context.agent,lead]}]}).to_string()])?;
         let snapshot = super::super::super::storage::snapshot(tx, &context)?;
         let sent = messages::send(tx, &snapshot, &json!({"target":lead,"text":"hello"}), &RequestIdentity::issue_root(), request_time())?;
-        let sent: Value = serde_json::from_str(sent.get())?;
+        let sent: Value = studio_json::from_str(sent.as_str())?;
         assert!(sent["deliveries"].as_object().unwrap().contains_key(&lead));
         let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='room' AND id=?1", [sent["room"].as_str().unwrap()], |row| row.get(0))?;
-        let projection: Value = serde_json::from_str(&payload)?;
+        let projection: Value = studio_json::from_str(&payload)?;
         assert_eq!(projection["value"]["peerTeamId"], "peers");
         Ok::<_, CallbackError>(())
     }).await.unwrap();
@@ -437,7 +437,7 @@ async fn message_send_does_not_scan_agent_directory() {
 mod frozen;
 
 fn expectations() -> Value {
-    serde_json::from_str(include_str!(
+    studio_json::from_str(include_str!(
         "../../../../tests/provider_callbacks/expected.json"
     ))
     .unwrap()
@@ -546,7 +546,7 @@ async fn try_send_args_with(
         )
         .unwrap();
     let actor = crate::managed_host_tools::Actor::from_record(
-        &serde_json::from_str(&raw).unwrap(),
+        &studio_json::from_str(&raw).unwrap(),
         &context.agent,
         context.epoch,
     )
@@ -555,7 +555,7 @@ async fn try_send_args_with(
     let result = store
         .transaction_with(move |tx| ports.send(tx, &actor, &args, &id, request_time()))
         .await
-        .map(|result| serde_json::from_str(result.value.get()).unwrap());
+        .map(|result| studio_json::from_str(result.value.as_str()).unwrap());
     (directory, store, result)
 }
 
@@ -739,7 +739,7 @@ async fn production_release_notifies_the_registry_after_a_committed_send() {
         })
         .await
         .unwrap();
-    let staged_value: Value = serde_json::from_str(staged.value.get()).unwrap();
+    let staged_value: Value = studio_json::from_str(staged.value.as_str()).unwrap();
     let event_count: i64 = store
         .test_reader()
         .unwrap()
@@ -865,7 +865,7 @@ async fn complaint_read_projects_a_page_with_one_agent_scan() {
         "SELECT payload FROM sync_entities WHERE collection='complaint' AND id=?1 AND deleted=0",
         [first["id"].as_str().unwrap()], |row| row.get(0),
     ).unwrap();
-    let projected: Value = serde_json::from_str(&projected).unwrap();
+    let projected: Value = studio_json::from_str(&projected).unwrap();
     assert_eq!(projected["value"]["authorName"], worker["name"]);
     assert_eq!(projected["value"]["leadName"], lead["name"]);
     assert_eq!(AGENT_SCANS.get(), 1, "one agent scan for the whole page");
@@ -1026,7 +1026,7 @@ async fn send_preserves_explicit_next_turn_for_followup_and_chat() {
                 "agent_message"
             }
         );
-        let metadata: Value = serde_json::from_str(&metadata).unwrap();
+        let metadata: Value = studio_json::from_str(&metadata).unwrap();
         assert_eq!(metadata["delivery"], json!(DeliveryMoment::NextTurn));
     }
 }
@@ -1039,7 +1039,7 @@ async fn an_ancestor_cancels_a_descendant_watch_and_others_are_refused_by_name()
     let (directory, store, oracle) = frozen::state().await;
     let log_root = store.state_dir().join("monitor-logs");
     let watch = |id: &str, owner: &Value| {
-        let mut record: studio_runtime_store::MonitorRecord = serde_json::from_str(
+        let mut record: studio_runtime_store::MonitorRecord = studio_json::from_str(
             r#"{"id":"fixture","agent":"fixture","epoch":1,"turnId":null,
             "requestId":"fixture","command":"gh run watch 1 > watch.log 2>&1",
             "cwd":"/","timeout_ms":3600000,
@@ -1136,7 +1136,7 @@ async fn an_ancestor_cancels_a_descendant_watch_and_others_are_refused_by_name()
     let cancelled = cancel_as(&store, &lead, "child-watch", "lead-cancels-child")
         .await
         .unwrap();
-    let cancelled_value: Value = serde_json::from_str(cancelled.value.get()).unwrap();
+    let cancelled_value: Value = studio_json::from_str(cancelled.value.as_str()).unwrap();
     assert_eq!(cancelled_value["cancelRequested"], true);
     let refused = cancel_as(&store, &child, "lead-watch", "child-cancels-lead").await;
     assert!(
@@ -1292,7 +1292,7 @@ async fn a_broadcast_names_a_member_that_cannot_be_checked_and_reaches_the_other
         )
         .unwrap();
     assert_eq!(
-        serde_json::from_str::<Value>(&deliveries).unwrap(),
+        studio_json::from_str::<Value>(&deliveries).unwrap(),
         sent["deliveries"]
     );
     let identity = RequestIdentity::new("agent_message", &[lead_id], request_id, &[]).unwrap();
@@ -1307,7 +1307,7 @@ async fn a_broadcast_names_a_member_that_cannot_be_checked_and_reaches_the_other
     )
     .unwrap()
     .unwrap();
-    let reply: ResultEnvelope<Value> = serde_json::from_str(&cached.result).unwrap();
+    let reply: ResultEnvelope<Value> = studio_json::from_str(&cached.result).unwrap();
     assert_eq!(reply.reply, sent);
     let bad_events: i64 = reader
         .query_row(
@@ -1334,7 +1334,7 @@ async fn a_broadcast_with_no_member_that_can_be_checked_is_refused_by_location()
         .query_map([lead], |row| row.get::<_, String>(0))
         .unwrap()
         .map(|raw| {
-            let mut record: Value = serde_json::from_str(&raw.unwrap()).unwrap();
+            let mut record: Value = studio_json::from_str(&raw.unwrap()).unwrap();
             record["cwd"] = json!("relative/cwd");
             record
         })
@@ -1462,7 +1462,7 @@ async fn radio_member_message_is_refused_only_during_its_shared_reply_turn() {
     let delivered = send(delivered_id.clone())
         .await
         .expect("a radio member may message privately outside its shared reply turn");
-    let delivered: Value = serde_json::from_str(delivered.get()).unwrap();
+    let delivered: Value = studio_json::from_str(delivered.as_str()).unwrap();
     assert_eq!(delivered["id"], delivered_id);
     let chat_count: i64 = store
         .test_reader()
@@ -1640,7 +1640,7 @@ async fn callback_blob_case(race: BlobRace) {
             panic!("request body")
         };
         let record: Value =
-            serde_json::from_str(body["contentItems"][0]["text"].as_str().unwrap()).unwrap();
+            studio_json::from_str(body["contentItems"][0]["text"].as_str().unwrap()).unwrap();
         assert!(body["success"] == true, "request read failed: {record}");
         if matches!(race, BlobRace::Cached) {
             assert_eq!(record["truncated"], true);

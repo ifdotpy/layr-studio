@@ -2,8 +2,8 @@ use axum::{
     body::{Body, to_bytes},
     http::Request,
 };
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::{account_policy::AccountPolicyState, usage_resume};
 use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
@@ -45,7 +45,7 @@ async fn limits_exposes_agent_policy_and_accounts_exposes_only_safe_organization
             "_credentialIdentity":identity,"_organizationName":"Fixture organization"}
     }});
     let policy = AccountPolicyState::from_startup(
-        Some(&serde_json::to_vec(&registry).expect("registry fixture serializes")),
+        Some(&studio_json::to_vec(&registry).expect("registry fixture serializes")),
         [("claude".into(), limits.clone())],
     )
     .expect("account policy fixture is valid");
@@ -78,7 +78,7 @@ async fn limits_exposes_agent_policy_and_accounts_exposes_only_safe_organization
         .await
         .expect("limits request completes");
     assert_eq!(response.status(), 200);
-    let body: Value = serde_json::from_slice(
+    let body: Value = studio_json::from_slice(
         &to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("limits body reads"),
@@ -87,7 +87,10 @@ async fn limits_exposes_agent_policy_and_accounts_exposes_only_safe_organization
     let observation = usage_resume::LimitsObservation::from_record(limits.clone(), None).unwrap();
     let typed_agent = AgentRecord::from_value(agent.clone()).unwrap();
     let expected = usage_resume::eligibility(&observation, &typed_agent, now);
-    assert_eq!(body["eligibility"], serde_json::to_value(expected).unwrap());
+    assert_eq!(
+        body["eligibility"],
+        studio_json::to_value(expected).unwrap()
+    );
     assert_eq!(body["eligibility"]["state"], "allowed");
     for (path, status) in [
         ("/api/limits?account_key=claude&cached=1&agent=unknown", 404),
@@ -105,7 +108,7 @@ async fn limits_exposes_agent_policy_and_accounts_exposes_only_safe_organization
         .oneshot(get("/api/limits?account_key=claude&cached=1"))
         .await
         .expect("shared limits request completes");
-    let shared: Value = serde_json::from_slice(
+    let shared: Value = studio_json::from_slice(
         &to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("shared limits body reads"),
@@ -117,7 +120,7 @@ async fn limits_exposes_agent_policy_and_accounts_exposes_only_safe_organization
         .await
         .expect("accounts request completes");
     assert_eq!(response.status(), 200);
-    let body: Value = serde_json::from_slice(
+    let body: Value = studio_json::from_slice(
         &to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("accounts body reads"),

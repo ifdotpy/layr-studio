@@ -99,7 +99,7 @@ impl Fixture {
         store
             .transaction(move |tx| {
                 let mut agent: studio_runtime_store::AgentRecord =
-                    serde_json::from_str(include_str!("agent.json"))?;
+                    studio_json::from_str(include_str!("agent.json"))?;
                 agent.cwd = Some(workspace.to_string_lossy().into_owned());
                 agent.host_project_path = studio_runtime_schema::queue_command::Field::Value(
                     workspace.to_string_lossy().into_owned(),

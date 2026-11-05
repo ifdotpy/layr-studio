@@ -8,8 +8,8 @@ use crate::managed_host_tools::{
     Actor, AgentAncestry, DispatchedOperation, Error, OperationResult, agent_ancestry,
 };
 use rusqlite::Transaction;
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_providers::Method;
 use studio_runtime_schema::persistence::{
     NativeReleasePhase, OutboxKind, OutboxStatus, OwnerKind, RecoveryReceiptStatus,
@@ -666,8 +666,9 @@ pub(crate) async fn finish_recovery(
                     let saved = RequestResults::admitted_result(tx, &auth.admission)
                         .map_err(studio_runtime_store::StoreError::from)?
                         .ok_or(Error::Stale)?;
-                    let saved: ResultEnvelope<ManualReply> = serde_json::from_str(&saved.result)
-                        .map_err(studio_runtime_store::StoreError::from)?;
+                    let saved: ResultEnvelope<ManualReply> =
+                        studio_json::from_str(&saved.result)
+                            .map_err(studio_runtime_store::StoreError::from)?;
                     saved.reply.into_receipt()?
                 }
             };
@@ -905,7 +906,7 @@ pub(crate) fn authorize_release(
     let worker = worker.value();
     let release = &worker["nativeRelease"];
     let Ok(auth) =
-        serde_json::from_value::<AuthorizedRecoveryRequest>(release["authorization"].clone())
+        studio_json::from_value::<AuthorizedRecoveryRequest>(release["authorization"].clone())
     else {
         return Ok(false);
     };
@@ -928,8 +929,8 @@ mod tests {
     use crate::account_session_runtime::{
         AccountSessionFuture, ConnectionScope, ProviderRequest, ProviderResponse, SessionReceipt,
     };
-    use serde_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
     use studio_runtime_schema::persistence::RequestIdentity;
     use studio_runtime_store::{AgentId, AgentRecord, AgentRepository};
@@ -1390,7 +1391,7 @@ mod tests {
         store.transaction(move |tx| {
             for id in ["legacy-public-id", saved_v7.as_str()] {
                 tx.execute("INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
-                    rusqlite::params![id,signature,serde_json::to_string(&saved)?,now_ms()])?;
+                    rusqlite::params![id,signature,studio_json::to_string(&saved)?,now_ms()])?;
             }
             tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('expired_before_ms',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.expired_before_ms',?1)", [now_ms() + 1])?;
             Ok(())
@@ -1509,8 +1510,10 @@ mod tests {
                 )?;
                 Ok::<_, Error>((
                     auth,
-                    RecoverySnapshot::from_record(serde_json::from_str(&raw).expect("worker JSON"))
-                        .expect("snapshot"),
+                    RecoverySnapshot::from_record(
+                        studio_json::from_str(&raw).expect("worker JSON"),
+                    )
+                    .expect("snapshot"),
                 ))
             })
             .await
@@ -1553,7 +1556,7 @@ mod tests {
         let (_directory, store, actor, session) = fixture().await;
         store.transaction(|tx| {
             let mut worker = AgentRepository::get(tx, &AgentId::from("worker-00000000"))?.expect("worker");
-            worker.native_release = Some(serde_json::from_str(r#"{"id":"old-release","phase":"resumed","closedAt":5.0,"resetPending":false,"targetEpoch":3,"threadId":"worker-thread","accountKey":"default"}"#).unwrap());
+            worker.native_release = Some(studio_json::from_str(r#"{"id":"old-release","phase":"resumed","closedAt":5.0,"resetPending":false,"targetEpoch":3,"threadId":"worker-thread","accountKey":"default"}"#).unwrap());
             AgentRepository::put(tx, &worker)
         }).await.expect("native close followed by resume");
         let session = Arc::new(session);

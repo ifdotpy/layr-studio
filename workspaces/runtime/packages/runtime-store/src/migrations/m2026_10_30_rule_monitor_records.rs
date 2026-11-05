@@ -13,7 +13,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
             let raw: String = row.get(1)?;
-            let rule: studio_runtime_schema::rule_record::RuleRecord = serde_json::from_str(&raw)?;
+            let rule: studio_runtime_schema::rule_record::RuleRecord = studio_json::from_str(&raw)?;
             if rule.id != id {
                 return Err(crate::StoreError::InvalidStoredRecord {
                     object: "rules",
@@ -22,7 +22,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
             tx.execute(
                 "UPDATE runtime_rules SET record=?1 WHERE id=?2",
-                rusqlite::params![serde_json::to_string(&rule)?, id],
+                rusqlite::params![studio_json::to_string(&rule)?, id],
             )?;
         }
     }
@@ -45,7 +45,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 )?;
             }
             let monitor: studio_runtime_schema::monitor_record::MonitorRecord =
-                serde_json::from_str(&raw)?;
+                studio_json::from_str(&raw)?;
             if monitor.id != id {
                 return Err(crate::StoreError::InvalidStoredRecord {
                     object: "monitors",
@@ -54,7 +54,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
             tx.execute(
                 "UPDATE runtime_monitors SET record=?1 WHERE id=?2",
-                rusqlite::params![serde_json::to_string(&monitor)?, id],
+                rusqlite::params![studio_json::to_string(&monitor)?, id],
             )?;
         }
     }
@@ -79,7 +79,7 @@ mod tests {
             })
             .unwrap();
         let rule: studio_runtime_schema::rule_record::RuleRecord =
-            serde_json::from_str(&raw).unwrap();
+            studio_json::from_str(&raw).unwrap();
         assert_eq!(rule.id, "r");
         assert!(!raw.contains("unused"));
         assert!(!raw.contains("\"path\""));
@@ -119,7 +119,7 @@ mod tests {
             )
             .unwrap();
         let record: studio_runtime_schema::monitor_record::MonitorRecord =
-            serde_json::from_str(&raw).unwrap();
+            studio_json::from_str(&raw).unwrap();
         assert_eq!(record.request_id, "m");
         assert!(raw.contains(r#""activityAt":2"#));
         assert!(record.reattach_recovery.is_none());
@@ -148,7 +148,7 @@ mod tests {
             )
             .unwrap();
         let record: studio_runtime_schema::monitor_record::MonitorRecord =
-            serde_json::from_str(&raw).unwrap();
+            studio_json::from_str(&raw).unwrap();
         assert!(matches!(
             record.stream_queue.unwrap().as_slice(),
             [studio_runtime_schema::monitor_record::MonitorQueueEvent::Output { .. }]

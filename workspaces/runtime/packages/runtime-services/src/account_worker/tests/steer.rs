@@ -661,7 +661,7 @@ async fn mixed_batch_is_compiled_acknowledged_once_and_deferred_input_waits(
                 [format!("{agent}:available")],
                 |r| r.get(0),
             )?;
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(record["inputs"].as_array().unwrap().len(), 7);
             assert_eq!(record["inputs"][0]["kind"], "work_ready");
             assert!(
@@ -677,7 +677,7 @@ async fn mixed_batch_is_compiled_acknowledged_once_and_deferred_input_waits(
                 [],
                 |r| r.get(0),
             )?;
-            let meta: Value = serde_json::from_str(&meta).unwrap();
+            let meta: Value = studio_json::from_str(&meta).unwrap();
             assert_eq!(meta["senderId"], "mixed-child");
             let count: i64 = db.query_row(
                 "SELECT count(*) FROM runtime_items WHERE id=?1",
@@ -766,7 +766,7 @@ async fn assert_overflow_events_readable(state: &State, text: &str) {
         })
         .await
         .unwrap();
-    let metadata: Value = serde_json::from_str(&metadata).unwrap();
+    let metadata: Value = studio_json::from_str(&metadata).unwrap();
     let blob = &metadata["studioInput"];
     let reference = format!("studio-input:{}", blob["sha256"].as_str().unwrap());
     assert!(text.contains(&reference));
@@ -975,7 +975,7 @@ async fn acknowledged_mixed_input_uses_frozen_authority_after_sender_moves() {
                 [format!("{agent}:available")],
                 |r| r.get(0),
             )?;
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             assert_eq!(record["inputs"].as_array().unwrap().len(), 7);
             assert!(
                 record["text"]

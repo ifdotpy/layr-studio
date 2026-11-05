@@ -50,7 +50,7 @@ impl Rows {
             tx.query_row(
                 "SELECT m.record FROM runtime_events e JOIN runtime_event_meta m ON e.id=m.id WHERE e.agent=?1 AND json_extract(m.record,'$.studioInput.sha256')=?2 ORDER BY e.created,e.id LIMIT 1",
                 rusqlite::params![actor, hash], |r| r.get::<_,String>(0),
-            ).optional()?.map(|raw| serde_json::from_str::<Value>(&raw).map(|v| v["studioInput"].clone())).transpose().map_err(StoreError::from)?
+            ).optional()?.map(|raw| studio_json::from_str::<Value>(&raw).map(|v| v["studioInput"].clone())).transpose().map_err(StoreError::from)?
         } else {
             None
         };
@@ -204,7 +204,7 @@ fn prepare_record(
                 return Ok(value.clone());
             }
             let value: Value =
-                serde_json::from_slice(&crate::payload_blobs::load_blob(root, reference)?)?;
+                studio_json::from_slice(&crate::payload_blobs::load_blob(root, reference)?)?;
             resolved.push((reference.clone(), value.clone()));
             Ok(value)
         },

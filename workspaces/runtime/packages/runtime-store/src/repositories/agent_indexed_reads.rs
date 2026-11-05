@@ -291,7 +291,7 @@ fn prefix_upper(prefix: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::domain::{ACTIVE_STATUS_INDEX, CAPACITY_STATUS_INDEX, ONE_UNFINISHED_TURN_INDEX};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     /// The agents table of the column format with this module's indexes.
     fn database() -> Connection {

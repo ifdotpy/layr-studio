@@ -1,7 +1,7 @@
 //! Safe, server-owned incident contract. This is diagnostic evidence, never permission to retry.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 mod monitor;
 pub use monitor::{
     MonitorOperationIdentity, MonitorRecoveryEvidence, MonitorRecoveryProof, MonitorRecoveryReason,
@@ -372,7 +372,7 @@ pub struct StudioError {
 }
 
 /// Derive all referenced components from this owner, including flattened action variants.
-pub(crate) fn schemas() -> Result<serde_json::Map<String, Value>, String> {
+pub(crate) fn schemas() -> Result<studio_json::Map<String, Value>, String> {
     // The API is OpenAPI 3.1 and the runtime validates JSON Schema: nullable
     // evidence must stay an actual null type, not OpenAPI 3.0's nullable annotation.
     let mut generator = schemars::generate::SchemaSettings::draft2020_12()
@@ -399,19 +399,19 @@ pub(crate) fn check_schema_parity(openapi: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn incident_actions_require_real_agent_destinations_and_keep_unknown_outcomes() {
         let mut row = json!({"id":"http:request", "kind":"http_failure", "level":"error", "reason":"Request failed", "action":"details", "detail":"store_data", "subject":"GET /api/monitor/log", "at":1,"diagnostics":{"context":{"source":"http","route":"GET /api/monitor/log","requestId":null,"status":503,"class":"store_data"},"certainty":"read_only","causes":[]}});
         let server: StudioError =
-            serde_json::from_value(row.clone()).expect("server incident has no fake agent");
+            studio_json::from_value(row.clone()).expect("server incident has no fake agent");
         assert!(matches!(server.target, Target::Details));
         row["action"] = json!("resume");
-        assert!(serde_json::from_value::<StudioError>(row.clone()).is_err());
+        assert!(studio_json::from_value::<StudioError>(row.clone()).is_err());
         row["agentId"] = json!("agent");
         row["agentName"] = json!("Agent");
-        assert!(serde_json::from_value::<StudioError>(row).is_ok());
+        assert!(studio_json::from_value::<StudioError>(row).is_ok());
         assert_eq!(
             Kind::MonitorOutcomeLost.certainty(),
             EffectCertainty::Unknown
@@ -420,11 +420,11 @@ mod tests {
 
     #[test]
     fn incident_schema_and_all_components_derive_from_the_owner() {
-        let openapi =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+            .expect("OpenAPI");
         check_schema_parity(&openapi).expect("incident contract parity");
         let monitor: Value =
-            serde_json::from_str(include_str!("schemas/persisted-monitor-record.schema.json"))
+            studio_json::from_str(include_str!("schemas/persisted-monitor-record.schema.json"))
                 .expect("monitor record schema");
         assert_eq!(
             monitor["$defs"]["MonitorState"], openapi["components"]["schemas"]["MonitorState"],
@@ -435,7 +435,7 @@ mod tests {
             .expect("closed reason set")
         {
             let reason: MonitorRecoveryReason =
-                serde_json::from_value(code.clone()).expect("owned reason code");
+                studio_json::from_value(code.clone()).expect("owned reason code");
             assert_eq!(code.as_str(), Some(reason.code()));
         }
     }
@@ -469,9 +469,9 @@ mod tests {
                 causes: Vec::new(),
             },
         };
-        let value = serde_json::to_value(incident).expect("typed incident");
-        let openapi: Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let value = studio_json::to_value(incident).expect("typed incident");
+        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+            .expect("OpenAPI");
         let registry = crate::registry_for_document(&openapi).expect("registry");
         let validator = jsonschema::options()
             .with_registry(&registry)

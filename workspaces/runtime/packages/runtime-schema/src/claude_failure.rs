@@ -1,7 +1,7 @@
 //! Claude failure metadata. The JSON schema owns allowed values and bounds.
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use std::{collections::BTreeMap, sync::OnceLock};
+use studio_json::{Map, Value};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -37,7 +37,7 @@ pub struct ClaudeFailure {
 }
 
 pub fn schema() -> Value {
-    serde_json::from_str(include_str!("schemas/claude-failure.schema.json"))
+    studio_json::from_str(include_str!("schemas/claude-failure.schema.json"))
         .expect("Claude failure schema")
 }
 
@@ -138,7 +138,7 @@ impl ClaudeFailure {
         if clean.is_empty() {
             return None;
         }
-        let mut failure: Self = serde_json::from_value(Value::Object(clean)).ok()?;
+        let mut failure: Self = studio_json::from_value(Value::Object(clean)).ok()?;
         failure.present();
         Some(failure)
     }
@@ -154,7 +154,7 @@ pub fn sanitize_error(error: &mut Value) {
     {
         fields.insert(
             "claudeFailure".into(),
-            serde_json::to_value(record).expect("failure record"),
+            studio_json::to_value(record).expect("failure record"),
         );
     }
 }
@@ -162,7 +162,7 @@ pub fn sanitize_error(error: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn unknown_code_gets_generic_presentation_and_token_context() {
@@ -178,19 +178,19 @@ mod tests {
 
     #[test]
     fn stored_provider_error_gets_presentation_on_read() {
-        let error: crate::provider_errors::AgentError = serde_json::from_str(
+        let error: crate::provider_errors::AgentError = studio_json::from_str(
             r#"{"message":"failed","claudeFailure":{"apiError":"tool_history_mismatch"}}"#,
         )
         .unwrap();
-        let encoded = serde_json::to_value(error).unwrap();
+        let encoded = studio_json::to_value(error).unwrap();
         assert_eq!(
             encoded["claudeFailure"]["title"],
             "Tool history does not match"
         );
         let replay: crate::provider_errors::AgentError =
-            serde_json::from_str(&encoded.to_string()).unwrap();
+            studio_json::from_str(&encoded.to_string()).unwrap();
         assert_eq!(
-            serde_json::to_value(replay).unwrap()["claudeFailure"]["title"],
+            studio_json::to_value(replay).unwrap()["claudeFailure"]["title"],
             "Tool history does not match"
         );
     }

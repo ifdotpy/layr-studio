@@ -1,7 +1,7 @@
 //! Pure translation of native rollout records. Context contains identities and
 //! token counters only; response bodies live only for the bounded input batch.
 use crate::analytics_capture::{CaptureError, first, number};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::parse_token_usage;
 use studio_runtime_store::truthy;
@@ -429,7 +429,7 @@ fn normalize_item(v: &Value) -> Result<Value, CaptureError> {
 #[cfg(test)]
 mod tests {
     use super::RolloutContext;
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn typed_usage_null_rollout_records_import_without_charges() {
@@ -531,7 +531,7 @@ mod tests {
             params["tokenUsage"], previous["tokenUsage"],
             "native counter objects must preserve pre-upgrade notice receipt identity"
         );
-        let receipt = |params: &serde_json::Value| {
+        let receipt = |params: &studio_json::Value| {
             let identity = studio_runtime_schema::usage::legacy_notice_identity(
                 "agent",
                 "account",
@@ -572,7 +572,7 @@ mod tests {
             let super::RolloutAction::Event { params, .. } = &actions[0] else {
                 panic!("usage event")
             };
-            let normalized = serde_json::to_value(
+            let normalized = studio_json::to_value(
                 studio_runtime_schema::usage::parse_token_usage(
                     studio_runtime_schema::provider_kind::ProviderKind::Codex,
                     params,

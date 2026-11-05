@@ -134,7 +134,7 @@ async fn attempt_record(state: &State, attempt: &str) -> Value {
                 [attempt],
                 |row| row.get(0),
             )?;
-            Ok(serde_json::from_str(&raw).expect("attempt record"))
+            Ok(studio_json::from_str(&raw).expect("attempt record"))
         })
         .await
         .unwrap()

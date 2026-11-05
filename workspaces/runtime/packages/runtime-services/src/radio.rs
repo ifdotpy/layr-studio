@@ -9,8 +9,8 @@
 //! event, question, transcript, and completed-turn records outside this input.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::Value;
 use studio_runtime_store::path_identity::LexicalPath;
 use thiserror::Error;
 
@@ -39,7 +39,7 @@ fn invalid(location: impl Into<String>) -> RadioSnapshotError {
 }
 
 fn parse_object(raw: &str, location: &str) -> Result<Value, RadioSnapshotError> {
-    let value: Value = serde_json::from_str(raw).map_err(|_| invalid(location))?;
+    let value: Value = studio_json::from_str(raw).map_err(|_| invalid(location))?;
     if !value.is_object() {
         return Err(invalid(location));
     }
@@ -339,7 +339,7 @@ impl RadioAuthorizationSnapshot {
                 return Err(invalid(format!("rooms/{key}/id")));
             }
             let location = format!("rooms/{key}");
-            let mut decoder = serde_json::Deserializer::from_str(raw);
+            let mut decoder = studio_json::Deserializer::from_str(raw);
             let row: StoredRadioRoom =
                 serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
                     invalid(format!(
@@ -376,7 +376,7 @@ impl RadioAuthorizationSnapshot {
         let mut projects = Vec::new();
         for (key, raw) in &records.projects {
             let location = format!("projects/{key}");
-            let mut decoder = serde_json::Deserializer::from_str(raw);
+            let mut decoder = studio_json::Deserializer::from_str(raw);
             let row: ProjectRecord =
                 serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
                     invalid(format!(
@@ -610,11 +610,11 @@ mod project_contract_tests {
     fn optional_flags_accept_null_and_reject_malformed() {
         for field in ["isLead", "autoWake"] {
             assert!(
-                !optional_bool(&serde_json::json!({(field):null}), field, "agent", false).unwrap()
+                !optional_bool(&studio_json::json!({(field):null}), field, "agent", false).unwrap()
             );
             assert!(
                 optional_bool(
-                    &serde_json::json!({(field):"invalid"}),
+                    &studio_json::json!({(field):"invalid"}),
                     field,
                     "agent",
                     false
@@ -654,13 +654,13 @@ mod project_contract_tests {
                 false,
             ),
         ] {
-            let value: Value = serde_json::from_str(raw).expect("fixture JSON");
+            let value: Value = studio_json::from_str(raw).expect("fixture JSON");
             assert_eq!(
                 studio_runtime_schema::validate("PersistedProjectRecord", &value)
                     .expect("project schema"),
                 valid
             );
-            assert_eq!(serde_json::from_str::<ProjectRecord>(raw).is_ok(), valid);
+            assert_eq!(studio_json::from_str::<ProjectRecord>(raw).is_ok(), valid);
         }
     }
 }

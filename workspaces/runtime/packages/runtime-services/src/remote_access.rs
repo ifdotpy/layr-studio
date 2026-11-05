@@ -7,8 +7,8 @@
 //! can disable access without a restart.
 
 use crate::remote_transport::validate_federation_origin;
-use serde_json::Value;
 use std::path::{Path, PathBuf};
+use studio_json::Value;
 use studio_runtime_schema::multi_server_protocol::{PUBLIC_ORIGIN_ENVIRONMENT, REMOTE_ACCESS_FILE};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl RemoteAccess {
         if let Some(origin) = &self.override_origin {
             return Some(origin.clone());
         }
-        let value: Value = serde_json::from_slice(&std::fs::read(&self.path).ok()?).ok()?;
+        let value: Value = studio_json::from_slice(&std::fs::read(&self.path).ok()?).ok()?;
         if value.get("enabled") != Some(&Value::Bool(true)) {
             return None;
         }

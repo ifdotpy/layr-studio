@@ -119,7 +119,7 @@ pub struct NativeState {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub tasks: Field<Vec<Value>>,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: studio_json::Map<String, Value>,
 }
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,7 +129,7 @@ pub struct NativeTurn {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub status: Field<String>,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: studio_json::Map<String, Value>,
 }
 /// The idle proof a settings mutation needs.
 #[derive(Clone, Debug)]
@@ -139,9 +139,9 @@ pub enum NativeProof {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct SettingsReply {
-    pub settings: serde_json::Map<String, Value>,
+    pub settings: studio_json::Map<String, Value>,
     #[serde(flatten)]
-    pub extra: serde_json::Map<String, Value>,
+    pub extra: studio_json::Map<String, Value>,
 }
 /// The only provider replies that can settle a control mutation.
 #[derive(Debug)]
@@ -151,7 +151,7 @@ pub enum MutationReply {
 impl MutationReply {
     pub fn into_value(self) -> Result<Value> {
         match self {
-            Self::Settings(reply) => serde_json::to_value(reply),
+            Self::Settings(reply) => studio_json::to_value(reply),
         }
         .map_err(|_| ControlError::Unknown)
     }
@@ -172,12 +172,12 @@ impl ControlReply {
     pub fn from_wire(call: &ControlInvocation, value: Value) -> Result<Self> {
         Ok(match call {
             ControlInvocation::State { .. } => {
-                Self::State(serde_json::from_value(value).map_err(|_| ControlError::Unknown)?)
+                Self::State(studio_json::from_value(value).map_err(|_| ControlError::Unknown)?)
             }
             ControlInvocation::RepairReport { .. } => Self::RepairReport(value),
             ControlInvocation::Commands { .. } => Self::Commands(value),
             ControlInvocation::Settings { .. } => {
-                Self::Settings(serde_json::from_value(value).map_err(|_| ControlError::Unknown)?)
+                Self::Settings(studio_json::from_value(value).map_err(|_| ControlError::Unknown)?)
             }
             ControlInvocation::StopTask { .. } => Self::StopTask(value),
             ControlInvocation::FileBackups { .. } => Self::FileBackups(value),
@@ -374,7 +374,7 @@ impl Controls {
             } else {
                 let ControlRequest::Settings { settings, .. } = request;
                 MutationReply::Settings(SettingsReply {
-                    settings: serde_json::to_value(settings)
+                    settings: studio_json::to_value(settings)
                         .map_err(|_| ControlError::Unknown)?
                         .as_object()
                         .cloned()
@@ -478,7 +478,7 @@ impl Controls {
                         .await?
                     {
                         ControlReply::State(state) => {
-                            serde_json::to_value(state).map_err(|_| ControlError::Unknown)?
+                            studio_json::to_value(state).map_err(|_| ControlError::Unknown)?
                         }
                         ControlReply::RepairReport(_)
                         | ControlReply::Commands(_)

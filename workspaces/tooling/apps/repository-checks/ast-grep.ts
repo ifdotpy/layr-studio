@@ -66,7 +66,10 @@ export function scan(): Record<string, Violation[]> {
     return {
       ruleId: value.ruleId,
       file: value.file,
-      text: value.text,
+      // Keep the existing JSON round-trip baseline stable across the facade rename.
+      text: value.ruleId.startsWith("rust-json-")
+        ? value.text.replaceAll("studio_json::", "serde_json::")
+        : value.text,
       message: value.message,
       offset: value.range.byteOffset.start,
     };

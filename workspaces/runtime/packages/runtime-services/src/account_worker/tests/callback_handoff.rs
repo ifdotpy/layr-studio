@@ -89,7 +89,7 @@ async fn saved_response(
                 |row| row.get(0),
             )?;
             let owner: CallbackTask<crate::provider_callbacks::CallbackOwner> =
-                serde_json::from_str(&raw).expect("logical callback owner");
+                studio_json::from_str(&raw).expect("logical callback owner");
             let mut canonical = response.clone();
             canonical["id"] = match &task.payload.accepted.request_id {
                 studio_runtime_providers::RequestId::Number(id) => Value::from(*id),
@@ -206,7 +206,7 @@ async fn callback_task_roundtrip_preserves_persisted_record() {
                 "SELECT record FROM runtime_tool_requests WHERE origin_key=?1 AND kind='provider_callback'",
                 [&operation], |row| row.get(0),
             )?;
-            serde_json::from_str(&raw).map_err(|error| WorkerError::PreparationRefused(error.to_string()))
+            studio_json::from_str(&raw).map_err(|error| WorkerError::PreparationRefused(error.to_string()))
         };
         let before = read_record(tx)?;
         let task: CallbackTask<callback_record::CallbackObligation> =

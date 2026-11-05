@@ -49,11 +49,11 @@ pub(super) fn convert_annotations(tx: &Transaction<'_>) -> crate::StoreResult<()
     drop(query);
     for (id, result) in rows {
         let Ok((namespace, authority, root, operation)) =
-            serde_json::from_str::<(String, Vec<String>, String, Vec<String>)>(&id)
+            studio_json::from_str::<(String, Vec<String>, String, Vec<String>)>(&id)
         else {
             continue;
         };
-        let Ok(old) = serde_json::from_str::<OldResult>(&result) else {
+        let Ok(old) = studio_json::from_str::<OldResult>(&result) else {
             continue;
         };
         if namespace != "annotation"
@@ -70,7 +70,7 @@ pub(super) fn convert_annotations(tx: &Transaction<'_>) -> crate::StoreResult<()
                 |row| row.get(0),
             )
             .optional()?;
-        let Some(current) = raw.and_then(|raw| serde_json::from_str::<AnnotationData>(&raw).ok())
+        let Some(current) = raw.and_then(|raw| studio_json::from_str::<AnnotationData>(&raw).ok())
         else {
             continue;
         };
@@ -174,7 +174,7 @@ mod tests {
             created: 1.0,
             turn_id: None,
         };
-        let body = serde_json::to_string(&ResultEnvelope {
+        let body = studio_json::to_string(&ResultEnvelope {
             actor: Some("agent".into()),
             reply: &record,
             references: vec![],
@@ -187,7 +187,7 @@ mod tests {
         .expect("legacy receipt");
         db.execute(
             "INSERT INTO runtime_annotations VALUES(?1,?2)",
-            rusqlite::params![id, serde_json::to_string(&record).unwrap()],
+            rusqlite::params![id, studio_json::to_string(&record).unwrap()],
         )
         .expect("annotation");
         let tx = db.transaction().expect("transaction");

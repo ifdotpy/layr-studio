@@ -6,7 +6,6 @@ use account_registry::{
     AccountLaunch, AccountLauncher, AccountRegistry, AccountRegistryConfig, AccountSessionBroker,
     LaunchFuture,
 };
-use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
@@ -16,6 +15,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use studio_json::{Value, json};
 use studio_runtime_process::{
     EventCursor, Generation, OperationId, ProviderHandle, ProviderLaunchSpec, provider_seam::*,
 };
@@ -56,7 +56,7 @@ fn codex_launch(
 }
 
 fn claude_launch(
-    profile: &serde_json::Value,
+    profile: &studio_json::Value,
     bridge_dir: &Path,
     state_root: &Path,
     account: &str,
@@ -552,7 +552,7 @@ impl ProviderTaskFactory for WireFactory {
                                         cursor: EventCursor(sequence),
                                         generation: Generation(7),
                                         payload: JournalPayload::Frame(Frame::Response {
-                                            id: serde_json::from_value::<RequestId>(
+                                            id: studio_json::from_value::<RequestId>(
                                                 write.message()["id"].clone(),
                                             )
                                             .unwrap(),
@@ -596,7 +596,7 @@ impl ProviderTaskFactory for WireFactory {
                                                     generation: Generation(7),
                                                     payload: JournalPayload::Frame(
                                                         Frame::Response {
-                                                            id: serde_json::from_value(
+                                                            id: studio_json::from_value(
                                                                 message["id"].clone(),
                                                             )
                                                             .unwrap(),
@@ -618,7 +618,7 @@ impl ProviderTaskFactory for WireFactory {
                                                 cursor: EventCursor(sequence),
                                                 generation: Generation(7),
                                                 payload: JournalPayload::Frame(Frame::Response {
-                                                    id: serde_json::from_value::<RequestId>(
+                                                    id: studio_json::from_value::<RequestId>(
                                                         message["id"].clone(),
                                                     )
                                                     .unwrap(),
@@ -746,7 +746,7 @@ fn radio_snapshot(mode: &str) -> Value {
         "queue" => include_str!("fixtures/radio-queue.json"),
         other => panic!("unknown radio fixture mode {other}"),
     };
-    serde_json::from_str(fixture).unwrap()
+    studio_json::from_str(fixture).unwrap()
 }
 
 fn radio_interrupt_snapshot() -> Value {
@@ -815,7 +815,7 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
                     let mut row = row.clone();
                     if table == "projects" {
                         let record: Value =
-                            serde_json::from_str(row["record"].as_str().unwrap()).unwrap();
+                            studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
                         let mut record = record;
                         record["recordKind"] = json!("live");
                         record["id"] = json!(stored_project_root.to_string_lossy());
@@ -830,7 +830,7 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
                     }
                     if table == "agents" {
                         let mut record: Value =
-                            serde_json::from_str(row["record"].as_str().unwrap()).unwrap();
+                            studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
                         record["compactions"] = json!(0);
                         record["cwd"] = json!(stored_project_root.to_string_lossy());
                         if record.get("projectId").is_some() {
@@ -840,7 +840,7 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
                     }
                     if table == "rooms" {
                         let mut record: Value =
-                            serde_json::from_str(row["record"].as_str().unwrap()).unwrap();
+                            studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
                         record["projectPath"] = json!(stored_project_root.to_string_lossy());
                         record["radio"]["direct"] = json!(false);
                         row["record"] = json!(record.to_string());
@@ -1090,7 +1090,7 @@ async fn production_reconcile_delivers_radio_interrupt_once_with_deterministic_c
                 row.get(0)
             })
             .unwrap();
-        serde_json::from_str::<Value>(&raw).unwrap()
+        studio_json::from_str::<Value>(&raw).unwrap()
     };
     let delivered = room();
     assert_eq!(delivered["radio"]["status"], "stopping");
@@ -1273,7 +1273,7 @@ async fn production_reconcile_keeps_closed_worker_interrupt_unknown_without_rese
                 row.get(0)
             })
             .unwrap();
-        serde_json::from_str::<Value>(&raw).unwrap()
+        studio_json::from_str::<Value>(&raw).unwrap()
     };
     let unknown = room();
     assert_eq!(unknown["radio"]["status"], "stopping");
@@ -1402,7 +1402,7 @@ async fn legacy_image_rows_finish_without_provider_launch_or_row_loss() {
         .unwrap();
     assert_eq!(event_status, "pending");
     drop(db);
-    let held: Value = serde_json::from_str(&record()).unwrap();
+    let held: Value = studio_json::from_str(&record()).unwrap();
     assert_eq!(held["status"], "completed");
     assert_eq!(held["workspaceMode"], "image");
     assert_eq!(held["legacyWorkspaceFinished"], true);
@@ -1417,7 +1417,7 @@ async fn legacy_image_rows_finish_without_provider_launch_or_row_loss() {
     .await
     .unwrap();
     restarted.reconcile(None).await.unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&record()).unwrap(), held);
+    assert_eq!(studio_json::from_str::<Value>(&record()).unwrap(), held);
     assert!(launcher.opened.lock().unwrap().is_empty());
     assert!(writes.try_recv().is_err());
     let db = fixture.store.test_reader().unwrap();
@@ -1782,7 +1782,7 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
         use studio_runtime_services::provider_callbacks::{self, CallbackContext, FrameAdmission};
         use studio_runtime_schema::persistence::{RequestIdentity, ToolRequestKind, ToolRequestStatus};
         let context = CallbackContext { agent: "managed-actor".into(), account: "default".into(), stream_id: "default".into(), connection: "original-connection".into(), generation: 7, epoch: 0, thread: "retained-thread".into(), turn: "retained-turn".into() };
-        let request: Value = serde_json::from_str(accepted["frame"].as_str().unwrap()).unwrap();
+        let request: Value = studio_json::from_str(accepted["frame"].as_str().unwrap()).unwrap();
         let DecodedJournalPayload::Frame(request) = decode_journal_value(1, 7, &request).payload else { panic!("request frame") };
         let DecodedJournalPayload::Frame(reply) = decode_journal_value(1, 7, &saved_response).payload else { panic!("response frame") };
         let identity = provider_callbacks::save_frame_response(tx, &context, &request, &reply).unwrap();
@@ -1880,7 +1880,7 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
             |row| row.get(0),
         )
         .unwrap();
-    let actor: Value = serde_json::from_str(&actor).unwrap();
+    let actor: Value = studio_json::from_str(&actor).unwrap();
     assert_eq!(actor["startAttempt"]["id"], "retained-attempt");
     assert_eq!(actor["status"], "running");
     assert_eq!(actor["autoWake"], true);
@@ -2018,7 +2018,7 @@ async fn recovery_selection_matches_frozen_scheduler_roster_without_changing_sto
         .unwrap()
         .map(|row| {
             let (id, raw) = row.unwrap();
-            let mut record = serde_json::from_str::<Value>(&raw).unwrap();
+            let mut record = studio_json::from_str::<Value>(&raw).unwrap();
             studio_runtime_store::agent_volatile::merge(&db, &id, &mut record).unwrap();
             (id, record)
         })
@@ -2404,7 +2404,7 @@ async fn registry_drains_strict_account_pages_after_one_global_wake() {
     let fixture = Fixture::new().await;
     seed_backlog(&fixture, 130, true).await;
     let final_agent = "00000000-0000-4000-8000-000000000129";
-    let provider_wait = serde_json::to_string(&AgentStartWait::ProviderSession {
+    let provider_wait = studio_json::to_string(&AgentStartWait::ProviderSession {
         epoch: fixture.agents[0]["epoch"].as_i64().unwrap(),
         until: None,
     })
@@ -2542,7 +2542,7 @@ fn launch_fixture(root: &std::path::Path, isolated: bool, supervised: bool) -> L
         (false, false) => include_str!("fixtures/launch-direct-false.json"),
         (false, true) => include_str!("fixtures/launch-direct-true.json"),
     };
-    serde_json::from_str(&data.replace(
+    studio_json::from_str(&data.replace(
         crate::fixture_support::STATE_PLACEHOLDER,
         &root.to_string_lossy(),
     ))
@@ -2562,7 +2562,7 @@ async fn wire_read(peer: &mut tokio::io::BufReader<tokio::net::UnixStream>) -> V
     use tokio::io::AsyncBufReadExt;
     let mut line = String::new();
     peer.read_line(&mut line).await.unwrap();
-    serde_json::from_str(&line).unwrap()
+    studio_json::from_str(&line).unwrap()
 }
 async fn wire_send(peer: &mut tokio::io::BufReader<tokio::net::UnixStream>, value: Value) {
     use tokio::io::AsyncWriteExt;
@@ -2690,7 +2690,7 @@ async fn every_launch_signature_field_matches_frozen_appserver_contract() {
         assert_eq!(open["cwd"], json!(oracle.cwd));
         assert_eq!(open["command"], json!(with_unload_override(&oracle)));
         let environment: BTreeMap<String, String> =
-            serde_json::from_value(open["env"].clone()).unwrap();
+            studio_json::from_value(open["env"].clone()).unwrap();
         // The frozen pre-unload-override command remains eligible for reattachment.
         assert_eq!(reattach_commands, std::slice::from_ref(&oracle.command));
         assert_eq!(
@@ -2739,7 +2739,7 @@ fn direct_launch_command_and_environment_match_frozen_contract() {
             std::slice::from_ref(&oracle.command)
         );
         assert_eq!(
-            serde_json::to_value(launch.environment).unwrap(),
+            studio_json::to_value(launch.environment).unwrap(),
             json!(oracle.env)
         );
         assert_eq!(
@@ -2979,7 +2979,7 @@ async fn supervised_child_observes_explicit_and_inherited_working_directories() 
         let mut observed = tokio::io::BufReader::new(stream);
         let mut line = String::new();
         observed.read_line(&mut line).await.unwrap();
-        let observed: Value = serde_json::from_str(&line).unwrap();
+        let observed: Value = studio_json::from_str(&line).unwrap();
         let expected = working_dir
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -3097,11 +3097,11 @@ fn claude_profile_is_not_refreshed_through_codex_account_home_admission() {
     let root = tempfile::tempdir().unwrap();
     let (_, home) = account_driver(root.path());
     let registry = root.path().join("accounts/registry.json");
-    let mut value: Value = serde_json::from_slice(&std::fs::read(&registry).unwrap()).unwrap();
+    let mut value: Value = studio_json::from_slice(&std::fs::read(&registry).unwrap()).unwrap();
     value["accounts"]["default"]["provider"] = json!("claude");
     value["accounts"]["default"]["status"] = json!("signedOut");
     value["accounts"]["default"]["home"] = json!(home);
-    std::fs::write(&registry, serde_json::to_vec(&value).unwrap()).unwrap();
+    std::fs::write(&registry, studio_json::to_vec(&value).unwrap()).unwrap();
     let before = std::fs::read(&registry).unwrap();
     let reads = Arc::new(AtomicUsize::new(0));
     let driver = studio_runtime_services::account_driver::AccountDriver::open_with_reader(
@@ -3363,7 +3363,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
         .unwrap();
     let mut bytes = Vec::new();
     reported.read_to_end(&mut bytes).await.unwrap();
-    let request: Value = serde_json::from_slice(&bytes).unwrap();
+    let request: Value = studio_json::from_slice(&bytes).unwrap();
     assert_eq!(request["pid"], pid);
     assert_eq!(request["count"], 1);
     assert_eq!(
@@ -3389,7 +3389,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let value: Value = serde_json::from_str(&row).unwrap();
+            let value: Value = studio_json::from_str(&row).unwrap();
             if value["status"] == "completed" && value["inFlight"] != true {
                 break value;
             }
@@ -3415,7 +3415,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
         .unwrap();
     assert!(!publication_rows.is_empty(), "P06 effects are journaled");
     for row in publication_rows {
-        let publication: Value = serde_json::from_str(&row).unwrap();
+        let publication: Value = studio_json::from_str(&row).unwrap();
         assert_eq!(publication["account"], "default");
         assert!(
             publication["sequence"]
@@ -3454,7 +3454,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
         "{}",
         String::from_utf8_lossy(&transcript_body)
     );
-    let transcript: Value = serde_json::from_slice(&transcript_body).unwrap();
+    let transcript: Value = studio_json::from_slice(&transcript_body).unwrap();
     assert!(transcript.to_string().contains("host composition cutover"));
     assert!(
         transcript
@@ -3479,7 +3479,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
-    let page: Value = serde_json::from_slice(
+    let page: Value = studio_json::from_slice(
         &axum::body::to_bytes(response.into_body(), 1_000_000)
             .await
             .unwrap(),
@@ -3543,7 +3543,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
         .unwrap();
     let mut bytes = Vec::new();
     barrier.read_to_end(&mut bytes).await.unwrap();
-    let barrier: Value = serde_json::from_slice(&bytes).unwrap();
+    let barrier: Value = studio_json::from_slice(&bytes).unwrap();
     assert_eq!(barrier["method"], "fixture/barrier");
     assert_eq!(
         barrier["count"], 1,
@@ -3729,7 +3729,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             if record["status"] == "completed" && record["inFlight"] != true {
                 break record;
             }
@@ -3770,7 +3770,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         .await
         .unwrap();
     assert_eq!(transcript.status(), 200);
-    let transcript: Value = serde_json::from_slice(
+    let transcript: Value = studio_json::from_slice(
         &axum::body::to_bytes(transcript.into_body(), 1_000_000)
             .await
             .unwrap(),
@@ -3816,7 +3816,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
     };
     eprintln!("STAGE transcript-read");
     let mut expected: Vec<Value> =
-        serde_json::from_str(include_str!("fixtures/claude-stream-items.json")).unwrap();
+        studio_json::from_str(include_str!("fixtures/claude-stream-items.json")).unwrap();
     // The input includes runtime instructions; compare its complete persisted text.
     expected[0]["text"] = transcript["items"][0]["text"].clone();
     expected[0]["id"] = json!(message_id);
@@ -3828,7 +3828,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
     let sdk_inputs: Vec<Value> = std::fs::read_to_string(cwd.join(".sdk-inputs"))
         .unwrap()
         .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
+        .map(|line| studio_json::from_str(line).unwrap())
         .collect();
     assert_eq!(sdk_inputs.len(), 2);
     assert_eq!(sdk_inputs[0]["shouldQuery"], false);
@@ -3963,7 +3963,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             let held = record["status"] == "queued"
                 && record["autoWake"] == true
                 && record["inFlight"] != true
@@ -4144,7 +4144,7 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
         .unwrap();
     let mut bytes = Vec::new();
     reported.read_to_end(&mut bytes).await.unwrap();
-    let started: Value = serde_json::from_slice(&bytes).unwrap();
+    let started: Value = studio_json::from_slice(&bytes).unwrap();
     let pid = started["pid"].as_u64().unwrap() as u32;
     assert_eq!(started["request"]["method"], "turn/start");
     assert_eq!(started["count"], 1);
@@ -4180,7 +4180,7 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let value: Value = serde_json::from_str(&row).unwrap();
+            let value: Value = studio_json::from_str(&row).unwrap();
             if value["status"] == "completed" && value["inFlight"] != true {
                 break value;
             }
@@ -4214,7 +4214,7 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
         .await
         .unwrap();
     assert_eq!(transcript.status(), 200);
-    let transcript: Value = serde_json::from_slice(
+    let transcript: Value = studio_json::from_slice(
         &axum::body::to_bytes(transcript.into_body(), 1_000_000)
             .await
             .unwrap(),
@@ -4516,7 +4516,7 @@ async fn direct_child_sigkill_settles_unknown_without_resend() {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             // Unknown starts use the native-history hold introduced in 1987a373:
             // queued is a reconciliation state, not permission to resend input.
             if record["restartRecovery"]["startAttempt"]["executionOutcome"] == "unknown"
@@ -4677,7 +4677,7 @@ async fn direct_child_crash_before_turn_write_retries_queued_input_once() {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             if record["status"] == "completed" && record["inFlight"] != true {
                 break record;
             }
@@ -4703,7 +4703,7 @@ async fn read_direct_report(listener: &tokio::net::UnixListener) -> Value {
         .unwrap();
     let mut bytes = Vec::new();
     socket.read_to_end(&mut bytes).await.unwrap();
-    serde_json::from_slice(&bytes).unwrap()
+    studio_json::from_slice(&bytes).unwrap()
 }
 
 #[cfg(target_os = "linux")]
@@ -4755,7 +4755,7 @@ async fn make_direct_agent_runnable(store: &RuntimeStore, agent_id: &str, accoun
                 [&agent_id],
                 |row| row.get(0),
             )?;
-            let mut record: Value = serde_json::from_str(&raw)
+            let mut record: Value = studio_json::from_str(&raw)
                 .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
             record["accountKey"] = json!(account);
             record["status"] = json!("queued");
@@ -4780,7 +4780,7 @@ fn direct_agent_debug(store: &RuntimeStore, agent_id: &str) -> String {
             |row| row.get::<_, String>(0),
         )
         .unwrap();
-    let agent: Value = serde_json::from_str(&raw).unwrap();
+    let agent: Value = studio_json::from_str(&raw).unwrap();
     let events = db
         .prepare("SELECT id,status FROM runtime_events ORDER BY rowid")
         .unwrap()
@@ -4854,7 +4854,7 @@ async fn wait_for_direct_completion<T: Clone + Send + Sync + 'static>(
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap();
-            let record: Value = serde_json::from_str(&raw).unwrap();
+            let record: Value = studio_json::from_str(&raw).unwrap();
             if record["status"] == "completed" && record["inFlight"] != true {
                 break record;
             }
@@ -4884,7 +4884,9 @@ fn restart_provider_requests(root: &std::path::Path) -> Vec<Value> {
     bytes
         .split_inclusive(|byte| *byte == b'\n')
         .filter(|line| line.ends_with(b"\n"))
-        .map(|line| serde_json::from_slice(line).expect("completed provider request is valid JSON"))
+        .map(|line| {
+            studio_json::from_slice(line).expect("completed provider request is valid JSON")
+        })
         .collect()
 }
 
@@ -4963,7 +4965,7 @@ fn restart_agent(store: &RuntimeStore, id: &str) -> Value {
             |row| row.get(0),
         )
         .unwrap();
-    serde_json::from_str(&raw).unwrap()
+    studio_json::from_str(&raw).unwrap()
 }
 
 /// The recovery fields of an agent record, for a failure message.

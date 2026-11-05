@@ -2,8 +2,8 @@
 //! `account/login/completed` notification, and a receipt whose completion was
 //! lost cannot stay active forever. A receipt is never ready for an account id
 //! other than the one it expects.
-use serde_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_services::account_driver::{
     AccountDriver, CODEX_LOGIN_RECEIPT_LIFETIME_SECONDS, CodexLoginRequest, LOGIN_EXPIRED_ERROR,
     LoginReservation,
@@ -75,7 +75,7 @@ fn pending_reauth(root: &Path, created: f64) -> AccountDriver {
 /// The persisted receipt; the registry file is the durable owner.
 fn stored(root: &Path) -> Value {
     let registry: Value =
-        serde_json::from_slice(&std::fs::read(root.join("registry.json")).expect("registry"))
+        studio_json::from_slice(&std::fs::read(root.join("registry.json")).expect("registry"))
             .expect("registry JSON");
     registry["logins"][REQUEST].clone()
 }

@@ -2,7 +2,7 @@ use futures_util::future::BoxFuture;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_services::multi_server_auth::{AccessError, OwnerObservation, SignedRequest};
 use studio_runtime_services::multi_server_pairing::{MultiServerBoundary, OwnerLookup};
 use studio_runtime_store::RuntimeStore;
@@ -11,7 +11,7 @@ use studio_runtime_store::RuntimeStore;
 #[serde(deny_unknown_fields)]
 pub struct Fixture {
     pub canvas_sql: String,
-    signing_identity: Box<serde_json::value::RawValue>,
+    signing_identity: studio_json::OwnedRawJson,
     pub data: Value,
 }
 static FIXTURE: OnceLock<Fixture> = OnceLock::new();
@@ -26,7 +26,7 @@ fn test_directory() -> tempfile::TempDir {
 }
 pub fn fixture() -> &'static Fixture {
     FIXTURE.get_or_init(|| {
-        serde_json::from_str(include_str!("fixture.json")).expect("frozen multi-server fixture")
+        studio_json::from_str(include_str!("fixture.json")).expect("frozen multi-server fixture")
     })
 }
 /// Decode each typed corpus directly from the frozen fixture bytes.
@@ -37,7 +37,7 @@ pub fn typed_data<T: serde::de::DeserializeOwned>() -> T {
     struct Data<T> {
         data: T,
     }
-    serde_json::from_str::<Data<T>>(include_str!("fixture.json"))
+    studio_json::from_str::<Data<T>>(include_str!("fixture.json"))
         .expect("typed frozen fixture")
         .data
 }
@@ -85,7 +85,7 @@ pub fn signing_identity() -> &'static studio_runtime_services::remote_transport:
         let directory = root.path().join("multi-server");
         std::fs::create_dir(&directory).expect("fixture identity directory");
         let path = directory.join("identity.json");
-        std::fs::write(&path, fixture().signing_identity.get()).expect("fixture identity");
+        std::fs::write(&path, fixture().signing_identity.as_str()).expect("fixture identity");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -159,7 +159,7 @@ pub fn owner() -> OwnerObservation {
 }
 pub fn rows(store: &RuntimeStore) -> Value {
     let db = store.test_reader().expect("read");
-    let mut output = serde_json::Map::new();
+    let mut output = studio_json::Map::new();
     for table in [
         "runtime_access_clients",
         "runtime_access_invites",
@@ -185,7 +185,7 @@ pub fn rows(store: &RuntimeStore) -> Value {
             .expect("rows")
             .collect::<Result<Vec<_>, _>>()
             .expect("collect");
-        output.insert(table.to_owned(), serde_json::json!(rows));
+        output.insert(table.to_owned(), studio_json::json!(rows));
     }
     Value::Object(output)
 }

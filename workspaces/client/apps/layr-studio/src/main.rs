@@ -1,6 +1,6 @@
 //! `layr-studio servers list [--json]` and `layr-studio servers forget <serverId>`.
-use serde_json::{Value, json};
 use std::path::PathBuf;
+use studio_json::{Value, json};
 
 const USAGE: &str =
     "Usage: layr-studio servers list [--json] | layr-studio servers forget <serverId>";

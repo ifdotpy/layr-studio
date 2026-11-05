@@ -5,8 +5,8 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, QueueEvent, QueueEventId, QueueEventRepository,
@@ -64,7 +64,7 @@ async fn post_annotation(app: &axum::Router, body: &AnnotationCommand<'_>) -> (u
         .extension(ConnectInfo(
             "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
         ))
-        .body(Body::from(serde_json::to_vec(body).unwrap()))
+        .body(Body::from(studio_json::to_vec(body).unwrap()))
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
     (
@@ -92,7 +92,7 @@ async fn annotation_command_replays_reference_and_returns_latest_entity() {
     };
     let (status, bytes) = post_annotation(&app, &input).await;
     assert_eq!(status, 200);
-    let first: AnnotationCommandReply = serde_json::from_slice(&bytes).expect("command response");
+    let first: AnnotationCommandReply = studio_json::from_slice(&bytes).expect("command response");
     assert_eq!(
         (
             first.status.as_str(),
@@ -113,7 +113,7 @@ async fn annotation_command_replays_reference_and_returns_latest_entity() {
     }).await.unwrap();
     let (status, bytes) = post_annotation(&app, &input).await;
     assert_eq!(status, 200);
-    let replay: AnnotationCommandReply = serde_json::from_slice(&bytes).unwrap();
+    let replay: AnnotationCommandReply = studio_json::from_slice(&bytes).unwrap();
     assert_eq!(
         (replay.status, replay.ref_kind, replay.ref_id, replay.rev),
         (first.status, first.ref_kind, first.ref_id, first.rev)
@@ -192,7 +192,7 @@ async fn call(app: &axum::Router, body: Option<Value>) -> (u16, Value) {
     let status = response.status().as_u16();
     (
         status,
-        serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+        studio_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
             .unwrap(),
     )
 }
@@ -433,7 +433,7 @@ async fn send_now_preserves_legacy_original_and_extensions_in_metadata() {
                 |row| row.get(0),
             )
             .unwrap();
-        let stored: Value = serde_json::from_str(&stored).unwrap();
+        let stored: Value = studio_json::from_str(&stored).unwrap();
         assert_eq!(stored["requestedDelivery"], expected);
         assert_eq!(stored["delivery"], "current_turn");
         assert_eq!(stored["future"], json!({"n":1}));

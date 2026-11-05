@@ -1,11 +1,11 @@
 use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
-use serde_json::{Value, json};
 use sha2::Digest;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::voice::runtime::{
     Method, VoiceConnectionScope, VoiceFuture, VoicePrepareFailure, VoiceReply, VoiceRequestPort,
@@ -137,7 +137,7 @@ async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, Arc<RecordingPort>)
         let approval = studio_runtime_store::approvals::from_legacy_record("request-1", &request)
             .expect("typed approval");
         studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
-        let request = serde_json::to_value(&approval).expect("approval json");
+        let request = studio_json::to_value(&approval).expect("approval json");
         let fingerprint = sha2::Sha256::digest(studio_runtime_store::python_json(&request).as_bytes())
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -167,7 +167,7 @@ async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, Arc<RecordingPort>)
 }
 
 async fn post(app: &axum::Router, path: &str, body: Value) -> (StatusCode, Value) {
-    let body = serde_json::to_vec(&body).expect("request JSON");
+    let body = studio_json::to_vec(&body).expect("request JSON");
     let mut request = Request::builder()
         .method("POST")
         .uri(path)
@@ -182,7 +182,7 @@ async fn post(app: &axum::Router, path: &str, body: Value) -> (StatusCode, Value
     )));
     let response = app.clone().oneshot(request).await.expect("HTTP response");
     let status = response.status();
-    let value = serde_json::from_slice(
+    let value = studio_json::from_slice(
         &to_bytes(response.into_body(), 1_000_000)
             .await
             .expect("body"),
@@ -336,7 +336,7 @@ async fn voice_monitor_approval_uses_monitor_transaction_and_dispatch_wake() {
             )
             .expect("typed approval");
             studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
-            let request = serde_json::to_value(&approval).expect("approval json");
+            let request = studio_json::to_value(&approval).expect("approval json");
             let fingerprint = studio_runtime_store::sha256_hex(
                 studio_runtime_store::python_json(&request).as_bytes(),
             );
@@ -435,7 +435,7 @@ async fn voice_monitor_approval_uses_monitor_transaction_and_dispatch_wake() {
         )
         .expect("read recovered voice approval receipt");
     assert_eq!(receipt.0, "accepted");
-    let saved: Value = serde_json::from_str(receipt.1.as_deref().expect("saved voice receipt"))
+    let saved: Value = studio_json::from_str(receipt.1.as_deref().expect("saved voice receipt"))
         .expect("valid saved voice receipt");
     assert_eq!(saved, json!({"status":"answered","replayed":true}));
 

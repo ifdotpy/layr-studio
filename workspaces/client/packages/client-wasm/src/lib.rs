@@ -11,7 +11,7 @@ pub fn sha256(bytes: &[u8]) -> Vec<u8> {
 #[wasm_bindgen]
 pub fn parse_markdown(text: &str, streaming: bool) -> Result<String, JsValue> {
     studio_client_domain::markdown::parse(text, streaming)
-        .and_then(|value| serde_json::to_string(&value).map_err(|error| error.to_string()))
+        .and_then(|value| studio_json::to_string(&value).map_err(|error| error.to_string()))
         .map_err(|error| JsValue::from_str(&error))
 }
 

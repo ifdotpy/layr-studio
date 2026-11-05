@@ -7,7 +7,7 @@
 use base64::Engine;
 use rusqlite::OptionalExtension;
 #[cfg(test)]
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::monitor_record::{MonitorProbeResult, MonitorQueueEvent, MonitorStream};
 use studio_runtime_store::{
     MonitorRecord, MonitorsRepository, RuntimeStore, StoreError, Table, Transaction,
@@ -210,7 +210,7 @@ pub async fn next(store: &RuntimeStore) -> Result<Option<Delivery>, MonitorError
     let Some((id, encoded)) = row else {
         return Ok(None);
     };
-    let record: MonitorRecord = serde_json::from_str(&encoded)
+    let record: MonitorRecord = studio_json::from_str(&encoded)
         .map_err(|_| MonitorError::InvalidDeliveryIdentity("monitor output queue"))?;
     if record.id != id {
         return Err(MonitorError::InvalidDeliveryIdentity(
@@ -304,7 +304,7 @@ pub async fn enqueue_probe(
                     Err(MonitorError::InvalidDeliveryIdentity("conflicting monitor probe"))
                 };
             }
-            let result_bytes = serde_json::to_vec(&result).map_err(StoreError::from)?.len();
+            let result_bytes = studio_json::to_vec(&result).map_err(StoreError::from)?.len();
             if queue.len() >= MAX_EVENTS - 1 || result_bytes > PROBE_RESULT_MAX_BYTES
                 || queue.iter().map(MonitorQueueEvent::byte_length).sum::<u64>().saturating_add(result_bytes as u64) > (STREAM_QUEUE_MAX_BYTES - TERMINAL_RECEIPT_RESERVE_BYTES) as u64
             {

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, TransactionBehavior};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use crate::{StoreError, StoreResult};
 
@@ -229,7 +229,7 @@ fn create_fresh(root: &Path) -> StoreResult<()> {
 }
 
 fn build_staging(staging: &Path, final_root: &Path) -> StoreResult<()> {
-    let snapshot: Value = serde_json::from_str(SNAPSHOT)?;
+    let snapshot: Value = studio_json::from_str(SNAPSHOT)?;
     for (file, schema) in CORE_DATABASES
         .iter()
         .zip(["canvas.sqlite3", "analytics.sqlite3"])
@@ -342,7 +342,7 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
 
 /// Install revision tracking from the same catalog that owns fresh databases.
 pub(crate) fn prepare_analytics_revision_schema(db: &Connection) -> StoreResult<()> {
-    let snapshot: Value = serde_json::from_str(SNAPSHOT)?;
+    let snapshot: Value = studio_json::from_str(SNAPSHOT)?;
     let mut entries = snapshot["analytics.sqlite3"]["sqlite_master"]
         .as_array()
         .ok_or(StoreError::RecordContract(
@@ -374,7 +374,7 @@ pub(crate) fn prepare_analytics_revision_schema(db: &Connection) -> StoreResult<
 /// Repository witnesses use the production catalog without files, fsyncs or writer actors.
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_canvas() -> Connection {
-    let snapshot = serde_json::from_str(SNAPSHOT).expect("fresh schema snapshot");
+    let snapshot = studio_json::from_str(SNAPSHOT).expect("fresh schema snapshot");
     let mut connection = create_database(Path::new(":memory:"), &snapshot, "canvas.sqlite3")
         .expect("in-memory canvas");
     crate::schema::register_python_trigger_functions(&connection).expect("projection functions");

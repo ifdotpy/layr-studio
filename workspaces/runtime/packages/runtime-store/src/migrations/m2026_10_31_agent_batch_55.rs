@@ -43,8 +43,8 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     })?;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
-            serde_json::from_str(&raw)?;
+        let mut record: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+            studio_json::from_str(&raw)?;
         for key in DROPPED {
             record.remove(*key);
         }
@@ -55,18 +55,18 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
         }
         if let Some(value) = record.get("excludedAccountKeys")
-            && serde_json::from_str::<Option<Vec<String>>>(value.get()).is_err()
+            && studio_json::from_str::<Option<Vec<String>>>(value.as_str()).is_err()
         {
             if let Ok(items) =
-                serde_json::from_str::<Vec<Box<serde_json::value::RawValue>>>(value.get())
+                studio_json::from_str::<Vec<studio_json::OwnedRawJson>>(value.as_str())
             {
                 let keys: Vec<String> = items
                     .iter()
-                    .filter_map(|item| serde_json::from_str(item.get()).ok())
+                    .filter_map(|item| studio_json::from_str(item.as_str()).ok())
                     .collect();
                 record.insert(
                     "excludedAccountKeys".into(),
-                    serde_json::value::RawValue::from_string(serde_json::to_string(&keys)?)?,
+                    studio_json::OwnedRawJson::from_string(studio_json::to_string(&keys)?)?,
                 );
             } else {
                 record.remove("excludedAccountKeys");
@@ -75,44 +75,45 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         // For malformed legacy archived values, process_controls now uses truthiness instead of requiring the literal true.
         for key in ["archived", "pinned"] {
             if let Some(value) = record.get(key)
-                && serde_json::from_str::<Option<bool>>(value.get()).is_err()
+                && studio_json::from_str::<Option<bool>>(value.as_str()).is_err()
             {
-                let parsed = serde_json::from_str(value.get())?;
+                let parsed = studio_json::from_str(value.as_str())?;
                 let normalized = crate::truthy(Some(&parsed));
                 eprintln!("agent migration error: normalized unreadable {key} for {id}");
                 record.insert(
                     key.into(),
-                    serde_json::value::RawValue::from_string(normalized.to_string())?,
+                    studio_json::OwnedRawJson::from_string(normalized.to_string())?,
                 );
             }
         }
         if record
             .get("imageWorkspace")
-            .is_some_and(|v| serde_json::from_str::<Option<bool>>(v.get()).is_err())
+            .is_some_and(|v| studio_json::from_str::<Option<bool>>(v.as_str()).is_err())
         {
             record.remove("imageWorkspace");
         }
         if record.get("maxAgents").is_some_and(|v| {
-            serde_json::from_str::<Option<studio_runtime_schema::AgentCounter>>(v.get()).is_err()
+            studio_json::from_str::<Option<studio_runtime_schema::AgentCounter>>(v.as_str())
+                .is_err()
         }) {
             record.remove("maxAgents");
         }
         for key in ["error", "lastCompletedTurnError"] {
             if let Some(error) = record.get(key)
-                && error.get() != "null"
+                && error.as_str() != "null"
             {
-                let value = serde_json::from_str(error.get())?;
+                let value = studio_json::from_str(error.as_str())?;
                 let normalized =
                     studio_runtime_schema::provider_errors::AgentError::from_receipt(value)?;
                 record.insert(
                     key.into(),
-                    serde_json::value::RawValue::from_string(serde_json::to_string(&normalized)?)?,
+                    studio_json::OwnedRawJson::from_string(studio_json::to_string(&normalized)?)?,
                 );
             }
         }
         if record
             .get("layrReady")
-            .is_some_and(|v| serde_json::from_str::<bool>(v.get()).is_err())
+            .is_some_and(|v| studio_json::from_str::<bool>(v.as_str()).is_err())
         {
             record.remove("layrReady");
         }
@@ -127,34 +128,34 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         ] {
             if record
                 .get(key)
-                .is_some_and(|v| serde_json::from_str::<Option<String>>(v.get()).is_err())
+                .is_some_and(|v| studio_json::from_str::<Option<String>>(v.as_str()).is_err())
             {
                 record.remove(key);
             }
         }
         if record
             .get("provider")
-            .is_some_and(|v| serde_json::from_str::<Option<ProviderKind>>(v.get()).is_err())
+            .is_some_and(|v| studio_json::from_str::<Option<ProviderKind>>(v.as_str()).is_err())
         {
             record.remove("provider");
         }
         if record.get("created").is_some_and(|v| {
-            serde_json::from_str::<Option<studio_runtime_schema::NonnegativeNumber>>(v.get())
+            studio_json::from_str::<Option<studio_runtime_schema::NonnegativeNumber>>(v.as_str())
                 .is_err()
         }) {
             record.remove("created");
         }
         for key in ["queueMutationRevision", "authResumeAttempt"] {
             if record.get(key).is_some_and(|v| {
-                serde_json::from_str::<u64>(v.get())
+                studio_json::from_str::<u64>(v.as_str())
                     .map_or(true, |revision| revision > max_revision as u64)
             }) {
                 record.remove(key);
             }
         }
-        let normalized = serde_json::to_string(&record)?;
-        if serde_json::from_str::<serde_json::Value>(&raw)?
-            == serde_json::from_str::<serde_json::Value>(&normalized)?
+        let normalized = studio_json::to_string(&record)?;
+        if studio_json::from_str::<studio_json::Value>(&raw)?
+            == studio_json::from_str::<studio_json::Value>(&normalized)?
             && !tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM json_each(?1) GROUP BY key HAVING count(*) > 1)",
                 [&raw],
@@ -172,13 +173,13 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 }
 
 fn clear_bad_workspace_value(
-    record: &mut std::collections::BTreeMap<String, Box<serde_json::value::RawValue>>,
+    record: &mut std::collections::BTreeMap<String, studio_json::OwnedRawJson>,
     key: &str,
     id: &str,
 ) -> Option<String> {
     if record
         .get(key)
-        .is_some_and(|value| serde_json::from_str::<Option<String>>(value.get()).is_err())
+        .is_some_and(|value| studio_json::from_str::<Option<String>>(value.as_str()).is_err())
     {
         record.remove(key);
         Some(format!(
@@ -213,10 +214,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&before).unwrap();
+        let value: studio_json::Value = studio_json::from_str(&before).unwrap();
         assert_eq!(
             value["error"]["studioRawEvidence"],
-            serde_json::json!({"message":"failed","data":{"id":1}})
+            studio_json::json!({"message":"failed","data":{"id":1}})
         );
         store.transaction(|tx| {
             tx.execute_batch("CREATE TRIGGER no_agent_rewrite BEFORE UPDATE ON runtime_agents BEGIN SELECT RAISE(FAIL, 'unexpected agent rewrite'); END")?;
@@ -240,8 +241,8 @@ mod tests {
 
     #[test]
     fn agent_batch_55_normalizes_all_owned_fields() {
-        let mut malformed = serde_json::from_str::<
-            std::collections::BTreeMap<String, Box<serde_json::value::RawValue>>,
+        let mut malformed = studio_json::from_str::<
+            std::collections::BTreeMap<String, studio_json::OwnedRawJson>,
         >(r#"{"workspaceOperation":42,"workspaceReservationId":{}}"#)
         .unwrap();
         for key in ["workspaceOperation", "workspaceReservationId"] {
@@ -265,8 +266,8 @@ mod tests {
             .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
-            serde_json::json!({
+            studio_json::from_str::<studio_json::Value>(&raw).unwrap(),
+            studio_json::json!({
                 "archived":true,"pinned":false,"id":"legacy","excludedAccountKeys":["blocked"],
                 "error":{"message":"nested","error":{"code":42,"message":"nested"},"ignored":true,"studioRawEvidence":{"error":{"code":42,"message":"nested"},"ignored":true}},
                 "lastCompletedTurnError":{"message":"previous","ignored":true,"studioRawEvidence":{"message":"previous","ignored":true}}
@@ -281,14 +282,14 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let record: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(
             record.pointer("/error/message"),
-            Some(&serde_json::json!("Write failed"))
+            Some(&studio_json::json!("Write failed"))
         );
         assert_eq!(
             record.pointer("/error/studioRawEvidence"),
-            Some(&serde_json::json!(
+            Some(&studio_json::json!(
                 r#"{"error":{"message":"Write failed","data":{"diskFull":true}}}"#
             ))
         );
@@ -316,8 +317,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
-            serde_json::json!({
+            studio_json::from_str::<studio_json::Value>(&raw).unwrap(),
+            studio_json::json!({
                 "id":"details", "error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail","ignored":true,
                     "studioRawEvidence":{"message":{"reason":"blocked"},"data":{"request":"one"},"additionalDetails":"detail","ignored":true}}
             })

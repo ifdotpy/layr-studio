@@ -1,6 +1,6 @@
 //! Wire fields shared by native and guest Layr evidence replies.
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +52,7 @@ mod tests {
             "{",
             r#"{"stateId":"s","ignored":1e999}"#,
         ] {
-            let Ok(value) = serde_json::from_str::<Value>(text) else {
+            let Ok(value) = studio_json::from_str::<Value>(text) else {
                 continue;
             };
             let expected = (

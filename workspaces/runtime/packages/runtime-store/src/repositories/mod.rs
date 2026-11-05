@@ -83,10 +83,10 @@ mod tests {
         QueueEvent, QueueEventId, QueueEventRepository, TaskRecord, TaskRepository,
     };
     use rusqlite::Connection;
-    use serde_json::Value;
-    use serde_json::json;
     use std::fs;
     use std::path::Path;
+    use studio_json::Value;
+    use studio_json::json;
     use sync_documents::SyncDocumentsRepository;
 
     fn database_with(requirements: &crate::schema::SchemaRequirements) -> Connection {
@@ -203,7 +203,7 @@ mod tests {
         AgentRepository::get(&db, agent.id()).expect("agent read uses declared objects");
 
         let db = database_with(&tasks::REQUIREMENTS);
-        let task: TaskRecord = serde_json::from_str(&json!({
+        let task: TaskRecord = studio_json::from_str(&json!({
             "id":"t", "agent":"a", "kind":"command", "status":"completed",
             "created":0, "itemId":"i", "turnId":"turn", "type":"commandExecution", "name":"commandExecution", "interactive":false, "exitCode":0
         }).to_string())

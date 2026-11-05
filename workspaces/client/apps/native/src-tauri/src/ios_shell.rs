@@ -47,11 +47,11 @@ thread_local! {
     // Main thread only: UIKit notifications and script messages arrive there.
     static KEYBOARD: Cell<Option<Keyboard>> = const { Cell::new(None) };
     // Diagnostic only: the last UIKit end frame and its conversions.
-    static KEYBOARD_FRAMES: std::cell::RefCell<serde_json::Value> = const { std::cell::RefCell::new(serde_json::Value::Null) };
+    static KEYBOARD_FRAMES: std::cell::RefCell<studio_json::Value> = const { std::cell::RefCell::new(studio_json::Value::Null) };
 }
 
-fn rect_json(r: CGRect) -> serde_json::Value {
-    serde_json::json!([r.origin.x, r.origin.y, r.size.width, r.size.height])
+fn rect_json(r: CGRect) -> studio_json::Value {
+    studio_json::json!([r.origin.x, r.origin.y, r.size.width, r.size.height])
 }
 
 /// Per-launch secret of the first-launch page form, as hex.
@@ -161,7 +161,7 @@ pub fn start_page(
             format!("Could not save the server: {}", escape(&error)),
         );
     }
-    let target = serde_json::to_string(url.as_str()).unwrap_or_default();
+    let target = studio_json::to_string(url.as_str()).unwrap_or_default();
     html(
         200,
         format!("<!doctype html><script>location.replace({target})</script>"),
@@ -248,14 +248,14 @@ fn reported_insets(webview: &UIView) -> (Geometry, Insets) {
 /// Send the current insets, and a keyboard state when one is known.
 fn push(webview: &UIView, keyboard: Option<Keyboard>) {
     let (_, insets) = reported_insets(webview);
-    let mut state = serde_json::json!({
+    let mut state = studio_json::json!({
         "insets": {
             "top": insets.top, "right": insets.right,
             "bottom": insets.bottom, "left": insets.left,
         }
     });
     if let Some(keyboard) = keyboard {
-        state["keyboard"] = serde_json::json!({
+        state["keyboard"] = studio_json::json!({
             "overlap": keyboard.overlap,
             "duration": keyboard.duration,
             "curve": keyboard.curve,
@@ -289,7 +289,7 @@ fn diagnose(webview: &UIView, tag: &str) {
     let frame = webview.frame();
     let (raw, insets) = reported_insets(webview);
     let offset = scroll.contentOffset();
-    let native = serde_json::json!({
+    let native = studio_json::json!({
         "frame": [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height],
         "uikitSafe": [raw.safe.top, raw.safe.right, raw.safe.bottom, raw.safe.left],
         "reportedSafe": [insets.top, insets.right, insets.bottom, insets.left],
@@ -308,9 +308,9 @@ fn diagnose(webview: &UIView, tag: &str) {
     let block = block2::RcBlock::new(
         move |value: *mut AnyObject, _error: *mut objc2_foundation::NSError| {
             let page = unsafe { value.cast::<NSString>().as_ref() }
-                .and_then(|v| serde_json::from_str::<serde_json::Value>(&v.to_string()).ok())
-                .unwrap_or(serde_json::Value::Null);
-            let sample = serde_json::json!({ "tag": tag, "native": native, "page": page });
+                .and_then(|v| studio_json::from_str::<studio_json::Value>(&v.to_string()).ok())
+                .unwrap_or(studio_json::Value::Null);
+            let sample = studio_json::json!({ "tag": tag, "native": native, "page": page });
             let _ = std::fs::create_dir_all(&path);
             let _ = std::fs::write(path.join(format!("{tag}.json")), sample.to_string());
         },
@@ -361,7 +361,7 @@ fn keyboard_from(
             unsafe { msg_send![webview, convertRect: frame, fromCoordinateSpace: &*space] };
         if diagnostics() {
             let from_window = webview.convertRect_fromView(frame, None);
-            KEYBOARD_FRAMES.set(serde_json::json!({
+            KEYBOARD_FRAMES.set(studio_json::json!({
                 "end": rect_json(frame),
                 "fromScreenSpace": rect_json(local),
                 "fromWindow": rect_json(from_window),

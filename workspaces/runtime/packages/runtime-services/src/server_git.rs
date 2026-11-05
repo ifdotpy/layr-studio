@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use studio_json::{Value, json};
 
 /// Bytes of merged stdout and stderr that a Git read keeps (Python `bounded_command`).
 pub const GIT_OUTPUT_LIMIT: usize = 64 * 1024;

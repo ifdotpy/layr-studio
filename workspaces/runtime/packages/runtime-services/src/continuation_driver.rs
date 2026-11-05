@@ -89,7 +89,7 @@ fn apply(
 ) -> Result<()> {
     // Validate all resulting stored records with the same constructor used for reads.
     let proposed = d.record.as_ref().map(|record| record.value());
-    let validation = serde_json::json!({"agent":d.agent.as_ref().map_or(&snapshot.agent, |agent| agent.value()),"record":proposed.as_ref().or(snapshot.record.as_ref()),"ancestors":snapshot.ancestors,"claims":snapshot.claims});
+    let validation = studio_json::json!({"agent":d.agent.as_ref().map_or(&snapshot.agent, |agent| agent.value()),"record":proposed.as_ref().or(snapshot.record.as_ref()),"ancestors":snapshot.ancestors,"claims":snapshot.claims});
     let agent = match d.agent.as_ref() {
         Some(agent) => agent.checked(),
         None => snapshot.current_agent_record(),
@@ -126,13 +126,13 @@ fn apply(
                 return Err(ContinuationError::Invalid("/events/identity".into()));
             }
 
-            let agent = serde_json::from_value(snapshot.agent.clone())
+            let agent = studio_json::from_value(snapshot.agent.clone())
                 .map_err(|_| ContinuationError::Invalid("/agent".into()))?;
             if prior.is_none() {
                 studio_runtime_store::QueueWriteRepository::put_metadata(
                     tx,
                     id,
-                    &serde_json::json!({"delivery":studio_runtime_schema::delivery::DeliveryMoment::NextTurn}),
+                    &studio_json::json!({"delivery":studio_runtime_schema::delivery::DeliveryMoment::NextTurn}),
                 )?;
             }
             crate::event_write::enqueue_event(
@@ -187,7 +187,7 @@ fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[tokio::test]
     async fn failed_proposal_persists_cleared_in_flight() {

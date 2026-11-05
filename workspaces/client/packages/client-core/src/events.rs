@@ -1,10 +1,10 @@
 //! Server event parsing, reconnect state and HTTP lifetime belong to Rust.
 use crate::backend::{Backend, error as command_error};
-use serde_json::{Value, json};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use studio_json::{Value, json};
 use tokio::sync::{Notify, mpsc};
 
 use studio_client_domain::NATIVE_SSE_EVENT_MAX_BYTES;

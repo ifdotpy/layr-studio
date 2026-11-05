@@ -58,6 +58,6 @@ fn the_status_command_reports_a_stopped_vm() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let status: studio_json::Value = studio_json::from_slice(&output.stdout).unwrap();
     assert_eq!(status["state"], "stopped");
 }

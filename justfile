@@ -64,6 +64,10 @@ check package *args:
 clippy-runtime:
     node workspaces/tooling/apps/repository-checks/clippy-ratchet.ts
 
+[doc("Check the locked Cargo dependency graph for banned direct dependencies, offline.")]
+deny-bans:
+    cargo deny --locked --offline check bans
+
 [doc("Check generated API and persisted-state contracts in read-only drift mode.")]
 contracts-check:
     @node {{quote(facade)}} contracts-check

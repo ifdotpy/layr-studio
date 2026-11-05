@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use base64::Engine as _;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::approvals::{
     Answer, Approval, ApprovalId, ApprovalState, BrowserCallbackForward, BrowserCard,
     BrowserOutcome, BrowserPhase, CloseReason, CommandId, Decision, Principal, Timestamp,
@@ -710,9 +710,9 @@ mod tests {
     use super::{BrowserAnswerContext, answer};
     use crate::browser_cards::fixture;
     use crate::linux_vm_guest::{GuestError, GuestRpc};
-    use serde_json::{Value, json};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use studio_json::{Value, json};
     use studio_runtime_schema::approvals::{ApprovalState, BrowserSource};
 
     struct FakeGuest {

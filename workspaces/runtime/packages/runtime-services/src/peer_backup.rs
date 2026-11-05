@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::watch;
 
@@ -77,7 +77,7 @@ impl Settings {
     pub fn read(root: &Path) -> Self {
         std::fs::read(root.join(SETTINGS_FILE))
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| studio_json::from_slice(&bytes).ok())
             .unwrap_or_default()
     }
 
@@ -92,7 +92,7 @@ impl Settings {
             return Err("a target server is required to turn the backup on".to_owned());
         }
         let path = root.join(SETTINGS_FILE);
-        let bytes = serde_json::to_vec(self).map_err(|error| error.to_string())?;
+        let bytes = studio_json::to_vec(self).map_err(|error| error.to_string())?;
         std::fs::create_dir_all(path.parent().ok_or("settings path")?)
             .and_then(|()| atomic_file::replace(&path, &bytes, None, true))
             .map_err(|error| error.to_string())
@@ -548,7 +548,7 @@ impl Sender {
         match receipt.outcome {
             RemoteOutcome::Applied => receipt
                 .value
-                .and_then(|value| serde_json::from_str(value.get()).ok())
+                .and_then(|value| studio_json::from_str(value.as_str()).ok())
                 .ok_or_else(|| error(INVALID_RECEIPT)),
             RemoteOutcome::NotApplied => {
                 Err(Stop::Error(receipt.error.unwrap_or_else(|| {

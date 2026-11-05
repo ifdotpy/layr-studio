@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::{
     multi_server_access::{
         AccessClientKind, AccessClientStatus, AccessGrant, PersistedAccessClient,
@@ -171,10 +171,10 @@ fn new_record(entry: &Entry, now: f64) -> Option<PersistedAccessClient> {
         } else {
             AccessClientStatus::Paired
         },
-        created: NonNegativeNumber::try_from(serde_json::Number::from_f64(entry.created)?).ok()?,
+        created: NonNegativeNumber::try_from(studio_json::Number::from_f64(entry.created)?).ok()?,
         last_access: Field::Null,
         revoked: if entry.revoked {
-            Field::Value(serde_json::Number::from_f64(now)?)
+            Field::Value(studio_json::Number::from_f64(now)?)
         } else {
             Field::Null
         },
@@ -210,7 +210,7 @@ fn merge_into(
             }
             let mut record = record.clone();
             record.status = AccessClientStatus::Revoked;
-            record.revoked = Field::Value(serde_json::Number::from_f64(now)?);
+            record.revoked = Field::Value(studio_json::Number::from_f64(now)?);
             Some(record)
         }
         Some(_) => None,
@@ -227,10 +227,10 @@ pub fn read_entries(tx: &Transaction<'_>) -> Result<Vec<Entry>, StoreError> {
     Ok(rows
         .iter()
         .filter_map(|raw| {
-            serde_json::from_str::<
-                    studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
-                >(raw)
-                .ok()
+            studio_json::from_str::<
+                studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+            >(raw)
+            .ok()
         })
         .filter_map(|record| entry_of(&record.0))
         .collect())
@@ -257,7 +257,7 @@ pub fn apply(
             )
             .optional()?;
         let local = match raw.as_deref().map(
-            serde_json::from_str::<
+            studio_json::from_str::<
                 studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
             >,
         ) {
@@ -272,7 +272,7 @@ pub fn apply(
         tx.execute(
             "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![entry.id, serde_json::to_string(&record)?],
+            params![entry.id, studio_json::to_string(&record)?],
         )?;
         tx.execute(
             "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,?2,?3,?4)",
@@ -309,7 +309,7 @@ pub fn receive(
 /// A short fingerprint of a list; equal lists give equal fingerprints.
 pub fn digest(entries: &[Entry]) -> String {
     studio_runtime_store::sha256_hex(
-        serde_json::to_string(entries)
+        studio_json::to_string(entries)
             .unwrap_or_default()
             .as_bytes(),
     )
@@ -347,7 +347,7 @@ pub async fn sync_peer(
         Ok(ExchangeOutcome::Applied(reply)) => reply,
         _ => return None,
     };
-    let theirs: TrustList = serde_json::from_str(reply.value.get()).ok()?;
+    let theirs: TrustList = studio_json::from_str(reply.value.as_str()).ok()?;
     if theirs.entries.len() > MAX_ENTRIES {
         return None;
     }
@@ -435,7 +435,7 @@ mod tests {
                 )
                 .optional()
                 .unwrap()
-                .map(|raw| serde_json::from_str(&raw).unwrap())
+                .map(|raw| studio_json::from_str(&raw).unwrap())
         }
         /// The revoke action of `multi_server::manage`.
         fn revoke(&self, id: &str, now: f64) {

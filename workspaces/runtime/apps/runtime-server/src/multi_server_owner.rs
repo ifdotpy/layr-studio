@@ -5,7 +5,6 @@
 //! the optional Tailscale-User-Login header.
 
 use futures_util::future::BoxFuture;
-use serde_json::Value;
 use std::{
     io::Read,
     process::{Command, Stdio},
@@ -13,6 +12,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use studio_json::Value;
 use studio_runtime_services::multi_server_auth::tailscale_observation::{
     Node, Observation, Profile, Status, object,
 };
@@ -64,7 +64,7 @@ pub(crate) fn whoami_projection(raw: Option<&Value>, status: Option<&Value>) -> 
                 .map(|s| s.trim().to_ascii_lowercase())
         })
     });
-    serde_json::json!({"status":if user.is_some() {"verified"} else {"unavailable"}, "user":user, "node":node, "ownerLogin":owner_login})
+    studio_json::json!({"status":if user.is_some() {"verified"} else {"unavailable"}, "user":user, "node":node, "ownerLogin":owner_login})
 }
 
 impl OwnerLookup for TailscaleOwnerLookup {
@@ -185,7 +185,7 @@ pub(crate) fn tailscale_json_from(
     if too_large || Instant::now() >= deadline {
         return Err(unavailable());
     }
-    serde_json::from_slice(&bytes).map_err(|_| unavailable())
+    studio_json::from_slice(&bytes).map_err(|_| unavailable())
 }
 
 fn unavailable() -> AccessError {
@@ -199,7 +199,7 @@ fn unavailable() -> AccessError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn whoami_projection_matches_legacy_aliases_and_policy() {

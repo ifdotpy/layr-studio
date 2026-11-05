@@ -1,7 +1,7 @@
 //! Upgrade room entities with their member roots before serving sync.
 use crate::{StoreResult, SyncDocumentsRepository};
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut query = tx.prepare("SELECT id,payload FROM sync_entities WHERE collection='room' AND deleted=0 AND json_valid(payload) AND json_type(payload,'$.value.leadIds') IS NULL ORDER BY id")?;
@@ -11,7 +11,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (id, payload) in rows {
-        let envelope: Value = serde_json::from_str(&payload)?;
+        let envelope: Value = studio_json::from_str(&payload)?;
         let mut room = envelope["value"].clone();
         let mut leads = Vec::<String>::new();
         if room["kind"] == "broadcast" {
@@ -22,7 +22,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 leads.push(root.to_owned());
             }
         } else {
-            let members = serde_json::to_string(&room["members"])?;
+            let members = studio_json::to_string(&room["members"])?;
             let mut agents = tx.prepare("SELECT CASE WHEN json_extract(member.record,'$.isLead')=1 THEN member.id ELSE member.root_id END AS root FROM runtime_agents member LEFT JOIN runtime_agents lead ON lead.id = CASE WHEN json_extract(member.record,'$.isLead')=1 THEN member.id ELSE member.root_id END WHERE member.deleted_at IS NULL AND member.id IN (SELECT value FROM json_each(?1) WHERE type='text') ORDER BY COALESCE(json_extract(lead.record,'$.created'),0), root")?;
             for root in agents.query_map([members], |row| row.get::<_, Option<String>>(0))? {
                 if let Some(root) = root?.filter(|root| !root.is_empty())

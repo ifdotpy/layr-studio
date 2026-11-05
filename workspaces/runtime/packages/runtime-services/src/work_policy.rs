@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{StoredQueueEvent, WorkItemRecord, WorkStatus};
 use thiserror::Error;
 
@@ -173,7 +173,7 @@ pub fn invalid(object: &'static str, id: &str) -> WorkPolicyError {
 #[cfg(test)]
 mod tests {
     use super::{prepare_queue, queue_items, work_list};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_store::StoredQueueEvent;
 
     #[test]
@@ -197,7 +197,7 @@ mod tests {
         let _: fn(
             &studio_runtime_store::Connection,
             &studio_runtime_store::WorkItemRecord,
-        ) -> studio_runtime_store::StoreResult<serde_json::Value> =
+        ) -> studio_runtime_store::StoreResult<studio_json::Value> =
             crate::work_write::work_item_view;
         let records = json!([
             {"id":"ready","rootId":"lead","status":"ready","dependencies":["accepted","missing"],"title":"Ready"},

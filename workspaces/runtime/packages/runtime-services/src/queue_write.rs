@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::event_write;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::queue_command::QueueCommand;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, AgentStatus, Connection, QueueWriteRepository,
@@ -38,8 +38,11 @@ mod receipt_tests {
     #[test]
     fn stored_receipt_round_trips() {
         let stored = r#"{"status":"updated","revision":"abc","capabilities":{"reorder":true,"receipts":true}}"#;
-        let reply: QueueReply = serde_json::from_str(stored).expect("stored receipt");
-        assert_eq!(serde_json::to_string(&reply).expect("receipt JSON"), stored);
+        let reply: QueueReply = studio_json::from_str(stored).expect("stored receipt");
+        assert_eq!(
+            studio_json::to_string(&reply).expect("receipt JSON"),
+            stored
+        );
     }
 }
 
@@ -64,7 +67,7 @@ pub enum QueueWriteError {
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
 }
 
 /// Applies one validated queue request atomically. The snapshot callback is
@@ -151,7 +154,7 @@ pub fn action(
                 let mut metadata = read_metadata(transaction, target_id)?;
                 metadata.extensions.insert(
                     "acceptedAt".into(),
-                    studio_runtime_schema::raw_json::RawJson(serde_json::value::to_raw_value(
+                    studio_runtime_schema::raw_json::RawJson(studio_json::to_raw_value(
                         &unix_time()?,
                     )?),
                 );
@@ -196,7 +199,7 @@ pub fn action(
                         metadata
                             .extensions
                             .get("sendNow")
-                            .and_then(|raw| serde_json::from_str(raw.0.get()).ok())
+                            .and_then(|raw| studio_json::from_str(raw.0.as_str()).ok())
                             .as_ref(),
                     )
                 {
@@ -215,9 +218,7 @@ pub fn action(
                 );
                 metadata.extensions.insert(
                     "sendNow".into(),
-                    studio_runtime_schema::raw_json::RawJson(serde_json::value::to_raw_value(
-                        &true,
-                    )?),
+                    studio_runtime_schema::raw_json::RawJson(studio_json::to_raw_value(&true)?),
                 );
                 QueueWriteRepository::put_typed_metadata(transaction, target_id, &metadata)?;
             }
@@ -453,7 +454,7 @@ pub fn queue_snapshot(
         }
     }
     let revision_number = agent.queue_mutation_revision.unwrap_or(0);
-    let bytes = serde_json::to_vec(&json!([agent.epoch, revision_number, items]))?;
+    let bytes = studio_json::to_vec(&json!([agent.epoch, revision_number, items]))?;
     let revision = studio_runtime_store::sha256_hex(&bytes);
     Ok(QueueSnapshot { items, revision })
 }

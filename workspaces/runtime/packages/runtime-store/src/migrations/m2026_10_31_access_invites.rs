@@ -15,7 +15,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for (id, raw) in rows {
-        let valid = serde_json::from_str::<Object<PersistedAccessInvite>>(&raw)
+        let valid = studio_json::from_str::<Object<PersistedAccessInvite>>(&raw)
             .is_ok_and(|invite| invite.0.invite_id() == id);
         if !valid {
             tx.execute("DELETE FROM runtime_access_invites WHERE id=?1", [&id])?;

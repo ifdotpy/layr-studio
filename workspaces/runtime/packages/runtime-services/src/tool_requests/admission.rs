@@ -1,7 +1,7 @@
 //! Atomic receipt admission/claim, sharing the recovery action lifecycle.
 use super::{ToolRequestError, lifecycle};
 use rusqlite::{Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_operations::*;
 use studio_runtime_store::system_reads as records;
 

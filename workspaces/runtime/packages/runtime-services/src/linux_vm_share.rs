@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 
 use crate::linux_vm_guest::{GuestError, GuestRpc};
 use crate::saved_mount::{SavedMount, SavedMountFailure};
@@ -308,7 +308,7 @@ fn project_id(value: Option<&Value>) -> Result<String, String> {
 }
 
 fn read_object(path: &Path) -> Option<Map<String, Value>> {
-    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+    studio_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
 /// Save `value` atomically with mode 0600.
@@ -319,7 +319,7 @@ fn save_private<T: serde::Serialize>(path: &Path, value: &T) -> io::Result<()> {
     let mut temporary = tempfile::Builder::new()
         .prefix(".studio-share.")
         .tempfile_in(parent)?;
-    let encoded = serde_json::to_vec(value).map_err(io::Error::other)?;
+    let encoded = studio_json::to_vec(value).map_err(io::Error::other)?;
     temporary.write_all(&encoded)?;
     temporary.as_file().sync_all()?;
     temporary

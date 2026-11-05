@@ -1,7 +1,7 @@
-use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_services::workspace_operations::*;
 use studio_runtime_services::workspace_operations_effects::*;
 use studio_runtime_store::workspace_operations::WorkspaceOperationsRepository;
@@ -28,9 +28,9 @@ fn ticket() -> ProviderTicket {
 #[test]
 fn complete_python_outputs_match_checked_snapshots() {
     let cases: Vec<Value> =
-        serde_json::from_str(include_str!("workspace_operations/cases.json")).expect("cases");
+        studio_json::from_str(include_str!("workspace_operations/cases.json")).expect("cases");
     let expected: Vec<Value> =
-        serde_json::from_str(include_str!("workspace_operations/oracle.json"))
+        studio_json::from_str(include_str!("workspace_operations/oracle.json"))
             .expect("frozen workspace outputs");
     assert_eq!(
         cases.len(),
@@ -97,7 +97,7 @@ fn complete_python_outputs_match_checked_snapshots() {
 #[test]
 fn malformed_stored_fields_are_located_and_never_panic() {
     let cases: Vec<Value> =
-        serde_json::from_str(include_str!("workspace_operations/cases.json")).expect("cases");
+        studio_json::from_str(include_str!("workspace_operations/cases.json")).expect("cases");
     let base = &cases[0]["actor"];
     for (field, bad) in [
         ("epoch", json!(-1)),
@@ -129,13 +129,13 @@ fn receipt_identity_and_unknown_provider_outcomes_never_allow_redispatch() {
         "generation",
         "request",
     ] {
-        let mut value = serde_json::to_value(&expected).expect("ticket");
+        let mut value = studio_json::to_value(&expected).expect("ticket");
         value[field] = if matches!(field, "epoch" | "generation") {
             json!(2)
         } else {
             json!("foreign")
         };
-        let foreign = serde_json::from_value(value).expect("foreign ticket");
+        let foreign = studio_json::from_value(value).expect("foreign ticket");
         assert!(
             accept_provider_result(&expected, &foreign, &json!({"thread":{"id":"new"}})).is_err(),
             "{field}"
@@ -193,10 +193,10 @@ impl Fixture {
         let state = root.path().join("state");
         std::fs::create_dir(&state).expect("state");
         let actor_json = include_str!("workspace_operations/actor.json");
-        let encoded = serde_json::to_string(&repo).expect("encode repository path");
+        let encoded = studio_json::to_string(&repo).expect("encode repository path");
         let encoded = &encoded[1..encoded.len() - 1];
         let mut actor: Value =
-            serde_json::from_str(&actor_json.replace("/FROZEN_WORKSPACE_REPO", encoded))
+            studio_json::from_str(&actor_json.replace("/FROZEN_WORKSPACE_REPO", encoded))
                 .expect("frozen workspace actor");
         // This historical workspace actor uses the Codex thread/fork protocol.
         actor["provider"] = json!(studio_runtime_schema::ProviderKind::Codex);

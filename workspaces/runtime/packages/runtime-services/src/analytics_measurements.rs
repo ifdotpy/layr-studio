@@ -1,6 +1,6 @@
 //! Payload measurements retain sizes, never prompt, image, or reasoning contents.
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 pub fn payload_size(value: &Value) -> Value {
     if value.is_null() {
@@ -88,7 +88,7 @@ pub(crate) fn item_sizes(kind: &str, item: &Value) -> (Value, Value) {
         "userMessage" => input = item["content"].clone(),
         "agentMessage" => output = item["text"].clone(),
         "reasoning" => {
-            let fields: serde_json::Map<String, Value> = ["summary", "content", "text"]
+            let fields: studio_json::Map<String, Value> = ["summary", "content", "text"]
                 .into_iter()
                 .filter_map(|k| item.get(k).map(|v| (k.to_owned(), v.clone())))
                 .collect();
@@ -108,7 +108,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn measures_compact_serde_json_payload() {
+    fn measures_compact_studio_json_payload() {
         let measured = payload_size(&json!({"x": 1e-6}));
         assert_eq!(measured["bytes"], r#"{"x":1e-6}"#.len());
         assert_eq!(measured["format"], "json");
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn measurements_do_not_count_provider_json_whitespace() {
         let raw = r#"{ "content" : [ "hello" ] }"#;
-        let payload = serde_json::from_str(raw).expect("provider JSON");
+        let payload = studio_json::from_str(raw).expect("provider JSON");
         let measured = payload_size(&payload);
         assert_eq!(measured["bytes"], r#"{"content":["hello"]}"#.len());
         assert_ne!(measured["bytes"].as_u64(), Some(raw.len() as u64));

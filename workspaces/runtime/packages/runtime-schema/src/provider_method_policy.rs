@@ -1,6 +1,6 @@
 //! Per-thread ordering policy shared by the Rust transport and Claude bridge.
 
-use serde_json::Value;
+use studio_json::Value;
 
 /// A method reserves its thread lane unconditionally, or when a parameter is true.
 pub struct ThreadSerializationRule {
@@ -89,7 +89,7 @@ pub fn is_recovered_thread_serialized(method: &str, params: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn recovered_policy_keeps_unreadable_parameters_owned() {

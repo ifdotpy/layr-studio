@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-use serde_json::json;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -8,6 +7,7 @@ use std::{
     },
     time::Duration,
 };
+use studio_json::json;
 use studio_runtime_process::{
     EventCursor, Generation, MAX_SUPERVISOR_FRAME_BYTES, OperationId, ProviderHandle,
     ProviderLaunchSpec, provider_seam::*,

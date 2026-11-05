@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Transaction};
-use serde_json::{Value, json};
 use std::sync::OnceLock;
+use studio_json::{Value, json};
 use studio_runtime_providers::{Method, RequestId, RequestTicket};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use studio_runtime_services::workspace_operations::ProviderTicket;
@@ -32,7 +32,7 @@ fn corpus() -> &'static Value {
         } else {
             include_str!("wave7_p11_native/cases.json")
         };
-        let mut data: Value = serde_json::from_str(data).expect("frozen native corpus");
+        let mut data: Value = studio_json::from_str(data).expect("frozen native corpus");
         // These frozen native actions/reviews exercise the Codex wire protocol.
         // Keep their oracle independent and adapt only the historical identity.
         for (group, fields) in [
@@ -167,7 +167,7 @@ impl Admission for IdleGate {
 fn receipt_pivot_superseded_idle_purpose_never_becomes_manual_compaction() {
     let case = &corpus()["actions"][0];
     let mut db = db(case);
-    let request: Request = serde_json::from_value(case["request"].clone()).expect("request");
+    let request: Request = studio_json::from_value(case["request"].clone()).expect("request");
     let before = actor(&db);
     let tx = db.transaction().expect("transaction");
     reserve(
@@ -244,14 +244,14 @@ fn row(db: &Connection) -> Value {
         json!([
             id,
             sig,
-            serde_json::from_str::<Value>(&r).expect("receipt"),
-            serde_json::from_str::<Value>(&o).expect("outcome")
+            studio_json::from_str::<Value>(&r).expect("receipt"),
+            studio_json::from_str::<Value>(&o).expect("outcome")
         ])
     })
     .expect("saved row")
 }
 fn actor(db: &Connection) -> Value {
-    serde_json::from_str(
+    studio_json::from_str(
         &studio_runtime_store::AgentRepository::get_raw(
             db,
             &studio_runtime_store::AgentId::from("lead"),
@@ -274,7 +274,7 @@ fn ticket() -> ProviderTicket {
     }
 }
 fn reserve_case(db: &mut Connection, case: &Value) {
-    let request: Request = serde_json::from_value(case["request"].clone()).expect("request");
+    let request: Request = studio_json::from_value(case["request"].clone()).expect("request");
     let tx = db.transaction().expect("begin");
     reserve(&tx, &request, "attempt", 1234567.5, &Gate).expect("reserve");
     tx.commit().expect("commit");
@@ -304,7 +304,7 @@ async fn stored_settings_resume_through_native_caller() {
                 .expect("bootstrap"),
         );
         let case = &corpus()["actions"][0];
-        let request: Request = serde_json::from_value(case["request"].clone()).expect("request");
+        let request: Request = studio_json::from_value(case["request"].clone()).expect("request");
         let scope = ConnectionScope {
             account: "default".into(),
             connection: "connection".into(),
@@ -343,7 +343,7 @@ fn complete_python_native_admission_rows_match() {
         assert_eq!(row(&db), case["row"]);
         assert_eq!(actor(&db), case["after"]);
         let before = row(&db);
-        let request: Request = serde_json::from_value(case["request"].clone()).expect("request");
+        let request: Request = studio_json::from_value(case["request"].clone()).expect("request");
         let tx = db.transaction().expect("begin");
         reserve(&tx, &request, "new-attempt", 555.0, &Gate)
             .expect("replay old result despite fresh time");
@@ -374,10 +374,10 @@ fn reservation_targets_the_authorized_repair_destination_and_keeps_request_ident
     let receipt: Value = db
         .query_row(
             "SELECT json_extract(payload,'$.receipt') FROM runtime_outbox WHERE id=?1",
-            [serde_json::json!(["native-action", request_id("action-request")]).to_string()],
+            [studio_json::json!(["native-action", request_id("action-request")]).to_string()],
             |row| row.get::<_, String>(0),
         )
-        .map(|raw| serde_json::from_str(&raw).expect("receipt"))
+        .map(|raw| studio_json::from_str(&raw).expect("receipt"))
         .expect("reserved receipt");
     assert_eq!(receipt["threadId"], "thread-repaired");
     assert!(
@@ -397,7 +397,7 @@ fn crash_matrix_never_reclaims_committed_handoff() {
         let mut db = db(case);
         if stop == 0 {
             let tx = db.transaction().expect("begin");
-            let req = serde_json::from_value(case["request"].clone()).expect("request");
+            let req = studio_json::from_value(case["request"].clone()).expect("request");
             reserve(&tx, &req, "attempt", 1.0, &Gate).expect("reserve");
             drop(tx);
             assert_eq!(
@@ -508,7 +508,7 @@ fn changed_payload_and_foreign_receipts_leave_intent_held() {
     let mut db = db(case);
     reserve_case(&mut db, case);
     let tx = db.transaction().expect("begin");
-    let mut req: Request = serde_json::from_value(case["request"].clone()).expect("request");
+    let mut req: Request = studio_json::from_value(case["request"].clone()).expect("request");
     req.action = Action::Review;
     assert!(matches!(
         reserve(&tx, &req, "next", 1.0, &Gate),
@@ -604,6 +604,68 @@ fn invalid_worker_not_sent_receipts_keep_intent_unknown_and_unclaimable() {
 }
 
 #[test]
+fn review_plan_record_boundary_preserves_optional_and_extension_fields() {
+    let case = &corpus()["reviews"][0];
+    for variant in 0..3 {
+        let mut actor = case["actor"].clone();
+        match variant {
+            0 => {
+                actor.as_object_mut().unwrap().remove("fastMode");
+            }
+            1 => {
+                actor["fastMode"] = Value::Null;
+            }
+            _ => {
+                actor["futureReviewOption"] = json!({"nested": [null, 1]});
+            }
+        }
+        let make = |actor: Value, root: Value| {
+            ReviewPlan::from_records(
+                actor,
+                root,
+                case["args"].clone(),
+                "review-request".into(),
+                case["directory"].as_str().unwrap().into(),
+            )
+        };
+        let actor_record = studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();
+        let root_record =
+            studio_runtime_store::AgentRecord::from_value(case["root"].clone()).unwrap();
+        let normalized_actor = actor_record.value();
+        let normalized_root = root_record.value();
+        let old = make(normalized_actor, normalized_root).unwrap();
+        let typed = ReviewPlan::from_checked_records(
+            &actor_record,
+            &root_record,
+            case["args"].clone(),
+            "review-request".into(),
+            case["directory"].as_str().unwrap().into(),
+        )
+        .unwrap();
+        assert_eq!(
+            studio_json::to_string(old.spec()).unwrap(),
+            studio_json::to_string(typed.spec()).unwrap()
+        );
+        assert_eq!(
+            old.existing(&case["child"]).unwrap(),
+            typed.existing(&case["child"]).unwrap()
+        );
+        assert!(make(actor.clone(), case["root"].clone()).is_ok());
+        let mut mismatch = case["root"].clone();
+        mismatch["id"] = json!("other-root");
+        assert!(matches!(
+            make(actor.clone(), mismatch),
+            Err(NativeError::Changed)
+        ));
+        actor["epoch"] = json!("invalid");
+        assert!(matches!(
+            make(actor, case["root"].clone()),
+            Err(NativeError::InvalidStored { .. })
+        ));
+    }
+}
+
+#[test]
 fn review_prompt_uses_compact_json() {
     let case = &corpus()["reviews"][0];
     let plan = ReviewPlan::from_records(
@@ -676,7 +738,7 @@ impl RepairEventSummary for Summaries {
 fn full_scoped_history_copy_matches_real_python_rewriter() {
     for case in corpus()["rewrites"].as_array().expect("rewrites") {
         let snapshot = HistoryRewrite::from_records(
-            serde_json::from_value(case["records"].clone()).expect("records"),
+            studio_json::from_value(case["records"].clone()).expect("records"),
             case["events"].as_array().expect("events").clone(),
             "thread".into(),
             "turn".into(),
@@ -715,7 +777,7 @@ fn native_command_input_and_process_item_scope_match_python() {
             expected.split_once("chars: ").expect("expected chars");
         assert_eq!(prefix, expected_prefix);
         let decode = |value: &str| {
-            serde_json::from_str::<String>(value.strip_suffix('.').expect("period"))
+            studio_json::from_str::<String>(value.strip_suffix('.').expect("period"))
                 .expect("JSON string")
         };
         assert_eq!(decode(encoded), decode(expected_encoded));
@@ -846,6 +908,112 @@ impl native_review::ReviewCreator for Creator {
     }
 }
 #[test]
+fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
+    let case = &corpus()["reviews"][0];
+    for change_root in [false, true] {
+        for variant in ["missing", "null", "unknown"] {
+            let mut actor = case["actor"].clone();
+            actor["rootId"] = json!("root");
+            actor["parentId"] = json!("root");
+            actor["isLead"] = json!(false);
+            let mut root = case["root"].clone();
+            root["id"] = json!("root");
+            root["rootId"] = json!("root");
+            let record = if change_root { &mut root } else { &mut actor };
+            match variant {
+                "missing" => {
+                    record.as_object_mut().unwrap().remove("effort");
+                }
+                "null" => {
+                    record["effort"] = Value::Null;
+                }
+                _ => {
+                    record["futureReviewOption"] = json!({"nested": [null, 1]});
+                }
+            }
+            let actor_record =
+                studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();
+            let root_record = studio_runtime_store::AgentRecord::from_value(root.clone()).unwrap();
+            let plans = [
+                ReviewPlan::from_records(
+                    actor.clone(),
+                    root.clone(),
+                    case["args"].clone(),
+                    "review-request".into(),
+                    case["directory"].as_str().unwrap().into(),
+                )
+                .unwrap(),
+                ReviewPlan::from_checked_records(
+                    &actor_record,
+                    &root_record,
+                    case["args"].clone(),
+                    "review-request".into(),
+                    case["directory"].as_str().unwrap().into(),
+                )
+                .unwrap(),
+            ];
+            let mut results = Vec::new();
+            for plan in &plans {
+                let make_db = || {
+                    let db = db(&json!({"agent":actor}));
+                    studio_runtime_store::agent_volatile::put(&db, "root", &root, false).unwrap();
+                    db
+                };
+                let mut changed = make_db();
+                let mut changed_record = if change_root {
+                    root.clone()
+                } else {
+                    actor.clone()
+                };
+                match variant {
+                    "missing" => changed_record["effort"] = Value::Null,
+                    "null" => {
+                        changed_record.as_object_mut().unwrap().remove("effort");
+                    }
+                    _ => {
+                        changed_record
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("futureReviewOption");
+                    }
+                }
+                let id = changed_record["id"].as_str().unwrap();
+                studio_runtime_store::agent_volatile::put(&changed, id, &changed_record, false)
+                    .unwrap();
+                let tx = changed.transaction().unwrap();
+                let mut child = case["child"].clone();
+                child["rootId"] = json!("root");
+                assert!(
+                    matches!(
+                        native_review::reserve(&tx, plan, &Creator(child.clone())),
+                        Err(NativeError::Changed)
+                    ),
+                    "{change_root} {variant}"
+                );
+                drop(tx);
+
+                let mut db = make_db();
+                let tx = db.transaction().unwrap();
+                let receipt = native_review::reserve(&tx, plan, &Creator(child)).unwrap();
+                tx.commit().unwrap();
+                let raw: String = db
+                    .query_row(
+                        "SELECT record FROM runtime_agents WHERE id=?1",
+                        [native_review::worker_id("review-request")],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                let mut persisted: Value = studio_json::from_str(&raw).unwrap();
+                // Each reservation issues a fresh action identity.
+                persisted["nativeReview"]["actionRequestId"] = Value::Null;
+                results.push((receipt, persisted));
+            }
+            assert_eq!(results[0], results[1], "{change_root} {variant}");
+        }
+    }
+}
+
+#[test]
 fn review_reservation_rolls_back_and_replays_without_second_child() {
     let case = &corpus()["reviews"][0];
     let plan = ReviewPlan::from_records(
@@ -888,7 +1056,7 @@ fn review_reservation_rolls_back_and_replays_without_second_child() {
             |r| r.get(0),
         )
         .expect("child");
-    let child: Value = serde_json::from_str(&raw).expect("JSON");
+    let child: Value = studio_json::from_str(&raw).expect("JSON");
     let action_id = child["nativeReview"]["actionRequestId"]
         .as_str()
         .expect("persisted action identity");
@@ -1131,9 +1299,9 @@ impl CommandAdmission for Enqueue {
         _: &Value,
         key: &str,
         instruction: &str,
-    ) -> Result<Box<serde_json::value::RawValue>> {
+    ) -> Result<studio_json::OwnedRawJson> {
         tx.execute("INSERT INTO effects VALUES('queued')", [])?;
-        Ok(serde_json::value::to_raw_value(
+        Ok(studio_json::to_raw_value(
             &json!({"id":key,"text":instruction}),
         )?)
     }
@@ -1388,14 +1556,14 @@ fn python_failed_and_unknown_receipt_errors_are_not_lost() {
         )
         .expect("Python outcome");
         assert_eq!(
-            serde_json::to_value(snapshot.outcome()).expect("outcome"),
+            studio_json::to_value(snapshot.outcome()).expect("outcome"),
             case["outcome"]
         );
     }
 }
 
 fn stored_agent(db: &Connection, id: &str) -> Value {
-    serde_json::from_str(
+    studio_json::from_str(
         &db.query_row("SELECT record FROM runtime_agents WHERE id=?1", [id], |r| {
             r.get::<_, String>(0)
         })
