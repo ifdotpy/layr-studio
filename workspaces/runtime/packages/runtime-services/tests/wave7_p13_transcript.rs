@@ -1,7 +1,7 @@
 //! Complete reader outputs from frozen notification snapshots, after restart.
 use base64::Engine;
-use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path, sync::Arc};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     transcript,
     transcript_runtime::{self, PageRequest},
@@ -19,7 +19,7 @@ async fn transcript_cases(group: usize) {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/wave7_p13_transcript")
         .join(mode);
-    let cases: Vec<Value> = serde_json::from_str(
+    let cases: Vec<Value> = studio_json::from_str(
         &std::fs::read_to_string(fixtures.join("cases.json"))
             .expect("frozen transcript corpus")
             .replace("@FIXTURE_ROOT@", &root.path().to_string_lossy()),
@@ -47,7 +47,7 @@ async fn transcript_cases(group: usize) {
         let state = root.path().join(name);
         restore_snapshot(&fixtures.join(name), &state, root.path());
         let orphan_replies: Vec<(String, String, String)> =
-            serde_json::from_value(case.get("orphanReplies").cloned().unwrap_or(json!([])))
+            studio_json::from_value(case.get("orphanReplies").cloned().unwrap_or(json!([])))
                 .expect("orphan reply fixtures");
         let (fixture_sync_high, fixture_workspace_sequence, room_migration_writes) = {
             let db = rusqlite::Connection::open(state.join("canvas.sqlite3"))
@@ -484,13 +484,13 @@ async fn seed_transcript_replies(store: &RuntimeStore, replies: Vec<(String, Str
                     outcome: ToolRequestOutcome::Applied,
                     admitted: &admitted,
                 };
-                let raw_owner = serde_json::to_string(&owner)?;
+                let raw_owner = studio_json::to_string(&owner)?;
                 tx.execute(
                     "INSERT INTO runtime_tool_requests(id,record) VALUES(?1,?2)",
                     rusqlite::params![identity.id(), raw_owner],
                 )?;
                 let result = studio_runtime_store::ToolResultRecord::from_value(
-                    serde_json::from_str(&raw)?,
+                    studio_json::from_str(&raw)?,
                 )?;
                 RequestResults::settle(
                     tx,
@@ -521,7 +521,7 @@ fn assert_pull(
         let mut v = v.clone();
         for doc in v["documents"].as_array_mut().expect("documents") {
             doc["payload"] =
-                serde_json::from_str(doc["payload"].as_str().expect("payload")).expect("JSON");
+                studio_json::from_str(doc["payload"].as_str().expect("payload")).expect("JSON");
         }
         v
     };
@@ -613,7 +613,7 @@ fn native_text(mut value: Value) -> Value {
     if let Some(items) = value["items"].as_array_mut() {
         for item in items {
             if item["title"] == "dynamicToolCall" {
-                item["text"] = serde_json::from_str(item["text"].as_str().expect("tool text"))
+                item["text"] = studio_json::from_str(item["text"].as_str().expect("tool text"))
                     .expect("compiled JSON");
             }
         }
@@ -637,7 +637,7 @@ fn restore_snapshot(fixture: &Path, state: &Path, root: &Path) {
             .expect("snapshot durability");
         db.execute_batch(&sql).expect("restore frozen SQLite seed");
     }
-    let blobs: BTreeMap<String, String> = serde_json::from_str(
+    let blobs: BTreeMap<String, String> = studio_json::from_str(
         &std::fs::read_to_string(fixture.join("blobs.json")).expect("frozen blobs"),
     )
     .expect("blob map");

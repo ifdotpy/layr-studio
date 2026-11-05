@@ -46,7 +46,7 @@ async fn record_of(state: &State, id: &str) -> Value {
                 [id],
                 |r| r.get(0),
             )?;
-            Ok(serde_json::from_str(&raw).unwrap())
+            Ok(studio_json::from_str(&raw).unwrap())
         })
         .await
         .unwrap()
@@ -306,7 +306,7 @@ async fn native_layr_receipt_capture_faults_stay_inside_each_agents_settlement()
                         SessionOutcome::Resolved {
                             ticket: studio_runtime_providers::RequestTicket {
                                 generation: peer.generation.0,
-                                id: serde_json::from_value(resume["id"].clone()).unwrap(),
+                                id: studio_json::from_value(resume["id"].clone()).unwrap(),
                                 method: Method::TurnInterrupt,
                             },
                             outcome: RequestOutcome::Reply {
@@ -329,7 +329,7 @@ async fn native_layr_receipt_capture_faults_stay_inside_each_agents_settlement()
                     SessionOutcome::Resolved {
                         ticket: studio_runtime_providers::RequestTicket {
                             generation: peer.generation.0,
-                            id: serde_json::from_value(resume["id"].clone()).unwrap(),
+                            id: studio_json::from_value(resume["id"].clone()).unwrap(),
                             method: Method::ThreadResume,
                         },
                         outcome: RequestOutcome::Reply {
@@ -1027,7 +1027,7 @@ async fn a_full_monitor_output_queue_holds_the_journal_until_it_drains() {
                         [],
                         |row| row.get(0),
                     )?;
-                    Ok(serde_json::from_str::<Vec<Value>>(&raw).unwrap())
+                    Ok(studio_json::from_str::<Vec<Value>>(&raw).unwrap())
                 })
                 .await
                 .unwrap()

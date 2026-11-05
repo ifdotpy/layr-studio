@@ -7,14 +7,14 @@ use super::outbox::OutboxError;
 use crate::request_results::{Admission, AdmittedRequest};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::persistence::{AccessOutboundState, OutboxStatus};
 
 #[derive(Serialize, Deserialize)]
 pub struct AccessReply {
     pub outcome: AccessOutboundState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub value: Option<Box<serde_json::value::RawValue>>,
+    pub value: Option<studio_json::OwnedRawJson>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -241,7 +241,7 @@ impl RemoteTransportRepository {
             Admission::Fresh(admitted) => admitted,
             Admission::Replay(saved) => {
                 let saved: crate::request_results::ResultEnvelope<AccessReply> =
-                    serde_json::from_str(&saved.result)?;
+                    studio_json::from_str(&saved.result)?;
                 return access_reservation(saved.reply);
             }
         };
@@ -290,7 +290,7 @@ impl RemoteTransportRepository {
             fingerprint,
             &AccessReply {
                 outcome: AccessOutboundState::Complete,
-                value: Some(serde_json::value::to_raw_value(value)?),
+                value: Some(studio_json::to_raw_value(value)?),
             },
         )
     }
@@ -320,7 +320,7 @@ fn access_reservation(reply: AccessReply) -> Result<OutboundReservation, StoreEr
         AccessOutboundState::Complete => reply
             .value
             .map(|value| {
-                serde_json::from_str(value.get())
+                studio_json::from_str(value.as_str())
                     .map(OutboundReservation::Complete)
                     .map_err(Into::into)
             })
@@ -376,7 +376,7 @@ mod tests {
         RemoteTransportRepository,
     };
     use rusqlite::Connection;
-    use serde_json::json;
+    use studio_json::json;
 
     fn nonce_db() -> Connection {
         let db = Connection::open_in_memory().expect("in-memory SQLite opens");
@@ -814,7 +814,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("redacted receipt reads");
-        let result: serde_json::Value = serde_json::from_str(&stored).expect("receipt JSON");
+        let result: studio_json::Value = studio_json::from_str(&stored).expect("receipt JSON");
         assert_eq!(result["reply"]["outcome"], "redacted");
         assert!(result["reply"].get("value").is_none());
         assert_eq!(

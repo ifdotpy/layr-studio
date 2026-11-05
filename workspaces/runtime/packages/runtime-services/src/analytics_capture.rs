@@ -5,8 +5,8 @@
 use crate::analytics_measurements::{item_sizes, payload_size};
 use crate::notification_dispatch::NotificationStreamMetrics;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_json::{Value, json};
 use studio_runtime_schema::json_compat::python_json_compact_serialized;
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::ledger::{
@@ -849,7 +849,7 @@ pub(crate) fn encoded_len(value: &(impl serde::Serialize + ?Sized)) -> usize {
         }
     }
     let mut count = Count(0);
-    serde_json::to_writer(&mut count, value).expect("analytics values serialize");
+    studio_json::to_writer(&mut count, value).expect("analytics values serialize");
     count.0
 }
 
@@ -886,7 +886,7 @@ pub(crate) fn check_identity(canvas: &Connection, agent: &Value) -> Result<(), C
         )
         .optional()?;
     let current: CaptureIdentity = raw
-        .map(|r| serde_json::from_str(&r).map_err(StoreError::from))
+        .map(|r| studio_json::from_str(&r).map_err(StoreError::from))
         .transpose()?
         .ok_or(CaptureError::StaleIdentity)?;
     let expected: CaptureIdentity =
@@ -1746,8 +1746,8 @@ mod usage_contract_tests {
 
     #[test]
     fn unknown_receipt_reuses_the_exact_lookup_key() {
-        let agent: Value = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"default","threadId":"thread"}"#).expect("agent");
-        let params: Value = serde_json::from_str(
+        let agent: Value = studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"default","threadId":"thread"}"#).expect("agent");
+        let params: Value = studio_json::from_str(
             r#"{"threadId":"","tokenUsage":{"total":{"totalTokens":23},"last":{"totalTokens":7}}}"#,
         )
         .expect("params");
@@ -1825,7 +1825,7 @@ mod usage_contract_tests {
     #[test]
     fn typed_usage_identity_keeps_legacy_hash() {
         let raw = r#"{"kind":"response","responseId":"résponse","model":"model","evidence":"live","tokens":{"uncachedInput":10,"cacheReadInput":3,"cacheWriteInput":2,"output":7}}"#;
-        let observation: UsageObservation = serde_json::from_str(raw).expect("usage observation");
+        let observation: UsageObservation = studio_json::from_str(raw).expect("usage observation");
         assert_eq!(
             fingerprint(&observation),
             "652b1851ea247a0d6b76e1b383f4b9cc7c8478f08e0b49bca10106359c03961d"
@@ -2060,13 +2060,13 @@ mod identity_read_tests {
         let current = r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"account","epoch":3,"threadId":"thread"}"#;
         db.execute("INSERT INTO runtime_agents VALUES ('agent',?1)", [current])
             .expect("agent");
-        let agent: Value = serde_json::from_str(current).expect("agent fixture");
+        let agent: Value = studio_json::from_str(current).expect("agent fixture");
         assert!(check_identity(&db, &agent).is_ok());
         for stale in [
             r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"other","epoch":3,"threadId":"thread"}"#,
             r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"account","epoch":2,"threadId":"thread"}"#,
         ] {
-            let agent: Value = serde_json::from_str(stale).expect("stale agent fixture");
+            let agent: Value = studio_json::from_str(stale).expect("stale agent fixture");
             assert!(matches!(
                 check_identity(&db, &agent),
                 Err(CaptureError::StaleIdentity)

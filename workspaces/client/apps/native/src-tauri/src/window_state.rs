@@ -56,7 +56,7 @@ fn fit(bounds: Bounds, areas: &[Bounds]) -> Option<Bounds> {
 }
 fn write(pending: &Pending) -> Result<(), String> {
     let temporary = pending.path.with_extension("json.tmp");
-    let data = serde_json::to_vec(&pending.value).map_err(|e| e.to_string())?;
+    let data = studio_json::to_vec(&pending.value).map_err(|e| e.to_string())?;
     std::fs::write(&temporary, data).map_err(|e| e.to_string())?;
     std::fs::rename(&temporary, &pending.path).map_err(|e| e.to_string())
 }
@@ -72,7 +72,7 @@ pub fn install(
     }
     let path = directory.join("native-window-state.json");
     let saved = match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice::<Saved>(&bytes)
+        Ok(bytes) => studio_json::from_slice::<Saved>(&bytes)
             .ok()
             .filter(|s| s.version == 1 && s.bounds.width > 0 && s.bounds.height > 0),
         Err(_) => None,

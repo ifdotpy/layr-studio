@@ -1,6 +1,6 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_annotations")? {
@@ -11,7 +11,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(&raw) else {
+        let Ok(Value::Object(mut fields)) = studio_json::from_str::<Value>(&raw) else {
             continue;
         };
         let original = fields.clone();
@@ -22,10 +22,16 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             "line" => studio_runtime_schema::annotation_record::valid_line(value),
             _ => false,
         });
-        let normalized = serde_json::to_string(&fields)?;
+        let normalized = studio_json::to_string(&fields)?;
         if fields != original
-            || (serde_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(&raw).is_err()
-                && serde_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(&normalized).is_ok())
+            || (studio_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(
+                &raw,
+            )
+            .is_err()
+                && studio_json::from_str::<
+                    studio_runtime_schema::annotation_record::AnnotationRecord,
+                >(&normalized)
+                .is_ok())
         {
             tx.execute(
                 "UPDATE runtime_annotations SET record=?2 WHERE id=?1",
@@ -59,7 +65,7 @@ mod tests {
         let raw: String = tx
             .query_row("SELECT record FROM runtime_annotations", [], |r| r.get(0))
             .unwrap();
-        let annotation: AnnotationRecord = serde_json::from_str(&raw).unwrap();
+        let annotation: AnnotationRecord = studio_json::from_str(&raw).unwrap();
         assert_eq!(annotation.value()["text"], "new");
     }
 
@@ -104,7 +110,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(first, second);
-        let record: AnnotationRecord = serde_json::from_str(&first).unwrap();
+        let record: AnnotationRecord = studio_json::from_str(&first).unwrap();
         assert_eq!(record.value()["rootId"], "r");
         assert!(record.value()["turnId"].is_null());
         assert!(record.value().get("extra").is_none());

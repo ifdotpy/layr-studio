@@ -312,7 +312,7 @@ mod tests {
             while let Some(chunk) = stream.next().await {
                 let text = String::from_utf8(chunk.expect("frame").to_vec()).expect("UTF8");
                 for data in text.lines().filter_map(|line| line.strip_prefix("data: ")) {
-                    let frame: serde_json::Value = serde_json::from_str(data).expect("SSE JSON");
+                    let frame: studio_json::Value = studio_json::from_str(data).expect("SSE JSON");
                     for version in frame["resourceVersions"].as_array().into_iter().flatten() {
                         for row in version["entityChanges"]["documents"]
                             .as_array()

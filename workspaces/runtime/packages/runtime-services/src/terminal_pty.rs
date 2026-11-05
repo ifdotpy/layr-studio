@@ -10,7 +10,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use base64::Engine as _;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_process::{
     LocalPtyHost, PtyHost, PtyHostError, PtyIdentity, PtySession, cleanup_orphan,
     terminal_environment,
@@ -529,7 +529,7 @@ mod tests {
     use std::time::Duration;
 
     use base64::Engine as _;
-    use serde_json::json;
+    use studio_json::json;
     use tempfile::TempDir;
 
     use super::PtyTerminalSession;
@@ -901,7 +901,7 @@ mod tests {
             keys: BTreeSet<String>,
         }
         let cases: Vec<EnvironmentCase> =
-            serde_json::from_str(include_str!("../tests/terminal_environment_corpus.json"))
+            studio_json::from_str(include_str!("../tests/terminal_environment_corpus.json"))
                 .expect("frozen terminal launch environments");
         let raw_key = OsString::from_vec(b"STUDIO_RAW_\xff".to_vec());
         for supervisor in [false, true] {

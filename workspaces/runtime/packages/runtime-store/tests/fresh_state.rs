@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{RuntimeStore, StoreError};
 
 #[tokio::test]
@@ -139,7 +139,7 @@ async fn serving_open_claims_the_state_and_a_foreign_owner_is_refused_before_wri
         .expect("a serving Rust open claims a fresh state");
     drop(store);
     let marker: Value =
-        serde_json::from_slice(&fs::read(state.join(STATE_OWNER_FILE)).expect("marker"))
+        studio_json::from_slice(&fs::read(state.join(STATE_OWNER_FILE)).expect("marker"))
             .expect("marker JSON");
     assert_eq!(
         marker,

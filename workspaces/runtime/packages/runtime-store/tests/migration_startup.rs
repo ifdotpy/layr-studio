@@ -1,5 +1,5 @@
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::studio_errors::{
     MigrationPhase, MigrationRollbackOutcome, MigrationTarget,
 };
@@ -176,7 +176,7 @@ async fn migration_startup_upgrades_registry_before_store_is_available() {
         .await
         .expect("upgrade");
     let bytes = std::fs::read(&path).expect("registry");
-    let value: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let value: Value = studio_json::from_slice(&bytes).expect("JSON");
     assert_eq!(value["version"], 2);
     assert_eq!(value["accounts"]["default"]["provider"], "codex");
     drop(store);
@@ -407,7 +407,7 @@ async fn migration_terminal_empty_source_is_complete_before_new_turns_arrive() {
             |row| row.get(0),
         )
         .expect("empty source has a completed checkpoint");
-    let completed: Value = serde_json::from_str(&checkpoint).expect("checkpoint JSON");
+    let completed: Value = studio_json::from_str(&checkpoint).expect("checkpoint JSON");
     assert_eq!(
         completed,
         json!({"cursor":0,"end":0,"repaired":0,"ambiguous":0})

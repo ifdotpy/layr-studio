@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
@@ -368,7 +368,7 @@ fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>>
     let Some(raw) = collections_json else {
         return Ok(all.collect());
     };
-    let selected: Vec<String> = serde_json::from_str(raw)?;
+    let selected: Vec<String> = studio_json::from_str(raw)?;
     Ok(all
         .filter(|collection| selected.iter().any(|name| name == collection))
         .collect())
@@ -613,7 +613,7 @@ fn work_units(
             let rows = match (deleted, record, work, index, root) {
                 (true, ..) => tombstones(&[collection], wanted, &id, seq),
                 (false, Some(raw), Some(work), Some(index), Some(root)) => {
-                    let value: Value = serde_json::from_str(&raw)?;
+                    let value: Value = studio_json::from_str(&raw)?;
                     let entry = crate::sync_views::work_history_entry(
                         &work,
                         &json!(root),
@@ -716,14 +716,14 @@ fn work_docs(
         return Ok(Vec::new());
     };
     // A row that does not decode has no document: the stream skips it and reports it here.
-    let item = match serde_json::from_str::<WorkItemRecord>(&raw) {
+    let item = match studio_json::from_str::<WorkItemRecord>(&raw) {
         Ok(item) => item,
         Err(error) => {
             eprintln!("work row {id} does not decode, no work document is streamed: {error}");
             return Ok(Vec::new());
         }
     };
-    let record: Value = serde_json::from_str(&raw)?;
+    let record: Value = studio_json::from_str(&raw)?;
     let mut rows = Vec::new();
     if !detail_only
         && wanted.contains("work")
@@ -789,7 +789,7 @@ fn upsert<T: serde::Serialize>(
         collection: collection.to_owned(),
         id: id.to_owned(),
         sequence: seq,
-        payload: Some(serde_json::to_string(&Envelope {
+        payload: Some(studio_json::to_string(&Envelope {
             collection,
             id,
             value,

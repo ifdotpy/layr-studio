@@ -413,7 +413,7 @@ pub(super) async fn scenario_sibling_completion_does_not_refuse_non_lead() {
                         record["parentId"] = if lead { Value::Null } else { json!("root") };
                         record["role"] = json!(if lead { "orchestrator" } else { "implementer" });
                         record["worktreeReady"] = json!(true);
-                        let record = serde_json::from_value(record).unwrap();
+                        let record = studio_json::from_value(record).unwrap();
                         AgentRepository::put(tx, &record)?;
                     }
                     Ok::<(), WorkerError>(())

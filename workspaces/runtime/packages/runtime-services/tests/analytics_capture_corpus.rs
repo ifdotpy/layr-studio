@@ -1,7 +1,7 @@
 use crate::analytics_fixtures as common;
 use common::{actual, tables};
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::analytics_capture::{
     CaptureSnapshot, CaptureSource, PreparedCapture, decide,
 };
@@ -10,7 +10,7 @@ use studio_runtime_services::analytics_capture::{
 // exercised by analytics_history_checkpoint and notification_dispatch_corpus.
 fn fixture() -> (Connection, Value) {
     let db = Connection::open_in_memory().expect("analytics database");
-    let schema: Value = serde_json::from_str(include_str!(
+    let schema: Value = studio_json::from_str(include_str!(
         "../../runtime-store/src/runtime-state-schema.json"
     ))
     .expect("Rust-owned schema");
@@ -65,7 +65,7 @@ fn legacy_counter_capture_persists_one_unknown_receipt() {
     }
     let (count, record): (i64, String) = db.query_row("SELECT COUNT(*), MIN(value) FROM analytics_meta WHERE key LIKE 'unknownUsageReceipt:%'", [], |row| Ok((row.get(0)?,row.get(1)?))).expect("receipt");
     assert_eq!(count, 1);
-    let record: Value = serde_json::from_str(&record).expect("receipt JSON");
+    let record: Value = studio_json::from_str(&record).expect("receipt JSON");
     assert_eq!(record["fault"], "unknownUsageReceipt");
     assert_eq!(record["identity"]["agent"], agent["id"]);
     assert!(
@@ -101,7 +101,7 @@ fn capture(db: &mut Connection, agent: &Value, method: &str, params: Value, at: 
 }
 
 #[test]
-fn command_error_uses_compact_serde_json() {
+fn command_error_uses_compact_studio_json() {
     let (mut db, agent) = started_turn();
     capture(
         &mut db,
@@ -115,7 +115,7 @@ fn command_error_uses_compact_serde_json() {
             row.get(0)
         })
         .expect("item");
-    let item: Value = serde_json::from_str(&raw).expect("item record");
+    let item: Value = studio_json::from_str(&raw).expect("item record");
     assert_eq!(item["error"], r#"{"code":1e-6}"#);
 }
 
@@ -135,7 +135,7 @@ fn uncertain_turn_keeps_its_outcome_and_reason_in_analytics() {
             row.get(0)
         })
         .expect("turn");
-    let turn: Value = serde_json::from_str(&raw).expect("turn record");
+    let turn: Value = studio_json::from_str(&raw).expect("turn record");
     assert_eq!(turn["status"], "uncertain");
     assert_eq!(turn["error"], error);
 }
@@ -175,7 +175,7 @@ fn capture_rows_bind_request_identity_without_writes() {
             r.get(0)
         })
         .expect("stored row");
-    let row: Value = serde_json::from_str(&raw).expect("record");
+    let row: Value = studio_json::from_str(&raw).expect("record");
     for field in ["id", "agentId", "threadId", "turnId", "rootId"] {
         let mut foreign = row.clone();
         foreign[field] = json!("foreign");
@@ -316,7 +316,7 @@ fn a_command_item_from_an_earlier_turn_still_captures_later_events() {
         )
         .expect("item row")
         .into_string();
-    let item: Value = serde_json::from_str(&raw).expect("item record");
+    let item: Value = studio_json::from_str(&raw).expect("item record");
     assert_eq!(item["turnId"], "turn-a", "the item keeps its starting turn");
     assert_eq!(item["stream"]["deltas"], 1, "the later delta is counted");
 }
@@ -345,7 +345,7 @@ fn claude_failure_metadata_reaches_stored_analytics_without_text_or_credentials(
             row.get(0)
         })
         .expect("analytics row reads");
-    let stored: Value = serde_json::from_str(&raw).expect("analytics row is JSON");
+    let stored: Value = studio_json::from_str(&raw).expect("analytics row is JSON");
     assert_eq!(stored["error"]["claudeFailure"], metadata);
     assert_eq!(stored["error"]["codexErrorInfo"], "badRequest");
     assert!(!raw.contains("secret"));

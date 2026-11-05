@@ -6,7 +6,7 @@ use super::{
 use crate::{error::ApiError, generated, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
 use serde::Deserialize;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_services::{
     account_transfer::{Action, TransferError},
@@ -186,17 +186,43 @@ async fn transfer(
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
             .as_secs_f64();
-        account_transfer_driver::request(
-            &store,
-            request_id.as_str(),
-            lead,
-            target,
-            scope.as_ref().map_or("team", |value| value.as_str()),
-            &target_provider,
-            now,
-        )
-        .await
-        .map_err(error)?
+        // An idle Claude chat moves between Claude accounts of this server by a
+        // file copy and one transaction; other chats use the transfer flow.
+        let homes: std::collections::BTreeMap<String, String> = accounts
+            .accounts
+            .iter()
+            .filter_map(|row| Some((row.id.as_str()?.to_owned(), row.home.as_str()?.to_owned())))
+            .collect();
+        let home = move |account: &str| homes.get(account).cloned();
+        let simple = if target_provider == ProviderKind::Claude.key() {
+            studio_runtime_services::simple_move::move_claude_chat(
+                &store,
+                lead,
+                &home,
+                target,
+                request_id.as_str(),
+                scope.as_ref().map_or("team", |value| value.as_str()),
+                now,
+            )
+            .await
+            .map_err(error)?
+        } else {
+            None
+        };
+        match simple {
+            Some(moved) => moved,
+            None => account_transfer_driver::request(
+                &store,
+                request_id.as_str(),
+                lead,
+                target,
+                scope.as_ref().map_or("team", |value| value.as_str()),
+                &target_provider,
+                now,
+            )
+            .await
+            .map_err(error)?,
+        }
     };
     state.event_wake.notify_one();
     state.continuation_wake.notify_one();
@@ -231,24 +257,24 @@ mod ingress_bounds_tests {
     #[test]
     fn transfer_body_bounds_are_enforced() {
         assert!(
-            serde_json::from_str::<AccountSelectionRequest>(r#"{"id":"a","account_key":"b"}"#)
+            studio_json::from_str::<AccountSelectionRequest>(r#"{"id":"a","account_key":"b"}"#)
                 .is_ok()
         );
         assert!(
-            serde_json::from_str::<AccountSelectionRequest>(r#"{"id":"","account_key":"b"}"#)
+            studio_json::from_str::<AccountSelectionRequest>(r#"{"id":"","account_key":"b"}"#)
                 .is_err()
         );
-        assert!(serde_json::from_str::<Request>(r#"{"request_id":""}"#).is_err());
+        assert!(studio_json::from_str::<Request>(r#"{"request_id":""}"#).is_err());
         assert!(
-            serde_json::from_str::<Request>(r#"{"request_id":"a","scope":"invalid"}"#).is_err()
+            studio_json::from_str::<Request>(r#"{"request_id":"a","scope":"invalid"}"#).is_err()
         );
-        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","scope":"team"}"#).is_ok());
-        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","action":"retry"}"#).is_ok());
-        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","action":null}"#).is_err());
-        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","scope":null}"#).is_err());
-        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","unknown":1}"#).is_err());
+        assert!(studio_json::from_str::<Request>(r#"{"request_id":"a","scope":"team"}"#).is_ok());
+        assert!(studio_json::from_str::<Request>(r#"{"request_id":"a","action":"retry"}"#).is_ok());
+        assert!(studio_json::from_str::<Request>(r#"{"request_id":"a","action":null}"#).is_err());
+        assert!(studio_json::from_str::<Request>(r#"{"request_id":"a","scope":null}"#).is_err());
+        assert!(studio_json::from_str::<Request>(r#"{"request_id":"a","unknown":1}"#).is_err());
         assert!(
-            serde_json::from_str::<AccountSelectionRequest>(
+            studio_json::from_str::<AccountSelectionRequest>(
                 r#"{"id":"a","account_key":"b","unknown":1}"#
             )
             .is_err()
@@ -263,8 +289,8 @@ mod replay_tests {
         extract::ConnectInfo,
         http::Request,
     };
-    use serde_json::{Value, json};
     use std::sync::Arc;
+    use studio_json::{Value, json};
     use studio_runtime_services::account_policy::AccountPolicyState;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
@@ -413,9 +439,11 @@ mod replay_tests {
                 "defaultAccountKey":"target","logins":{},"accounts":{"target":{
                     "id":"target","provider":"codex","home":root.path(),"label":"Target",
                     "source":"fixture","status":status,"disconnected":disconnected}}});
-            let policy =
-                AccountPolicyState::from_startup(Some(&serde_json::to_vec(&registry).unwrap()), [])
-                    .unwrap();
+            let policy = AccountPolicyState::from_startup(
+                Some(&studio_json::to_vec(&registry).unwrap()),
+                [],
+            )
+            .unwrap();
             crate::router(crate::HttpState::new(
                 "token".into(),
                 "fixture".into(),
@@ -443,7 +471,7 @@ mod replay_tests {
                 .unwrap();
             let response = app.oneshot(request).await.unwrap();
             let status = response.status();
-            let body = serde_json::from_slice::<Value>(
+            let body = studio_json::from_slice::<Value>(
                 &to_bytes(response.into_body(), 1024 * 1024).await.unwrap(),
             )
             .unwrap();

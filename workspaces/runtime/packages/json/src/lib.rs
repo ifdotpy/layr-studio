@@ -17,6 +17,11 @@ use std::fmt;
 
 pub use serde_json::{Deserializer, Map, Number, Serializer, Value, error, json, value};
 
+/// Serde's private wire marker for raw JSON values.
+pub const RAW_VALUE_TOKEN: &str = "$serde_json::private::RawValue";
+/// Serde JSON's `number.rs` marker, emitted when its `arbitrary_precision` feature is enabled.
+pub const NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
 #[cfg(not(feature = "sonic-backend"))]
 mod raw;
 #[cfg(not(feature = "sonic-backend"))]
@@ -215,5 +220,91 @@ pub fn to_vec_pretty<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
     #[cfg(not(feature = "sonic-backend"))]
     {
         serde_json::to_vec_pretty(value).map_err(error)
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::Serde(error) => error.into(),
+            #[cfg(feature = "sonic-backend")]
+            Error::Sonic(error) => std::io::Error::other(error),
+            #[cfg(feature = "simd-backend")]
+            Error::Simd(error) => std::io::Error::other(error),
+        }
+    }
+}
+
+#[inline]
+pub fn to_raw_value<T: Serialize + ?Sized>(value: &T) -> Result<OwnedRawJson> {
+    #[cfg(feature = "serde-backend")]
+    {
+        serde_json::value::to_raw_value(value)
+            .map(OwnedRawJson::from_raw)
+            .map_err(Error::from)
+    }
+    #[cfg(not(feature = "serde-backend"))]
+    {
+        OwnedRawJson::from_string(to_string(value)?)
+    }
+}
+
+impl Error {
+    #[inline]
+    pub fn classify(&self) -> error::Category {
+        match self {
+            Self::Serde(error) => error.classify(),
+            #[cfg(feature = "sonic-backend")]
+            Self::Sonic(_) => error::Category::Data,
+            #[cfg(feature = "simd-backend")]
+            Self::Simd(_) => error::Category::Data,
+        }
+    }
+}
+
+impl Error {
+    #[inline]
+    pub fn is_io(&self) -> bool {
+        self.classify() == error::Category::Io
+    }
+
+    #[inline]
+    pub fn is_data(&self) -> bool {
+        self.classify() == error::Category::Data
+    }
+}
+
+impl Error {
+    #[inline]
+    pub fn is_eof(&self) -> bool {
+        self.classify() == error::Category::Eof
+    }
+    #[inline]
+    pub fn is_syntax(&self) -> bool {
+        self.classify() == error::Category::Syntax
+    }
+    #[inline]
+    pub fn line(&self) -> usize {
+        match self {
+            Self::Serde(e) => e.line(),
+            #[cfg(feature = "sonic-backend")]
+            Self::Sonic(_) => 0,
+            #[cfg(feature = "simd-backend")]
+            Self::Simd(_) => 0,
+        }
+    }
+    #[inline]
+    pub fn column(&self) -> usize {
+        match self {
+            Self::Serde(e) => e.column(),
+            #[cfg(feature = "sonic-backend")]
+            Self::Sonic(_) => 0,
+            #[cfg(feature = "simd-backend")]
+            Self::Simd(_) => 0,
+        }
+    }
+    #[inline]
+    pub fn io(error: std::io::Error) -> Self {
+        Self::Serde(serde_json::Error::io(error))
     }
 }

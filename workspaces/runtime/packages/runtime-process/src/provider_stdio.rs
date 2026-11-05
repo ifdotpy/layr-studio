@@ -45,7 +45,7 @@ fn witnessed_method(write: &PreparedWrite) -> Option<Method> {
     write
         .message()
         .get("method")
-        .and_then(serde_json::Value::as_str)
+        .and_then(studio_json::Value::as_str)
         .and_then(Method::from_wire)
         .filter(|method| WITNESSED_METHODS.contains(method))
 }
@@ -104,7 +104,7 @@ impl ReplyWitness {
 }
 
 fn diagnostic_line(prefix: &[u8], diagnostic: &impl Serialize) -> Option<Vec<u8>> {
-    let payload = serde_json::to_vec(diagnostic).ok()?;
+    let payload = studio_json::to_vec(diagnostic).ok()?;
     let mut line = Vec::with_capacity(prefix.len() + payload.len() + 1);
     line.extend_from_slice(prefix);
     line.extend_from_slice(&payload);
@@ -666,7 +666,7 @@ where
         timing.pending_replies.register(&write, method);
     }
     let mut bytes =
-        serde_json::to_vec(&write.message).map_err(|_| AdapterError::InvalidConfiguration)?;
+        studio_json::to_vec(&write.message).map_err(|_| AdapterError::InvalidConfiguration)?;
     bytes.push(b'\n');
     while receipt.bytes_written < bytes.len() {
         let count = stdin
@@ -1320,9 +1320,9 @@ mod tests {
 
     #[tokio::test]
     async fn prepared_diagnostic_requests_preserve_valid_and_malformed_ids() {
-        fn prepared(id: Option<serde_json::Value>) -> PreparedWrite {
-            let mut fields = serde_json::Map::new();
-            fields.insert("method".into(), serde_json::json!("turn/start"));
+        fn prepared(id: Option<studio_json::Value>) -> PreparedWrite {
+            let mut fields = studio_json::Map::new();
+            fields.insert("method".into(), studio_json::json!("turn/start"));
             if let Some(id) = id {
                 fields.insert("id".into(), id);
             }
@@ -1333,10 +1333,10 @@ mod tests {
             PreparedWrite::new(OperationId("fixture".into()), &frame).unwrap()
         }
         for (id, expected) in [
-            (serde_json::json!(0), RequestId::Number(0)),
-            (serde_json::json!(u64::MAX), RequestId::Number(u64::MAX)),
+            (studio_json::json!(0), RequestId::Number(0)),
+            (studio_json::json!(u64::MAX), RequestId::Number(u64::MAX)),
             (
-                serde_json::json!("string-id"),
+                studio_json::json!("string-id"),
                 RequestId::String("string-id".into()),
             ),
         ] {
@@ -1347,7 +1347,7 @@ mod tests {
                 .unwrap()
                 .strip_prefix(STDIN_TIMING_DIAGNOSTIC_PREFIX)
                 .unwrap();
-            let diagnostic: serde_json::Value = serde_json::from_str(json).unwrap();
+            let diagnostic: studio_json::Value = studio_json::from_str(json).unwrap();
             assert_eq!(diagnostic["requestId"], id);
             assert_eq!(
                 pending.take(&expected),
@@ -1356,11 +1356,11 @@ mod tests {
         }
         for id in [
             None,
-            Some(serde_json::Value::Null),
-            Some(serde_json::json!(false)),
-            Some(serde_json::json!(-1)),
-            Some(serde_json::json!(1.5)),
-            Some(serde_json::json!({"id":1})),
+            Some(studio_json::Value::Null),
+            Some(studio_json::json!(false)),
+            Some(studio_json::json!(-1)),
+            Some(studio_json::json!(1.5)),
+            Some(studio_json::json!({"id":1})),
         ] {
             let pending = PendingReplies::default();
             assert!(write_with(prepared(id), true, &pending).await.is_empty());
@@ -1373,7 +1373,7 @@ mod tests {
         observation.send(()).unwrap();
         write_one_command(
             &mut writer,
-            prepared(Some(serde_json::json!(7))),
+            prepared(Some(studio_json::json!(7))),
             &mut PendingStdinWrite::new(reply),
             observed,
             WriterTimingDiagnostics {

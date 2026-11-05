@@ -1,8 +1,8 @@
 //! Remove retired fields from durable paired and discovered identities.
 use crate::{StoreError, StoreResult};
 use rusqlite::Transaction;
-use serde_json::value::RawValue;
 use std::collections::BTreeMap;
+use studio_json::OwnedRawJson as RawValue;
 use studio_runtime_schema::multi_server_access::{
     AccessGrant, CLIENT_FIELDS, GRANT_OBSERVE, PersistedAccessClient,
 };
@@ -20,14 +20,14 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
         for (id, raw) in rows {
-            let mut fields: BTreeMap<String, Box<RawValue>> =
-                serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
+            let mut fields: BTreeMap<String, RawValue> =
+                studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: table,
                     id: id.clone(),
                 })?;
             fields.retain(|key, _| CLIENT_FIELDS.contains(&key.as_str()));
             if fields.get("grant").is_some_and(|grant| {
-                serde_json::from_str::<Option<AccessGrant>>(grant.get()).is_err()
+                studio_json::from_str::<Option<AccessGrant>>(grant.as_str()).is_err()
             }) {
                 fields.insert(
                     "grant".into(),
@@ -40,15 +40,16 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 );
             }
             let normalized =
-                serde_json::to_string(&fields).map_err(|_| StoreError::InvalidStoredRecord {
+                studio_json::to_string(&fields).map_err(|_| StoreError::InvalidStoredRecord {
                     object: table,
                     id: id.clone(),
                 })?;
-            let _: PersistedAccessClient =
-                serde_json::from_str(&normalized).map_err(|_| StoreError::InvalidStoredRecord {
+            let _: PersistedAccessClient = studio_json::from_str(&normalized).map_err(|_| {
+                StoreError::InvalidStoredRecord {
                     object: table,
                     id: id.clone(),
-                })?;
+                }
+            })?;
             if normalized != raw {
                 tx.execute(
                     &format!("UPDATE {table} SET record=?2 WHERE id=?1"),

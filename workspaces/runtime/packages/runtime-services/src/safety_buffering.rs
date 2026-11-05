@@ -10,11 +10,11 @@ pub async fn execute_action(
     resources: &std::sync::Arc<crate::account_worker::preparation::PreparationResources>,
     lifecycle: Option<std::sync::Arc<dyn crate::agent_lifecycle_runtime::LifecyclePorts>>,
     action: SafetyAction<'_>,
-) -> Result<serde_json::Value, SafetyBufferingError> {
+) -> Result<studio_json::Value, SafetyBufferingError> {
     executor::execute_action(store, provider, resources, lifecycle, action).await
 }
 
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use thiserror::Error;
 
 const ACTIVE_STAGES: &[SafetyRetryStage] = &[
@@ -422,9 +422,9 @@ mod tests {
     use super::{
         SafetyBufferingError, SafetyDecision, SafetySnapshot, active, decide_action, decide_restart,
     };
-    use serde_json::json;
+    use studio_json::json;
 
-    fn agent() -> serde_json::Value {
+    fn agent() -> studio_json::Value {
         json!({"id":"agent","epoch":4,"threadId":"thread","turnId":"turn","accountKey":"acct","inFlight":true,"autoWake":true,"nativeSafetyBuffering":{"turnId":"turn","threadId":"thread","connectionId":"conn","showBufferingUi":true,"fasterModel":"model"}})
     }
 
@@ -612,7 +612,7 @@ mod tests {
         let snapshot = SafetySnapshot::from_agent(&missing, true, true).expect("default account");
         assert_eq!(snapshot.account_key, "default");
 
-        for value in [serde_json::Value::Null, json!(7), json!(false)] {
+        for value in [studio_json::Value::Null, json!(7), json!(false)] {
             let mut malformed = agent();
             malformed["accountKey"] = value;
             assert_eq!(
@@ -672,7 +672,7 @@ mod tests {
             panic!("expected cancellation");
         };
         assert_eq!(cancelled["stage"], "cancelled");
-        assert_eq!(cancelled["error"], serde_json::Value::Null);
+        assert_eq!(cancelled["error"], studio_json::Value::Null);
         assert!(cancelled.get("private").is_none());
         let SafetyDecision::Replay { receipt: public } = decide_action(
             &snapshot,

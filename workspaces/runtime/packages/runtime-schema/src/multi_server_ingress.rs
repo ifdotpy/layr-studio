@@ -285,24 +285,24 @@ impl ManagementRequest {
 #[cfg(test)]
 mod tests {
     use super::ServerLabel;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn pairing_protocol_refuses_integral_float_spelling() {
         let pair = r#"{"protocol":1.0,"inviteId":"i","token":"t","clientId":"c","label":"l","kind":"server","publicKey":"p","requestId":"r"}"#;
         let auto = r#"{"protocol":1.0,"serverId":"s","label":"l","origin":"","publicKey":"p","requestId":"r"}"#;
-        assert!(serde_json::from_str::<super::DevicePairRequest>(pair).is_err());
-        assert!(serde_json::from_str::<super::AutoPairRequest>(auto).is_err());
+        assert!(studio_json::from_str::<super::DevicePairRequest>(pair).is_err());
+        assert!(studio_json::from_str::<super::AutoPairRequest>(auto).is_err());
         assert!(
-            serde_json::from_str::<super::DevicePairRequest>(&pair.replace("1.0", "1")).is_ok()
+            studio_json::from_str::<super::DevicePairRequest>(&pair.replace("1.0", "1")).is_ok()
         );
-        assert!(serde_json::from_str::<super::AutoPairRequest>(&auto.replace("1.0", "1")).is_ok());
+        assert!(studio_json::from_str::<super::AutoPairRequest>(&auto.replace("1.0", "1")).is_ok());
     }
 
     #[test]
     fn accept_invite_expiry_schema_matches_ingress() {
-        let doc: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let schemas = &doc["components"]["schemas"];
         assert_eq!(
             schemas["AcceptInvite"]["properties"]["invitation"]["$ref"],
@@ -317,7 +317,7 @@ mod tests {
         ] {
             assert_eq!(
                 jsonschema::is_valid(expiry, &value),
-                serde_json::from_slice::<super::Expiry>(&serde_json::to_vec(&value).unwrap())
+                studio_json::from_slice::<super::Expiry>(&studio_json::to_vec(&value).unwrap())
                     .is_ok(),
                 "{value}"
             );
@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn request_limits_match_openapi() {
         use super::*;
-        let doc: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         let schemas = &doc["components"]["schemas"];
         for schema in [
             "AcceptInvite",
@@ -448,15 +448,15 @@ mod tests {
     #[test]
     fn invite_serialization_preserves_missing_and_null_presence() {
         use super::ManagementRequest;
-        let parse = |value| serde_json::from_value::<ManagementRequest>(value).unwrap();
+        let parse = |value| studio_json::from_value::<ManagementRequest>(value).unwrap();
         let first = parse(json!({"action":"create_invite", "requestId":"r"}));
         let same = parse(json!({"requestId":"r", "action":"create_invite"}));
         let explicit_null = parse(json!({"action":"create_invite", "requestId":"r", "label":null}));
-        let bytes = |body: &ManagementRequest| serde_json::to_vec(body).unwrap();
+        let bytes = |body: &ManagementRequest| studio_json::to_vec(body).unwrap();
         assert_eq!(bytes(&first), bytes(&same));
         assert_ne!(bytes(&first), bytes(&explicit_null));
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&bytes(&first)).unwrap(),
+            studio_json::from_slice::<studio_json::Value>(&bytes(&first)).unwrap(),
             json!({"action":"create_invite", "requestId":"r"})
         );
     }
@@ -479,7 +479,7 @@ mod tests {
             "a  b",
             "a\u{a0}b",
         ] {
-            let typed = serde_json::from_value::<ServerLabel>(json!(label)).is_ok();
+            let typed = studio_json::from_value::<ServerLabel>(json!(label)).is_ok();
             let old =
                 crate::validate("RenameServer", &json!({"requestId":"r", "label":label})).unwrap();
             assert_eq!(typed, old, "{label:?}");

@@ -2,8 +2,8 @@
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{AgentRecord, AgentRepository, StoreError, StoreResult, Table, WorkItemRecord};
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Value, json};
 
 const RECORD_TABLES: &[&str] = &[
     "runtime_agents",
@@ -141,7 +141,7 @@ pub fn read_for_agents(
         tables.insert(
             "approvals".to_owned(),
             rows.iter()
-                .map(|row| serde::Serialize::serialize(row, serde_json::value::Serializer))
+                .map(|row| serde::Serialize::serialize(row, studio_json::value::Serializer))
                 .collect::<Result<Vec<_>, _>>()?,
         );
     }
@@ -227,7 +227,7 @@ fn parse_record(
     raw: String,
 ) -> StoreResult<Value> {
     let mut record: Value =
-        serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredObject {
+        studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredObject {
             table,
             id: id.clone(),
         })?;
@@ -251,7 +251,7 @@ pub fn write(transaction: &Transaction<'_>, table: &str, record: &Value) -> Stor
     match table {
         "runtime_agents" => AgentRepository::put(
             transaction,
-            &serde_json::from_value::<AgentRecord>(record.clone())?,
+            &studio_json::from_value::<AgentRecord>(record.clone())?,
         ),
         "approvals" => {
             let approval: studio_runtime_schema::approvals::Approval =
@@ -316,7 +316,7 @@ pub fn settle_archived_inputs(
         rusqlite::params![
             agent,
             epoch,
-            serde_json::to_string(ids)?,
+            studio_json::to_string(ids)?,
             ARCHIVED_INPUT_ERROR
         ],
     )?;
@@ -441,7 +441,7 @@ mod tests {
         let error = super::write(
             &tx,
             "approvals",
-            &serde_json::json!({"id":"r","state":false}),
+            &studio_json::json!({"id":"r","state":false}),
         )
         .unwrap_err();
         assert!(

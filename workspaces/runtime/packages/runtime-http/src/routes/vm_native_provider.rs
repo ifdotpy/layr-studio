@@ -5,7 +5,7 @@ use std::{
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 
 use futures_util::future::BoxFuture;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_providers::{RequestId, RequestTicket};
 use studio_runtime_schema::shared_values::LINUX_VM_PROVIDER_HANDLE_PREFIX;
 use studio_runtime_services::linux_vm_guest::GuestError;
@@ -111,7 +111,7 @@ impl AccountSessionPort for VmNativeProvider {
                 }) => ReceiptOutcome::Written {
                     ticket,
                     response: ProviderResponse::Rejected(
-                        serde_json::json!({"code":code,"detail":detail}),
+                        studio_json::json!({"code":code,"detail":detail}),
                     ),
                 },
                 Err(error) if error.uncertain() => ReceiptOutcome::Unknown { ticket },
@@ -277,7 +277,7 @@ impl VmNativeProvider {
                 match decoded.payload {
                     studio_runtime_providers::DecodedJournalPayload::Frame(frame) => Some((
                         frame,
-                        serde_json::from_str::<Value>(payload).map_err(|_| {
+                        studio_json::from_str::<Value>(payload).map_err(|_| {
                             GuestError::Protocol {
                                 message: "invalid native provider event frame",
                                 uncertain: true,
@@ -374,8 +374,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use serde_json::json;
     use std::sync::Mutex;
+    use studio_json::json;
     use studio_runtime_providers::Method;
     use studio_runtime_services::account_session_runtime::{NotSentReason, RequestCertainty};
 
@@ -424,7 +424,7 @@ mod tests {
     }
 
     struct FakeGuest {
-        calls: Mutex<Vec<(String, serde_json::Value)>>,
+        calls: Mutex<Vec<(String, studio_json::Value)>>,
         fail_poll: bool,
         notification: bool,
         order: Arc<Mutex<Vec<&'static str>>>,
@@ -434,16 +434,16 @@ mod tests {
         fn stream(
             &self,
             method: &str,
-            params: &serde_json::Value,
+            params: &studio_json::Value,
             _request_id: Option<&str>,
             _timeout: std::time::Duration,
             _on_frame: &mut dyn FnMut(
-                serde_json::Value,
+                studio_json::Value,
             ) -> Result<
                 (),
                 studio_runtime_services::linux_vm_guest::GuestError,
             >,
-        ) -> Result<serde_json::Value, studio_runtime_services::linux_vm_guest::GuestError>
+        ) -> Result<studio_json::Value, studio_runtime_services::linux_vm_guest::GuestError>
         {
             self.calls
                 .lock()

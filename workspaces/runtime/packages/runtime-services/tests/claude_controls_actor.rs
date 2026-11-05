@@ -1,5 +1,5 @@
-use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use studio_json::{Value, json};
 use studio_runtime_services::claude_controls::{
     ControlError, ControlRequest, service::*, store::StoredControls,
 };
@@ -73,7 +73,7 @@ async fn early_unknown_does_not_finalize_the_control_request() {
         native.clone(),
     );
     let request = || {
-        serde_json::from_str(r#"{"action":"settings","id":"agent","request_id":"early-unknown","settings":{"thinking":false}}"#).unwrap()
+        studio_json::from_str(r#"{"action":"settings","id":"agent","request_id":"early-unknown","settings":{"thinking":false}}"#).unwrap()
     };
     assert!(matches!(
         controls.execute(request()).await,
@@ -130,7 +130,7 @@ async fn malformed_state_never_authorizes_a_settings_mutation() {
         Arc::new(StoredControls::new(store, Arc::new(|_| {}))),
         native.clone(),
     );
-    let request = serde_json::from_value(json!({"action":"settings","id":"agent","request_id":"malformed","settings":{"thinking":false}})).expect("request");
+    let request = studio_json::from_value(json!({"action":"settings","id":"agent","request_id":"malformed","settings":{"thinking":false}})).expect("request");
     assert!(controls.execute(request).await.is_err());
     assert_eq!(*native.0.lock().expect("calls"), ["claude/state"]);
 }
@@ -138,15 +138,15 @@ async fn malformed_state_never_authorizes_a_settings_mutation() {
 #[test]
 fn control_wire_roundtrips_presence_numbers_extensions_and_original_ids() {
     let state = json!({"turns":[{"id":"turn","status":null,"extra":1.5}],"tasks":null,"extra":{"count":9007199254740991u64}});
-    let parsed: NativeState = serde_json::from_value(state.clone()).expect("state");
+    let parsed: NativeState = studio_json::from_value(state.clone()).expect("state");
     assert_eq!(
-        serde_json::to_value(parsed).expect("state serialization"),
+        studio_json::to_value(parsed).expect("state serialization"),
         state
     );
     let settings = json!({"autoCompactWindow":null,"thinking":false});
     let call = ControlInvocation::Settings {
         thread_id: "thread".into(),
-        settings: serde_json::from_value(settings.clone()).expect("settings"),
+        settings: studio_json::from_value(settings.clone()).expect("settings"),
         request_id: "transport".into(),
     };
     assert_eq!(
@@ -154,9 +154,9 @@ fn control_wire_roundtrips_presence_numbers_extensions_and_original_ids() {
         json!({"threadId":"thread","settings":settings})
     );
     let reply = json!({"settings":{"thinking":false,"vendor":{"count":1.5}},"extra":null});
-    let parsed: SettingsReply = serde_json::from_value(reply.clone()).expect("reply");
+    let parsed: SettingsReply = studio_json::from_value(reply.clone()).expect("reply");
     assert_eq!(
-        serde_json::to_value(parsed).expect("reply serialization"),
+        studio_json::to_value(parsed).expect("reply serialization"),
         reply
     );
 }
@@ -251,7 +251,7 @@ async fn mismatched_settings_reply_is_unknown_and_never_replayed() {
         Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
         native.clone(),
     );
-    let request: ControlRequest = serde_json::from_value(json!({"action":"settings","id":"agent","request_id":"mismatch","settings":{"permissionMode":"plan"}})).expect("request");
+    let request: ControlRequest = studio_json::from_value(json!({"action":"settings","id":"agent","request_id":"mismatch","settings":{"permissionMode":"plan"}})).expect("request");
     assert!(matches!(
         controls.execute(request.clone()).await,
         Err(ControlError::Unknown)
@@ -299,7 +299,7 @@ async fn extra_known_settings_in_reply_remain_unknown_and_are_not_replayed() {
             Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
             native.clone(),
         );
-        let request: ControlRequest = serde_json::from_value(
+        let request: ControlRequest = studio_json::from_value(
             json!({"action":"settings","id":"agent","request_id":"extra-known","settings":{}}),
         )
         .expect("request");
@@ -368,7 +368,7 @@ async fn malformed_mutation_reply_is_unknown_and_never_replayed() {
         Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
         native.clone(),
     );
-    let request: ControlRequest = serde_json::from_value(
+    let request: ControlRequest = studio_json::from_value(
         json!({"action":"settings","id":"agent","request_id":"malformed-reply","settings":{"thinking":false}}),
     )
     .expect("request");
@@ -440,7 +440,7 @@ async fn stored_control_replay_and_unknown_never_repeat_native_write() {
 
         let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let request = || {
-            serde_json::from_value::<ControlRequest>(
+            studio_json::from_value::<ControlRequest>(
                 json!({"id":"agent","action":"settings","request_id":request_id,"settings":{"thinking":false}}),
             )
             .expect("valid fixture")
@@ -603,7 +603,7 @@ async fn durable_control_store_boundaries_resume_or_hold_without_duplicate_write
             });
             let service = Controls::new(cut.clone(), native.clone());
             let request = || {
-                serde_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","request_id":"control-one","settings":{"thinking":false}})).expect("valid fixture")
+                studio_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","request_id":"control-one","settings":{"thinking":false}})).expect("valid fixture")
             };
             tokio::select! { _=cut.reached.notified()=>{}, result=service.execute(request())=>panic!("{step}/{after}: unexpected completion {}",result.is_ok()) }
             drop(service);
@@ -706,7 +706,7 @@ async fn stale_failure_cannot_clear_a_newer_durable_submission() {
             .expect("runtime store opens"),
     );
     let adapter = StoredControls::new(store.clone(), Arc::new(|_| {}));
-    let request = serde_json::from_value::<ControlRequest>(
+    let request = studio_json::from_value::<ControlRequest>(
         json!({"id":"agent","action":"settings","settings":{"thinking":false},"request_id":"race"}),
     )
     .expect("settings request parses");
@@ -716,7 +716,7 @@ async fn stale_failure_cannot_clear_a_newer_durable_submission() {
         .reserve(request.clone(), binding)
         .await
         .expect("stale settings reserves");
-    let submitted=adapter.submitted(stale.clone(),request,NativeProof::Settings(serde_json::from_value(json!({"tasks":[],"turns":[{"id":"one","status":"completed"},{"id":"two","status":"completed"},{"id":"three","status":"completed"}]})).expect("state"))).await.expect("settings submission persists");
+    let submitted=adapter.submitted(stale.clone(),request,NativeProof::Settings(studio_json::from_value(json!({"tasks":[],"turns":[{"id":"one","status":"completed"},{"id":"two","status":"completed"},{"id":"three","status":"completed"}]})).expect("state"))).await.expect("settings submission persists");
     assert!(matches!(
         adapter
             .failed(
@@ -825,7 +825,7 @@ async fn definite_not_sent_releases_and_retries_the_same_request_after_fresh_idl
         native.clone(),
     );
     let request = || {
-        serde_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","settings":{"thinking":false},"request_id":"not-sent"})).expect("settings request parses")
+        studio_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","settings":{"thinking":false},"request_id":"not-sent"})).expect("settings request parses")
     };
     assert!(matches!(
         controls.execute(request()).await,
@@ -914,7 +914,7 @@ async fn quota_preparation_refusal_releases_and_retries_after_fresh_idle_proof()
         native.clone(),
     );
     let request = |id: &str| {
-        serde_json::from_value::<ControlRequest>(
+        studio_json::from_value::<ControlRequest>(
             json!({"id":"agent","action":"settings","settings":{"thinking":false},"request_id":id}),
         )
         .expect("settings request parses")
@@ -1057,13 +1057,13 @@ async fn live_permissions_claude_control_applies_while_running_and_pending_witho
                 )),
                 native.clone(),
             );
-            let other_setting = serde_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","request_id":"thinking","settings":{"permissionMode":"default","thinking":false}})).expect("request");
+            let other_setting = studio_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","request_id":"thinking","settings":{"permissionMode":"default","thinking":false}})).expect("request");
             assert!(matches!(
                 service.execute(other_setting).await,
                 Err(ControlError::Busy)
             ));
 
-            let request = serde_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","request_id":"live-permission","settings":{"permissionMode":"bypassPermissions","thinking":true}})).expect("request");
+            let request = studio_json::from_value::<ControlRequest>(json!({"id":"agent","action":"settings","request_id":"live-permission","settings":{"permissionMode":"bypassPermissions","thinking":true}})).expect("request");
             let result = service.execute(request.clone()).await;
             assert_eq!(result.is_ok(), !fail, "{status}: {result:?}");
             if let Ok(result) = &result {
@@ -1106,7 +1106,7 @@ async fn live_permissions_claude_control_applies_while_running_and_pending_witho
 #[test]
 fn mcp_auto_background_accepts_only_booleans() {
     use studio_runtime_schema::claude_controls::ClaudeSettings;
-    let settings = |value: Value| serde_json::from_value::<ClaudeSettings>(value);
+    let settings = |value: Value| studio_json::from_value::<ClaudeSettings>(value);
     for value in [json!(true), json!(false)] {
         assert!(settings(json!({"mcpAutoBackground":value})).is_ok());
     }

@@ -3,8 +3,8 @@ use crate::checkpoints::{self, CheckpointsError};
 use crate::workspace_operations::{
     CompletedTurn, CompletionSnapshot, OperationSnapshot, WorkspaceOperationError,
 };
-use serde_json::Value;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_store::workspace_operations::WorkspaceOperationsRepository as Repository;
 use studio_runtime_store::{CaptureKind, CheckpointsRepository, RuntimeStore, StoreError};
 
@@ -156,7 +156,7 @@ pub async fn record_provider_response(
         .transaction_with(move |tx| {
             let mut operation = Repository::operation(tx, &receipt.operation)?
                 .ok_or(WorkspaceOperationError::ForeignReceipt)?;
-            let expected: ProviderTicket = serde_json::from_value(
+            let expected: ProviderTicket = studio_json::from_value(
                 operation
                     .extensions()
                     .get("providerTicket")
@@ -202,7 +202,7 @@ pub async fn record_provider_response(
             );
             operation.phase = crate::workspace_operations::OperationPhase::ProviderReady;
             operation
-                .set_extension("updated", serde_json::json!(checkpoints::now_seconds()))
+                .set_extension("updated", studio_json::json!(checkpoints::now_seconds()))
                 .expect("known extension");
             Repository::put_operation(tx, &operation)?;
             Ok(result)

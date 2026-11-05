@@ -838,7 +838,7 @@ impl LoginService {
         let mut job = entry.lock().await;
         let mut record = job.snapshot.record().clone();
         record["metadata"]["child"] =
-            serde_json::to_value(identity).map_err(|_| LoginError::Unavailable)?;
+            studio_json::to_value(identity).map_err(|_| LoginError::Unavailable)?;
         let next = LoginSnapshot::from_record(record)?;
         self.save(&next).await?;
         job.snapshot = next;

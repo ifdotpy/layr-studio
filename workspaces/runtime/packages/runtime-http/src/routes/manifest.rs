@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn print_operation_manifest() {
         let operations = operation_manifest().expect("route manifest validates");
-        let json = serde_json::to_string(&operations).expect("route manifest serializes");
+        let json = studio_json::to_string(&operations).expect("route manifest serializes");
         println!("RUST_HTTP_OPERATION_MANIFEST={json}");
     }
 

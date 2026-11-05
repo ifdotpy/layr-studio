@@ -3,7 +3,7 @@ use crate::request_results::{AdmittedRequest, RequestResults, ResultEnvelope};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],
@@ -68,7 +68,7 @@ impl ProjectLocationsRepository {
             [id],
             |row| row.get(0),
         )?;
-        let admitted: AdmittedRequest = serde_json::from_str(&raw)?;
+        let admitted: AdmittedRequest = studio_json::from_str(&raw)?;
         RequestResults::settle(
             tx,
             &admitted,
@@ -97,7 +97,7 @@ impl ProjectLocationsRepository {
     }
 }
 fn decode(table: &'static str, id: &str, raw: &str) -> StoreResult<Value> {
-    serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+    studio_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
         object: table,
         id: id.to_owned(),
     })
@@ -129,34 +129,34 @@ mod tests {
     #[test]
     fn project_record_rejects_unknown_keys_and_malformed_known_fields() {
         let valid = r#"{"recordKind":"live","id":"p","peerTeams":[],"path":"/work/project","locations":[{"serverId":"s","path":"/work/project","projectId":"p"}],"locationsRevision":0}"#;
-        assert!(serde_json::from_str::<ProjectLocationRecord>(valid).is_ok());
+        assert!(studio_json::from_str::<ProjectLocationRecord>(valid).is_ok());
         assert!(
-            serde_json::from_str::<ProjectLocationRecord>(
+            studio_json::from_str::<ProjectLocationRecord>(
                 &valid.replace("\"id\":\"p\"", "\"id\":\"p\",\"unknown\":1")
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<ProjectLocationRecord>(
+            studio_json::from_str::<ProjectLocationRecord>(
                 &valid.replace("\"peerTeams\":[]", "\"peerTeams\":false")
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<ProjectLocationRecord>(
+            studio_json::from_str::<ProjectLocationRecord>(
                 &valid.replace("\"serverId\":\"s\"", "\"serverId\":\"s\",\"unknown\":1")
             )
             .is_err()
         );
-        assert!(serde_json::from_str::<ProjectLocationRecord>(r#"{"recordKind":"live","id":"p","path":"/work/project","projectAliases":[{"serverId":"s","projectId":"p","name":"P","unknown":1}]}"#).is_err());
-        assert!(serde_json::from_str::<ProjectLocationRecord>(r#"{"recordKind":"removal","id":"p","peerTeams":[],"removal":{"deletedAt":1,"reason":"delete","requestId":"r","sequence":1}}"#).is_ok());
+        assert!(studio_json::from_str::<ProjectLocationRecord>(r#"{"recordKind":"live","id":"p","path":"/work/project","projectAliases":[{"serverId":"s","projectId":"p","name":"P","unknown":1}]}"#).is_err());
+        assert!(studio_json::from_str::<ProjectLocationRecord>(r#"{"recordKind":"removal","id":"p","peerTeams":[],"removal":{"deletedAt":1,"reason":"delete","requestId":"r","sequence":1}}"#).is_ok());
     }
 
     #[test]
     fn typed_project_encoder_checks_row_identity() {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         let valid: ProjectLocationRecord =
-            serde_json::from_str(r#"{"recordKind":"live","id":"p","path":"/work/project"}"#)
+            studio_json::from_str(r#"{"recordKind":"live","id":"p","path":"/work/project"}"#)
                 .unwrap();
         assert!(valid.encode_stored(&connection, "p").is_ok());
         assert!(valid.encode_stored(&connection, "other").is_err());

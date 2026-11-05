@@ -7,7 +7,7 @@ use crate::event_write::truthy;
 pub use callback_storage::{CallbackTask, delete_callback, get_callback, put_callback};
 use lifecycle::terminal;
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{ExecutionEffectKind, ExecutionEffectStatus};
 use studio_runtime_store::request_results::{AdmittedRequest, RequestResults, ResultEnvelope};
 use studio_runtime_store::{StoreError, system_reads as records};
@@ -99,7 +99,7 @@ pub fn saved_result(
         (now * 1000.0) as i64,
     )?;
     row.map(|row| {
-        serde_json::from_str::<ResultEnvelope<OpaqueToolReply>>(&row.result)
+        studio_json::from_str::<ResultEnvelope<OpaqueToolReply>>(&row.result)
             .map(|result| result.reply)
             .map_err(StoreError::from)
             .map_err(Into::into)
@@ -180,7 +180,7 @@ fn execute_with_payload_recovery(
             ToolRequestError::InvalidRequest("Unknown or deleted managed agent")
         }
     })?;
-    let actor = serde_json::to_value(actor).map_err(StoreError::from)?;
+    let actor = studio_json::to_value(actor).map_err(StoreError::from)?;
     if matches!(action, Action::List) {
         let mut requests = Vec::new();
         for mut record in list_records(tx, actor_id)? {
@@ -323,7 +323,7 @@ pub fn resolve_admission(
     }
     match resolve_raw(tx, actor, id)? {
         Selection::Found(_, raw) => Ok(Some(
-            serde_json::from_str::<Admission>(&raw)
+            studio_json::from_str::<Admission>(&raw)
                 .map_err(StoreError::from)?
                 .admitted,
         )),
@@ -475,7 +475,7 @@ fn populate_spawned_agent_ids(record: &mut Value) {
         .into_iter()
         .flatten()
         .filter(|value| value["type"] == "inputText")
-        .filter_map(|value| serde_json::from_str::<Value>(value["text"].as_str()?).ok())
+        .filter_map(|value| studio_json::from_str::<Value>(value["text"].as_str()?).ok())
     {
         for id in value["agents"]
             .as_array()

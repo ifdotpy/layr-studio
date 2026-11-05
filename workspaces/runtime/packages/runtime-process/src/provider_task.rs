@@ -3,9 +3,9 @@
 //! on the command socket. No automatic reconnect or write retry exists here.
 use crate::{provider_seam::*, provider_shared::*, *};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
 use std::{collections::BTreeMap, future::Future, path::PathBuf, time::Duration};
+use studio_json::Value;
 use studio_runtime_providers::{
     DecodedJournalPayload, Frame, RequestId, ResponseBody, decode_journal_entry_borrowed,
 };
@@ -1095,7 +1095,7 @@ impl AdapterTask {
         event: SupervisorEventV2,
         received_at_ms: u64,
     ) -> Result<JournalEntry, AdapterError> {
-        let raw = event.payload.get();
+        let raw = event.payload.as_str();
         let payload = match event.kind {
             EventKind::Stdout => match decode_stdout(raw) {
                 DecodedJournalPayload::Frame(mut frame) => {
@@ -1159,7 +1159,7 @@ struct SupervisorRawStdout<'a> {
 fn decode_stdout(raw: &str) -> DecodedJournalPayload {
     let decoded = decode_journal_entry_borrowed(0, 0, raw.as_bytes()).payload;
     if let DecodedJournalPayload::RawStdout { .. } = decoded
-        && let Ok(wrapped) = serde_json::from_str::<SupervisorRawStdout<'_>>(raw)
+        && let Ok(wrapped) = studio_json::from_str::<SupervisorRawStdout<'_>>(raw)
     {
         return decode_journal_entry_borrowed(0, 0, wrapped.raw.as_bytes()).payload;
     }
@@ -1167,7 +1167,7 @@ fn decode_stdout(raw: &str) -> DecodedJournalPayload {
 }
 
 fn parse_payload(raw: &str) -> Result<Value, AdapterError> {
-    serde_json::from_str(raw).map_err(|error| SupervisorError::from(error).into())
+    studio_json::from_str(raw).map_err(|error| SupervisorError::from(error).into())
 }
 
 /// The local ID of an outbound request, when it is a valid wire request ID.

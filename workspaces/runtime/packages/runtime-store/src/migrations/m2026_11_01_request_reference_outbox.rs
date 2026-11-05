@@ -70,8 +70,8 @@ mod tests {
     /// migrated store check the same values.
     #[test]
     fn the_snapshot_holds_the_generated_request_result_triggers() {
-        let snapshot: serde_json::Value =
-            serde_json::from_str(include_str!("../runtime-state-schema.json")).unwrap();
+        let snapshot: studio_json::Value =
+            studio_json::from_str(include_str!("../runtime-state-schema.json")).unwrap();
         let objects = snapshot["canvas.sqlite3"]["sqlite_master"]
             .as_array()
             .unwrap();

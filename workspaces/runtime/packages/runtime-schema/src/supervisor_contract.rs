@@ -1,7 +1,7 @@
 //! Supervisor health responses and handshake acknowledgement wire contracts.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]

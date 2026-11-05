@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use base64::Engine;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 use crate::linux_vm_guest::{GuestError, GuestRpc};
 use crate::managed_host_tools::{Actor, DispatchedOperation, OperationResult};
@@ -43,7 +43,7 @@ pub(crate) fn tool_definition() -> Option<&'static crate::thread_prepare::ToolDe
     static DEFINITION: OnceLock<Option<crate::thread_prepare::ToolDefinition>> = OnceLock::new();
     DEFINITION
         .get_or_init(|| {
-            serde_json::from_value(json!({
+            studio_json::from_value(json!({
                 "type": "function", "name": TOOL,
                 "description": format!(
                     "Run one read-only layr command as your Linux user in your read-only line, outside your sandbox: {}. \

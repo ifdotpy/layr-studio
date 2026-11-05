@@ -130,7 +130,7 @@ fn request_action(app: &tauri::AppHandle, action: Action) -> bool {
     if let Some(id) = gate.begin(action) {
         let delivered = app.get_webview_window("main").is_some_and(|window| {
             window
-                .emit("studio-close-request", serde_json::json!({ "id": id, "action": match action { Action::Close => "close", Action::Reload => "reload" } }))
+                .emit("studio-close-request", studio_json::json!({ "id": id, "action": match action { Action::Close => "close", Action::Reload => "reload" } }))
                 .is_ok()
         });
         if !delivered {

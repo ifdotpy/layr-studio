@@ -1,7 +1,7 @@
 //! Entity change envelopes shared by sync transport and the local cache.
 use crate::MAX_SAFE_INTEGER;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 
 /// Maximum entity records requested per sync pull page.
 pub const SYNC_ENTITY_PAGE_LIMIT: i64 = 500;
@@ -117,7 +117,7 @@ impl EntityChange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn entity_changes_keep_opaque_payload_and_validate_boundaries() {
@@ -125,8 +125,9 @@ mod tests {
             json!({"op":"upsert","collection":"future","id":"a:b","seq":1,"value":{"nested":[null,{"x":true}]},"future":42}),
             json!({"op":"delete","collection":"future","id":"a","seq":2,"future":true}),
         ] {
-            let change: EntityChange = serde_json::from_value(value.clone()).expect("valid change");
-            assert_eq!(serde_json::to_value(&change).expect("serialize"), value);
+            let change: EntityChange =
+                studio_json::from_value(value.clone()).expect("valid change");
+            assert_eq!(studio_json::to_value(&change).expect("serialize"), value);
             assert!(!change.scope().is_empty());
         }
         for value in [
@@ -138,16 +139,16 @@ mod tests {
             json!({"op":"delete","collection":"a","id":"b","seq":MAX_SAFE_INTEGER as u64 + 1}),
         ] {
             assert!(
-                serde_json::from_value::<EntityChange>(value.clone()).is_err(),
+                studio_json::from_value::<EntityChange>(value.clone()).is_err(),
                 "{value}"
             );
         }
-        assert!(serde_json::from_value::<EntityChange>(json!({"op":"delete","collection":"a","id":"x".repeat(MAX_ENTITY_SCOPE_BYTES),"seq":0})).is_err());
+        assert!(studio_json::from_value::<EntityChange>(json!({"op":"delete","collection":"a","id":"x".repeat(MAX_ENTITY_SCOPE_BYTES),"seq":0})).is_err());
     }
 
     #[test]
     fn shared_wire_fields_match_openapi_owner() {
-        let openapi: Value = serde_json::from_str(include_str!(
+        let openapi: Value = studio_json::from_str(include_str!(
             "../../../../runtime/packages/runtime-http/openapi.json"
         ))
         .expect("openapi");

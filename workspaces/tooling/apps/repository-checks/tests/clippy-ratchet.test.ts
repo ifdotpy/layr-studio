@@ -48,7 +48,7 @@ test("Clippy diagnostics reject new and fixed findings until the baseline shrink
 test("conversion lints are classified and other disallowed methods still fail", () => {
   const output = diagnostic(
     "clippy::disallowed_methods",
-    "use of a disallowed method `serde_json::from_value`",
+    "use of a disallowed method `studio_json::from_value`",
   );
   assert.equal((collect(output).from_value ?? []).length, 1);
   assert.throws(
@@ -73,8 +73,8 @@ test("ratchet Clippy config extends the HTTP policy", () => {
     "utf8",
   );
   const extras = `
-  { path = "serde_json::from_value", reason = "prefer typed deserialization" },
-  { path = "serde_json::to_value", reason = "prefer typed serialization" },`;
+  { path = "studio_json::from_value", reason = "prefer typed deserialization" },
+  { path = "studio_json::to_value", reason = "prefer typed serialization" },`;
   assert.equal(
     config,
     owner.replace("disallowed-methods = [", `disallowed-methods = [${extras}`),

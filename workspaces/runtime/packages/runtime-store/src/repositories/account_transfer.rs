@@ -6,7 +6,7 @@ use crate::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Serialize;
-use serde_json::Value;
+use studio_json::Value;
 
 pub type AccountTransferRecord = crate::transfer_record::TransferRecord;
 impl JsonRecord for AccountTransferRecord {
@@ -47,7 +47,7 @@ impl AccountTransferRepository {
         Self::get_typed_with_raw(db, id)?
             .map(|(record, _)| {
                 record
-                    .serialize(serde_json::value::Serializer)
+                    .serialize(studio_json::value::Serializer)
                     .map_err(Into::into)
             })
             .transpose()
@@ -62,7 +62,7 @@ impl AccountTransferRepository {
             .map(|raw| {
                 let record: AccountTransferRecord =
                     Table::<AccountTransferRecord>::new(db).decode_stored(id, &raw)?;
-                let value = record.serialize(serde_json::value::Serializer)?;
+                let value = record.serialize(studio_json::value::Serializer)?;
                 if !studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
                     .map_err(StoreError::SchemaValidation)?
                 {
@@ -119,7 +119,7 @@ impl AccountTransferRepository {
             };
             let agent = Table::<AgentRecord>::new(db).decode_stored(&id, &raw)?;
             if !agent.is_deleted() {
-                bytes = bytes.saturating_add(serde_json::to_vec(&agent)?.len());
+                bytes = bytes.saturating_add(studio_json::to_vec(&agent)?.len());
                 if agents.len() >= studio_runtime_schema::agent_limits::MAX_TRANSFER_AGENT_RECORDS
                     || bytes > Self::MAX_SNAPSHOT_BYTES
                 {
@@ -140,11 +140,11 @@ impl AccountTransferRepository {
             });
         }
         let typed: AccountTransferRecord =
-            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredObject {
+            studio_json::from_str(raw).map_err(|_| StoreError::InvalidStoredObject {
                 table: "runtime_account_transfers",
                 id: id.into(),
             })?;
-        let value = typed.serialize(serde_json::value::Serializer)?;
+        let value = typed.serialize(studio_json::value::Serializer)?;
         if value["id"] != id
             || !studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
                 .map_err(StoreError::SchemaValidation)?

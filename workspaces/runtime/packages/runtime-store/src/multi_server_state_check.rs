@@ -1,8 +1,8 @@
 //! Read-only validation of the open access records and SQL delivery projections.
 use crate::{StateCheckFailure, StateCheckTable, StoreError, StoreResult};
 use rusqlite::Connection;
-use serde_json::Value;
 use std::collections::BTreeMap;
+use studio_json::Value;
 
 pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>> {
     let mut result = Vec::new();
@@ -37,7 +37,7 @@ pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>
                 let raw = row.get::<_, String>(1).ok();
                 let error = if table == "runtime_access_invites" {
                     match raw.as_deref().and_then(|raw| {
-                        serde_json::from_str::<
+                        studio_json::from_str::<
                             studio_runtime_schema::http_ingress::Object<
                                 studio_runtime_schema::multi_server_protocol::PersistedAccessInvite,
                             >,
@@ -52,7 +52,7 @@ pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>
                     "runtime_access_clients" | "runtime_access_discovered"
                 ) {
                     let decoded = raw.as_deref().and_then(|raw| {
-                        serde_json::from_str::<
+                        studio_json::from_str::<
                             studio_runtime_schema::http_ingress::Object<
                                 studio_runtime_schema::multi_server_access::PersistedAccessClient,
                             >,
@@ -64,7 +64,7 @@ pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>
                         _ => Some((String::new(), "recordType".to_owned())),
                     }
                 } else {
-                    match raw.and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
+                    match raw.and_then(|s| studio_json::from_str::<Value>(&s).ok()) {
                         Some(value) => studio_runtime_schema::first_error(
                             studio_runtime_schema::table_schema(table).ok_or_else(|| {
                                 StoreError::SchemaValidation(format!(

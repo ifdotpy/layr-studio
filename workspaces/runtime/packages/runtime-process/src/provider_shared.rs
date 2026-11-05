@@ -9,10 +9,10 @@ use crate::{
     SupervisorHandle, SupervisorHandshakeV2, SupervisorHandshakeV2Result,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
+use studio_json::Value;
 
 const BACKEND_ONLY_ENVIRONMENT: &[&str] = &[
     "CODEX_AGENTS_BACKEND_ID",
@@ -321,7 +321,7 @@ pub(crate) fn handshake_request_v2(identity: &BackendIdentity) -> SupervisorHand
 }
 
 pub(crate) fn validate_handshake_v2(response: &str) -> Result<(), SupervisorError> {
-    let value: SupervisorHandshakeV2Result = serde_json::from_str(response)?;
+    let value: SupervisorHandshakeV2Result = studio_json::from_str(response)?;
     let received = value.protocol;
     if value.ok && received == Some(SUPERVISOR_PROTOCOL_VERSION) {
         Ok(())
@@ -453,7 +453,7 @@ pub(crate) fn request_frame<R: SupervisorRequest>(
         action: action.to_string(),
         request_id,
     };
-    serde_json::to_writer(&mut writer, &envelope).map_err(|error| {
+    studio_json::to_writer(&mut writer, &envelope).map_err(|error| {
         if error.is_io() {
             SupervisorError::InvalidFrame("request exceeds 1 MiB".into())
         } else {
@@ -499,7 +499,7 @@ pub(crate) fn response_value<O: for<'de> Deserialize<'de>>(
     request_id: u64,
     response: &str,
 ) -> Result<O, SupervisorError> {
-    let response: ResponseEnvelope<O> = match serde_json::from_str(response) {
+    let response: ResponseEnvelope<O> = match studio_json::from_str(response) {
         Ok(response) => response,
         Err(_) => return Err(SupervisorError::UnknownOutcome { action, request_id }),
     };
@@ -513,7 +513,7 @@ pub(crate) fn response_value<O: for<'de> Deserialize<'de>>(
 }
 
 pub(crate) fn serialize_frame(value: &impl Serialize) -> Result<Vec<u8>, SupervisorError> {
-    let mut frame = serde_json::to_vec(value)?;
+    let mut frame = studio_json::to_vec(value)?;
     if frame.len() + 1 > crate::transport::MAX_FRAME_BYTES {
         return Err(SupervisorError::InvalidFrame(
             "request exceeds 1 MiB".into(),

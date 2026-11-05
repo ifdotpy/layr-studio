@@ -14,7 +14,7 @@ async fn task(state: &State, item: &str) -> Value {
                 [id],
                 |r| r.get(0),
             )?;
-            Ok(serde_json::from_str::<Value>(&raw).unwrap())
+            Ok(studio_json::from_str::<Value>(&raw).unwrap())
         })
         .await
         .unwrap()

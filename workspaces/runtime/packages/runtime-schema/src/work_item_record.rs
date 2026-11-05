@@ -4,8 +4,8 @@ use crate::{
     task_record::TaskId,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
 use std::collections::BTreeMap;
+use studio_json::{Number, Value};
 
 /// Persisted work version, bounded to the JSON safe integer range.
 pub type WorkItemVersion = RuleInteger<0, 9007199254740991>;
@@ -78,15 +78,15 @@ pub struct WorkItem {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    #[schemars(with = "Vec<serde_json::Map<String, Value>>")]
-    results: Option<Vec<serde_json::Map<String, Value>>>,
+    #[schemars(with = "Vec<studio_json::Map<String, Value>>")]
+    results: Option<Vec<studio_json::Map<String, Value>>>,
     #[serde(
         default,
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    #[schemars(with = "Vec<serde_json::Map<String, Value>>")]
-    decisions: Option<Vec<serde_json::Map<String, Value>>>,
+    #[schemars(with = "Vec<studio_json::Map<String, Value>>")]
+    decisions: Option<Vec<studio_json::Map<String, Value>>>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -138,16 +138,16 @@ impl WorkItem {
     pub fn version(&self) -> Option<&Number> {
         self.version.as_ref().map(RuleInteger::number)
     }
-    pub fn results(&self) -> Option<&[serde_json::Map<String, Value>]> {
+    pub fn results(&self) -> Option<&[studio_json::Map<String, Value>]> {
         self.results.as_deref()
     }
-    pub fn decisions(&self) -> Option<&[serde_json::Map<String, Value>]> {
+    pub fn decisions(&self) -> Option<&[studio_json::Map<String, Value>]> {
         self.decisions.as_deref()
     }
-    pub fn results_mut(&mut self) -> Option<&mut Vec<serde_json::Map<String, Value>>> {
+    pub fn results_mut(&mut self) -> Option<&mut Vec<studio_json::Map<String, Value>>> {
         self.results.as_mut()
     }
-    pub fn decisions_mut(&mut self) -> Option<&mut Vec<serde_json::Map<String, Value>>> {
+    pub fn decisions_mut(&mut self) -> Option<&mut Vec<studio_json::Map<String, Value>>> {
         self.decisions.as_mut()
     }
     pub fn extra(&self, key: &str) -> Option<&Value> {
@@ -156,7 +156,7 @@ impl WorkItem {
     pub fn set_status(&mut self, value: WorkStatus) {
         self.status = value;
     }
-    pub fn set(&mut self, key: impl Into<String>, value: Value) -> Result<(), serde_json::Error> {
+    pub fn set(&mut self, key: impl Into<String>, value: Value) -> Result<(), studio_json::Error> {
         let key = key.into();
         match key.as_str() {
             "id" => {
@@ -175,10 +175,10 @@ impl WorkItem {
             "title" => self.title = Field::deserialize(value)?,
             "version" => self.version = Some(RuleInteger::deserialize(value)?),
             "results" => {
-                self.results = Some(Vec::<serde_json::Map<String, Value>>::deserialize(value)?)
+                self.results = Some(Vec::<studio_json::Map<String, Value>>::deserialize(value)?)
             }
             "decisions" => {
-                self.decisions = Some(Vec::<serde_json::Map<String, Value>>::deserialize(value)?)
+                self.decisions = Some(Vec::<studio_json::Map<String, Value>>::deserialize(value)?)
             }
             "releases" => self.releases = Some(Vec::<Value>::deserialize(value)?),
             _ => {
@@ -188,11 +188,11 @@ impl WorkItem {
         Ok(())
     }
     pub fn value(&self) -> Value {
-        self.serialize(serde_json::value::Serializer)
+        self.serialize(studio_json::value::Serializer)
             .expect("work item fields serialize")
     }
     pub fn into_value(self) -> Value {
-        let mut fields: serde_json::Map<String, Value> = self.extra.into_iter().collect();
+        let mut fields: studio_json::Map<String, Value> = self.extra.into_iter().collect();
         fields.insert("id".into(), Value::String(self.id.0));
         fields.insert("status".into(), Value::String(self.status.as_str().into()));
         if let Some(v) = self.dependencies {
@@ -205,7 +205,7 @@ impl WorkItem {
         insert_field(&mut fields, "agent", self.agent, Value::String);
         insert_field(&mut fields, "archive", self.archive, |raw| {
             // RawJson contains valid JSON by construction.
-            serde_json::from_str(raw.0.get()).expect("valid raw archive")
+            studio_json::from_str(raw.0.as_str()).expect("valid raw archive")
         });
         if let Some(v) = self.updated {
             fields.insert("updated".into(), Value::Number(v));
@@ -234,7 +234,7 @@ impl WorkItem {
     }
 }
 fn insert_field<T>(
-    fields: &mut serde_json::Map<String, Value>,
+    fields: &mut studio_json::Map<String, Value>,
     key: &str,
     field: Field<T>,
     project: impl FnOnce(T) -> Value,
@@ -253,7 +253,7 @@ pub(crate) fn schema() -> Value {
     schemars::schema_for!(WorkItem).to_value()
 }
 pub(crate) fn check_schema_parity() -> Result<(), String> {
-    let stored: Value = serde_json::from_slice(include_bytes!(
+    let stored: Value = studio_json::from_slice(include_bytes!(
         "schemas/persisted-work-item-record.schema.json"
     ))
     .map_err(|e| e.to_string())?;
@@ -268,7 +268,7 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn work_schema_matches_typed_fields_and_preserves_json() {

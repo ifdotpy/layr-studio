@@ -1,8 +1,8 @@
 //! Canonical renderer entity views built from records and explicit context.
 
-use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{StoreError, StoreResult};
@@ -52,13 +52,13 @@ pub(crate) fn bound_opaque_json(value: &mut Value, field: &str, depth: usize) {
 }
 
 pub(crate) fn bound_raw_json(
-    raw: &serde_json::value::RawValue,
+    raw: &studio_json::OwnedRawJson,
     field: &str,
     depth: usize,
-) -> Result<Box<serde_json::value::RawValue>, serde_json::Error> {
-    let mut value: Value = serde_json::from_str(raw.get())?;
+) -> Result<studio_json::OwnedRawJson, studio_json::Error> {
+    let mut value: Value = studio_json::from_str(raw.as_str())?;
     bound_opaque_json(&mut value, field, depth);
-    serde_json::value::to_raw_value(&value)
+    studio_json::to_raw_value(&value)
 }
 
 const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
@@ -80,7 +80,7 @@ const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
 pub fn openapi_document() -> &'static Value {
     static DOCUMENT: OnceLock<Value> = OnceLock::new();
     DOCUMENT.get_or_init(|| {
-        serde_json::from_str(include_str!("../../runtime-http/openapi.json"))
+        studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
             .expect("the committed OpenAPI document is valid JSON")
     })
 }
@@ -600,7 +600,7 @@ pub(crate) fn invalid_agent_view(id: &str, record: &Value, diagnostic: &str) -> 
 /// Canonical wait projection used by both sync/HTTP and lead status.
 pub(crate) fn agent_start_wait(
     record: &Value,
-) -> Result<Option<studio_runtime_schema::agent_progress::AgentStartWait>, serde_json::Error> {
+) -> Result<Option<studio_runtime_schema::agent_progress::AgentStartWait>, studio_json::Error> {
     use studio_runtime_schema::agent_progress::AgentStartWait;
     // Older private native holds can carry a diagnostic object. Decode the
     // envelope without exposing or inspecting its diagnostic fields.
@@ -689,25 +689,25 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         .unwrap_or_default();
     view.insert(
         "manualConnectionCheck".into(),
-        serde::Serialize::serialize(&manual_check, serde_json::value::Serializer).ok()?,
+        serde::Serialize::serialize(&manual_check, studio_json::value::Serializer).ok()?,
     );
     view.insert(
         studio_runtime_schema::agent_progress::START_WAIT_FIELD.into(),
         serde::Serialize::serialize(
             &(agent_start_wait(record).ok()?),
-            serde_json::value::Serializer,
+            studio_json::value::Serializer,
         )
         .ok()?,
     );
 
     view.insert(
         "commandProgress".to_owned(),
-        serde::Serialize::serialize(&(&context.command_progress), serde_json::value::Serializer)
+        serde::Serialize::serialize(&(&context.command_progress), studio_json::value::Serializer)
             .ok()?,
     );
     view.insert(
         "stall".to_owned(),
-        serde::Serialize::serialize(&(&context.stall), serde_json::value::Serializer).ok()?,
+        serde::Serialize::serialize(&(&context.stall), studio_json::value::Serializer).ok()?,
     );
     let remote_server = record
         .pointer("/remoteWorker/server")
@@ -747,7 +747,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     }) {
         let dto =
             studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto::from(summary);
-        view.insert("accountTransfer".into(), serde::Serialize::serialize(&(dto), serde_json::value::Serializer).ok()?);
+        view.insert("accountTransfer".into(), serde::Serialize::serialize(&(dto), studio_json::value::Serializer).ok()?);
     } else if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)
@@ -775,7 +775,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
             .collect::<Vec<_>>();
         view.insert(
             "accountDestinations".into(),
-            serde::Serialize::serialize(&destinations, serde_json::value::Serializer).ok()?,
+            serde::Serialize::serialize(&destinations, studio_json::value::Serializer).ok()?,
         );
     }
     let account_change = if source.is_lead != Some(true) {
@@ -802,11 +802,11 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     };
     view.insert(
         "accountChange".into(),
-        serde::Serialize::serialize(&account_change, serde_json::value::Serializer).ok()?,
+        serde::Serialize::serialize(&account_change, studio_json::value::Serializer).ok()?,
     );
     view.insert(
         "accountTransferProgress".into(),
-        serde::Serialize::serialize(&progress, serde_json::value::Serializer).ok()?,
+        serde::Serialize::serialize(&progress, studio_json::value::Serializer).ok()?,
     );
     let block = native_thread_block(record);
     let can_send = block.is_none()
@@ -841,7 +841,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         if let Some(counts) = &context.team_counts {
             view.insert(
                 "teamCounts".to_owned(),
-                serde::Serialize::serialize(&(counts), serde_json::value::Serializer).ok()?,
+                serde::Serialize::serialize(&(counts), studio_json::value::Serializer).ok()?,
             );
         }
         view.remove("overview");
@@ -1071,7 +1071,7 @@ mod projection_plan_tests {
         invalid_agent_view, openapi_document, project_persisted_record,
         schema_projection_properties,
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn task_entity_payload_hash_is_stable_after_projection_move() {
@@ -1082,8 +1082,8 @@ mod projection_plan_tests {
             value: T,
         }
         let raw = r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"}"#;
-        let task: studio_runtime_store::TaskRecord = serde_json::from_str(raw).unwrap();
-        let payload = serde_json::to_string(&Entity {
+        let task: studio_runtime_store::TaskRecord = studio_json::from_str(raw).unwrap();
+        let payload = studio_json::to_string(&Entity {
             collection: "task",
             id: "a:i",
             value: super::project_task_record(&task).unwrap(),
@@ -1120,7 +1120,7 @@ mod projection_plan_tests {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
             "provider":"codex","excludedAccountKeys":["blocked"]});
         let context = super::AgentViewContext {
-            account_destinations: serde_json::from_str(
+            account_destinations: studio_json::from_str(
                 r#"[
                 {"accountKey":"blocked","eligibility":{"kind":"available"}},
                 {"accountKey":"other","eligibility":{"kind":"available"}}
@@ -1167,14 +1167,14 @@ mod projection_plan_tests {
     #[test]
     fn removed_agent_diagnostics_are_not_projected() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"checkpointError":"legacy","complaintsPresented":["c"],"workspaceBackend":null}"#;
-        let record = serde_json::from_str(raw).unwrap();
+        let record = studio_json::from_str(raw).unwrap();
         let projected =
             super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
         assert!(projected.get("checkpointError").is_none());
         assert!(projected.get("complaintsPresented").is_none());
         assert!(projected.get("workspaceBackend").is_none());
         assert_eq!(
-            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            studio_runtime_store::sha256_hex(&studio_json::to_vec(&projected).unwrap()),
             "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
@@ -1182,19 +1182,19 @@ mod projection_plan_tests {
     #[test]
     fn removed_compaction_flag_changes_agent_projection() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
-        let record = serde_json::from_str(raw).unwrap();
+        let record = studio_json::from_str(raw).unwrap();
         let projected =
             super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
         assert!(projected.get("compactionsObservedOnly").is_none());
         assert_eq!(
-            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            studio_runtime_store::sha256_hex(&studio_json::to_vec(&projected).unwrap()),
             "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
 
     #[test]
     fn agent_projection_uses_canonical_capacity() {
-        let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"explicit","max":80}});
+        let record = studio_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"explicit","max":80}});
         let projected =
             super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
         assert_eq!(projected["capacity"], record["capacity"]);
@@ -1205,7 +1205,7 @@ mod projection_plan_tests {
     #[test]
     fn canonical_naming_states_project_to_agent() {
         for naming in ["automatic", "pending_title", "manual"] {
-            let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":naming});
+            let record = studio_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":naming});
             let view =
                 super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
             assert_eq!(view["naming"], naming);
@@ -1216,11 +1216,11 @@ mod projection_plan_tests {
     #[test]
     fn chat_organization_flags_project_with_canonical_capacity() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"archived":true,"pinned":true}"#;
-        let agent: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        let agent: studio_runtime_store::AgentRecord = studio_json::from_str(raw).unwrap();
         let projected =
             super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
         assert_eq!(
-            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            studio_runtime_store::sha256_hex(&studio_json::to_vec(&projected).unwrap()),
             "80e14a8a655e664574ce206954aa188b700430e6c5c27f4b0fe887101a76cc64"
         );
     }
@@ -1231,8 +1231,8 @@ mod projection_plan_tests {
         let after = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
         let context = super::AgentViewContext::default();
         let project = |raw: &str| {
-            let record = serde_json::from_str(raw).unwrap();
-            serde_json::to_vec(&super::agent_entity_view(&record, &context).unwrap()).unwrap()
+            let record = studio_json::from_str(raw).unwrap();
+            studio_json::to_vec(&super::agent_entity_view(&record, &context).unwrap()).unwrap()
         };
         let legacy = project(before);
         let normalized = project(after);
@@ -1251,11 +1251,12 @@ mod projection_plan_tests {
                 r#"{{"id":"c","leadId":"lead","author":"user","text":"hello","recipient":"{recipient}","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]}}"#
             );
             let record: studio_runtime_schema::complaint_record::ComplaintRecord =
-                serde_json::from_str(&raw).unwrap();
-            let encoded =
-                serde_json::to_string(&super::project_complaint_record(&record, &context).unwrap())
-                    .unwrap();
-            let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+                studio_json::from_str(&raw).unwrap();
+            let encoded = studio_json::to_string(
+                &super::project_complaint_record(&record, &context).unwrap(),
+            )
+            .unwrap();
+            let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
             assert_eq!(
                 actual,
                 json!({"id":"c","leadId":"lead","leadName":"lead","author":"user","authorName":"You","title":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"needsUserResponse":recipient == "user"})
@@ -1328,8 +1329,8 @@ mod projection_plan_tests {
             let task: studio_runtime_store::TaskRecord =
                 serde::Deserialize::deserialize(&raw).unwrap();
             let encoded =
-                serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
-            let mut new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+                studio_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
+            let mut new: studio_json::Value = studio_json::from_str(&encoded).unwrap();
             new.as_object_mut().unwrap().remove("display");
             let limit = length.min(2_000);
             assert_eq!(
@@ -1375,7 +1376,7 @@ mod projection_plan_tests {
                 false,
             ),
         ] {
-            let value: serde_json::Value = serde_json::from_str(raw).expect("fixture JSON");
+            let value: studio_json::Value = studio_json::from_str(raw).expect("fixture JSON");
             let result = super::retained_worktree_entity(&value);
             assert_eq!(result.is_some(), expected, "{raw}");
             if let Some(view) = result {
@@ -1391,8 +1392,8 @@ mod projection_plan_tests {
                 "effect":{"kind":"remove_worktree","identity":{"cwd":null,"private":"secret"}},
                 "receipt":{"reason":false,"private":"secret"},"requestId":"private"}});
         let view = super::retained_worktree_entity(&member).expect("retained");
-        assert_eq!(view["cleanup"]["path"], serde_json::Value::Null);
-        assert_eq!(view["cleanup"]["reason"], serde_json::Value::Null);
+        assert_eq!(view["cleanup"]["path"], studio_json::Value::Null);
+        assert_eq!(view["cleanup"]["reason"], studio_json::Value::Null);
         assert!(!view.to_string().contains("secret"));
         assert!(!view.to_string().contains("private"));
     }
@@ -1400,15 +1401,15 @@ mod projection_plan_tests {
     #[test]
     fn complaint_projection_preserves_integer_seconds() {
         let raw = r#"{"id":"c","author":null,"leadId":null,"text":null,"recipient":"lead","status":"open","created":1,"updated":2,"readAt":null,"version":null,"responses":[]}"#;
-        let record = serde_json::from_str(raw).unwrap();
+        let record = studio_json::from_str(raw).unwrap();
         let view =
             super::project_complaint_record(&record, &super::ComplaintViewContext::default())
                 .unwrap();
-        let encoded = serde_json::to_string(&view).unwrap();
-        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let encoded = studio_json::to_string(&view).unwrap();
+        let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
         assert_eq!(actual["created"], json!(1));
         assert_eq!(actual["updated"], json!(2));
-        let stored = serde_json::to_string(&record).unwrap();
+        let stored = studio_json::to_string(&record).unwrap();
         assert_eq!(
             studio_runtime_store::sha256_hex(stored.as_bytes()),
             "413cdeb2d2cd1fb25994cbbac3469ccb6fb478a625197a6ebd205b453f97e49a"
@@ -1419,20 +1420,20 @@ mod projection_plan_tests {
     fn complaint_names_preserve_missing_and_null() {
         let raw = r#"{"id":"complaint","author":"author","leadId":null,"text":"Question","recipient":"lead","status":"open","created":null,"updated":null,"readAt":null,"version":null,"responses":[]}"#;
         let record: studio_runtime_schema::complaint_record::ComplaintRecord =
-            serde_json::from_str(raw).unwrap();
+            studio_json::from_str(raw).unwrap();
         for (agent, expected) in [
             (r#"{"id":"author"}"#, json!("author")),
             (r#"{"id":"author","name":null}"#, json!(null)),
             (r#"{"id":"author","name":"Author"}"#, json!("Author")),
         ] {
-            let agents = [serde_json::from_str(agent).expect("typed agent")];
+            let agents = [studio_json::from_str(agent).expect("typed agent")];
             let view = super::project_complaint_record(
                 &record,
                 &super::ComplaintViewContext { agents: &agents },
             )
             .expect("complaint view");
-            let encoded = serde_json::to_string(&view).unwrap();
-            let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            let encoded = studio_json::to_string(&view).unwrap();
+            let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
             assert_eq!(actual["authorName"], expected);
         }
     }
@@ -1470,7 +1471,7 @@ mod projection_plan_tests {
             );
             let record = serde::Deserialize::deserialize(&raw).unwrap();
             let view = crate::sync_policy::project_monitor_record(&record).unwrap();
-            serde::Serialize::serialize(&view, serde_json::value::Serializer).unwrap()
+            serde::Serialize::serialize(&view, studio_json::value::Serializer).unwrap()
         };
         let unset = monitor(json!([]));
         assert!(unset.get("outputPatterns").is_none(), "{unset}");
@@ -1519,14 +1520,14 @@ mod projection_plan_tests {
 #[cfg(test)]
 mod work_views_tests {
     use super::work_views;
-    use serde_json::{Value, json};
     use std::collections::BTreeMap;
+    use studio_json::{Value, json};
 
     #[test]
     fn work_views_build_results_decisions_and_releases() {
         let raw_text = r#"{"id":"w","rootId":"lead","title":"work","status":"review","results":[{"id":"r0"},{"id":"r1"}],"decisions":[{"id":"d0"}],"releases":[{"id":"x0"}]}"#;
-        let raw: Value = serde_json::from_str(raw_text).unwrap();
-        let item: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw_text).unwrap();
+        let raw: Value = studio_json::from_str(raw_text).unwrap();
+        let item: studio_runtime_store::WorkItemRecord = studio_json::from_str(raw_text).unwrap();
         let refusal = json!({"reason": "none"});
         let views = work_views(&item, &raw, refusal, &BTreeMap::new()).unwrap();
         let collections: Vec<&str> = views.iter().map(|(collection, _)| *collection).collect();
@@ -1543,7 +1544,7 @@ mod work_views_tests {
         );
         let texts: Vec<String> = views
             .iter()
-            .map(|(_, view)| serde_json::to_string(view).unwrap())
+            .map(|(_, view)| studio_json::to_string(view).unwrap())
             .collect();
         assert_eq!(
             texts[0],

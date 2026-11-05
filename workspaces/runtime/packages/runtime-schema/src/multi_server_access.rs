@@ -228,7 +228,7 @@ pub struct InvitationResponse {
 }
 
 /// Regenerate HTTP response components from their Rust serialization owners.
-pub(crate) fn refresh_openapi(openapi: &mut serde_json::Value) {
+pub(crate) fn refresh_openapi(openapi: &mut studio_json::Value) {
     let mut generator = schemars::generate::SchemaSettings::draft2020_12()
         .for_deserialize()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
@@ -240,9 +240,9 @@ pub(crate) fn refresh_openapi(openapi: &mut serde_json::Value) {
         openapi["components"]["schemas"][name] = schema;
     }
     openapi["components"]["schemas"]["DiscoveredServer"] =
-        serde_json::json!({"$ref":"#/components/schemas/AccessClient"});
+        studio_json::json!({"$ref":"#/components/schemas/AccessClient"});
     openapi["components"]["schemas"]["AcceptInvite"]["properties"]["invitation"] =
-        serde_json::json!({"$ref":"#/components/schemas/AccessInvitationRequest"});
+        studio_json::json!({"$ref":"#/components/schemas/AccessInvitationRequest"});
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -312,13 +312,13 @@ pub struct PublicAccessClient {
     pub tailscale_user: Option<String>,
     #[serde(deserialize_with = "required_nullable_number")]
     #[schemars(with = "RequiredNullableNumber")]
-    pub last_access: Option<serde_json::Number>,
+    pub last_access: Option<studio_json::Number>,
     #[serde(deserialize_with = "required_nullable_number")]
     #[schemars(with = "RequiredNullableNumber")]
-    pub revoked: Option<serde_json::Number>,
+    pub revoked: Option<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
-    pub last_seen: Field<serde_json::Number>,
+    #[schemars(with = "Option<studio_json::Number>")]
+    pub last_seen: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<bool>")]
     pub auto_pair: Field<bool>,
@@ -334,8 +334,8 @@ pub struct PublicAccessClient {
 }
 fn required_nullable_number<'de, D: serde::Deserializer<'de>>(
     d: D,
-) -> Result<Option<serde_json::Number>, D::Error> {
-    Option::<serde_json::Number>::deserialize(d)
+) -> Result<Option<studio_json::Number>, D::Error> {
+    Option::<studio_json::Number>::deserialize(d)
 }
 struct RequiredNullableNumber;
 impl schemars::JsonSchema for RequiredNullableNumber {
@@ -394,17 +394,17 @@ pub struct PersistedAccessClient {
     #[schemars(with = "Option<String>")]
     pub tailscale_user: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
+    #[schemars(with = "Option<studio_json::Number>")]
     /// Last access in Unix seconds, including fractional seconds.
-    pub last_access: Field<serde_json::Number>,
+    pub last_access: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
+    #[schemars(with = "Option<studio_json::Number>")]
     /// Revocation time in Unix seconds, including fractional seconds.
-    pub revoked: Field<serde_json::Number>,
+    pub revoked: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
+    #[schemars(with = "Option<studio_json::Number>")]
     /// Discovery time in Unix seconds, including fractional seconds.
-    pub last_seen: Field<serde_json::Number>,
+    pub last_seen: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<bool>")]
     pub auto_pair: Field<bool>,
@@ -438,22 +438,23 @@ mod tests {
     #[test]
     fn strict_client_accepts_valid_grants_and_rejects_unknown_fields() {
         assert_eq!(
-            serde_json::to_string(&AccessGrant::Full).unwrap(),
+            studio_json::to_string(&AccessGrant::Full).unwrap(),
             format!("\"{GRANT_FULL}\"")
         );
         assert_eq!(
-            serde_json::to_string(&AccessGrant::Observe).unwrap(),
+            studio_json::to_string(&AccessGrant::Observe).unwrap(),
             format!("\"{GRANT_OBSERVE}\"")
         );
         let prefix = r#"{"id":"peer","clientId":"client","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired""#;
         for suffix in ["}", r#", "grant":null}"#, r#", "grant":"observe"}"#] {
             assert!(
-                serde_json::from_str::<PersistedAccessClient>(&format!("{prefix}{suffix}")).is_ok()
+                studio_json::from_str::<PersistedAccessClient>(&format!("{prefix}{suffix}"))
+                    .is_ok()
             );
         }
         for suffix in [r#", "grant":"other"}"#, r#", "extra":true}"#] {
             assert!(
-                serde_json::from_str::<PersistedAccessClient>(&format!("{prefix}{suffix}"))
+                studio_json::from_str::<PersistedAccessClient>(&format!("{prefix}{suffix}"))
                     .is_err()
             );
         }
@@ -468,7 +469,7 @@ mod tests {
             client_id: "peer".to_owned().try_into().unwrap(),
             kind: AccessClientKind::Server,
             label: "Peer".to_owned().try_into().unwrap(),
-            created: NonNegativeNumber::try_from(serde_json::Number::from(1)).unwrap(),
+            created: NonNegativeNumber::try_from(studio_json::Number::from(1)).unwrap(),
             public_key: "key".to_owned().try_into().unwrap(),
             status: AccessClientStatus::Paired,
             server_id: Field::Null,
@@ -486,9 +487,9 @@ mod tests {
             pairing_hash: Field::Null,
             pairing_receipt: Field::Null,
         };
-        let serialized = serde_json::to_string(&record).unwrap();
+        let serialized = studio_json::to_string(&record).unwrap();
         let object: std::collections::BTreeMap<String, serde::de::IgnoredAny> =
-            serde_json::from_str(&serialized).unwrap();
+            studio_json::from_str(&serialized).unwrap();
         let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
         let mut fields = CLIENT_FIELDS.to_vec();
         keys.sort_unstable();

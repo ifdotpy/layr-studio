@@ -456,7 +456,7 @@ pub fn dispatch(request: &Request) -> Response {
     match result {
         Ok(value) => Response::success(
             request.id.clone(),
-            serde_json::to_value(value)
+            studio_json::to_value(value)
                 .expect("the inert Markdown output contains only serializable fields"),
         ),
         Err(error) => Response::failure(request.id.clone(), "markdown", error),
@@ -465,13 +465,13 @@ pub fn dispatch(request: &Request) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use studio_json::Value;
 
     fn parse(text: &str, streaming: bool) -> Result<Value, String> {
-        super::parse(text, streaming).map(|blocks| serde_json::to_value(blocks).unwrap())
+        super::parse(text, streaming).map(|blocks| studio_json::to_value(blocks).unwrap())
     }
     fn tree(html: String) -> Result<Value, String> {
-        super::tree(html).map(|tree| serde_json::to_value(tree).unwrap())
+        super::tree(html).map(|tree| studio_json::to_value(tree).unwrap())
     }
 
     #[test]

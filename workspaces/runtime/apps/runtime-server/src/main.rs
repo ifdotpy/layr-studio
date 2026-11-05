@@ -69,7 +69,7 @@ const STARTUP_TRACE_ENV: &str = "CODEX_STUDIO_STARTUP_TRACE";
 
 /// Durable inputs that can enqueue or unblock a server-to-server delivery.
 const ORCHESTRATION_WAKE_TABLES: [ObservedTable; 3] = [
-    // The shared outbox holds server requests and federation messages. A write wakes both schedulers.
+    // Both remote delivery families share this outbox.
     ObservedTable::RuntimeOutbox,
     ObservedTable::AccessClients,
     ObservedTable::ServerLinks,
@@ -87,7 +87,15 @@ const FEDERATION_WAKE_TABLES: [ObservedTable; 6] = [
 fn observe_table_wakes(store: &RuntimeStore, tables: &[ObservedTable], wake: Arc<Notify>) {
     for table in tables {
         let wake = Arc::clone(&wake);
-        store.add_table_change_observer(*table, move || wake.notify_one());
+        if *table == ObservedTable::RuntimeOutbox {
+            store.add_outbox_change_observer(move |local_only| {
+                if !local_only {
+                    wake.notify_one();
+                }
+            });
+        } else {
+            store.add_table_change_observer(*table, move || wake.notify_one());
+        }
     }
 }
 
@@ -181,7 +189,7 @@ fn main() -> std::process::ExitCode {
             if let Some(store) = error.downcast_ref::<studio_runtime_store::StoreError>()
                 && matches!(store, studio_runtime_store::StoreError::Migration { .. })
             {
-                match serde_json::to_string(&studio_runtime_services::studio_errors::store_causes(
+                match studio_json::to_string(&studio_runtime_services::studio_errors::store_causes(
                     store,
                 )) {
                     Ok(causes) => eprintln!("runtime migration diagnostic: {causes}"),
@@ -360,11 +368,11 @@ fn vault_configure(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let [vm_state_dir, source] = args else {
         return Err("vault-configure requires a VM state directory and a project folder".into());
     };
-    let given: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+    let given: studio_json::Value = studio_json::from_reader(std::io::stdin())?;
     let guest = studio_runtime_services::linux_vm_guest::UnixGuestRpc::new(vm_state_dir);
     let result =
         studio_runtime_services::vault::configure(&guest, Path::new(vm_state_dir), source, &given)?;
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    println!("{}", studio_json::to_string_pretty(&result)?);
     Ok(())
 }
 
@@ -395,7 +403,7 @@ async fn run(
         }
         let report =
             studio_runtime_store::check_state_readonly(PathBuf::from(state_dir).as_path())?;
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        println!("{}", studio_json::to_string_pretty(&report)?);
         return Ok(None);
     }
     let port = parse_port(args.into_iter())?;
@@ -1902,7 +1910,7 @@ fn next_federation_retry_delay(previous: Option<Duration>) -> Duration {
 }
 
 fn successful_pair_retry_delay(
-    updated: &serde_json::Value,
+    updated: &studio_json::Value,
     previous: Option<Duration>,
 ) -> Option<Duration> {
     (updated["localApproved"] == true && updated["remoteApproved"] != true)
@@ -1944,7 +1952,7 @@ impl studio_runtime_http::NativeContextRepairPort for NativeContextRepairAdapter
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<
-                    Output = studio_runtime_services::native_actions::Result<serde_json::Value>,
+                    Output = studio_runtime_services::native_actions::Result<studio_json::Value>,
                 > + Send
                 + 'static,
         >,
@@ -2119,6 +2127,278 @@ mod targeted_scheduler_wake_tests {
     use tokio::sync::Notify;
 
     #[tokio::test]
+    #[ignore]
+    async fn outbox_wake_measurement() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_services::multi_server_orchestration::{
+            HttpsPairedTransport, OrchestrationDriver, RuntimeOrchestrationEffects,
+        };
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        let driver = OrchestrationDriver::new(
+            store.clone(),
+            Arc::new(HttpsPairedTransport::new(store.clone())),
+            Arc::new(RuntimeOrchestrationEffects::new(store.clone())),
+        );
+        let mut counts = (0, 0);
+        for n in 0..20 {
+            store
+                .transaction(move |tx| {
+                    Outbox::put(
+                        tx,
+                        &OutboxRow {
+                            id: n.to_string(),
+                            kind: if n % 2 == 0 {
+                                OutboxKind::JournalEntry
+                            } else {
+                                OutboxKind::Publication
+                            },
+                            owner_kind: OwnerKind::Account,
+                            owner_id: "account".into(),
+                            request_id: None,
+                            signature: "sig".into(),
+                            status: OutboxStatus::Pending,
+                            account: None,
+                            stream_id: None,
+                            generation: None,
+                            ordinal: None,
+                            next_at: None,
+                            payload: studio_test_deps::EmptyObject {},
+                            created: 1,
+                        },
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            if tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_ok()
+            {
+                counts.0 += 1;
+                driver.pump_due(1).await.unwrap();
+                driver.next_due_at().await.unwrap();
+            }
+            if tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_ok()
+            {
+                counts.1 += 1;
+                studio_runtime_services::federation::snapshot(&store)
+                    .await
+                    .unwrap();
+            }
+        }
+        println!(
+            "wake counts: orchestration={}, federation={}",
+            counts.0, counts.1
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn typed_local_outbox_writes_leave_remote_schedulers_quiet() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        for kind in [OutboxKind::JournalEntry, OutboxKind::Publication] {
+            store
+                .transaction(move |tx| {
+                    Outbox::put(
+                        tx,
+                        &OutboxRow {
+                            id: format!("{kind:?}"),
+                            kind,
+                            owner_kind: OwnerKind::Account,
+                            owner_id: "account".into(),
+                            request_id: None,
+                            signature: "sig".into(),
+                            status: OutboxStatus::Pending,
+                            account: None,
+                            stream_id: None,
+                            generation: None,
+                            ordinal: None,
+                            next_at: None,
+                            payload: studio_test_deps::EmptyObject {},
+                            created: 1,
+                        },
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                tokio::time::timeout(Duration::ZERO, federation.notified())
+                    .await
+                    .is_err()
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unclassified_mixed_overflow_and_remote_outbox_wake_both() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        use studio_runtime_store::remote_outbox::{RemoteEffect, RemoteOutbox};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        for scenario in 0..8 {
+            store.transaction(move |tx| {
+                if scenario == 0 || scenario == 1 {
+                    tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES(?1,'journal_entry','account','account','sig','pending','{}',1)", [format!("raw-{scenario}")])?;
+                }
+                if scenario == 1 || scenario == 2 || scenario == 7 {
+                    for n in 0..if scenario == 2 { studio_runtime_store::CHANGED_ROW_HINT_LIMIT + 1 } else { 1 } {
+                        Outbox::put(tx, &OutboxRow {
+                            id: format!("typed-{scenario}-{n}"), kind: OutboxKind::JournalEntry,
+                            owner_kind: OwnerKind::Account, owner_id: "account".into(), request_id: None,
+                            signature: "sig".into(), status: OutboxStatus::Pending, account: None,
+                            stream_id: None, generation: None, ordinal: None, next_at: None,
+                            payload: studio_test_deps::EmptyObject {}, created: 1,
+                        })?;
+                    }
+                }
+                if scenario == 5 {
+                    tx.execute("UPDATE runtime_outbox SET status='committed' WHERE id='raw-0'", [])?;
+                }
+                if scenario == 6 {
+                    tx.execute("DELETE FROM runtime_outbox WHERE id='raw-0'", [])?;
+                }
+                if scenario == 3 || scenario == 4 || scenario == 7 {
+                    RemoteOutbox::put(tx, if scenario == 3 { RemoteEffect::ServerRequest } else { RemoteEffect::FederationMessage }, "peer", &format!("remote-{scenario}"), "sig", OutboxStatus::Pending, Some(1), studio_test_deps::EmptyObject {}, 1)?;
+                }
+                Ok(())
+            }).await.unwrap();
+            assert!(
+                tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                    .await
+                    .is_ok(),
+                "scenario {scenario}"
+            );
+            assert!(
+                tokio::time::timeout(Duration::ZERO, federation.notified())
+                    .await
+                    .is_ok(),
+                "scenario {scenario}"
+            );
+        }
+        let result = store
+            .transaction(|tx| {
+                Outbox::put(
+                    tx,
+                    &OutboxRow {
+                        id: "rolled-back".into(),
+                        kind: OutboxKind::JournalEntry,
+                        owner_kind: OwnerKind::Account,
+                        owner_id: "account".into(),
+                        request_id: None,
+                        signature: "sig".into(),
+                        status: OutboxStatus::Pending,
+                        account: None,
+                        stream_id: None,
+                        generation: None,
+                        ordinal: None,
+                        next_at: None,
+                        payload: studio_test_deps::EmptyObject {},
+                        created: 1,
+                    },
+                )?;
+                Err::<(), _>(studio_runtime_store::StoreError::WriterPoisoned)
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rollback_hints_do_not_suppress_next_raw_outbox_write() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        let result = store
+            .transaction(|tx| {
+                Outbox::put(
+                    tx,
+                    &OutboxRow {
+                        id: "rollback-before-raw".into(),
+                        kind: OutboxKind::JournalEntry,
+                        owner_kind: OwnerKind::Account,
+                        owner_id: "account".into(),
+                        request_id: None,
+                        signature: "sig".into(),
+                        status: OutboxStatus::Pending,
+                        account: None,
+                        stream_id: None,
+                        generation: None,
+                        ordinal: None,
+                        next_at: None,
+                        payload: studio_test_deps::EmptyObject {},
+                        created: 1,
+                    },
+                )?;
+                Err::<(), _>(studio_runtime_store::StoreError::WriterPoisoned)
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_err()
+        );
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES('raw-after-rollback','remote_delivery','account','account','sig','pending','{}',1)", [])?;
+            Ok(())
+        }).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_ok()
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
     async fn unrelated_event_commit_does_not_wake_orchestration_but_outbox_commit_does() {
         let directory = tempfile::tempdir().expect("state directory");
         let store = RuntimeStore::open(Some(directory.path()))
@@ -2184,7 +2464,7 @@ mod targeted_scheduler_wake_tests {
                     "fingerprint",
                     studio_runtime_schema::persistence::OutboxStatus::Pending,
                     Some(1),
-                    serde_json::json!({"body":"{\"action\":\"event\"}"}),
+                    studio_json::json!({"body":"{\"action\":\"event\"}"}),
                     1,
                 )?;
                 Ok(())
@@ -2287,11 +2567,14 @@ mod exit_logging_tests {
     }
     fn put_tick_limits(
         tx: &studio_runtime_store::Transaction<'_>,
-        observation: &serde_json::Value,
+        observation: &studio_json::Value,
     ) -> studio_runtime_store::StoreResult<()> {
-        let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
-        let view =
-            studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "default", 1000.0)?;
+        let raw = studio_json::OwnedRawJson::from_string(observation.to_string())?;
+        let view = studio_runtime_schema::usage_limits::RateLimitView::read(
+            raw.as_str(),
+            "default",
+            1000.0,
+        )?;
         studio_runtime_store::SyncDocumentsRepository::put_entity(
             tx,
             "rateLimit",
@@ -2307,7 +2590,7 @@ mod exit_logging_tests {
             account: &'a str,
         ) -> studio_runtime_services::account_session_runtime::AccountSessionFuture<
             'a,
-            serde_json::Value,
+            studio_json::Value,
         > {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Box::pin(async move {
@@ -2316,11 +2599,11 @@ mod exit_logging_tests {
                 }
                 if let Some(store) = &self.newer_rejection {
                     store.transaction_with(|tx| {
-                        put_tick_limits(tx,&serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}))
+                        put_tick_limits(tx,&studio_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}))
                     }).await.expect("rate-limit fixture writes");
                 }
                 Ok(
-                    serde_json::json!({"accountKey":account,"at":1000.0,"data":{"rateLimits":{"primary":{"usedPercent":10.0,"resetsAt":2000.0}}}}),
+                    studio_json::json!({"accountKey":account,"at":1000.0,"data":{"rateLimits":{"primary":{"usedPercent":10.0,"resetsAt":2000.0}}}}),
                 )
             })
         }
@@ -2337,13 +2620,13 @@ mod exit_logging_tests {
             );
             store.transaction_with(move |tx| {
                 for id in ["a", "b"] {
-                    let resume = serde_json::json!({"id":id,"accountKey":"default","threadId":"thread","epoch":1,"turnId":"turn","cause":"rate_limit","status":"scheduled","failedAt":900.0,"dueAt":990.0,"taskClaims":[],"updatedAt":980.0});
-                    let agent = serde_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"failed","accountKey":"default","threadId":"thread","lastCompletedTurn":"turn","autoWake":true,"nativeFailureHold":true,"cwd":"/fixture","isLead":true,"usageResume":resume});
+                    let resume = studio_json::json!({"id":id,"accountKey":"default","threadId":"thread","epoch":1,"turnId":"turn","cause":"rate_limit","status":"scheduled","failedAt":900.0,"dueAt":990.0,"taskClaims":[],"updatedAt":980.0});
+                    let agent = studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"failed","accountKey":"default","threadId":"thread","lastCompletedTurn":"turn","autoWake":true,"nativeFailureHold":true,"cwd":"/fixture","isLead":true,"usageResume":resume});
                     tx.execute("INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",[id,&agent.to_string()])?;
                     tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES (?1,?1,?2)",[id,&resume.to_string()])?;
                 }
                 // A recent cache entry cannot replace the provider read at the due time.
-                put_tick_limits(tx,&serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}))?;
+                put_tick_limits(tx,&studio_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}))?;
                 Ok::<_,studio_runtime_store::StoreError>(())
             }).await.expect("usage resume fixture writes");
             let port = TickLimits {
@@ -2368,8 +2651,8 @@ mod exit_logging_tests {
                     |row| row.get(0),
                 )
                 .expect("usage resume record loads");
-            let record: serde_json::Value =
-                serde_json::from_str(&record).expect("usage resume JSON parses");
+            let record: studio_json::Value =
+                studio_json::from_str(&record).expect("usage resume JSON parses");
             assert_eq!(
                 record["status"],
                 if allowed && !newer_rejection {
@@ -2428,10 +2711,10 @@ mod exit_logging_tests {
             .transaction_with(|tx| {
                 // The first agent's proof cursor has no proofAt, so its stage fails.
                 for (id, pending) in [
-                    ("a-broken", serde_json::json!({"afterId":""})),
-                    ("b-valid", serde_json::json!({"afterId":"","proofAt":1.0})),
+                    ("a-broken", studio_json::json!({"afterId":""})),
+                    ("b-valid", studio_json::json!({"afterId":"","proofAt":1.0})),
                 ] {
-                    let record = serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
+                    let record = studio_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                         "id":id, "rootId":id, "role":"orchestrator", "status":"idle", "epoch":1,
                         "authResumeProofPending":{"default":pending},
                     });
@@ -2488,11 +2771,11 @@ mod exit_logging_tests {
                 for index in 0..broken + valid {
                     let id = format!("agent-{index:02}");
                     let pending = if index < broken {
-                        serde_json::json!({"afterId":""})
+                        studio_json::json!({"afterId":""})
                     } else {
-                        serde_json::json!({"afterId":"", "proofAt":1.0})
+                        studio_json::json!({"afterId":"", "proofAt":1.0})
                     };
-                    let record = serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
+                    let record = studio_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                         "id":id, "rootId":id, "role":"orchestrator", "status":"idle", "epoch":1,
                         "authResumeProofPending":{"default":pending},
                     });
@@ -2752,7 +3035,7 @@ mod exit_logging_tests {
                     "INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",
                     rusqlite::params![
                         format!("empty-{index:02}"),
-                        serde_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"authResumeProofPending":{}}).to_string()
+                        studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"authResumeProofPending":{}}).to_string()
                     ],
                 )
                 .expect("empty proof row");
@@ -2761,7 +3044,7 @@ mod exit_logging_tests {
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES ('real-proof',?1)",
                 [
-                    serde_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"authResumeProofPending":{"requestId":"stable-request"}})
+                    studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"authResumeProofPending":{"requestId":"stable-request"}})
                         .to_string(),
                 ],
             )
@@ -2794,7 +3077,7 @@ mod exit_logging_tests {
                     "INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",
                     rusqlite::params![
                         agent,
-                        serde_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"usageResume":{"id":"new-current-id"}}).to_string()
+                        studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"usageResume":{"id":"new-current-id"}}).to_string()
                     ],
                 )
                 .expect("owner row");
@@ -2804,7 +3087,7 @@ mod exit_logging_tests {
                     rusqlite::params![
                         format!("stale-resume-{index:02}"),
                         agent,
-                        serde_json::json!({"status":"scheduled","dueAt":1.0}).to_string()
+                        studio_json::json!({"status":"scheduled","dueAt":1.0}).to_string()
                     ],
                 )
                 .expect("stale due child");
@@ -2812,7 +3095,7 @@ mod exit_logging_tests {
         connection
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES ('real-proof',?1)",
-                [serde_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"authResumeProofPending":{"account":{"proofAt":1.0,"afterId":""}}}).to_string()],
+                [studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"authResumeProofPending":{"account":{"proofAt":1.0,"afterId":""}}}).to_string()],
             )
             .expect("pending proof owner");
 
@@ -2931,7 +3214,7 @@ mod exit_logging_tests {
     #[test]
     fn successful_pending_pairing_waits_before_retry_after_its_own_commit() {
         let now = tokio::time::Instant::now();
-        let response = serde_json::json!({"localApproved": true, "remoteApproved": false});
+        let response = studio_json::json!({"localApproved": true, "remoteApproved": false});
         let delay = successful_pair_retry_delay(&response, None)
             .expect("pending remote approval has a retry deadline");
         assert_eq!(delay, Duration::from_secs(5));
@@ -2944,7 +3227,7 @@ mod exit_logging_tests {
         assert!(!pairing_retry_is_pending(&retries, "peer-id", now + delay));
         assert_eq!(
             successful_pair_retry_delay(
-                &serde_json::json!({"localApproved": true, "remoteApproved": true}),
+                &studio_json::json!({"localApproved": true, "remoteApproved": true}),
                 None,
             ),
             None

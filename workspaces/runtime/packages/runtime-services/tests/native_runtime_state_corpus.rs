@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::{fs, path::Path};
 
-use serde_json::Value;
-use serde_json::json;
 use std::collections::BTreeMap;
+use studio_json::Value;
+use studio_json::json;
 use tempfile::TempDir;
 
 struct NoProbe;
@@ -77,14 +77,14 @@ fn rust_reads_the_complete_status_record_written_by_python() {
     let temp = TempDir::new().expect("isolated state root");
     let root = studio_runtime_store::path_identity::resolve(temp.path()).expect("resolved root");
     let expected: BTreeMap<String, Value> =
-        serde_json::from_str(include_str!("native_runtime_state.json"))
+        studio_json::from_str(include_str!("native_runtime_state.json"))
             .expect("frozen status records");
     for (name, record) in &expected {
         let directory = root.join(name).join("native-runtime");
         fs::create_dir_all(&directory).expect("status directory");
         fs::write(
             directory.join("status.json"),
-            serde_json::to_vec(record).expect("status JSON"),
+            studio_json::to_vec(record).expect("status JSON"),
         )
         .expect("write status fixture");
     }

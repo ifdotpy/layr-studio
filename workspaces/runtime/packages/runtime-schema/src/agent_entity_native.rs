@@ -22,7 +22,7 @@ pub enum NativeSafetyStage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectionCheckDto {
-    pub at: serde_json::Number,
+    pub at: studio_json::Number,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -88,16 +88,16 @@ pub struct NativeSafetyRetryDto {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub created: Field<serde_json::Number>,
+    pub created: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub updated: Field<serde_json::Number>,
+    pub updated: Field<studio_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub epoch: Field<SafeInteger>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub stage: Field<NativeSafetyStage>,
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 6], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -137,7 +137,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String
         }
         let properties = schema_object
             .get_mut("properties")
-            .and_then(serde_json::Value::as_object_mut)
+            .and_then(studio_json::Value::as_object_mut)
             .ok_or_else(|| format!("{name} must have properties"))?;
         for (key, value) in properties {
             let mut chars = key.chars();
@@ -159,18 +159,18 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String
                 if variants.len() != 2
                     || variants[0]
                         .get("$ref")
-                        .and_then(serde_json::Value::as_str)
+                        .and_then(studio_json::Value::as_str)
                         .is_none()
-                    || variants[1].get("type").and_then(serde_json::Value::as_str) != Some("null")
+                    || variants[1].get("type").and_then(studio_json::Value::as_str) != Some("null")
                 {
                     return Err(format!("{name}.{key} must be a nullable reference"));
                 }
-                property.insert("default".into(), serde_json::Value::Null);
+                property.insert("default".into(), studio_json::Value::Null);
                 continue;
             }
             let kinds = property
                 .get("type")
-                .and_then(serde_json::Value::as_array)
+                .and_then(studio_json::Value::as_array)
                 .ok_or_else(|| format!("{name}.{key} must have nullable type"))?;
             if kinds.len() != 2 || kinds[1] != "null" || !kinds[0].is_string() {
                 return Err(format!("{name}.{key} must have one type and null"));
@@ -179,11 +179,11 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String
             property.insert("type".into(), kind.clone());
             let inner = value.clone();
             let variants = if kind == "integer" {
-                serde_json::json!([inner,{"type":"null"}])
+                studio_json::json!([inner,{"type":"null"}])
             } else {
-                serde_json::json!([{"type":"null"},inner])
+                studio_json::json!([{"type":"null"},inner])
             };
-            *value = serde_json::json!({"anyOf":variants,"default":null,"title":label});
+            *value = studio_json::json!({"anyOf":variants,"default":null,"title":label});
         }
     }
     Ok(schemas)
@@ -192,15 +192,15 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
     #[test]
     fn records_preserve_missing_null_and_validate_epochs() {
         for value in [
             json!({"at":1}),
             json!({"at":1.5,"epoch":2.0,"threadId":null}),
         ] {
-            let dto: ConnectionCheckDto = serde_json::from_value(value.clone()).unwrap();
-            assert_eq!(serde_json::to_value(dto).unwrap(), value);
+            let dto: ConnectionCheckDto = studio_json::from_value(value.clone()).unwrap();
+            assert_eq!(studio_json::to_value(dto).unwrap(), value);
         }
         for value in [
             json!({}),
@@ -208,19 +208,19 @@ mod tests {
             json!({"at":1,"epoch":1.5}),
             json!({"at":1,"extra":true}),
         ] {
-            assert!(serde_json::from_value::<ConnectionCheckDto>(value).is_err());
+            assert!(studio_json::from_value::<ConnectionCheckDto>(value).is_err());
         }
         let value = json!({"stage":"verify_turns","error":null,"created":1.5});
-        let dto: NativeSafetyRetryDto = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(dto).unwrap(), value);
+        let dto: NativeSafetyRetryDto = studio_json::from_value(value.clone()).unwrap();
+        assert_eq!(studio_json::to_value(dto).unwrap(), value);
         assert!(
-            serde_json::from_value::<NativeSafetyRetryDto>(json!({"stage":"invalid"})).is_err()
+            studio_json::from_value::<NativeSafetyRetryDto>(json!({"stage":"invalid"})).is_err()
         );
     }
     #[test]
     fn published_components_match_owners() {
-        let document: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }

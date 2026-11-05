@@ -1,6 +1,6 @@
 //! Catalog read projections of provider responses and the managed tool inventory.
 
-use serde_json::json;
+use studio_json::json;
 use studio_runtime_services::catalog_reads::{managed_tool_catalog, skills_for_cwd};
 use studio_runtime_services::thread_prepare::{CatalogSnapshot, CatalogSource, ToolDefinition};
 
@@ -24,8 +24,9 @@ fn managed_tool_catalog_serializes_the_full_selected_inventory() {
         definitions: vec![ToolDefinition {
             name: "fixture-tool".into(),
             description: "fixture description".into(),
-            input_schema: serde_json::from_value(json!({"type":"object"})).expect("fixture schema"),
-            extra: serde_json::from_value(json!({"strict":true})).expect("fixture extension"),
+            input_schema: studio_json::from_value(json!({"type":"object"}))
+                .expect("fixture schema"),
+            extra: studio_json::from_value(json!({"strict":true})).expect("fixture extension"),
         }],
         saved_thread_id: None,
         saved_digest: None,

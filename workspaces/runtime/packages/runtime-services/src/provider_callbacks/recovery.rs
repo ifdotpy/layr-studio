@@ -1,9 +1,9 @@
 //! Invoked by the account owner when a connection is lost or on startup.
 use super::{CallbackError, cards, storage, tools};
 use crate::tool_requests::{admission, lifecycle};
-use serde_json::Value;
-use serde_json::json;
 use std::{collections::BTreeMap, path::Path};
+use studio_json::Value;
+use studio_json::json;
 use studio_runtime_store::{
     Connection, RuntimeStore, StartupRecoveryRepository, Transaction, system_reads as records,
 };
@@ -324,7 +324,7 @@ mod context_tool_receipt_snapshot_tests {
         revalidate_unresolved_context_tool_receipts,
     };
     use crate::payload_blobs::{decide_externalize, write_blobs};
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::RuntimeStore;
 
     fn externalized_request(text: char) -> (Value, Vec<crate::payload_blobs::BlobWrite>) {

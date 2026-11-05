@@ -98,7 +98,7 @@ inventory::submit! {
 #[cfg(test)]
 mod typed_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn task_rows_preserve_presence_extensions_and_check_identity() {
@@ -109,7 +109,7 @@ mod typed_tests {
             db.execute_batch(&index.create_sql).unwrap();
         }
         let value = json!({"id":"a","agent":"agent","created":1.0,"status":"running","kind":"command","itemId":"item","turnId":"turn","type":"commandExecution","name":"commandExecution"});
-        let record: TaskRecord = serde_json::from_str(&value.to_string()).unwrap();
+        let record: TaskRecord = studio_json::from_str(&value.to_string()).unwrap();
         TaskRepository::put(&db, &record).unwrap();
         assert_eq!(
             crate::WorkspaceViewsRepository::task(&db, "a").unwrap(),

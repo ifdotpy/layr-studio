@@ -3,10 +3,10 @@ use super::{
     runtime::{self, NativeLayrError},
     *,
 };
-use serde_json::{Value, json};
 #[cfg(test)]
 use std::fs;
 use std::{collections::BTreeSet, path::Path};
+use studio_json::{Value, json};
 use studio_runtime_schema::layr_progress::{CopyPhase, CopyUnit};
 use studio_runtime_store::path_identity::CanonicalPath;
 
@@ -294,7 +294,7 @@ pub fn migrate_with_progress(
             let line_size = plan.migration_size(clone_main, relative);
             size_all.include(line_size);
             let mut entry = json!({"source":source,"repository":relative,"line":line,"headCommit":head,"status":if dry_run{"planned"}else{"pending"}});
-            if let Some(fields) = serde_json::to_value(line_size)
+            if let Some(fields) = studio_json::to_value(line_size)
                 .map_err(|error| NativeLayrError::Refused(error.to_string()))?
                 .as_object()
             {
@@ -450,7 +450,7 @@ pub fn migrate_with_progress(
     let mut dirty_estimate = json!(size_dirty);
     dirty_estimate["linesToCreate"] = json!(dirty_lines_to_create);
     let mut report = json!({"dryRun":dry_run,"withoutGit":options.without_git,"worktreeSelection":options.worktrees.as_str(),"selectionEstimates":{"all":all_estimate,"dirty":dirty_estimate},"skipWorktrees":options.skip_worktrees,"gitMetadataDisposition":if options.without_git {"Top-level .git is omitted and is not preserved. Source files and nested repositories follow normal admission. The source folder remains unchanged."} else {"Git metadata follows normal admission and preservation."},"projectId":project_id,"source":project,"allocationModel":super::import::allocation_model(),"mainSize":clone_main.size,"sourceSize":main_plan.size,"worktreeData":main_plan.worktree_data,"worktreeSummary":super::inventory::worktree_summary(&lines),"linesToCreate":lines_to_create,"sizesComplete":sizes_complete,"excludedWorktreeFolders":main_plan.excluded_worktree_folders,"repositories":repositories,"plainGitMetadata":super::inventory::plain_git_metadata(&project, &main_plan),"refusals":refusals,"admissible":refusals.is_empty()});
-    if let Some(fields) = serde_json::to_value(size)
+    if let Some(fields) = studio_json::to_value(size)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?
         .as_object()
     {
@@ -546,7 +546,7 @@ pub(super) fn import_worktree_line(
         .transpose()?;
     with_git_aside(&destination, saved_directory.as_ref(), || {
         let overlays: Vec<Value> =
-            serde_json::from_str(&run(state_dir, &cwd, &["overlay", "list", "--json"])?)
+            studio_json::from_str(&run(state_dir, &cwd, &["overlay", "list", "--json"])?)
                 .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
         let mut cache_roots: BTreeSet<PathBuf> = overlays
             .iter()

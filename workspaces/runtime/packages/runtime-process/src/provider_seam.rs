@@ -2,7 +2,7 @@
 //! and durable settlement; receiving an entry never acknowledges it.
 use std::{future::Future, pin::Pin};
 
-use serde_json::Value;
+use studio_json::Value;
 pub use studio_runtime_providers::InitializationStatus;
 use studio_runtime_providers::{CodecError, Frame, encode_line};
 use tokio::{
@@ -81,7 +81,7 @@ impl PreparedWrite {
     pub fn new(operation_id: OperationId, frame: &Frame) -> Result<Self, AdapterError> {
         let bytes = encode_line(frame).map_err(|_| AdapterError::InvalidConfiguration)?;
         let message =
-            serde_json::from_slice(&bytes).map_err(|_| AdapterError::InvalidConfiguration)?;
+            studio_json::from_slice(&bytes).map_err(|_| AdapterError::InvalidConfiguration)?;
         let prepared = Self {
             operation_id,
             message,

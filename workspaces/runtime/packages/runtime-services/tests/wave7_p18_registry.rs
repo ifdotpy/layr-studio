@@ -1,5 +1,5 @@
-use serde_json::{Value, json};
 use std::path::Path;
+use studio_json::{Value, json};
 use studio_runtime_services::account_driver::{AccountDriver, CodexLoginRequest, LoginReservation};
 
 const REQUEST: &str = "4b154e4b-80bb-4f1f-b07f-dcaa15563190";
@@ -12,7 +12,7 @@ fn request(existing: bool) -> CodexLoginRequest {
     }
 }
 fn read(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).expect("registry")).expect("JSON")
+    studio_json::from_slice(&std::fs::read(path).expect("registry")).expect("JSON")
 }
 
 #[test]

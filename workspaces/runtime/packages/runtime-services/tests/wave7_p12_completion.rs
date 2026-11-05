@@ -1,4 +1,3 @@
-use serde_json::{Value, json};
 use std::{
     path::Path,
     sync::{
@@ -6,6 +5,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use studio_json::{Value, json};
 use studio_runtime_services::{
     continuation::{ContinuationError, Snapshot},
     continuation_runtime::{self, Completion, WakePort},
@@ -64,7 +64,7 @@ fn all_usage_rows(store: &RuntimeStore) -> Vec<Value> {
         .expect("query");
     stmt.query_map([], |row| row.get::<_, String>(0))
         .expect("rows")
-        .map(|row| serde_json::from_str(&row.expect("record")).expect("json record"))
+        .map(|row| studio_json::from_str(&row.expect("record")).expect("json record"))
         .collect()
 }
 
@@ -91,7 +91,7 @@ fn complete_continuation_rows(store: &RuntimeStore) -> Value {
         .expect("rows")
         .map(|row| {
             let (id, record) = row.expect("record row");
-            json!({"id":id,"record":serde_json::from_str::<Value>(&record).expect("record JSON")})
+            json!({"id":id,"record":studio_json::from_str::<Value>(&record).expect("record JSON")})
         })
         .collect()
     };
@@ -416,7 +416,7 @@ async fn ineligible_terminal_failure_does_not_require_limits() {
     let store = RuntimeStore::open(Some(root.path())).await.expect("store");
     store
         .transaction(|tx| {
-            let mut agent: Value = serde_json::from_str(&tx.query_row(
+            let mut agent: Value = studio_json::from_str(&tx.query_row(
                 "SELECT record FROM runtime_agents WHERE id='a'",
                 [],
                 |r| r.get::<_, String>(0),
@@ -453,7 +453,7 @@ async fn auth_proof_cursors_survive_two_accounts_and_wake_errors_do_not_drop_lat
                     |row| row.get(0),
                 )
                 .map_err(StoreError::from)?;
-            let base_agent: Value = serde_json::from_str(&base).map_err(StoreError::from)?;
+            let base_agent: Value = studio_json::from_str(&base).map_err(StoreError::from)?;
             let base_resume: String = tx
                 .query_row(
                     "SELECT record FROM runtime_usage_resumes WHERE id='resume'",
@@ -462,7 +462,7 @@ async fn auth_proof_cursors_survive_two_accounts_and_wake_errors_do_not_drop_lat
                 )
                 .map_err(StoreError::from)?;
             let base_resume: Value =
-                serde_json::from_str(&base_resume).map_err(StoreError::from)?;
+                studio_json::from_str(&base_resume).map_err(StoreError::from)?;
             for (prefix, account_key) in [("alpha", "default"), ("beta", "other")] {
                 for index in 0..34 {
                     let agent_id = format!("{prefix}-agent-{index:02}");
@@ -513,7 +513,7 @@ async fn auth_proof_cursors_survive_two_accounts_and_wake_errors_do_not_drop_lat
                     |row| row.get(0),
                 )
                 .map_err(StoreError::from)?;
-            let mut owner: Value = serde_json::from_str(&owner_raw).map_err(StoreError::from)?;
+            let mut owner: Value = studio_json::from_str(&owner_raw).map_err(StoreError::from)?;
             owner["accountKey"] = json!("other");
             tx.execute(
                 "UPDATE runtime_agents SET record=?1 WHERE id='a'",

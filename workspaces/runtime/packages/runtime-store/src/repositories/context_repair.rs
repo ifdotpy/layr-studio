@@ -2,7 +2,7 @@
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
 use crate::{AgentId, AgentRecord, AgentRepository, StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[
@@ -56,7 +56,7 @@ pub struct ContextRepairRepository;
 
 fn capture_bytes(used: &mut usize, value: &Value, maximum_bytes: usize) -> StoreResult<()> {
     *used = used
-        .checked_add(serde_json::to_vec(value)?.len())
+        .checked_add(studio_json::to_vec(value)?.len())
         .filter(|total| *total <= maximum_bytes)
         .ok_or(StoreError::RecordContract("context capture byte bound"))?;
     Ok(())
@@ -102,7 +102,7 @@ impl ContextRepairRepository {
         db.query_row(
             "SELECT json_extract(record,'$.terminalRepair') FROM runtime_execution_attempts WHERE json_type(record,'$.terminalRepair')='object' AND json_extract(record,'$.terminalRepair.source.accountKey')=?1 AND json_extract(record,'$.terminalRepair.source.threadId')=?2 AND json_extract(record,'$.terminalRepair.proof.turnId')=?3",
             params![account, thread, turn], |row| row.get::<_,String>(0),
-        ).optional()?.map(|raw| serde_json::from_str(&raw).map_err(StoreError::from)).transpose()
+        ).optional()?.map(|raw| studio_json::from_str(&raw).map_err(StoreError::from)).transpose()
     }
 
     pub fn agent(db: &Connection, id: &str) -> StoreResult<Option<Value>> {
@@ -126,7 +126,7 @@ impl ContextRepairRepository {
         for row in rows {
             let (mut event, metadata) = row?;
             event["metadata"] = metadata
-                .map(|text| serde_json::from_str(&text))
+                .map(|text| studio_json::from_str(&text))
                 .transpose()?
                 .unwrap_or(Value::Null);
             capture_bytes(&mut used_bytes, &event, maximum_bytes)?;
@@ -166,7 +166,7 @@ impl ContextRepairRepository {
             let Some(row) = row else {
                 return Ok(None);
             };
-            let row = serde_json::from_str(&row)?;
+            let row = studio_json::from_str(&row)?;
             capture_bytes(&mut used_bytes, &row, maximum_bytes)?;
             result.push(row);
         }

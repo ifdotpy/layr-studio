@@ -5,14 +5,14 @@
     allow(dead_code, unused_imports, unused_variables)
 )]
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-#[cfg(test)]
-use serde_json::json;
 use std::{
     collections::VecDeque,
     sync::{Mutex, OnceLock},
 };
 use studio_client_domain::json_object::JsonObject;
+use studio_json::Value;
+#[cfg(test)]
+use studio_json::json;
 use tokio::sync::broadcast;
 
 pub const DENIED: &str = "STUDIO_NOTIFICATIONS_DENIED: Enable Allow notifications for Codex Studio in macOS System Settings > Notifications.";
@@ -100,7 +100,7 @@ fn clicked(id: &str) {
         targets.remove(index).map(|(_, target)| target)
     });
     if let Some(target) = target
-        && let Ok(value) = serde_json::to_value(target)
+        && let Ok(value) = studio_json::to_value(target)
     {
         drop(navigation().send(value));
     }
@@ -314,14 +314,14 @@ mod tests {
             r#"{"title":"t","body":"b","target":["a","messages"]}"#,
             r#"{"title":"t","body":"b","target":{"agentId":"a","section":{"messages":null}}}"#,
         ] {
-            let value: Value = serde_json::from_str(wire).unwrap();
+            let value: Value = studio_json::from_str(wire).unwrap();
             assert!(validate(&value).is_err());
         }
         let notification = validate(&json!({"title":"t","body":"b","sound":null,
             "target":{"agentId":"a","section":"messages","serverId":null,"itemId":null,"extension":1}})).unwrap();
         assert!(!notification.sound);
         assert_eq!(
-            serde_json::to_value(notification.target).unwrap(),
+            studio_json::to_value(notification.target).unwrap(),
             json!({"agentId":"a","section":"messages"})
         );
     }
@@ -344,7 +344,7 @@ mod tests {
         .unwrap();
         assert!(sound, "an open sign-in card plays the sound");
         assert_eq!(
-            serde_json::to_value(&target).unwrap(),
+            studio_json::to_value(&target).unwrap(),
             json!({"agentId":"a","section":"messages","itemId":"m","serverId":"remote"})
         );
         for bad in [
@@ -363,7 +363,7 @@ mod tests {
         clicked("n1");
         assert_eq!(
             events.try_recv().unwrap(),
-            serde_json::to_value(&target).unwrap()
+            studio_json::to_value(&target).unwrap()
         );
         assert!(events.try_recv().is_err());
         for index in 0..TARGETS + 1 {

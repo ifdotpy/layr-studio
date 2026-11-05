@@ -3,7 +3,7 @@
 //! Parse a full JSON value first: ignored evidence must still obey JSON depth
 //! and number limits, and duplicate members retain their last value.
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
-use serde_json::Value;
+use studio_json::Value;
 
 struct Object<T>(T);
 
@@ -20,7 +20,7 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Object<T> {
 }
 
 fn parse<T: DeserializeOwned>(text: &str) -> Option<T> {
-    let value: Value = serde_json::from_str(text).ok()?;
+    let value: Value = studio_json::from_str(text).ok()?;
     if !value.is_object() {
         return None;
     }
@@ -124,7 +124,7 @@ mod tests {
             "{",
         ] {
             let original = (|| {
-                let value: Value = serde_json::from_str(text).ok()?;
+                let value: Value = studio_json::from_str(text).ok()?;
                 let field = |key| value.get(key)?.as_str();
                 let (id, room, sender, body) = (
                     field("message_id")?,
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn progress_fields_match_message_tool_contract() {
-        let resources: Value = serde_json::from_str(include_str!(
+        let resources: Value = studio_json::from_str(include_str!(
             "../../runtime-services/src/account_worker/preparation-resources.json"
         ))
         .unwrap();
@@ -194,7 +194,7 @@ mod tests {
             Option<(String, String)>,
         );
         fn original(text: &str) -> Results {
-            let Ok(v) = serde_json::from_str::<Value>(text) else {
+            let Ok(v) = studio_json::from_str::<Value>(text) else {
                 return (None, None, None);
             };
             let complaints = (|| {

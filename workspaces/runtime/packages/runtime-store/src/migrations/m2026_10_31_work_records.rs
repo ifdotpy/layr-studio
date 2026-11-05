@@ -2,7 +2,7 @@
 use crate::{StoreError, StoreResult};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::{persistence::MigrationStatus, work_item_record::WorkItem};
 
 const CHECKPOINT: &str = "2026-10-31-work-records";
@@ -34,9 +34,9 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for (id, raw) in rows {
-        if serde_json::from_str::<WorkItem>(&raw).is_ok() {
-            let value: Value = serde_json::from_str(&raw)?;
-            let encoded = serde_json::to_string(&value)?;
+        if studio_json::from_str::<WorkItem>(&raw).is_ok() {
+            let value: Value = studio_json::from_str(&raw)?;
+            let encoded = studio_json::to_string(&value)?;
             if raw != encoded {
                 tx.execute(
                     "UPDATE runtime_work SET record=?2 WHERE id=?1",
@@ -46,7 +46,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             continue;
         }
         let mut value: Value =
-            serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredObject {
+            studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredObject {
                 table: "runtime_work",
                 id: id.clone(),
             })?;
@@ -111,8 +111,8 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 None => {}
             }
         }
-        let encoded = serde_json::to_string(&value)?;
-        serde_json::from_str::<WorkItem>(&encoded).map_err(|_| {
+        let encoded = studio_json::to_string(&value)?;
+        studio_json::from_str::<WorkItem>(&encoded).map_err(|_| {
             StoreError::InvalidStoredObject {
                 table: "runtime_work",
                 id: id.clone(),
@@ -147,7 +147,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let work: WorkItem = serde_json::from_str(&raw).unwrap();
+        let work: WorkItem = studio_json::from_str(&raw).unwrap();
         assert_eq!(work.id().0, "row");
         assert_eq!(work.status().as_str(), "review");
         assert_eq!(work.updated(), 0.0);
@@ -163,7 +163,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(extra.matches("\"note\"").count(), 1);
-        assert_eq!(serde_json::from_str::<Value>(&extra).unwrap()["note"], 2);
+        assert_eq!(studio_json::from_str::<Value>(&extra).unwrap()["note"], 2);
     }
 
     #[test]
@@ -178,7 +178,7 @@ mod tests {
             let mut query = tx.prepare("SELECT record FROM runtime_work").unwrap();
             let records = query.query_map([], |row| row.get::<_, String>(0)).unwrap();
             for record in records {
-                serde_json::from_str::<WorkItem>(&record.unwrap()).unwrap();
+                studio_json::from_str::<WorkItem>(&record.unwrap()).unwrap();
             }
         }
         tx.commit().unwrap();

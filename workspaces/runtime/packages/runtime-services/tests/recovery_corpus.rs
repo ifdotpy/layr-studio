@@ -2,12 +2,12 @@ use studio_runtime_services::recovery_policy::{RecoverySnapshot, native_operatio
 #[test]
 fn malformed_native_items_never_authorize_completion() {
     for items in [
-        serde_json::json!(null),
-        serde_json::json!("invalid"),
-        serde_json::json!({}),
+        studio_json::json!(null),
+        studio_json::json!("invalid"),
+        studio_json::json!({}),
     ] {
         assert!(!native_operations_settled(
-            &serde_json::json!({"items":items})
+            &studio_json::json!({"items":items})
         ));
     }
 }
@@ -15,33 +15,33 @@ fn malformed_native_items_never_authorize_completion() {
 #[test]
 fn recovery_record_typed_boundary_matches_schema() {
     let base =
-        serde_json::json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"running"});
+        studio_json::json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"running"});
     for (field, values) in [
         (
             "epoch",
             vec![
-                serde_json::json!(1.0),
-                serde_json::json!(-1),
-                serde_json::json!(9007199254740992_u64),
+                studio_json::json!(1.0),
+                studio_json::json!(-1),
+                studio_json::json!(9007199254740992_u64),
             ],
         ),
         (
             "events",
             vec![
-                serde_json::json!(null),
-                serde_json::json!(1.0),
-                serde_json::json!(-1),
+                studio_json::json!(null),
+                studio_json::json!(1.0),
+                studio_json::json!(-1),
             ],
         ),
         (
             "startAttempt",
             vec![
-                serde_json::json!([]),
-                serde_json::json!({"events":[1]}),
-                serde_json::json!({"epoch":1.0}),
+                studio_json::json!([]),
+                studio_json::json!({"events":[1]}),
+                studio_json::json!({"epoch":1.0}),
             ],
         ),
-        ("id", vec![serde_json::json!(""), serde_json::json!(null)]),
+        ("id", vec![studio_json::json!(""), studio_json::json!(null)]),
     ] {
         for value in values {
             let mut candidate = base.clone();
@@ -64,7 +64,7 @@ fn recovery_record_typed_boundary_matches_schema() {
     }
     assert!(
         <studio_runtime_schema::recovery_record::RecoveryAgentRecord as serde::Deserialize>::deserialize(
-            serde_json::json!(["a", "a", 1, "running"])
+            studio_json::json!(["a", "a", 1, "running"])
         )
         .is_err()
     );
@@ -72,9 +72,9 @@ fn recovery_record_typed_boundary_matches_schema() {
 
 #[test]
 fn snapshot_rejects_object_encoded_request_state() {
-    let mut record = serde_json::json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"running",
+    let mut record = studio_json::json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"running",
         "connectionRecovery":{"requestState":"pending"}});
     assert!(RecoverySnapshot::from_record(record.clone()).is_ok());
-    record["connectionRecovery"]["requestState"] = serde_json::json!({"pending":null});
+    record["connectionRecovery"]["requestState"] = studio_json::json!({"pending":null});
     assert!(RecoverySnapshot::from_record(record).is_err());
 }

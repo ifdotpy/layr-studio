@@ -113,7 +113,7 @@ mod tests {
         body::Body,
         http::{Method, Request},
     };
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use tower::ServiceExt;
 
     /// The P-256 base point: a valid uncompressed point for a fixture subscription.
@@ -160,7 +160,7 @@ mod tests {
             .expect("body");
         (
             status,
-            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            studio_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
     }
 

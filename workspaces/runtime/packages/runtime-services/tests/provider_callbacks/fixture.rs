@@ -1,8 +1,8 @@
 //! Shared callback fixture written through current owner contracts.
 use rusqlite::{Transaction, params, types::Value as SqlValue};
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{
     EventKind, EventStatus, RequestIdentity, ToolRequestKind, ToolRequestStatus,
 };
@@ -36,7 +36,7 @@ struct Seed {
 struct SeedTool {
     stage: ToolRequestStatus,
     #[serde(flatten)]
-    fields: serde_json::Map<String, Value>,
+    fields: studio_json::Map<String, Value>,
 }
 
 #[derive(serde::Serialize)]
@@ -47,14 +47,14 @@ struct PersistedTool<'a> {
     stage: &'a ToolRequestStatus,
     supervisor: Value,
     #[serde(flatten)]
-    fields: &'a serde_json::Map<String, Value>,
+    fields: &'a studio_json::Map<String, Value>,
 }
 
 #[derive(serde::Serialize, Deserialize)]
 struct ExecutionNode {
     status: studio_runtime_schema::persistence::ExecutionNodeStatus,
     #[serde(flatten)]
-    fields: serde_json::Map<String, Value>,
+    fields: studio_json::Map<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -95,7 +95,7 @@ fn replace_ids(value: &mut Value, ids: &BTreeMap<String, String>) {
         Value::String(text) => {
             if let Some(id) = ids.get(text) {
                 *text = id.clone();
-            } else if let Ok(mut encoded) = serde_json::from_str::<Value>(text)
+            } else if let Ok(mut encoded) = studio_json::from_str::<Value>(text)
                 && (encoded.is_object() || encoded.is_array())
             {
                 replace_ids(&mut encoded, ids);
@@ -167,11 +167,11 @@ fn seed_tools(tx: &Transaction<'_>, tools: Vec<SeedTool>) -> Result<(), StoreErr
             supervisor: json!({"generation":7}),
             fields: &task.fields,
         };
-        let raw = serde_json::to_string(&persisted)?;
+        let raw = studio_json::to_string(&persisted)?;
         let task = studio_runtime_store::system_reads::validate(
             "runtime_tool_requests",
             &id,
-            serde_json::from_str(&raw)?,
+            studio_json::from_str(&raw)?,
         )?;
         tx.execute(
             "INSERT INTO runtime_tool_requests(id,record) VALUES(?1,?2)",
@@ -187,9 +187,9 @@ pub(crate) async fn state() -> (tempfile::TempDir, RuntimeStore, Value) {
         .await
         .expect("callback store");
     let mut seed: Seed =
-        serde_json::from_str(include_str!("seed.json")).expect("current callback seed");
+        studio_json::from_str(include_str!("seed.json")).expect("current callback seed");
     let mut oracle: Value =
-        serde_json::from_str(include_str!("expected.json")).expect("callback expectations");
+        studio_json::from_str(include_str!("expected.json")).expect("callback expectations");
     let mut ids = BTreeMap::new();
     for task in &seed.tool_requests {
         ids.insert(
@@ -238,7 +238,7 @@ pub(crate) async fn state() -> (tempfile::TempDir, RuntimeStore, Value) {
     {
         let mut args = case["message"]["params"]["arguments"].clone();
         if let Some(encoded) = args.as_str() {
-            args = serde_json::from_str(encoded).expect("encoded arguments");
+            args = studio_json::from_str(encoded).expect("encoded arguments");
         }
         let signature = studio_runtime_store::sha256_hex(
             studio_runtime_store::python_json_compact(
@@ -279,13 +279,13 @@ pub(crate) async fn state() -> (tempfile::TempDir, RuntimeStore, Value) {
             tx.execute("INSERT INTO runtime_execution_effects(id,run,kind,reference,record) VALUES(?1,?2,?3,?4,?5)",params![record["id"].as_str(),record["runId"].as_str(),record["kind"].as_str(),record["referenceId"].as_str(),record.to_string()])?;
         }
         for record in seed.execution_nodes {
-            tx.execute("INSERT INTO runtime_execution_nodes(id,run,record) VALUES(?1,?2,?3)",params![record.fields["id"].as_str(),record.fields["runId"].as_str(),serde_json::to_string(&record)?])?;
+            tx.execute("INSERT INTO runtime_execution_nodes(id,run,record) VALUES(?1,?2,?3)",params![record.fields["id"].as_str(),record.fields["runId"].as_str(),studio_json::to_string(&record)?])?;
         }
         for item in seed.transcript_items { assert_eq!(item.record.value()["id"],item.id); Table::new(tx).put_with_columns(&item.record,&[("agent",SqlValue::Text(item.agent)),("created",SqlValue::Real(item.created))])?; }
         for monitor in seed.monitors { Table::new(tx).put(&monitor)?; }
         for project in seed.projects { ProjectsRepository::put_project(tx,&project)?; }
         for request in seed.requests {
-            studio_runtime_services::provider_callbacks::legacy_view::insert(tx, &serde_json::json!(request))?;
+            studio_runtime_services::provider_callbacks::legacy_view::insert(tx, &studio_json::json!(request))?;
         }
         seed_tools(tx,seed.tool_requests)?;
         for entity in seed.sync_entities.into_iter().filter(|entity| entity.collection != "request") { SyncDocumentsRepository::put_entity(tx,&entity.collection,&entity.id,entity.value,entity.deleted)?; }

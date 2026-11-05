@@ -52,11 +52,11 @@ pub(super) fn preflight(db: &Connection) -> StoreResult<()> {
             db.prepare("SELECT record FROM analytics_usage WHERE root IS NOT NULL")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
-            let value: serde_json::Value = serde_json::from_str(&row.get::<_, String>(0)?)?;
+            let value: studio_json::Value = studio_json::from_str(&row.get::<_, String>(0)?)?;
             studio_runtime_schema::usage::persisted::validate_legacy_analytics_cost_fields(&value)
                 .map_err(|e| crate::StoreError::SchemaValidation(e.to_string()))?;
             if let Some(typed) = value.get("studioUsage") {
-                serde_json::from_value::<studio_runtime_schema::usage::UsageObservation>(
+                studio_json::from_value::<studio_runtime_schema::usage::UsageObservation>(
                     typed.clone(),
                 )?;
             }

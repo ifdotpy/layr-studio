@@ -89,8 +89,8 @@ async fn messages(
 fn message_record(
     message: &coordination::ValidatedMessage,
 ) -> Result<crate::generated::MessageRecord, ApiError> {
-    let encoded = serde_json::to_vec(message).map_err(ApiError::json)?;
-    serde_json::from_slice(&encoded).map_err(ApiError::json)
+    let encoded = studio_json::to_vec(message).map_err(ApiError::json)?;
+    studio_json::from_slice(&encoded).map_err(ApiError::json)
 }
 
 /// The send path of the `send` command and of the chat commands that send a message.
@@ -125,7 +125,7 @@ pub(super) async fn send_message_with<T: Send + 'static>(
         .assets
         .unwrap_or_default()
         .into_iter()
-        .map(|asset| serde_json::to_value(asset).map_err(|_| ApiError::internal()))
+        .map(|asset| studio_json::to_value(asset).map_err(|_| ApiError::internal()))
         .collect::<Result<Vec<_>, _>>()?;
     let delivery = body.delivery.unwrap_or_default();
     let admission_room = body.room.clone();
@@ -202,7 +202,7 @@ pub(super) async fn send_message_with<T: Send + 'static>(
         .await
         .map_err(federation_error)?;
         let mut result: crate::generated::StudioApiWorkModelsMessageReceipt =
-            serde_json::from_str(result.get()).map_err(|_| ApiError::internal())?;
+            studio_json::from_str(result.as_str()).map_err(|_| ApiError::internal())?;
         result.id = body.id.clone();
         wake.notify_one();
         return Ok((Json(result), None));
@@ -222,9 +222,9 @@ pub(super) async fn send_message_with<T: Send + 'static>(
                 },
                 admission.as_ref(),
             )?;
-            let result = serde_json::to_value(&posted.receipt)
+            let result = studio_json::to_value(&posted.receipt)
                 .and_then(
-                    serde_json::from_value::<crate::generated::StudioApiWorkModelsMessageReceipt>,
+                    studio_json::from_value::<crate::generated::StudioApiWorkModelsMessageReceipt>,
                 )
                 .map_err(|_| CoordinationError::InvalidStored {
                     object: "message receipt",
@@ -261,8 +261,8 @@ async fn agent_chat(
     let limit = query.limit.map_or(100, |value| value.get());
     if before.is_some() && after.is_some() {
         return Err(ApiError::validation(vec![
-            serde_json::json!("query"),
-            serde_json::json!("before"),
+            studio_json::json!("query"),
+            studio_json::json!("before"),
         ]));
     }
     room_snapshot(state, room, before, after, limit)
@@ -284,8 +284,8 @@ pub(super) async fn room_snapshot(
                 tx, &room, before, after, limit,
             )
             .map_err(coordination_error)?;
-            let encoded = serde_json::to_vec(&value).map_err(ApiError::json)?;
-            serde_json::from_slice::<crate::generated::ChatRead>(&encoded).map_err(ApiError::json)
+            let encoded = studio_json::to_vec(&value).map_err(ApiError::json)?;
+            studio_json::from_slice::<crate::generated::ChatRead>(&encoded).map_err(ApiError::json)
         })
         .await
 }
@@ -300,8 +300,8 @@ async fn receipts(
         .map_or("", |value| value.as_str())
         .to_owned();
     let ids = query.ids.as_ref().map_or("[]", |value| value.as_str());
-    let ids: Vec<String> = serde_json::from_str(ids).map_err(|_| {
-        ApiError::validation(vec![serde_json::json!("query"), serde_json::json!("ids")])
+    let ids: Vec<String> = studio_json::from_str(ids).map_err(|_| {
+        ApiError::validation(vec![studio_json::json!("query"), studio_json::json!("ids")])
     })?;
     let workspace = state.workspace_id;
     let store = state.store.ok_or_else(ApiError::internal)?;
@@ -401,13 +401,13 @@ mod ingress_tests;
 #[cfg(test)]
 mod delivery_tests {
     use crate::generated::ManagedMessageBody;
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_schema::{DeliveryMoment, delivery::LEGACY_DELIVERY_MOMENTS};
 
     #[test]
     fn chat_read_accepts_projected_room_roots() {
         let value = json!({"room": {"id": "room", "leadIds": ["lead"]}, "messages": []});
-        assert!(serde_json::from_value::<crate::generated::ChatRead>(value).is_ok());
+        assert!(studio_json::from_value::<crate::generated::ChatRead>(value).is_ok());
     }
 
     #[test]
@@ -442,24 +442,24 @@ mod delivery_tests {
             )]),
         };
         let response = super::message_record(&message).expect("message response");
-        let encoded = serde_json::to_string(&response).expect("encode response");
-        let value: serde_json::Value = serde_json::from_str(&encoded).expect("response JSON");
+        let encoded = studio_json::to_string(&response).expect("encode response");
+        let value: studio_json::Value = studio_json::from_str(&encoded).expect("response JSON");
         assert_eq!(value["deliveries"]["agent"]["status"], "queued");
     }
 
     #[test]
     fn generated_closed_request_rejects_unknown_fields() {
         assert!(
-            serde_json::from_str::<crate::generated::RoomDeleteBody>(r#"{"id":"room"}"#).is_ok()
+            studio_json::from_str::<crate::generated::RoomDeleteBody>(r#"{"id":"room"}"#).is_ok()
         );
         assert!(
-            serde_json::from_str::<crate::generated::RoomDeleteBody>(
+            studio_json::from_str::<crate::generated::RoomDeleteBody>(
                 r#"{"id":"room","extra":true}"#
             )
             .is_err()
         );
         let body = json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello", "extra":true});
-        assert!(serde_json::from_value::<ManagedMessageBody>(body).is_err());
+        assert!(studio_json::from_value::<ManagedMessageBody>(body).is_err());
     }
 
     #[test]
@@ -467,7 +467,7 @@ mod delivery_tests {
         let body =
             json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello"});
         let missing: ManagedMessageBody =
-            serde_json::from_value(body.clone()).expect("missing timing");
+            studio_json::from_value(body.clone()).expect("missing timing");
         assert_eq!(
             missing.delivery.unwrap_or_default(),
             DeliveryMoment::CurrentTurn
@@ -480,10 +480,10 @@ mod delivery_tests {
             let mut input = body.clone();
             input["delivery"] = json!(value);
             let parsed: ManagedMessageBody =
-                serde_json::from_value(input).expect("supported input");
+                studio_json::from_value(input).expect("supported input");
             assert_eq!(parsed.delivery, Some(expected));
             assert_eq!(
-                serde_json::to_value(parsed).expect("canonical output")["delivery"],
+                studio_json::to_value(parsed).expect("canonical output")["delivery"],
                 json!(expected)
             );
         }
@@ -497,7 +497,7 @@ mod delivery_tests {
         ] {
             let mut input = body.clone();
             input["delivery"] = value;
-            assert!(serde_json::from_value::<ManagedMessageBody>(input).is_err());
+            assert!(studio_json::from_value::<ManagedMessageBody>(input).is_err());
         }
     }
 }

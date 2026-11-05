@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_store::text_blobs::{self, MovedText};
 use studio_runtime_store::{RuntimeStore, StoreError, StoreResult};
 

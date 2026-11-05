@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::process_support as support;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_process::{
     AckRequest, AdminCloseHandleRequest, BackendId, BackendIdentity, CursorRequest, EventCursor,
     EventKind, FinishFallbackRequest, HandleRequest, HealthRequest, OperationId,
@@ -493,7 +493,7 @@ impl Write for DropOpenResponse {
         for byte in &buffer[..written] {
             self.outgoing.push(*byte);
             if *byte == b'\n' {
-                let is_open = serde_json::from_slice::<Value>(&self.outgoing)
+                let is_open = studio_json::from_slice::<Value>(&self.outgoing)
                     .ok()
                     .and_then(|request| {
                         request
@@ -813,14 +813,14 @@ printf '{"id":%s,"result":{"echo":"%s"}}\n' "$id" "$text"
     let mut bad = std::os::unix::net::UnixStream::connect(safe_socket_path(&state)).unwrap();
     let bad_handshake =
         json!({"protocol":99,"stateDir":state.0.to_string_lossy(),"backendId":"bad-version"});
-    serde_json::to_writer(&mut bad, &bad_handshake).unwrap();
+    studio_json::to_writer(&mut bad, &bad_handshake).unwrap();
     use std::io::Write as _;
     bad.write_all(b"\n").unwrap();
     let mut response = String::new();
     std::io::BufReader::new(&bad)
         .read_line(&mut response)
         .unwrap();
-    let response: Value = serde_json::from_str(&response).unwrap();
+    let response: Value = studio_json::from_str(&response).unwrap();
     assert!(response["error"].as_str().unwrap().contains("protocol"));
 
     drop(operator);
@@ -934,7 +934,7 @@ fn supervisor_rejects_retired_protocol_before_admission() {
     std::io::BufReader::new(&socket)
         .read_line(&mut response)
         .unwrap();
-    let response: Value = serde_json::from_str(&response).unwrap();
+    let response: Value = studio_json::from_str(&response).unwrap();
     assert!(
         response.get("error").is_some(),
         "retired protocol admitted: {response}"

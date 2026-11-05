@@ -1,13 +1,13 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 use crate::process_support as support;
-use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
 };
+use studio_json::{Value, json};
 use studio_runtime_process::{
     EventCursor, EventKind, OperationId, OperationStatusRequest, OperationStatusResult,
     SupervisorHandle, WriteRequest, WriteResult,
@@ -51,7 +51,7 @@ done
     let mut reply = String::new();
     BufReader::new(&socket).read_line(&mut reply).unwrap();
     assert_eq!(
-        serde_json::from_str::<Value>(&reply).unwrap(),
+        studio_json::from_str::<Value>(&reply).unwrap(),
         json!({"ok":true,"protocol":studio_runtime_process::SUPERVISOR_PROTOCOL_VERSION})
     );
     writeln!(socket,"{}",json!({"requestId":99,"action":"write","handle":handle.0,"operationId":"monitor:lost","nativeId":17,"message":{"method":"echo","params":{"text":"one"}}})).unwrap();

@@ -9,7 +9,7 @@ pub mod process;
 pub mod receipts;
 pub mod service;
 
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 
 const RESTARTED: &str = "Studio restarted during sign-in. Start a new sign-in request.";
 pub const CODE_UNKNOWN: &str = "Cannot confirm delivery of the code. Start a new sign-in request.";
@@ -80,7 +80,7 @@ impl LoginSnapshot {
         if let Some(receipt) = record.get_mut("receipt").and_then(Value::as_object_mut) {
             receipt.remove("verificationUrl");
         }
-        let parsed: ClaudeLoginRecord = serde_json::from_value(record.clone()).map_err(|_| {
+        let parsed: ClaudeLoginRecord = studio_json::from_value(record.clone()).map_err(|_| {
             let path = studio_runtime_schema::first_error("PersistedClaudeLoginRecord", &record)
                 .ok()
                 .flatten()
@@ -157,7 +157,7 @@ impl LoginSnapshot {
     pub fn finish(&self, status: LoginStatus, error: Option<&str>) -> Result<Self, LoginError> {
         let mut record = self.record.clone();
         record["receipt"]["status"] =
-            serde_json::to_value(status).map_err(|_| LoginError::Unavailable)?;
+            studio_json::to_value(status).map_err(|_| LoginError::Unavailable)?;
         if let Some(error) = error {
             record["receipt"]["error"] = json!(error);
         }

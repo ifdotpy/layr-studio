@@ -11,9 +11,9 @@
 //! revisions retain the explicitly registered negative-zero/u64-overflow exception.
 use chrono::{DateTime, Datelike, SecondsFormat};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
+use studio_json::{Map, Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::provider_input::ProviderInputOrigin;
 use studio_runtime_store::{python_float_json, sha256_hex};
@@ -181,7 +181,7 @@ pub struct AssetPath {
 }
 /// Fingerprint every source field before a transport path can replace it.
 pub(crate) fn asset_fingerprint(asset: &Asset) -> Result<String, PrepareError> {
-    serde_json::to_vec(asset)
+    studio_json::to_vec(asset)
         .map(|value| sha256_hex(&value))
         .map_err(|_| PrepareError::InvalidAssetProjection)
 }
@@ -341,7 +341,7 @@ impl std::fmt::Debug for PrepareError {
     }
 }
 
-/// serde_json objects are sorted; workspace preserve_order is forbidden.
+/// studio_json objects are sorted; workspace preserve_order is forbidden.
 pub fn context_version(value: &Value) -> String {
     sha256_hex(value.to_string().as_bytes())[..24].into()
 }
@@ -546,31 +546,31 @@ pub(crate) enum OrderedJson {
 }
 impl<'de> Deserialize<'de> for OrderedJson {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+        let raw = studio_json::OwnedRawJson::deserialize(deserializer)?;
         Self::parse(&raw, 0, true).map_err(serde::de::Error::custom)
     }
 }
 impl OrderedJson {
     fn parse(
-        raw: &serde_json::value::RawValue,
+        raw: &studio_json::OwnedRawJson,
         depth: usize,
         progress: bool,
-    ) -> Result<Self, serde_json::Error> {
+    ) -> Result<Self, studio_json::Error> {
         use serde::de::{Deserializer, Error};
-        let text = raw.get();
+        let text = raw.as_str();
         if !text.starts_with(['{', '[']) {
-            let value: Value = serde_json::from_str(text)?;
+            let value: Value = studio_json::from_str(text)?;
             if value.is_number()
                 && !text.contains(['.', 'e', 'E'])
                 && (text == "-0" || (text.parse::<i64>().is_err() && text.parse::<u64>().is_err()))
                 && !(progress && (text == "-0" || !text.starts_with('-')))
             {
-                return Err(serde_json::Error::custom("unsupported integer"));
+                return Err(studio_json::Error::custom("unsupported integer"));
             }
             return Ok(Self::Scalar(value));
         }
         if depth >= 64 {
-            return Err(serde_json::Error::custom("JSON depth exceeds 64"));
+            return Err(studio_json::Error::custom("JSON depth exceeds 64"));
         }
         struct Visitor {
             depth: usize,
@@ -586,7 +586,7 @@ impl OrderedJson {
                 mut seq: A,
             ) -> Result<Self::Value, A::Error> {
                 let mut values = Vec::new();
-                while let Some(raw) = seq.next_element::<Box<serde_json::value::RawValue>>()? {
+                while let Some(raw) = seq.next_element::<studio_json::OwnedRawJson>()? {
                     values.push(
                         OrderedJson::parse(&raw, self.depth + 1, false)
                             .map_err(A::Error::custom)?,
@@ -601,7 +601,7 @@ impl OrderedJson {
                 let mut values: Vec<(String, OrderedJson)> = Vec::new();
                 let mut positions = BTreeMap::new();
                 while let Some((key, raw)) =
-                    map.next_entry::<String, Box<serde_json::value::RawValue>>()?
+                    map.next_entry::<String, studio_json::OwnedRawJson>()?
                 {
                     let value = OrderedJson::parse(
                         &raw,
@@ -619,7 +619,8 @@ impl OrderedJson {
                 Ok(OrderedJson::Object(values))
             }
         }
-        serde_json::Deserializer::from_str(text).deserialize_any(Visitor { depth, progress })
+        Ok(studio_json::Deserializer::from_str(text)
+            .deserialize_any(Visitor { depth, progress })?)
     }
 }
 // The raw-token checks share the ordered parse; there is no validation-only walk.
@@ -634,7 +635,7 @@ fn event_json(row: &Event, index: usize) -> Result<Option<Value>, PrepareError> 
         location: format!("events[{index}].text"),
     };
     let text = row.text.trim();
-    let raw = match serde_json::from_str::<Box<serde_json::value::RawValue>>(text) {
+    let raw = match studio_json::from_str::<studio_json::OwnedRawJson>(text) {
         Ok(raw) => raw,
         Err(_)
             if text.starts_with(['{', '[']) || matches!(text, "NaN" | "Infinity" | "-Infinity") =>
@@ -645,7 +646,7 @@ fn event_json(row: &Event, index: usize) -> Result<Option<Value>, PrepareError> 
     };
     let ordered =
         OrderedJson::parse(&raw, 0, row.kind == "agent_message").map_err(|_| invalid())?;
-    serde_json::to_value(ordered)
+    studio_json::to_value(ordered)
         .map(Some)
         .map_err(|_| invalid())
 }
@@ -669,7 +670,7 @@ impl Serialize for OrderedJson {
             }
             Self::Scalar(v) => {
                 if let Some(value) = v.as_f64().filter(|_| v.is_f64()) {
-                    serde_json::value::RawValue::from_string(python_float_json(value))
+                    studio_json::OwnedRawJson::from_string(python_float_json(value))
                         .map_err(serde::ser::Error::custom)?
                         .serialize(serializer)
                 } else {
@@ -701,10 +702,10 @@ impl OrderedJson {
 }
 fn rewritten(text: &str, edit: impl FnOnce(&mut OrderedJson)) -> String {
     // Parsing already passed the explicit JSON evidence boundary.
-    match serde_json::from_str::<OrderedJson>(text) {
+    match studio_json::from_str::<OrderedJson>(text) {
         Ok(mut ordered) => {
             edit(&mut ordered);
-            serde_json::to_string(&ordered).unwrap_or_else(|_| text.into())
+            studio_json::to_string(&ordered).unwrap_or_else(|_| text.into())
         }
         Err(_) => text.into(),
     }
@@ -730,7 +731,7 @@ fn truncate_review(result: &mut Value) {
 fn bound_event(row: &Event, text: &str, limit: usize) -> String {
     let mut text = text.to_owned();
     if matches!(row.kind.as_str(), "work_review" | "child_result")
-        && let Ok(mut value) = serde_json::from_str::<Value>(&text)
+        && let Ok(mut value) = studio_json::from_str::<Value>(&text)
     {
         let result = &value["result"];
         let body = if result.is_object() {
@@ -815,7 +816,7 @@ fn bound_event(row: &Event, text: &str, limit: usize) -> String {
         return text;
     }
     let mut summary = json!({"eventId":row.id,"kind":row.kind,"truncated":true,"textBytes":row.text.len(),"read":{"tool":"orchestration_read","output_ref":format!("event:{}",row.id)}});
-    if let Ok(value) = serde_json::from_str::<Value>(&text)
+    if let Ok(value) = studio_json::from_str::<Value>(&text)
         && value.is_object()
     {
         // A bounded review must retain the acceptance outcome even when its log is large.
@@ -1617,7 +1618,7 @@ mod input_origin_tests {
             "status":"failed","exitCode":7,"monitorId":"gate-monitor","output":"x".repeat(12000)
         }}})
         .to_string();
-        let projected: Value = serde_json::from_str(&bound_event(&row, &row.text, 1000))
+        let projected: Value = studio_json::from_str(&bound_event(&row, &row.text, 1000))
             .expect("bounded event remains valid JSON");
         assert_eq!(projected["task"], "gated-task");
         assert_eq!(projected["gate"]["status"], "failed");

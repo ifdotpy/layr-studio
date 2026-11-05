@@ -7,7 +7,7 @@ use studio_runtime_store::SyncDocumentsRepository;
 use crate::error::ApiError;
 use crate::generated::{ResourceRef, ResourceRevisionEntry, SubscriptionCursor};
 use crate::router::HttpState;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::shared_values::SYNC_STREAM_EVENT_MAX_BYTES;
 
 #[cfg(test)]
@@ -35,7 +35,7 @@ pub(super) async fn auth_progress(state: &HttpState, request_id: &str) -> Option
         .ok()?
         .ok()?;
         if let Some(receipt) = receipt {
-            return serde_json::to_value(receipt).ok();
+            return studio_json::to_value(receipt).ok();
         }
     }
     match &state.claude_login {
@@ -79,7 +79,7 @@ pub(crate) trait ResourceKindHandler: Send + Sync {
 /// Empty data for kinds whose baseline is already carried by the shared frame.
 /// V4 preserves the existing revision when this entry has no durable cursor.
 fn empty_entry() -> Result<ResourceRevisionEntry, ApiError> {
-    serde_json::from_value(serde_json::json!({"revision": 0})).map_err(|_| ApiError::internal())
+    studio_json::from_value(studio_json::json!({"revision": 0})).map_err(|_| ApiError::internal())
 }
 
 macro_rules! resource_handlers {
@@ -195,7 +195,7 @@ async fn view_value(
     resource: ResourceRef,
     since: Option<SubscriptionCursor>,
 ) -> Result<Value, ApiError> {
-    use serde_json::json;
+    use studio_json::json;
     match resource {
         ResourceRef::ProcessesResource(_) => Err(ApiError::internal()),
         ResourceRef::ComplaintResource(r) => Ok(
@@ -223,7 +223,7 @@ async fn view_value(
             )
             .await?;
             // Preserve an exclusive history boundary while fitting a bounded tail.
-            while serde_json::to_vec(&room)
+            while studio_json::to_vec(&room)
                 .map_err(|_| ApiError::internal())?
                 .len()
                 > SYNC_STREAM_EVENT_MAX_BYTES / 2
@@ -313,12 +313,12 @@ async fn view_initial(
         .as_object_mut()
         .and_then(|s| s.remove("terminalGeneration"))
         .and_then(|generation| generation.as_i64());
-    let mut value = serde_json::json!({"revision":0,"resource":resource,"viewSnapshot":snapshot});
+    let mut value = studio_json::json!({"revision":0,"resource":resource,"viewSnapshot":snapshot});
     if let Some(output) = snapshot.get("terminalOutput") {
         let offset = output["offset"].as_i64().ok_or_else(ApiError::internal)?;
-        value["revision"] = serde_json::json!(offset);
-        value["cursor"] = serde_json::json!({"workspaceId":state.workspace_id,"seq":offset,"terminalGeneration":generation});
-        value["replyKind"] = serde_json::json!(if since.as_ref().is_some_and(|c| c.workspace_id
+        value["revision"] = studio_json::json!(offset);
+        value["cursor"] = studio_json::json!({"workspaceId":state.workspace_id,"seq":offset,"terminalGeneration":generation});
+        value["replyKind"] = studio_json::json!(if since.as_ref().is_some_and(|c| c.workspace_id
             == state.workspace_id
             && c.seq <= offset
             && c.terminal_generation.is_some()
@@ -330,7 +330,7 @@ async fn view_initial(
             "snapshot"
         });
         if value["replyKind"] == "delta" {
-            value["terminalBaseOffset"] = serde_json::json!(since.map(|cursor| cursor.seq));
+            value["terminalBaseOffset"] = studio_json::json!(since.map(|cursor| cursor.seq));
         }
     }
     if let Some(room) = snapshot.get("room") {
@@ -339,10 +339,10 @@ async fn view_initial(
             .and_then(|messages| messages.last())
             .and_then(|message| message["seq"].as_i64())
             .unwrap_or(0);
-        value["cursor"] = serde_json::json!({"workspaceId":state.workspace_id,"seq":seq});
-        value["replyKind"] = serde_json::json!("snapshot");
+        value["cursor"] = studio_json::json!({"workspaceId":state.workspace_id,"seq":seq});
+        value["replyKind"] = studio_json::json!("snapshot");
     }
-    serde_json::from_value(value).map_err(|_| ApiError::internal())
+    studio_json::from_value(value).map_err(|_| ApiError::internal())
 }
 
 /// Each live stream owns only the last terminal offset it sent. Reuse the same
@@ -409,10 +409,10 @@ pub(super) fn attach_sampled_process_snapshots(
         if !matches!(resource, ResourceRef::ProcessesResource(_)) || entry.view_snapshot.is_some() {
             continue;
         }
-        let Some(listing) = serde_json::to_string(resource)
+        let Some(listing) = studio_json::to_string(resource)
             .ok()
             .and_then(|key| samples.get(&key))
-            .and_then(|bytes| serde_json::from_slice(bytes).ok())
+            .and_then(|bytes| studio_json::from_slice(bytes).ok())
         else {
             continue;
         };
@@ -421,7 +421,7 @@ pub(super) fn attach_sampled_process_snapshots(
             ..Default::default()
         });
         entry.resource = Some(Some(resource.clone()));
-        if serde_json::to_vec(&entry)
+        if studio_json::to_vec(&entry)
             .map_or(true, |bytes| bytes.len() > SYNC_STREAM_EVENT_MAX_BYTES)
         {
             entry.view_snapshot = None;
@@ -507,13 +507,13 @@ pub(super) async fn initial_snapshot(
     {
         return Err(ApiError::internal());
     }
-    if serde_json::to_vec(&entry)
+    if studio_json::to_vec(&entry)
         .map_err(|_| ApiError::internal())?
         .len()
         > handler.max_bytes()
     {
-        return serde_json::from_value(
-            serde_json::json!({"revision":entry.revision,"resource":reference}),
+        return studio_json::from_value(
+            studio_json::json!({"revision":entry.revision,"resource":reference}),
         )
         .map_err(|_| ApiError::internal());
     }
@@ -531,9 +531,9 @@ fn same_scope(resource: &ResourceRef, changed: &ResourceRef) -> bool {
         (ResourceRef::TranscriptResource(left), ResourceRef::TranscriptResource(right)) => {
             left.agent_id == right.agent_id
         }
-        _ => serde_json::to_value(resource)
+        _ => studio_json::to_value(resource)
             .ok()
-            .zip(serde_json::to_value(changed).ok())
+            .zip(studio_json::to_value(changed).ok())
             .is_some_and(|(left, right)| left == right),
     }
 }
@@ -569,13 +569,13 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
         )
         .await
         .ok()
-        .and_then(|value| serde_json::to_vec(&value).ok());
+        .and_then(|value| studio_json::to_vec(&value).ok());
     }
     if is_view_resource(&resource) {
         return view_value(state, resource, None)
             .await
             .ok()
-            .and_then(|value| serde_json::to_vec(&value).ok());
+            .and_then(|value| studio_json::to_vec(&value).ok());
     }
     match resource {
         ResourceRef::DraftsResource(_) => state
@@ -584,7 +584,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
                 "runtime-http/routes/sync_stream/draft-revision",
                 |connection| {
                     let sequence = SyncDocumentsRepository::draft_sequence(connection)?;
-                    serde_json::to_vec(&sequence).map_err(studio_runtime_store::StoreError::from)
+                    studio_json::to_vec(&sequence).map_err(studio_runtime_store::StoreError::from)
                 },
             )
             .await
@@ -604,7 +604,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
                             connection,
                             &resource.agent_id,
                         )?;
-                        serde_json::to_vec(&(revision, publication))
+                        studio_json::to_vec(&(revision, publication))
                             .map_err(studio_runtime_store::StoreError::from)
                     },
                 )
@@ -620,14 +620,14 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
                     resource.request_id.as_str(),
                 )
                 .map_err(|_| studio_runtime_store::StoreError::RecordContract("rename progress"))?;
-                serde_json::to_vec(&reply).map_err(studio_runtime_store::StoreError::from)
+                studio_json::to_vec(&reply).map_err(studio_runtime_store::StoreError::from)
             })
             .await
             .ok(),
         ResourceRef::AuthProgressResource(resource) => {
-            serde_json::to_vec(&auth_progress(&state, resource.request_id.as_str()).await?).ok()
+            studio_json::to_vec(&auth_progress(&state, resource.request_id.as_str()).await?).ok()
         }
-        ResourceRef::VaultJobProgressResource(resource) => serde_json::to_vec(
+        ResourceRef::VaultJobProgressResource(resource) => studio_json::to_vec(
             &super::host_secrets::job_progress(&state, resource.job, resource.request_id.as_str())
                 .await,
         )
@@ -643,10 +643,10 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .await
             .ok()?
             .ok()
-            .and_then(|ready| serde_json::to_vec(&ready).ok())
+            .and_then(|ready| studio_json::to_vec(&ready).ok())
         }
         ResourceRef::MultiServerResource(_) if cfg!(unix) => {
-            serde_json::to_vec(&super::multi_server::read_snapshot(&state).await.ok()?).ok()
+            studio_json::to_vec(&super::multi_server::read_snapshot(&state).await.ok()?).ok()
         }
         ResourceRef::VoiceResource(resource) => state
             .store?
@@ -671,8 +671,8 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
                 }
             }
             let snapshot: crate::generated::UsageLimitsResponse =
-                serde_json::from_value(snapshot).ok()?;
-            serde_json::to_vec(&snapshot).ok()
+                studio_json::from_value(snapshot).ok()?;
+            studio_json::to_vec(&snapshot).ok()
         }
         ResourceRef::DesktopResource(_) | ResourceRef::TerminalsResource(_) => None,
         ResourceRef::QueueResource(_) => None,
@@ -708,24 +708,24 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::collections::BTreeSet;
+    use studio_json::json;
 
     #[test]
     fn process_publication_uses_sampled_listing() {
         let resource: ResourceRef =
-            serde_json::from_str(r#"{"kind":"processes","agentId":"lead"}"#).unwrap();
+            studio_json::from_str(r#"{"kind":"processes","agentId":"lead"}"#).unwrap();
         let listing = json!({"responseTarget":null,"processes":[],"activities":[]});
-        let mut event: crate::generated::ResourceChangeEvent = serde_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"lead"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
+        let mut event: crate::generated::ResourceChangeEvent = studio_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"lead"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
         let samples = [(
-            serde_json::to_string(&resource).unwrap(),
-            serde_json::to_vec(&listing).unwrap(),
+            studio_json::to_string(&resource).unwrap(),
+            studio_json::to_vec(&listing).unwrap(),
         )]
         .into_iter()
         .collect();
         attach_sampled_process_snapshots(&mut event, &samples);
         assert_eq!(
-            serde_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"],
+            studio_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"],
             listing
         );
     }
@@ -747,11 +747,11 @@ mod tests {
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id, agent.to_string()])?;
                 let monitor_id = format!("monitor-{index}");
                 let monitor = json!({"id":monitor_id,"agent":id,"epoch":1,"status":"running","requestId":monitor_id,"created":1,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"echo ready","cwd":"","interactive":false,"livenessCommand":"","log":"","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","operation":{"accountKey":"default","connectionId":"connection","threadId":"thread","agent":id,"epoch":1}});
-                serde_json::from_value::<studio_runtime_store::MonitorRecord>(monitor.clone()).expect("valid monitor fixture");
+                studio_json::from_value::<studio_runtime_store::MonitorRecord>(monitor.clone()).expect("valid monitor fixture");
                 tx.execute("INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)", rusqlite::params![monitor_id, monitor.to_string()])?;
                 let task_id = format!("task-{index}");
                 let task = json!({"id":task_id,"agent":id,"created":1,"itemId":task_id,"turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"});
-                serde_json::from_value::<studio_runtime_store::TaskRecord>(task.clone()).expect("valid task fixture");
+                studio_json::from_value::<studio_runtime_store::TaskRecord>(task.clone()).expect("valid task fixture");
                 tx.execute("INSERT INTO runtime_tasks(id,record) VALUES(?1,?2)", rusqlite::params![task_id, task.to_string()])?;
             }
             Ok::<_, StoreError>(())
@@ -766,21 +766,21 @@ mod tests {
             None,
         );
         let resource: ResourceRef =
-            serde_json::from_str(r#"{"kind":"processes","agentId":"agent-0"}"#).unwrap();
+            studio_json::from_str(r#"{"kind":"processes","agentId":"agent-0"}"#).unwrap();
         let listing = super::super::process_controls::read_listing(state.clone(), "agent-0".into())
             .await
             .expect("listing fixture");
-        let bytes = serde_json::to_vec(&listing).unwrap();
-        let mut event: crate::generated::ResourceChangeEvent = serde_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"agent-0"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
+        let bytes = studio_json::to_vec(&listing).unwrap();
+        let mut event: crate::generated::ResourceChangeEvent = studio_json::from_str(&format!(r#"{{"protocol":{},"workspaceId":"workspace","epoch":"epoch","revision":2,"reason":"change","resources":[{{"kind":"processes","agentId":"agent-0"}}],"resourceVersions":[{{"revision":2}}]}}"#, studio_runtime_schema::SYNC_PROTOCOL_VERSION)).unwrap();
         if reuse {
-            let samples = [(serde_json::to_string(&resource).unwrap(), bytes)]
+            let samples = [(studio_json::to_string(&resource).unwrap(), bytes)]
                 .into_iter()
                 .collect();
             attach_sampled_process_snapshots(&mut event, &samples);
         } else {
             attach_view_snapshots(Some(&state), &mut event).await;
         }
-        let value = serde_json::to_value(event).unwrap();
+        let value = studio_json::to_value(event).unwrap();
         assert_eq!(
             value["resourceVersions"][0]["viewSnapshot"]["processes"]["processes"]
                 .as_array()
@@ -943,12 +943,12 @@ mod tests {
             None,
         );
         let resource =
-            serde_json::from_value(json!({"kind":"room","roomId":"room"})).expect("room resource");
+            studio_json::from_value(json!({"kind":"room","roomId":"room"})).expect("room resource");
         let initial =
             super::super::messages::room_snapshot(state.clone(), "room".into(), None, None, 40)
                 .await
                 .expect("untrimmed room snapshot");
-        let initial = serde_json::to_value(initial).expect("initial value");
+        let initial = studio_json::to_value(initial).expect("initial value");
         let initial_count = initial["messages"]
             .as_array()
             .expect("initial messages")
@@ -976,7 +976,7 @@ mod tests {
             )
             .await
             .expect("history");
-            let history = serde_json::to_value(history).expect("history value");
+            let history = studio_json::to_value(history).expect("history value");
             let rows = history["messages"].as_array().expect("history messages");
             assert!(
                 rows.iter()
@@ -997,7 +997,7 @@ mod tests {
             .collect();
         assert_eq!(tail_ids, expected_tail);
         assert!(
-            serde_json::to_vec(room).expect("serialized tail").len()
+            studio_json::to_vec(room).expect("serialized tail").len()
                 <= SYNC_STREAM_EVENT_MAX_BYTES / 2
         );
     }
@@ -1050,34 +1050,34 @@ mod tests {
                 "terminalOutput",
             ),
         ] {
-            let resource: ResourceRef = serde_json::from_value(resource).expect("typed reference");
+            let resource: ResourceRef = studio_json::from_value(resource).expect("typed reference");
             let baseline = initial_snapshot(state.clone(), resource.clone(), None)
                 .await
                 .expect("baseline");
-            let baseline = serde_json::to_value(baseline).expect("frame");
+            let baseline = studio_json::to_value(baseline).expect("frame");
             assert!(
                 !baseline["viewSnapshot"][field].is_null(),
                 "{field} baseline"
             );
-            let mut event:crate::generated::ResourceChangeEvent = serde_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"epoch","revision":2,"reason":"change","resources":[resource],"resourceVersions":[{"revision":2}]})).expect("event");
+            let mut event:crate::generated::ResourceChangeEvent = studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"epoch","revision":2,"reason":"change","resources":[resource],"resourceVersions":[{"revision":2}]})).expect("event");
             attach_view_snapshots(Some(&state), &mut event).await;
-            let live = serde_json::to_value(event).expect("live frame");
+            let live = studio_json::to_value(event).expect("live frame");
             assert_eq!(
                 live["resourceVersions"][0]["viewSnapshot"][field],
                 baseline["viewSnapshot"][field]
             );
             assert!(
-                serde_json::to_vec(&live).expect("encoded").len() <= SYNC_STREAM_EVENT_MAX_BYTES
+                studio_json::to_vec(&live).expect("encoded").len() <= SYNC_STREAM_EVENT_MAX_BYTES
             );
         }
         // Work shares the public resource registry, but its records are entity
         // partitions rather than the full-view snapshots exercised above.
         let work: ResourceRef =
-            serde_json::from_value(json!({"kind":"work","agentId":"lead"})).expect("work ref");
+            studio_json::from_value(json!({"kind":"work","agentId":"lead"})).expect("work ref");
         let baseline = initial_snapshot(state.clone(), work.clone(), None)
             .await
             .expect("work entities");
-        let baseline = serde_json::to_value(baseline).expect("work frame");
+        let baseline = studio_json::to_value(baseline).expect("work frame");
         assert!(baseline.get("viewSnapshot").is_none());
         assert_eq!(baseline["replyKind"], "snapshot");
         let documents = baseline["entityChanges"]["documents"]
@@ -1104,12 +1104,12 @@ mod tests {
             .expect("history");
         assert_eq!(result["value"]["value"]["text"], "Existing evidence");
         assert!(
-            serde_json::to_vec(&baseline)
+            studio_json::to_vec(&baseline)
                 .expect("encode work baseline for byte bound")
                 .len()
                 <= SYNC_STREAM_EVENT_MAX_BYTES
         );
-        let cursor = serde_json::from_value(baseline["cursor"].clone()).expect("work cursor");
+        let cursor = studio_json::from_value(baseline["cursor"].clone()).expect("work cursor");
         store.transaction_with(|tx| {
             tx.execute("UPDATE runtime_work SET record=json_set(record,'$.status','review','$.updated',2,'$.version',2) WHERE id='assignment'",[])?;
             Ok::<_,StoreError>(())
@@ -1117,7 +1117,7 @@ mod tests {
         let live = initial_snapshot(state.clone(), work.clone(), Some(cursor))
             .await
             .expect("work delta");
-        let live = serde_json::to_value(live).expect("work delta frame");
+        let live = studio_json::to_value(live).expect("work delta frame");
         assert!(live.get("viewSnapshot").is_none());
         assert_eq!(live["replyKind"], "delta");
         let changed = live["entityChanges"]["documents"]
@@ -1127,22 +1127,22 @@ mod tests {
         assert_eq!(changed[0]["collection"], "workDetail");
         assert_eq!(changed[0]["value"]["status"], "review");
         assert!(
-            serde_json::to_vec(&live)
+            studio_json::to_vec(&live)
                 .expect("encode work delta for byte bound")
                 .len()
                 <= SYNC_STREAM_EVENT_MAX_BYTES
         );
-        let mut event:crate::generated::ResourceChangeEvent=serde_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"epoch","revision":2,"reason":"change","resources":[work],"resourceVersions":[{"revision":2}]})).expect("work notification");
+        let mut event:crate::generated::ResourceChangeEvent=studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"epoch","revision":2,"reason":"change","resources":[work],"resourceVersions":[{"revision":2}]})).expect("work notification");
         attach_view_snapshots(Some(&state), &mut event).await;
         assert!(
-            serde_json::to_value(event).expect("serialize work notification")["resourceVersions"]
+            studio_json::to_value(event).expect("serialize work notification")["resourceVersions"]
                 [0]
             .get("viewSnapshot")
             .is_none(),
             "legacy full-view helper must not reattach work history"
         );
         let resource: ResourceRef =
-            serde_json::from_value(json!({"kind":"terminal-output","terminalId":"shell"}))
+            studio_json::from_value(json!({"kind":"terminal-output","terminalId":"shell"}))
                 .expect("terminal ref");
         let cursor = SubscriptionCursor {
             terminal_generation: Some(0),
@@ -1153,7 +1153,7 @@ mod tests {
             .await
             .expect("first");
         assert_eq!(
-            serde_json::to_value(first).expect("first frame")["viewSnapshot"]["terminalOutput"]["text"],
+            studio_json::to_value(first).expect("first frame")["viewSnapshot"]["terminalOutput"]["text"],
             "a🙂"
         );
         store
@@ -1169,7 +1169,7 @@ mod tests {
         let resumed = initial_snapshot(state.clone(), resource.clone(), Some(cursor))
             .await
             .expect("resume");
-        let resumed = serde_json::to_value(resumed).expect("resumed frame");
+        let resumed = studio_json::to_value(resumed).expect("resumed frame");
         assert_eq!(resumed["viewSnapshot"]["terminalOutput"]["text"], "中");
         assert_eq!(resumed["cursor"]["seq"], 3);
         assert_eq!(resumed["replyKind"], "delta");
@@ -1185,7 +1185,7 @@ mod tests {
         )
         .await
         .expect("future cursor snapshot");
-        let future = serde_json::to_value(future).expect("future frame");
+        let future = studio_json::to_value(future).expect("future frame");
         assert_eq!(future["replyKind"], "snapshot");
         assert_eq!(future["viewSnapshot"]["terminalOutput"]["text"], "a🙂中");
         // A failed client reset write leaves the old generation at offset 40.
@@ -1227,7 +1227,7 @@ mod tests {
         let recovered = initial_snapshot(state.clone(), resource.clone(), old.cursor)
             .await
             .expect("reset resume");
-        let recovered = serde_json::to_value(recovered).expect("recovered frame");
+        let recovered = studio_json::to_value(recovered).expect("recovered frame");
         assert_eq!(recovered["replyKind"], "snapshot");
         assert_eq!(recovered["cursor"]["terminalGeneration"], 1);
         assert_eq!(
@@ -1246,7 +1246,7 @@ mod tests {
         .await
         .expect("legacy resume");
         assert_eq!(
-            serde_json::to_value(legacy).expect("legacy frame")["replyKind"],
+            studio_json::to_value(legacy).expect("legacy frame")["replyKind"],
             "snapshot"
         );
         let oversized =
@@ -1264,7 +1264,7 @@ mod tests {
         let bounded = initial_snapshot(state, resource, None)
             .await
             .expect("bounded output");
-        let bounded = serde_json::to_value(bounded).expect("bounded frame");
+        let bounded = studio_json::to_value(bounded).expect("bounded frame");
         assert_eq!(
             bounded["viewSnapshot"]["terminalOutput"]["text"]
                 .as_str()
@@ -1279,7 +1279,7 @@ mod tests {
     #[test]
     fn every_generated_resource_has_exactly_one_handler_and_data_contract() {
         let document: Value =
-            serde_json::from_str(include_str!("../../openapi.json")).expect("OpenAPI owner");
+            studio_json::from_str(include_str!("../../openapi.json")).expect("OpenAPI owner");
         let schemas = &document["components"]["schemas"];
         let kinds = schemas["ResourceRef"]["discriminator"]["mapping"]
             .as_object()
@@ -1303,7 +1303,7 @@ mod tests {
             let properties = schemas[name]["properties"]
                 .as_object()
                 .expect("selector fields");
-            let mut value = serde_json::Map::new();
+            let mut value = studio_json::Map::new();
             for (field, schema) in properties {
                 let schema = schema
                     .get("$ref")
@@ -1346,7 +1346,7 @@ mod tests {
                     "{kind}"
                 );
                 let typed: ResourceRef =
-                    serde_json::from_value(original.clone()).expect("generated reference");
+                    studio_json::from_value(original.clone()).expect("generated reference");
                 use studio_runtime_services::resource_notify::ResourceIdentity;
                 let selector = crate::routes::sync_stream::SubscribedResource::new(typed.clone())
                     .expect("resource identity");
@@ -1356,13 +1356,13 @@ mod tests {
                     "notification role for {kind}"
                 );
                 assert_eq!(
-                    serde_json::to_value(typed).expect("serialized reference"),
+                    studio_json::to_value(typed).expect("serialized reference"),
                     original,
                     "wire identity for {kind}"
                 );
             }
             let resource: ResourceRef =
-                serde_json::from_value(Value::Object(value)).expect("generated reference");
+                studio_json::from_value(Value::Object(value)).expect("generated reference");
             let matches: Vec<_> = REGISTRY
                 .iter()
                 .enumerate()

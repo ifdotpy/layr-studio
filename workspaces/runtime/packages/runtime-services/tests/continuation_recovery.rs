@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{
     continuation::{ContinuationError, Result},
     continuation_driver::{self, Boundary, Fault},
@@ -55,13 +55,13 @@ fn read(store: &RuntimeStore) -> Value {
     let mut statement = db
         .prepare("SELECT record FROM runtime_usage_resumes WHERE id='resume'")
         .expect("statement");
-    let r: Value = serde_json::from_str(
+    let r: Value = studio_json::from_str(
         &statement
             .query_row([], |r| r.get::<_, String>(0))
             .expect("row"),
     )
     .expect("record");
-    let a: Value = serde_json::from_str(
+    let a: Value = studio_json::from_str(
         &db.query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |r| {
             r.get::<_, String>(0)
         })
@@ -169,7 +169,7 @@ async fn checked_decision_write_preserves_number_kinds() {
             |r| r.get(0),
         )
         .unwrap();
-    let row: Value = serde_json::from_str(&raw).unwrap();
+    let row: Value = studio_json::from_str(&raw).unwrap();
     assert_eq!(row["attempt"], json!(1.0));
     assert!(row.get("claimedAt").is_none());
 }
@@ -317,7 +317,7 @@ async fn every_store_boundary_rolls_back_or_replays_the_one_committed_followup()
 async fn changed_task_cancels_resume_and_notifies_parent_atomically() {
     let (_root, store) = seeded("usage").await;
     store.transaction(|tx|{
-        let mut a:Value=serde_json::from_str(&tx.query_row("SELECT record FROM runtime_agents WHERE id='a'",[],|r|r.get::<_,String>(0))?)?;
+        let mut a:Value=studio_json::from_str(&tx.query_row("SELECT record FROM runtime_agents WHERE id='a'",[],|r|r.get::<_,String>(0))?)?;
         a["isLead"]=json!(false);a["parentId"]=json!("parent");a["rootId"]=json!("parent");
         tx.execute("UPDATE runtime_agents SET record=?1 WHERE id='a'",[a.to_string()])?;
         let parent=json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"parent","rootId":"parent","epoch":1,"status":"waiting","autoWake":true});
@@ -423,7 +423,7 @@ fn capacity_state(store: &RuntimeStore) -> Value {
     let events: i64 = db
         .query_row("SELECT count(*) FROM runtime_events", [], |r| r.get(0))
         .expect("events");
-    json!({"record":serde_json::from_str::<Value>(&record).expect("record JSON"),"agent":serde_json::from_str::<Value>(&agent).expect("agent JSON"),"events":events})
+    json!({"record":studio_json::from_str::<Value>(&record).expect("record JSON"),"agent":studio_json::from_str::<Value>(&agent).expect("agent JSON"),"events":events})
 }
 
 #[tokio::test]
@@ -435,7 +435,7 @@ async fn pending_settings_cannot_claim_a_replaced_capacity_retry() {
                 tx.query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |r| {
                     r.get(0)
                 })?;
-            let mut agent: Value = serde_json::from_str(&raw).expect("agent");
+            let mut agent: Value = studio_json::from_str(&raw).expect("agent");
             let mut replacement = agent["capacityRetry"].clone();
             replacement["id"] = json!("replacement");
             agent["pendingSettings"] = json!({"capacityRetry":replacement});
@@ -564,7 +564,7 @@ async fn automatic_capacity_retry_cancels_an_excluded_account_with_a_permanent_h
                     [],
                     |row| row.get::<_, String>(0),
                 )
-                .map(|raw| serde_json::from_str(&raw).expect("agent JSON"))?;
+                .map(|raw| studio_json::from_str(&raw).expect("agent JSON"))?;
             agent["excludedAccountKeys"] = json!(["default"]);
             studio_runtime_store::ContinuationRepository::put_agent(tx, &agent)?;
             let stage = studio_runtime_services::continuation_runtime::stage_capacity_retry(
@@ -707,7 +707,7 @@ async fn a_disk_full_turn_failure_creates_a_free_space_retry() {
             [],
             |row| row.get::<_, String>(0),
         )
-        .map(|raw| serde_json::from_str(&raw).expect("agent JSON"))
+        .map(|raw| studio_json::from_str(&raw).expect("agent JSON"))
         .expect("agent");
     let retry = &agent["capacityRetry"];
     assert_eq!(retry["cause"], "diskFull");
@@ -729,7 +729,7 @@ async fn a_disk_full_turn_failure_creates_a_free_space_retry() {
         )
         .expect("durable retry row");
     assert_eq!(
-        &serde_json::from_str::<Value>(&stored).expect("retry JSON"),
+        &studio_json::from_str::<Value>(&stored).expect("retry JSON"),
         retry
     );
 }

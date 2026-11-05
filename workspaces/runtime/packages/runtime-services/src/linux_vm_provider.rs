@@ -12,7 +12,6 @@ use crate::linux_vm_guest::{GUEST_RPC_TIMEOUT_SECONDS, GuestError, GuestRpc};
 use base64::Engine as _;
 use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::Path,
@@ -22,6 +21,7 @@ use std::{
     },
     time::Duration,
 };
+use studio_json::{Value, json};
 use studio_runtime_process::{
     EventCursor, Generation, ProviderHandle, ProviderLaunchSpec,
     provider_seam::{
@@ -124,7 +124,7 @@ pub enum GuestProviderError {
     #[error("VM guest request failed")]
     Guest(#[from] GuestError),
     #[error("VM provider JSON is invalid")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error("VM provider worker task failed")]
     Task,
 }
@@ -950,7 +950,7 @@ impl GuestProviderSession {
             output.extend(data);
         }
         let text = std::str::from_utf8(&output).map_err(|_| GuestProviderError::InvalidResponse)?;
-        let payload: Value = serde_json::from_str(text)?;
+        let payload: Value = studio_json::from_str(text)?;
         if !payload.is_object() {
             return Err(GuestProviderError::InvalidResponse);
         }
@@ -1035,7 +1035,7 @@ pub async fn copy_guest_credentials(
         return Err(GuestProviderError::Invalid);
     }
     let digest = hex_digest(credential_document);
-    let request_material = serde_json::to_vec(&json!({
+    let request_material = studio_json::to_vec(&json!({
         "agentId": target.agent_id,
         "accountKey": target.account_key,
         "path": target.relative_path,
@@ -1120,7 +1120,7 @@ fn start_params(
 }
 
 fn fingerprint(params: &Value) -> Result<String> {
-    Ok(hex_digest(&serde_json::to_vec(params)?))
+    Ok(hex_digest(&studio_json::to_vec(params)?))
 }
 
 async fn reserve_start(
@@ -1705,7 +1705,7 @@ fn parse_info_fields(handle: &str, value: &Value) -> Result<ProviderInfo> {
 
 fn parse_event(value: &Value) -> Result<ProviderEvent> {
     let payload = match value.get("payload") {
-        Some(Value::String(encoded)) => serde_json::from_str(encoded)?,
+        Some(Value::String(encoded)) => studio_json::from_str(encoded)?,
         Some(payload) => payload.clone(),
         None => return Err(GuestProviderError::InvalidResponse),
     };
@@ -1733,8 +1733,8 @@ mod tests {
 
     use super::*;
     use crate::linux_vm_guest::GuestError;
-    use serde_json::json;
     use std::{collections::BTreeMap, sync::Mutex};
+    use studio_json::json;
     use studio_runtime_process::{
         Generation, OperationId, ProviderHandle,
         provider_seam::{
@@ -2269,7 +2269,7 @@ mod tests {
         let source = bootstrap_source(&store, &root).await;
         let old_root = RequestIdentity::issue_root();
         let old_source = bootstrap_source(&store, &old_root).await;
-        let imported: AdmittedRequest = serde_json::from_str(&format!(
+        let imported: AdmittedRequest = studio_json::from_str(&format!(
             r#"{{"id":"account-worker:vm-auth-bootstrap:agent-1:9:old:complete","signature":"complete","created":{}}}"#,
             chrono::Utc::now().timestamp_millis()
         ))
@@ -2353,7 +2353,7 @@ mod tests {
         let (_directory, store) = open_store().await;
         let root = RequestIdentity::issue_root();
         let source = bootstrap_source(&store, &root).await;
-        let expired: AdmittedRequest = serde_json::from_str(&format!(
+        let expired: AdmittedRequest = studio_json::from_str(&format!(
             r#"{{"id":"expired-bootstrap-effect","signature":"payload","created":{}}}"#,
             chrono::Utc::now().timestamp_millis() - REQUEST_RESULT_TTL_MS - 1000
         ))
@@ -2516,7 +2516,7 @@ mod tests {
             let (_directory, store) = open_store().await;
             let guest = Arc::new(FakeGuest::new(false));
             let target = credential_target();
-            let material = serde_json::to_vec(&json!({
+            let material = studio_json::to_vec(&json!({
                 "agentId":target.agent_id,"accountKey":target.account_key,
                 "path":target.relative_path,"digest":hex_digest(b"{}"),
             }))
@@ -2537,7 +2537,7 @@ mod tests {
                 } else {
                     let result = ResultEnvelope {actor: None, reply: WorkEffectStatus::Complete, references: vec![]};
                     tx.execute("INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
-                        rusqlite::params![request, signature, serde_json::to_string(&result)?, chrono::Utc::now().timestamp_millis()])
+                        rusqlite::params![request, signature, studio_json::to_string(&result)?, chrono::Utc::now().timestamp_millis()])
                         .map_err(StoreError::from)?;
                 }
                 Ok(())
@@ -2660,7 +2660,7 @@ mod tests {
         store
             .read_async("linux_vm_provider/test_start_receipt", |connection| {
                 let agent = AgentRepository::get(connection, &AgentId::from("agent-1"))?.unwrap();
-                Ok::<_, StoreError>(serde_json::to_string(&agent.vm_launch).unwrap())
+                Ok::<_, StoreError>(studio_json::to_string(&agent.vm_launch).unwrap())
             })
             .await
             .unwrap()
@@ -2724,7 +2724,7 @@ mod tests {
                 "pid" => guest.info.lock().unwrap()["pid"] = json!(43),
                 _ => {
                     let mut saved: VmLaunch =
-                        serde_json::from_str(&saved_start(&store).await).unwrap();
+                        studio_json::from_str(&saved_start(&store).await).unwrap();
                     saved.info.as_mut().unwrap()["state"] =
                         json!(if refusal == "legacy lost proof" {
                             "lost"
@@ -2769,7 +2769,7 @@ mod tests {
             ));
             let reserved = saved_start(&store).await;
             assert_eq!(
-                serde_json::from_str::<Value>(&reserved).unwrap()["status"],
+                studio_json::from_str::<Value>(&reserved).unwrap()["status"],
                 "submitted"
             );
             assert!(
@@ -2801,7 +2801,7 @@ mod tests {
             );
             let reserved = saved_start(&store).await;
             assert_eq!(
-                serde_json::from_str::<Value>(&reserved).unwrap()["status"],
+                studio_json::from_str::<Value>(&reserved).unwrap()["status"],
                 "submitted"
             );
             assert!(open_session(store.clone(), guest.clone()).await.is_err());
@@ -2868,7 +2868,7 @@ mod tests {
                     .unwrap();
                 let mut line = String::new();
                 BufReader::new(&mut socket).read_line(&mut line).unwrap();
-                let request: Value = serde_json::from_str(&line).unwrap();
+                let request: Value = studio_json::from_str(&line).unwrap();
                 assert_eq!(request["method"], "provider.start");
                 match reply {
                     Reply::Unknown => {
@@ -2954,7 +2954,7 @@ mod tests {
                 SessionOutcome::GenerationClosed { generation: 3 }
             )));
             let reserved = saved_start(&store).await;
-            let saved: Value = serde_json::from_str(&reserved).unwrap();
+            let saved: Value = studio_json::from_str(&reserved).unwrap();
             assert_eq!(saved["status"], "submitted");
             assert_eq!(saved["identity"]["requestId"], request["id"]);
             assert_eq!(
@@ -3131,13 +3131,13 @@ mod tests {
             open_session(store.clone(), guest.clone()).await,
             Err(GuestProviderError::Guest(_))
         ));
-        let not_sent: VmLaunch = serde_json::from_str(&saved_start(&store).await).unwrap();
+        let not_sent: VmLaunch = studio_json::from_str(&saved_start(&store).await).unwrap();
         assert_eq!(not_sent.status, WorkEffectStatus::NotSent);
         assert!(matches!(
             open_session(store.clone(), guest.clone()).await,
             Err(GuestProviderError::Unknown)
         ));
-        let after_unknown: VmLaunch = serde_json::from_str(&saved_start(&store).await).unwrap();
+        let after_unknown: VmLaunch = studio_json::from_str(&saved_start(&store).await).unwrap();
         let reopened = open_session(store, guest.clone()).await.unwrap();
 
         assert_eq!(*guest.inner.starts.lock().unwrap(), 2);
@@ -3241,7 +3241,7 @@ mod tests {
         let receipt = agent.credential_copy.unwrap();
         assert_eq!(receipt.status, WorkEffectStatus::Complete);
         assert!(
-            !serde_json::to_string(&receipt)
+            !studio_json::to_string(&receipt)
                 .unwrap()
                 .contains("private-token")
         );

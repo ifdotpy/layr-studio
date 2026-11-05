@@ -507,7 +507,7 @@ pub(super) async fn scenario_old_generation_pending_text_is_materialized_and_rec
             let text=db.query_row("SELECT json_extract(record,'$.text') FROM runtime_items WHERE id LIKE '%:generation'",[],|r|r.get::<_,String>(0))?;
             let calls=db.prepare("SELECT payload FROM runtime_outbox WHERE account='default' AND kind=?1")?
                 .query_map([OutboxKind::ProviderCall],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?
-                .into_iter().map(|raw|serde_json::from_str::<store::ProviderCall>(&raw).map_err(StoreError::from)).collect::<Result<Vec<_>,_>>()?;
+                .into_iter().map(|raw|studio_json::from_str::<store::ProviderCall>(&raw).map_err(StoreError::from)).collect::<Result<Vec<_>,_>>()?;
             let all:i64=db.query_row("SELECT COUNT(*) FROM runtime_outbox WHERE account='default'",[],|row|row.get(0))?;
             let owner_count:i64=db.query_row("SELECT COUNT(*) FROM runtime_account_state WHERE account='default'",[],|row|row.get(0))?;
             assert_eq!(owner_count,1,"the host keeps one current stream owner across generations");

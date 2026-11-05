@@ -60,7 +60,7 @@ pub async fn install(store: &RuntimeStore) -> StoreResult<()> {
 #[cfg(test)]
 pub(crate) mod test_support {
     use rusqlite::OptionalExtension;
-    use serde_json::Value;
+    use studio_json::Value;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
 
     /// A store set up as the server sets it up: with the default publisher.
@@ -81,7 +81,7 @@ pub(crate) mod test_support {
             .as_object_mut()
             .expect("agent fixture")
             .entry("compactions")
-            .or_insert(serde_json::json!(0));
+            .or_insert(studio_json::json!(0));
         store
             .transaction_with(move |tx| {
                 let agent = AgentRecord::from_value(record)?;
@@ -119,7 +119,7 @@ pub(crate) mod test_support {
             })
             .expect("the client entity reads")
             .map(|(deleted, payload)| {
-                let payload: Value = serde_json::from_str(&payload).expect("entity JSON");
+                let payload: Value = studio_json::from_str(&payload).expect("entity JSON");
                 (deleted, payload["value"].clone())
             })
     }
@@ -140,7 +140,7 @@ pub(crate) mod test_support {
             checkpoint: 0,
             reset: false,
         };
-        let collections = serde_json::json!([collection]).to_string();
+        let collections = studio_json::json!([collection]).to_string();
         let mut found = None;
         loop {
             page = crate::entity_scope::continue_page(

@@ -1,6 +1,6 @@
 //! Empty-chat account selection with injected registry facts; no credential access.
 use crate::account_transfer::{TransferError, read_record, remove};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{AccountTransferRepository, AgentRepository, RuntimeStore, StoreError};
 
 struct SelectionAccount {

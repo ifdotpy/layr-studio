@@ -67,7 +67,7 @@ fn pending_reauth(state: &State) -> (Arc<AccountDriver>, PathBuf) {
 }
 
 fn stored(registry: &std::path::Path) -> Value {
-    let value: Value = serde_json::from_slice(&std::fs::read(registry).unwrap()).unwrap();
+    let value: Value = studio_json::from_slice(&std::fs::read(registry).unwrap()).unwrap();
     value["logins"][REQUEST].clone()
 }
 

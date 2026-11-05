@@ -46,13 +46,13 @@ fn p06_empty_deltas_arm_timer_and_coalesce_without_refusal() {
         1,
         "empty pending stream arms worker timer"
     );
-    let serialized = serde_json::to_vec(&streams).expect("test invariant");
+    let serialized = studio_json::to_vec(&streams).expect("test invariant");
     assert!(
         serialized.len() < 2048,
         "coalesced metadata does not grow with empty deltas"
     );
     let mut restored: NotificationStreamBuffer =
-        serde_json::from_slice(&serialized).expect("test invariant");
+        studio_json::from_slice(&serialized).expect("test invariant");
     restored.flush_analytics(&key, &json!({"id":"agent"}));
     let batch = restored.take_post_commit().expect("test invariant");
     assert_eq!(batch.sequence, 1);
@@ -127,7 +127,7 @@ fn failed_notification_transaction_discards_staged_stream_changes() {
         "params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"new"}
     }));
 
-    let before_streams = serde_json::to_value(&streams).expect("serialize original buffer");
+    let before_streams = studio_json::to_value(&streams).expect("serialize original buffer");
     let before_agent = NotificationDispatchRepository::agent_record(&tx, "agent").unwrap();
     assert!(
         dispatch_notification(
@@ -145,7 +145,7 @@ fn failed_notification_transaction_discards_staged_stream_changes() {
         )
         .is_err()
     );
-    assert_eq!(serde_json::to_value(&streams).unwrap(), before_streams);
+    assert_eq!(studio_json::to_value(&streams).unwrap(), before_streams);
     assert_eq!(streams.clone().flush(&key, "").unwrap().0, "old");
     assert_eq!(
         NotificationDispatchRepository::agent_record(&tx, "agent").unwrap(),

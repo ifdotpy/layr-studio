@@ -58,7 +58,7 @@ async fn shutdown_interrupts_pending_socket_write() {
         };
         rpc.call::<_, WriteResult>(
             SupervisorAction::Write,
-            serde_json::json!({"handle":"account:test"}),
+            studio_json::json!({"handle":"account:test"}),
             &mut stop,
         )
         .await
@@ -84,7 +84,7 @@ async fn rpc_absolute_deadline_expires_without_new_input() {
         };
         rpc.call::<_, WriteResult>(
             SupervisorAction::Write,
-            serde_json::json!({"handle":"account:test"}),
+            studio_json::json!({"handle":"account:test"}),
             &mut stop,
         )
         .await
@@ -137,7 +137,7 @@ fn v2_handshake_and_event_keep_typed_envelope_and_raw_payload() {
         state_dir: PathBuf::from("/tmp/state"),
     };
     let request = handshake_request_v2(&identity);
-    let encoded = serde_json::to_value(request).unwrap();
+    let encoded = studio_json::to_value(request).unwrap();
     assert_eq!(encoded["protocol"], SUPERVISOR_PROTOCOL_VERSION);
     assert!(validate_handshake_v2(r#"{"ok":true}"#).is_err());
     assert!(validate_handshake_v2(r#"{"ok":true,"protocol":3}"#).is_ok());
@@ -146,15 +146,15 @@ fn v2_handshake_and_event_keep_typed_envelope_and_raw_payload() {
         sequence: EventCursor(9),
         generation: Generation(2),
         kind: EventKind::Unknown("future".into()),
-        payload: serde_json::value::RawValue::from_string(
+        payload: studio_json::OwnedRawJson::from_string(
             r#"{"nested":{"text":"escaped\\n雪"},"number":1e+02}"#.into(),
         )
         .unwrap(),
     };
-    let frame = serde_json::to_string(&event).unwrap();
+    let frame = studio_json::to_string(&event).unwrap();
     assert!(frame.contains(r#""payload":{"nested":{"text":"escaped\\n雪"},"number":1e+02}"#));
-    let decoded: SupervisorEventV2 = serde_json::from_str(&frame).unwrap();
-    assert_eq!(decoded.payload.get(), event.payload.get());
+    let decoded: SupervisorEventV2 = studio_json::from_str(&frame).unwrap();
+    assert_eq!(decoded.payload.as_str(), event.payload.as_str());
 }
 
 #[tokio::test(start_paused = true)]
@@ -238,7 +238,7 @@ async fn shutdown_interrupts_partial_response_without_restart() {
         };
         rpc.call::<_, WriteResult>(
             SupervisorAction::Write,
-            serde_json::json!({"handle":"account:test"}),
+            studio_json::json!({"handle":"account:test"}),
             &mut stop,
         )
         .await
@@ -316,7 +316,7 @@ fn actor(
 async fn read_request<S: AsyncRead + Unpin>(server: &mut BufReader<S>) -> Value {
     let mut line = String::new();
     assert_ne!(server.read_line(&mut line).await.unwrap(), 0);
-    serde_json::from_str(&line).unwrap()
+    studio_json::from_str(&line).unwrap()
 }
 
 async fn attachment_with_supervisor_peers() -> (
@@ -365,9 +365,9 @@ async fn attachment_with_supervisor_peers() -> (
         .await
         .unwrap();
     let status = read_request(&mut control).await;
-    control.get_mut().write_all(format!("{}\n", serde_json::json!({"requestId":status["requestId"],"error":"Unknown supervisor handle"})).as_bytes()).await.unwrap();
+    control.get_mut().write_all(format!("{}\n", studio_json::json!({"requestId":status["requestId"],"error":"Unknown supervisor handle"})).as_bytes()).await.unwrap();
     let open = read_request(&mut control).await;
-    control.get_mut().write_all(format!("{}\n", serde_json::json!({"requestId":open["requestId"],"result":{"pid":1,"generation":1,"resumed":false,"sequence":0,"acknowledged":0}})).as_bytes()).await.unwrap();
+    control.get_mut().write_all(format!("{}\n", studio_json::json!({"requestId":open["requestId"],"result":{"pid":1,"generation":1,"resumed":false,"sequence":0,"acknowledged":0}})).as_bytes()).await.unwrap();
     let (socket, _) = listener.accept().await.unwrap();
     let mut events = BufReader::new(socket);
     let _handshake = read_request(&mut events).await;
@@ -547,7 +547,7 @@ async fn full_journal_lane_keeps_ack_commands_live_while_next_event_waits() {
                     sequence: EventCursor(LANE_CAPACITY as u64 + 1),
                     generation: Generation(1),
                     kind: EventKind::Stdout,
-                    payload: serde_json::value::RawValue::from_string(
+                    payload: studio_json::OwnedRawJson::from_string(
                         r#"{"id":"initialized","result":{}}"#.into(),
                     )
                     .unwrap(),
@@ -591,7 +591,7 @@ async fn full_journal_lane_keeps_ack_commands_live_while_next_event_waits() {
         .unwrap();
     assert_eq!(request["action"], "ack");
     assert_eq!(request["sequence"], LANE_CAPACITY as u64);
-    let response = serde_json::json!({
+    let response = studio_json::json!({
         "requestId": request["requestId"],
         "result": {"acknowledged": LANE_CAPACITY as u64}
     });
@@ -639,7 +639,7 @@ async fn cancellation_before_send_is_not_sent_and_missing_receipt_is_unknown() {
             AdapterCommand::Write {
                 write: PreparedWrite {
                     operation_id: OperationId("owned".into()),
-                    message: serde_json::json!({"method":"notice"}),
+                    message: studio_json::json!({"method":"notice"}),
                 },
                 reply: sender,
                 observed: oneshot::channel().1,
@@ -688,7 +688,7 @@ async fn v2_journal_entry_uses_the_frame_arrival_clock() {
         sequence: EventCursor(1),
         generation: Generation(1),
         kind: EventKind::Stderr,
-        payload: serde_json::value::RawValue::from_string(r#"{"data":"output"}"#.into()).unwrap(),
+        payload: studio_json::OwnedRawJson::from_string(r#"{"data":"output"}"#.into()).unwrap(),
     };
     let received_at_ms = actor.clock.millis_at(received_at);
     let entry = actor.journal_entry_v2(event, received_at_ms).unwrap();
@@ -705,7 +705,7 @@ async fn abandoned_buffered_write_receipt_or_receive_future_fences_attachment() 
         let mut server = BufReader::new(server);
         let (command, mut receipt) = AdapterCommand::write(PreparedWrite {
             operation_id: OperationId("once".into()),
-            message: serde_json::json!({"method":"notice"}),
+            message: studio_json::json!({"method":"notice"}),
         });
         let task = tokio::spawn(async move {
             let mut rpc = Rpc {
@@ -717,7 +717,7 @@ async fn abandoned_buffered_write_receipt_or_receive_future_fences_attachment() 
             actor.command(&mut rpc, command, EventCursor(0)).await
         });
         let request = read_request(&mut server).await;
-        let response = serde_json::json!({"requestId":request["requestId"],"result":{"accepted":true,"duplicate":false,"remoteId":null,"durableMs":0}});
+        let response = studio_json::json!({"requestId":request["requestId"],"result":{"accepted":true,"duplicate":false,"remoteId":null,"durableMs":0}});
         server
             .get_mut()
             .write_all(format!("{response}\n").as_bytes())
@@ -827,7 +827,7 @@ async fn response_mapping_prunes_all_settled_entries() {
                     &mut rpc,
                     PreparedWrite {
                         operation_id: OperationId(format!("request:{id}")),
-                        message: serde_json::json!({"id":id,"method":"model/list"}),
+                        message: studio_json::json!({"id":id,"method":"model/list"}),
                     },
                 )
                 .await
@@ -840,7 +840,7 @@ async fn response_mapping_prunes_all_settled_entries() {
                 sequence: EventCursor(id),
                 generation: Generation(1),
                 kind: EventKind::Stdout,
-                payload: serde_json::value::RawValue::from_string(format!(
+                payload: studio_json::OwnedRawJson::from_string(format!(
                     r#"{{"id":{id},"result":{{}}}}"#
                 ))
                 .unwrap(),
@@ -857,7 +857,7 @@ async fn response_mapping_prunes_all_settled_entries() {
                     &mut rpc,
                     PreparedWrite {
                         operation_id: OperationId("after-prune".into()),
-                        message: serde_json::json!({"id":99,"method":"model/list"})
+                        message: studio_json::json!({"id":99,"method":"model/list"})
                     }
                 )
                 .await
@@ -868,7 +868,7 @@ async fn response_mapping_prunes_all_settled_entries() {
     });
     for remote in 1..=OWED + 1 {
         let request = read_request(&mut server).await;
-        let response = serde_json::json!({"requestId":request["requestId"],"result":{"accepted":true,"duplicate":false,"remoteId":remote,"durableMs":0}});
+        let response = studio_json::json!({"requestId":request["requestId"],"result":{"accepted":true,"duplicate":false,"remoteId":remote,"durableMs":0}});
         server
             .get_mut()
             .write_all(format!("{response}\n").as_bytes())
@@ -882,7 +882,7 @@ thread_local! { static PANIC_OPEN: std::cell::Cell<bool> = const { std::cell::Ce
 pub(super) fn panic_on_open_write(bytes: &[u8]) {
     PANIC_OPEN.with(|armed| {
         if armed.get()
-            && serde_json::from_slice::<Value>(bytes).is_ok_and(|v| v["action"] == "open")
+            && studio_json::from_slice::<Value>(bytes).is_ok_and(|v| v["action"] == "open")
         {
             armed.set(false);
             panic!("injected after production open socket write");
@@ -932,7 +932,7 @@ async fn panic_during_uncertain_open_closes_socket_and_preserves_handle_recovery
             .unwrap();
         let status = read_request(&mut peer).await;
         assert_eq!(status["action"], "status");
-        peer.get_mut().write_all(format!("{}\n", serde_json::json!({"requestId":status["requestId"], "error":"Unknown supervisor handle"})).as_bytes()).await.unwrap();
+        peer.get_mut().write_all(format!("{}\n", studio_json::json!({"requestId":status["requestId"], "error":"Unknown supervisor handle"})).as_bytes()).await.unwrap();
         let open = read_request(&mut peer).await;
         assert_eq!(open["action"], "open");
         let exit = attachment.completion().await;
@@ -999,7 +999,7 @@ async fn stdout_journal_remaps_only_numeric_replies_and_preserves_raw_bytes() {
                     sequence: EventCursor(1),
                     generation: Generation(1),
                     kind: EventKind::Stdout,
-                    payload: serde_json::value::RawValue::from_string(payload.into()).unwrap(),
+                    payload: studio_json::OwnedRawJson::from_string(payload.into()).unwrap(),
                 },
                 0,
             )
@@ -1008,9 +1008,9 @@ async fn stdout_journal_remaps_only_numeric_replies_and_preserves_raw_bytes() {
             panic!("protocol frame")
         };
         let actual: Value =
-            serde_json::from_slice(&studio_runtime_providers::encode_line(&frame).unwrap())
+            studio_json::from_slice(&studio_runtime_providers::encode_line(&frame).unwrap())
                 .unwrap();
-        assert_eq!(actual, serde_json::from_str::<Value>(expected).unwrap());
+        assert_eq!(actual, studio_json::from_str::<Value>(expected).unwrap());
     }
     assert!(actor.response_ids.is_empty());
     for (payload, expected) in [
@@ -1029,7 +1029,7 @@ async fn stdout_journal_remaps_only_numeric_replies_and_preserves_raw_bytes() {
                     sequence: EventCursor(2),
                     generation: Generation(1),
                     kind: EventKind::Stdout,
-                    payload: serde_json::value::RawValue::from_string(payload.into()).unwrap(),
+                    payload: studio_json::OwnedRawJson::from_string(payload.into()).unwrap(),
                 },
                 0,
             )

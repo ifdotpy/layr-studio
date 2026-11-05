@@ -1,12 +1,12 @@
 use crate::projection_fixtures as projections;
 use rusqlite::{Connection, params};
-use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
     path::Path,
     sync::{Arc, Mutex},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::{RequestId, RequestTicket};
 use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use studio_runtime_services::{
@@ -41,7 +41,7 @@ async fn fixture_store(
 }
 
 fn template(root: &Path) {
-    let schema: Value = serde_json::from_str(include_str!(
+    let schema: Value = studio_json::from_str(include_str!(
         "../../runtime-store/tests/fixtures/live-state-schema.json"
     ))
     .expect("schema fixture");
@@ -90,7 +90,7 @@ fn template(root: &Path) {
 }
 fn cases() -> Vec<Value> {
     let mut cases: Vec<Value> =
-        serde_json::from_str(include_str!("wave7_p10_lifecycle/cases.json"))
+        studio_json::from_str(include_str!("wave7_p10_lifecycle/cases.json"))
             .expect("frozen lifecycle cases");
     // The frozen corpus names the former stop, which is now the `pause` action.
     for case in &mut cases {
@@ -214,7 +214,7 @@ async fn attach_voice_scope(store: &RuntimeStore) {
             .expect("read lead").expect("lead exists");
         let scope = studio_runtime_store::account_state::current_provider_scope(tx, &agent)
             .expect("voice provider attached");
-        let encoded = serde_json::to_string(&scope).expect("encode provider scope");
+        let encoded = studio_json::to_string(&scope).expect("encode provider scope");
         tx.execute("UPDATE voice_sessions SET provider_scope=?1 WHERE agent='lead' AND connection_id='6'", [encoded])?;
         Ok(())
     }).await.expect("save voice provider scope");
@@ -305,7 +305,7 @@ async fn stale_voice_stop_handoff(unknown: bool) {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("Python rows"),
+        studio_json::from_value(case["records"].clone()).expect("Python rows"),
     )
     .await;
     store
@@ -439,7 +439,7 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
         .into_iter()
         .find(|case| case["name"] == "idle-False")
         .expect("Python idle stop case");
-    let mut records: Records = serde_json::from_value(case["records"].clone()).expect("records");
+    let mut records: Records = studio_json::from_value(case["records"].clone()).expect("records");
     let lead = records
         .tables
         .get_mut("runtime_agents")
@@ -515,7 +515,7 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
         )
         .expect("capacity row");
     assert_eq!(
-        serde_json::from_str::<Value>(&usage).expect("usage JSON")["status"],
+        studio_json::from_str::<Value>(&usage).expect("usage JSON")["status"],
         "cancelled"
     );
     let embedded: String = db
@@ -526,17 +526,17 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
         )
         .expect("embedded usage");
     assert_eq!(
-        serde_json::from_str::<Value>(&embedded).unwrap(),
-        serde_json::from_str::<Value>(&usage).unwrap()
+        studio_json::from_str::<Value>(&embedded).unwrap(),
+        studio_json::from_str::<Value>(&usage).unwrap()
     );
     assert!(
-        serde_json::from_str::<Value>(&usage)
+        studio_json::from_str::<Value>(&usage)
             .unwrap()
             .get("waitingForAuth")
             .is_none()
     );
     assert_eq!(
-        serde_json::from_str::<Value>(&capacity).expect("capacity JSON")["status"],
+        studio_json::from_str::<Value>(&capacity).expect("capacity JSON")["status"],
         "finished"
     );
 }
@@ -569,7 +569,7 @@ async fn committed_delete_succeeds_when_post_commit_delivery_fails() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("records"),
+        studio_json::from_value(case["records"].clone()).expect("records"),
     )
     .await;
     let result = agent_lifecycle_runtime::execute(
@@ -606,7 +606,7 @@ async fn committed_delete_drains_its_intent_despite_unrelated_cleanup_failure() 
         .into_iter()
         .find(|case| case["name"] == "delete")
         .expect("delete case");
-    let mut records: Records = serde_json::from_value(case["records"].clone()).expect("records");
+    let mut records: Records = studio_json::from_value(case["records"].clone()).expect("records");
     let root = tempfile::tempdir().expect("root");
     records.tables.get_mut("runtime_agents").expect("agents").push(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
         "id":"a-broken-cleanup", "rootId":"a-broken-cleanup", "epoch":1, "status":"paused", "deletedAt":1,
@@ -664,7 +664,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
         .into_iter()
         .find(|case| case["name"] == "delete")
         .expect("Python delete case");
-    let mut records: Records = serde_json::from_value(case["records"].clone()).expect("records");
+    let mut records: Records = studio_json::from_value(case["records"].clone()).expect("records");
     records.tables.insert(
         "runtime_work".to_owned(),
         vec![json!({
@@ -705,7 +705,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
             |row| row.get(0),
         )
         .expect("work row");
-    let work: Value = serde_json::from_str(&raw).expect("work JSON");
+    let work: Value = studio_json::from_str(&raw).expect("work JSON");
     assert!(work["owner"].is_null());
     assert_eq!(work["status"], "ready");
     assert_eq!(work["version"], 2);
@@ -726,7 +726,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
         .find(|row| row.id == "deleted-worker-task" && !row.deleted)
         .and_then(|row| row.payload)
         .expect("released work entity");
-    let entity: Value = serde_json::from_str(&payload).expect("entity JSON");
+    let entity: Value = studio_json::from_str(&payload).expect("entity JSON");
     // The renderer view carries the released status, not the owner.
     assert_eq!(entity["value"]["status"], "ready");
 }
@@ -743,7 +743,7 @@ fn typed_table<'a>(table: &'a str, expected: &Value) -> (&'a str, Value) {
         .iter()
         .map(|row| {
             let id = row["id"].as_str().expect("request id");
-            serde_json::to_value(
+            studio_json::to_value(
                 studio_runtime_store::approvals::from_legacy_record(id, row)
                     .expect("typed approval"),
             )
@@ -783,7 +783,7 @@ fn state(store: &RuntimeStore) -> Value {
     // Work documents have no copy in sync_entities; a reader builds them at read time.
     let mut sync = sync;
     let collections =
-        serde_json::to_string(studio_runtime_store::WORK_COLLECTIONS).expect("collections");
+        studio_json::to_string(studio_runtime_store::WORK_COLLECTIONS).expect("collections");
     let page = studio_runtime_services::entity_scope::resume(
         &db,
         None,
@@ -817,7 +817,7 @@ fn parsed_child_event_rows(rows: &Value) -> Value {
             .is_some_and(|id| id.starts_with("child-stop:"))
             && let Some(text) = row.get("text").and_then(Value::as_str)
         {
-            row["text"] = serde_json::from_str(text).expect("child event JSON payload");
+            row["text"] = studio_json::from_str(text).expect("child event JSON payload");
         }
     }
     rows
@@ -978,7 +978,7 @@ impl LifecyclePorts for InterruptFixture {
             )
             .map_err(studio_runtime_store::StoreError::from)?;
         assert_eq!(
-            serde_json::from_str::<Value>(&saved).expect("saved agent"),
+            studio_json::from_str::<Value>(&saved).expect("saved agent"),
             *stopped
         );
         Ok(())
@@ -1003,7 +1003,7 @@ fn assert_conversation_detail_sources(snapshot: &Value) {
             continue;
         }
         let payload: Value =
-            serde_json::from_str(row[4].as_str().expect("payload")).expect("entity JSON");
+            studio_json::from_str(row[4].as_str().expect("payload")).expect("entity JSON");
         assert!(
             studio_runtime_schema::validate_sync_entity_payload_strict(
                 collection,
@@ -1063,7 +1063,7 @@ fn assert_work_detail_sources(case: &Value, snapshot: &Value) {
         .map(|row| {
             let collection = row[0].as_str().expect("collection");
             let id = row[1].as_str().expect("id");
-            let payload: Value = serde_json::from_str(row[4].as_str().expect("work payload"))
+            let payload: Value = studio_json::from_str(row[4].as_str().expect("work payload"))
                 .expect("work entity JSON");
             assert_eq!(payload["collection"], collection);
             assert_eq!(payload["id"], id);
@@ -1093,7 +1093,7 @@ fn unrelated_work_projection_rows(snapshot: &Value) -> Vec<Value> {
             if collection != "work" && !is_work_partition(collection) {
                 return false;
             }
-            let payload: Value = serde_json::from_str(row[4].as_str().expect("work payload"))
+            let payload: Value = studio_json::from_str(row[4].as_str().expect("work payload"))
                 .expect("work entity JSON");
             row[1] == "unrelated-work" || payload["value"]["taskId"] == "unrelated-work"
         })
@@ -1171,7 +1171,7 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
             if row[0] == "agent" && row[5] == 0 {
                 // These server-owned account projections postdate the frozen Python oracle.
                 let mut value: Value =
-                    serde_json::from_str(payload.as_str().expect("agent payload"))
+                    studio_json::from_str(payload.as_str().expect("agent payload"))
                         .expect("agent JSON");
                 if let Some(agent) = value["value"].as_object_mut() {
                     for field in [
@@ -1191,7 +1191,7 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
     expected_sync.iter_mut().for_each(|row| {
         if row[0] == "agent" && row[3] == 0 {
             // The frozen Codex projection predates explicit provider identity.
-            let mut payload: Value = serde_json::from_str(row[2].as_str().expect("agent payload"))
+            let mut payload: Value = studio_json::from_str(row[2].as_str().expect("agent payload"))
                 .expect("frozen agent JSON");
             payload["value"]["provider"] = json!(studio_runtime_schema::ProviderKind::Codex);
             payload["value"]["compactions"] = json!(0);
@@ -1215,16 +1215,17 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
     // legacy comparison intact and check the added projections independently.
     let rows = saved["sync"].as_array().expect("sync rows");
     for legacy in rows.iter().filter(|row| row[0] == "agent" && row[5] == 0) {
-        let full: Value =
-            serde_json::from_str(legacy[4].as_str().expect("legacy payload")).expect("legacy JSON");
+        let full: Value = studio_json::from_str(legacy[4].as_str().expect("legacy payload"))
+            .expect("legacy JSON");
         for collection in ["agentSummary", "agentDetail"] {
             let row = rows
                 .iter()
                 .find(|row| row[0] == collection && row[1] == legacy[1])
                 .expect("agent projection exists");
             assert_eq!(row[5], 0, "live projection");
-            let payload: Value = serde_json::from_str(row[4].as_str().expect("projection payload"))
-                .expect("projection JSON");
+            let payload: Value =
+                studio_json::from_str(row[4].as_str().expect("projection payload"))
+                    .expect("projection JSON");
             assert_eq!(payload["value"]["id"], full["value"]["id"]);
             if collection == "agentSummary" {
                 assert_eq!(payload["value"]["status"], full["value"]["status"]);
@@ -1244,7 +1245,7 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
             continue;
         }
         let payload: Value =
-            serde_json::from_str(row[4].as_str().expect("receipt payload")).expect("receipt JSON");
+            studio_json::from_str(row[4].as_str().expect("receipt payload")).expect("receipt JSON");
         let event = saved["tables"]["runtime_events"]
             .as_array()
             .expect("events")
@@ -1285,7 +1286,7 @@ async fn python_stop_corpus_complete_records_and_exact_descendants() {
         let store = Arc::new(clone_store(base.path(), root.path()).await);
         seed(
             &store,
-            serde_json::from_value(case["records"].clone()).expect("Python rows"),
+            studio_json::from_value(case["records"].clone()).expect("Python rows"),
         )
         .await;
         let unrelated_work_before = (case["name"] == "delete-unrelated-open-work")
@@ -1297,7 +1298,7 @@ async fn python_stop_corpus_complete_records_and_exact_descendants() {
         let ports = Arc::new(InterruptFixture::for_case(&case));
         let mut result = Value::Null;
         for action in actions {
-            let action: Action = serde_json::from_value(action).expect("action");
+            let action: Action = studio_json::from_value(action).expect("action");
             result = agent_lifecycle_runtime::execute(
                 Arc::clone(&store),
                 &action,
@@ -1362,7 +1363,7 @@ async fn lifecycle_store_failpoints_and_missing_consumer_leave_no_writes() {
     let store = fixture_store(Some(base.path())).await.expect("open");
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("Python rows"),
+        studio_json::from_value(case["records"].clone()).expect("Python rows"),
     )
     .await;
     // The clones below copy only the database files; the seed must not stay in the WAL.
@@ -1383,7 +1384,7 @@ async fn lifecycle_store_failpoints_and_missing_consumer_leave_no_writes() {
             let store = Arc::new(clone_store(base.path(), root.path()).await);
             let before = state(&store);
             store.transaction(move |tx| { tx.execute_batch(&format!("CREATE TRIGGER failpoint {boundary} {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'stop failure'); END"))?; Ok(()) }).await.expect("failpoint");
-            let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+            let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
             assert!(
                 agent_lifecycle_runtime::execute(
                     Arc::clone(&store),
@@ -1464,7 +1465,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                         |row| row.get(0),
                     )
                     .expect("stopped agent row");
-                let agent: Value = serde_json::from_str(&raw).expect("agent record");
+                let agent: Value = studio_json::from_str(&raw).expect("agent record");
                 let interrupt = &agent["startAttempt"]["interrupt"];
                 if request.method == studio_runtime_providers::Method::TurnInterrupt {
                     assert_eq!(interrupt["outcome"], "unknown");
@@ -1508,7 +1509,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
             seed(
                 &store,
-                serde_json::from_value(case["records"].clone()).expect("Python rows"),
+                studio_json::from_value(case["records"].clone()).expect("Python rows"),
             )
             .await;
             let before = state(&store);
@@ -1537,7 +1538,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                 broker.clone(),
                 None,
             );
-            let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+            let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
             assert!(
                 ports
                     .execute(&action, case["now"].as_f64().expect("time"))
@@ -1590,7 +1591,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                     |row| row.get(0),
                 )
                 .expect("agent row");
-            let agent: Value = serde_json::from_str(&raw).expect("agent record");
+            let agent: Value = studio_json::from_str(&raw).expect("agent record");
             assert_eq!(agent["startAttempt"]["interrupt"]["outcome"], "accepted");
             drop(reader);
             let actual = state(&store);
@@ -1643,7 +1644,7 @@ async fn production_child_notification_matches_python_corpus() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("Python rows"),
+        studio_json::from_value(case["records"].clone()).expect("Python rows"),
     )
     .await;
     let ports = ProductionLifecyclePorts::new(
@@ -1653,7 +1654,7 @@ async fn production_child_notification_matches_python_corpus() {
         Arc::new(NoBroker),
         None,
     );
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     assert_eq!(
         ports
             .execute(&action, case["now"].as_f64().expect("time"))
@@ -1712,7 +1713,7 @@ async fn production_child_notification_matches_python_corpus() {
             let mut payload = row[4].clone();
             if row[0] == "agent" && row[5] == 0 {
                 let mut value: Value =
-                    serde_json::from_str(payload.as_str().expect("agent payload"))
+                    studio_json::from_str(payload.as_str().expect("agent payload"))
                         .expect("agent JSON");
                 crate::normalize_agent_nulls(&mut value);
                 payload = json!(value.to_string());
@@ -1728,7 +1729,7 @@ async fn production_child_notification_matches_python_corpus() {
         .collect::<Vec<_>>();
     for row in &mut expected_sync {
         if row[0] == "agent" && row[3] == 0 {
-            let mut payload: Value = serde_json::from_str(row[2].as_str().expect("agent payload"))
+            let mut payload: Value = studio_json::from_str(row[2].as_str().expect("agent payload"))
                 .expect("frozen agent JSON");
             payload["value"]["compactions"] = json!(0);
             payload["value"]["provider"] = json!(studio_runtime_schema::ProviderKind::Codex);
@@ -1757,7 +1758,7 @@ async fn production_restart_scan_settles_durable_deleted_agent_state() {
         .find(|case| case["name"] == "delete-running")
         .expect("active delete corpus case");
     let mut records: Records =
-        serde_json::from_value(case["records"].clone()).expect("Python rows");
+        studio_json::from_value(case["records"].clone()).expect("Python rows");
     let deleted = records
         .tables
         .get_mut("runtime_agents")
@@ -1893,7 +1894,7 @@ async fn composed_delete_stages_voice_sessions_before_rows_are_removed_and_stops
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("store"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
     store.transaction_with_error(|tx|->Result<(),provider::VoiceProviderError>{
@@ -1994,7 +1995,7 @@ async fn production_interrupt_requires_in_flight_active_turn() {
         .find(|case| case["name"] == "running-True")
         .expect("active stop corpus case");
     let mut records: Records =
-        serde_json::from_value(case["records"].clone()).expect("Python rows");
+        studio_json::from_value(case["records"].clone()).expect("Python rows");
     let lead = records
         .tables
         .get_mut("runtime_agents")
@@ -2016,7 +2017,7 @@ async fn production_interrupt_requires_in_flight_active_turn() {
         Arc::new(NoBroker),
         None,
     );
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     ports
         .execute(&action, case["now"].as_f64().expect("time"))
         .await
@@ -2084,7 +2085,7 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("Python rows"),
+        studio_json::from_value(case["records"].clone()).expect("Python rows"),
     )
     .await;
     let broker = Arc::new(UnknownBroker {
@@ -2102,7 +2103,7 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
         broker.clone(),
         None,
     );
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     ports
         .execute(&action, case["now"].as_f64().expect("time"))
         .await
@@ -2146,7 +2147,7 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
             |row| row.get(0),
         )
         .expect("agent row");
-    let agent: Value = serde_json::from_str(&raw).expect("agent");
+    let agent: Value = studio_json::from_str(&raw).expect("agent");
     assert_eq!(agent["startAttempt"]["interrupt"], first);
 }
 
@@ -2162,11 +2163,11 @@ async fn deletion_requires_release_only_for_releasable_deleted_owner_work() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
     let before = state(&store);
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     assert!(matches!(
         agent_lifecycle_runtime::execute(
             Arc::clone(&store),
@@ -2207,11 +2208,11 @@ async fn effect_adapter_failure_rolls_back_its_own_writes() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
     let before = state(&store);
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     assert!(
         agent_lifecycle_runtime::execute(Arc::clone(&store), &action, 1234567.5, Arc::new(Fails),)
             .await
@@ -2251,11 +2252,11 @@ async fn successful_adapter_cannot_resurrect_stopped_agent() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
     let before = state(&store);
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     assert!(matches!(
         agent_lifecycle_runtime::execute(
             Arc::clone(&store),
@@ -2309,11 +2310,11 @@ async fn successful_adapter_cannot_replace_attempt_or_provider_identity() {
         let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
         seed(
             &store,
-            serde_json::from_value(case["records"].clone()).expect("rows"),
+            studio_json::from_value(case["records"].clone()).expect("rows"),
         )
         .await;
         let before = state(&store);
-        let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+        let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
         assert!(matches!(
             agent_lifecycle_runtime::execute(
                 Arc::clone(&store),
@@ -2356,10 +2357,10 @@ async fn lost_wake_preserves_committed_stop_for_restart() {
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
-        serde_json::from_value(case["records"].clone()).expect("rows"),
+        studio_json::from_value(case["records"].clone()).expect("rows"),
     )
     .await;
-    let action: Action = serde_json::from_value(case["action"].clone()).expect("action");
+    let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
     agent_lifecycle_runtime::execute(Arc::clone(&store), &action, 1234567.5, Arc::new(LostWake))
         .await
         .expect("a lost wake preserves the committed stop result");

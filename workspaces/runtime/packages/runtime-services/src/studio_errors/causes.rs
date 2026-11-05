@@ -39,15 +39,23 @@ pub fn store_error_kind(error: &studio_runtime_store::StoreError) -> InternalErr
     }
 }
 
-pub fn json_cause(error: &serde_json::Error) -> Cause {
+pub fn json_cause(error: &studio_json::Error) -> Cause {
+    json_cause_parts(error.line(), error.column(), error.classify())
+}
+
+pub(super) fn json_cause_parts(
+    line: usize,
+    column: usize,
+    category: studio_json::error::Category,
+) -> Cause {
     Cause::Json {
-        line: error.line(),
-        column: error.column(),
-        category: match error.classify() {
-            serde_json::error::Category::Io => JsonCategory::Io,
-            serde_json::error::Category::Syntax => JsonCategory::Syntax,
-            serde_json::error::Category::Data => JsonCategory::Data,
-            serde_json::error::Category::Eof => JsonCategory::Eof,
+        line,
+        column,
+        category: match category {
+            studio_json::error::Category::Io => JsonCategory::Io,
+            studio_json::error::Category::Syntax => JsonCategory::Syntax,
+            studio_json::error::Category::Data => JsonCategory::Data,
+            studio_json::error::Category::Eof => JsonCategory::Eof,
         },
     }
 }
@@ -220,7 +228,7 @@ mod tests {
         assert!(
             matches!(causes.last(), Some(Cause::Sqlite { primary_code, .. }) if *primary_code==rusqlite::ffi::SQLITE_IOERR)
         );
-        let encoded = serde_json::to_string(&causes).expect("safe diagnostic");
+        let encoded = studio_json::to_string(&causes).expect("safe diagnostic");
         assert!(!encoded.contains("source-canary"));
         assert!(!encoded.contains("rollback-canary"));
     }
@@ -238,7 +246,7 @@ mod tests {
             matches!(&causes[0], Cause::StoredRecord {object,id,pointer:Some(pointer)} if object=="runtime_work" && id=="task-7" && pointer=="/dependencies/0")
         );
         assert!(
-            !serde_json::to_string(&causes)
+            !studio_json::to_string(&causes)
                 .expect("safe facts")
                 .contains("source-canary")
         );
@@ -250,11 +258,11 @@ mod tests {
             matches!(store_causes(&sql)[0], Cause::Sqlite {primary_code,extended_code} if primary_code==rusqlite::ffi::SQLITE_CONSTRAINT && extended_code==rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE)
         );
         assert!(
-            !serde_json::to_string(&store_causes(&sql))
+            !studio_json::to_string(&store_causes(&sql))
                 .expect("safe facts")
                 .contains("source-canary")
         );
-        let json = serde_json::from_str::<serde_json::Value>("{\n  source-canary")
+        let json = studio_json::from_str::<studio_json::Value>("{\n  source-canary")
             .expect_err("syntax failure");
         assert!(matches!(
             json_cause(&json),

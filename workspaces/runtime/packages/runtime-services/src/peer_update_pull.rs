@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
@@ -542,7 +542,7 @@ impl Puller {
         match receipt.outcome {
             RemoteOutcome::Applied => receipt
                 .value
-                .and_then(|value| serde_json::from_str::<R>(value.get()).ok())
+                .and_then(|value| studio_json::from_str::<R>(value.as_str()).ok())
                 .ok_or_else(|| Step::Failed(INVALID_RECEIPT.to_owned())),
             RemoteOutcome::NotApplied => {
                 Err(Step::Refused(receipt.error.unwrap_or_else(|| {
@@ -1032,7 +1032,7 @@ fn pending_id(server: &str, build: &Value) -> String {
 }
 
 fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&std::fs::read(path).ok()?)
+    studio_json::from_slice(&std::fs::read(path).ok()?)
         .ok()
         .filter(Value::is_object)
 }
@@ -1083,7 +1083,7 @@ mod tests {
     use std::time::Duration;
 
     use futures_util::future::BoxFuture;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
     use studio_runtime_store::RuntimeStore;
     use tokio::sync::watch;
 
@@ -1202,9 +1202,9 @@ mod tests {
                 {
                     self.corrupt_chunks.fetch_sub(1, Ordering::SeqCst);
                     let mut value: ChunkReply =
-                        serde_json::from_str(receipt.value.as_ref().unwrap().get()).unwrap();
+                        studio_json::from_str(receipt.value.as_ref().unwrap().as_str()).unwrap();
                     value.sha256 = "0".repeat(64);
-                    receipt.value = Some(serde_json::value::to_raw_value(&value).unwrap());
+                    receipt.value = Some(studio_json::to_raw_value(&value).unwrap());
                 }
                 Ok(receipt)
             })

@@ -13,7 +13,7 @@ use crate::{
     usage_resume::{self, Cause as UsageCause, FailureObservation, LimitsObservation},
 };
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::provider_errors::{
     KnownCodexErrorKind, known_error_kind, raw_error_kind,
 };

@@ -2,8 +2,8 @@ use crate::CachedSql;
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, functions::FunctionFlags, params};
-use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use studio_json::{Map, Value};
 
 use crate::{StoreError, StoreResult};
 
@@ -384,11 +384,11 @@ pub use studio_runtime_schema::json_compat::{
     python_json_with_separators,
 };
 
-fn event_payload(key: &str, raw: &str, deleted: bool) -> Result<String, serde_json::Error> {
+fn event_payload(key: &str, raw: &str, deleted: bool) -> Result<String, studio_json::Error> {
     let mut value = if deleted {
         Map::new()
     } else {
-        serde_json::from_str::<Value>(raw)
+        studio_json::from_str::<Value>(raw)
             .ok()
             .and_then(|value| value.as_object().cloned())
             .unwrap_or_default()
@@ -407,7 +407,7 @@ fn event_payload(key: &str, raw: &str, deleted: bool) -> Result<String, serde_js
                 field.is_null()
                     || field
                         .as_number()
-                        .and_then(serde_json::Number::as_f64)
+                        .and_then(studio_json::Number::as_f64)
                         .is_some_and(f64::is_finite)
             }
             _ => false,
@@ -416,7 +416,7 @@ fn event_payload(key: &str, raw: &str, deleted: bool) -> Result<String, serde_js
 
     let mut payload = format!(
         "{{\"collection\":\"event\",\"id\":{},\"value\":{{",
-        serde_json::to_string(key)?
+        studio_json::to_string(key)?
     );
     let mut fields = value.into_iter().collect::<Vec<_>>();
     fields.sort_by(|left, right| left.0.cmp(&right.0));
@@ -424,7 +424,7 @@ fn event_payload(key: &str, raw: &str, deleted: bool) -> Result<String, serde_js
         if index != 0 {
             payload.push(',');
         }
-        payload.push_str(&serde_json::to_string(name)?);
+        payload.push_str(&studio_json::to_string(name)?);
         payload.push(':');
         if name == "created"
             && let Some(number) = field.as_number()
@@ -434,7 +434,7 @@ fn event_payload(key: &str, raw: &str, deleted: bool) -> Result<String, serde_js
             }
             continue;
         }
-        payload.push_str(&serde_json::to_string(field)?);
+        payload.push_str(&studio_json::to_string(field)?);
     }
     payload.push_str("}}");
     Ok(payload)
@@ -611,7 +611,7 @@ fn verify_analytics_migration(canvas: &Connection, analytics: &Connection) -> St
     let Some(marker) = marker else {
         return Ok(());
     };
-    let decoded: Value = serde_json::from_str(&marker).map_err(|error| {
+    let decoded: Value = studio_json::from_str(&marker).map_err(|error| {
         object_mismatch(
             "analytics.sqlite3",
             "analytics_meta.fileMigrationV1",
@@ -745,11 +745,11 @@ mod tests {
 
     #[test]
     fn persisted_and_federation_json_keep_distinct_unicode_formats() {
-        let value = serde_json::json!({"z": 1, "a": "é"});
+        let value = studio_json::json!({"z": 1, "a": "é"});
         assert_eq!(python_json(&value), r#"{"a": "\u00e9", "z": 1}"#,);
         assert_eq!(python_json_compact(&value), r#"{"a":"é","z":1}"#,);
         assert_eq!(
-            python_json_compact(&serde_json::json!({"x": 1e-6})),
+            python_json_compact(&studio_json::json!({"x": 1e-6})),
             r#"{"x":1e-06}"#
         );
     }

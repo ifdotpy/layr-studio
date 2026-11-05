@@ -88,7 +88,7 @@ pub async fn verify(
     }
     let saved: startup::SupervisorRecovery =
         match std::fs::read(state.join("background-recovery.json")) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
+            Ok(bytes) => studio_json::from_slice(&bytes)
                 .map_err(|e| format!("Cannot read backend recovery settings: {e}"))?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
             Err(error) => return Err(error.to_string()),

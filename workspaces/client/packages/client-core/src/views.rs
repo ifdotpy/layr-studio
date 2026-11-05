@@ -4,9 +4,9 @@ use crate::{
     protocol::{Request, Response},
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Arc};
 use studio_client_domain::json_object::JsonObject;
+use studio_json::{Value, json};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 // Non-string optional fields historically behave like absent values.

@@ -16,7 +16,7 @@ fn path(state: &Path) -> PathBuf {
 
 fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
     let settings = match fs::read(path(state)) {
-        Ok(bytes) => serde_json::from_slice::<Settings>(&bytes)
+        Ok(bytes) => studio_json::from_slice::<Settings>(&bytes)
             .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}")))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
         Err(e) => return Err(e.into()),
@@ -123,7 +123,7 @@ pub fn configure_resolved(state: &Path, root: &CanonicalPath, use_default: bool)
     fs::create_dir_all(&folder)?;
     crate::atomic_file::replace(
         &path(state),
-        serde_json::to_string(&settings)
+        studio_json::to_string(&settings)
             .map_err(|e| NativeLayrError::Refused(e.to_string()))?
             .as_bytes(),
         Some(0o600),
@@ -137,7 +137,7 @@ pub(crate) fn fixture_select(state: &Path, root: &Path) {
     fs::create_dir_all(state.join(NATIVE_LAYR_DIRECTORY)).expect("settings folder");
     fs::write(
         path(state),
-        serde_json::to_string(&Settings {
+        studio_json::to_string(&Settings {
             store_root: Some(root.to_owned()),
         })
         .unwrap(),
@@ -305,7 +305,7 @@ mod tests {
         std::fs::create_dir_all(state.path().join(NATIVE_LAYR_DIRECTORY)).unwrap();
         std::fs::write(
             path(state.path()),
-            serde_json::to_string(&Settings {
+            studio_json::to_string(&Settings {
                 store_root: Some(default.path().to_owned()),
             })
             .unwrap(),

@@ -19,8 +19,8 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use strum::VariantNames;
+use studio_json::Value;
 
 use crate::approvals;
 use crate::records::{AgentExecutionMode, AgentId, AgentStatus};
@@ -362,7 +362,7 @@ pub(crate) fn backfill(transaction: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let record: String = row.get(1)?;
-        let value: Value = serde_json::from_str(&record)?;
+        let value: Value = studio_json::from_str(&record)?;
         project(transaction, &id, &value)?;
     }
     Ok(())
@@ -424,7 +424,7 @@ fn place_attempt(connection: &Connection, chat: &str, fields: &Fields) -> StoreR
             .execute([chat])?;
         return Ok(());
     };
-    let text = serde_json::to_string(attempt)?;
+    let text = studio_json::to_string(attempt)?;
     let ticket = attempt
         .pointer("/interrupt/requestTicket")
         .and_then(Value::as_str);
@@ -751,12 +751,12 @@ pub fn read_chat(connection: &Connection, id: &str) -> StoreResult<Option<ChatRo
         .optional()?;
     raw.map(
         |(id, state, status, auto_wake, usage_resume_enabled, mode, turn_epoch)| {
-            let status = serde_json::from_value::<AgentStatus>(Value::String(status))?;
+            let status = studio_json::from_value::<AgentStatus>(Value::String(status))?;
             if matches!(status, AgentStatus::Other(_)) {
                 return Err(StoreError::RecordContract("invalid stored chat status"));
             }
             let execution_mode = mode
-                .map(|mode| serde_json::from_value(Value::String(mode)))
+                .map(|mode| studio_json::from_value(Value::String(mode)))
                 .transpose()?;
             Ok(ChatRow {
                 id: AgentId(id),
@@ -886,7 +886,7 @@ pub(crate) const TABLE_REQUIREMENTS: [crate::schema::TableRequirement; 3] = [
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     fn agent(id: &str, extra: Value) -> Value {
         let mut base = json!({"id":id,"rootId":id,"epoch":1,"status":"idle","provider":"codex","compactions":0,
@@ -1278,7 +1278,7 @@ mod tests {
         );
         let turn = unfinished_turn(&db, "c").unwrap().unwrap();
         assert_eq!(turn.interrupt_ticket.as_deref(), Some("i1"));
-        let attempt: Value = serde_json::from_str(turn.attempt.as_deref().unwrap()).unwrap();
+        let attempt: Value = studio_json::from_str(turn.attempt.as_deref().unwrap()).unwrap();
         assert_eq!(attempt["id"], "a1");
     }
 

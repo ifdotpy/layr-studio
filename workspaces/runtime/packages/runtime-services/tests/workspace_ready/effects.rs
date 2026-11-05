@@ -1564,7 +1564,7 @@ async fn public_probe_child() {
         if expected == "ref-conflict" {
             let db = store.test_reader().expect("read");
             let journal: String = db.query_row("SELECT record FROM runtime_workspace_operations WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.kind')='provision'", [&id], |row| row.get(0)).expect("journal");
-            let journal: Value = serde_json::from_str(&journal).expect("json");
+            let journal: Value = studio_json::from_str(&journal).expect("json");
             assert!(
                 journal["result"]["checkpointError"]
                     .as_str()

@@ -10,13 +10,13 @@ use crate::event_write::settle_request;
 use crate::workspace_operations::ProviderTicket;
 use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
+use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_providers::{Method, RequestId};
 use studio_runtime_schema::persistence::{
@@ -63,7 +63,7 @@ pub enum NativeError {
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error("Invalid stored native action JSON")]
-    Json(#[from] serde_json::Error),
+    Json(#[from] studio_json::Error),
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
 }
@@ -980,7 +980,7 @@ pub async fn execute_provider_prepared(
         }
         let mut value = response(&snapshot, false);
         value["outcome"] =
-            serde_json::to_value(settled).map_err(|_| NativeError::Invalid("outcome"))?;
+            studio_json::to_value(settled).map_err(|_| NativeError::Invalid("outcome"))?;
         return Ok(value);
     }
     Err(NativeError::Unknown)
@@ -1041,7 +1041,7 @@ mod native_action_retry_tests {
             "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
         )
         .expect("policy");
-        let reply = serde_json::json!({"receipt":{"requestId":"old-action","agentId":"agent","action":"compact","accountKey":"account","threadId":"thread","epoch":1,"attemptId":"attempt","acceptedAt":1.0,"status":"accepted"},"outcome":{"status":"acknowledged","result":{"turnId":"original"}},"replayed":false,"result":{"turnId":"original"}});
+        let reply = studio_json::json!({"receipt":{"requestId":"old-action","agentId":"agent","action":"compact","accountKey":"account","threadId":"thread","epoch":1,"attemptId":"attempt","acceptedAt":1.0,"status":"accepted"},"outcome":{"status":"acknowledged","result":{"turnId":"original"}},"replayed":false,"result":{"turnId":"original"}});
         let envelope = studio_runtime_store::request_results::ResultEnvelope {
             actor: Some("agent".to_owned()),
             reply,
@@ -1050,7 +1050,7 @@ mod native_action_retry_tests {
         db.execute(
             "INSERT INTO request_results(id,signature,result,created) VALUES('old-action','signature',?1,?2)",
             rusqlite::params![
-                serde_json::to_string(&envelope).expect("reply"),
+                studio_json::to_string(&envelope).expect("reply"),
                 chrono::Utc::now().timestamp_millis()
             ],
         )
@@ -1063,7 +1063,7 @@ mod native_action_retry_tests {
     use super::{NativeRequest, SessionReceipt, validate_provider_receipt};
     use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
     use crate::{account_session_runtime::ConnectionScope, workspace_operations::ProviderTicket};
-    use serde_json::json;
+    use studio_json::json;
     use studio_runtime_providers::{Method, RequestId, RequestTicket};
 
     /// The store owns the attempt action names that may have no input events.
@@ -1071,7 +1071,7 @@ mod native_action_retry_tests {
     fn action_wire_names_match_the_store_native_action_owner() {
         let names: Vec<_> = [super::Action::Compact, super::Action::Review]
             .into_iter()
-            .map(|action| serde_json::to_value(action).expect("action wire name"))
+            .map(|action| studio_json::to_value(action).expect("action wire name"))
             .collect();
         assert_eq!(
             names,
@@ -1551,10 +1551,10 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(
     location: &'static str,
 ) -> Result<T> {
     bounded(&value, location)?;
-    serde_json::from_value(value).map_err(|_| NativeError::Invalid(location))
+    studio_json::from_value(value).map_err(|_| NativeError::Invalid(location))
 }
 
-pub(crate) fn checked_agent(value: &Value) -> Result<AgentRecord> {
+pub(crate) fn validate_agent(value: &Value) -> Result<()> {
     bounded(value, "agent")?;
     crate::context_repair::validate("PersistedAgentRecord", value, "agent").map_err(|_| {
         NativeError::InvalidStored {
@@ -1567,6 +1567,11 @@ pub(crate) fn checked_agent(value: &Value) -> Result<AgentRecord> {
             location: "record".into(),
         }
     })?;
+    Ok(())
+}
+
+pub(crate) fn checked_agent(value: &Value) -> Result<AgentRecord> {
+    validate_agent(value)?;
     Ok(AgentRecord::from_value(value.clone())?)
 }
 
@@ -1633,7 +1638,7 @@ impl CommandSnapshot {
         Ok(format!(
             "Use your native write_stdin tool for session {}. Send exactly this JSON string as chars: {}.",
             self.process,
-            serde_json::to_string(text)?
+            studio_json::to_string(text)?
         ))
     }
     pub fn listed(&self, page: &Value) -> Result<bool> {
@@ -1654,7 +1659,7 @@ impl CommandSnapshot {
                 .ok_or(NativeError::Invalid("command.id"))?],
             |r| r.get(0),
         )?;
-        let task: Value = serde_json::from_str(&saved)?;
+        let task: Value = studio_json::from_str(&saved)?;
         if task != self.task
             || agent(
                 tx,
@@ -1678,7 +1683,7 @@ pub trait CommandAdmission {
         agent: &Value,
         key: &str,
         instruction: &str,
-    ) -> Result<Box<serde_json::value::RawValue>>;
+    ) -> Result<studio_json::OwnedRawJson>;
 }
 #[derive(Clone, Copy)]
 pub enum CommandAction<'a> {
@@ -1761,10 +1766,10 @@ pub fn command_input(
     snapshot: &CommandSnapshot,
     text: &str,
     admission: &impl CommandAdmission,
-) -> Result<Box<serde_json::value::RawValue>> {
+) -> Result<studio_json::OwnedRawJson> {
     use crate::event_write::{CallerAdmission, RequestKey, begin_request};
     let signature = json!({"task":snapshot.task["id"],"action":"input","text":text}).to_string();
-    let admitted = match begin_request::<Box<serde_json::value::RawValue>>(
+    let admitted = match begin_request::<studio_json::OwnedRawJson>(
         tx,
         RequestKey::new("native-command", &[], key).raw(&format!("native-command:{key}")),
         &signature,
@@ -1775,7 +1780,7 @@ pub fn command_input(
     };
     snapshot.current(tx)?;
     let result = admission.enqueue(tx, &snapshot.agent, key, &snapshot.input(text)?)?;
-    if result.get().len() > MAX_BYTES {
+    if result.as_str().len() > MAX_BYTES {
         return Err(NativeError::Invalid("command.result"));
     }
     settle_request(tx, &admitted, snapshot.agent["id"].as_str(), &result)?;

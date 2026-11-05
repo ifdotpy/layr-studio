@@ -13,4 +13,4 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-serde_json.workspace = true
+studio-json = { path = "../../packages/json" }

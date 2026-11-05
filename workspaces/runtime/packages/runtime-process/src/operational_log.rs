@@ -315,7 +315,7 @@ mod tests {
         }
         const QUEUED_CHUNKS: usize = 16;
         let fixture: RotationFixture =
-            serde_json::from_str(include_str!("../tests/fixtures/log-rotation.json"))
+            studio_json::from_str(include_str!("../tests/fixtures/log-rotation.json"))
                 .expect("frozen log rotation fixture");
         let root = tempdir().expect("isolated log directory");
         for (name, bytes) in fixture.seed {

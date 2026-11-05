@@ -1,7 +1,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
-use serde_json::{Value, json};
 use std::{collections::BTreeMap, future::Future, task::Poll};
+use studio_json::{Value, json};
 use studio_runtime_process::{
     BackendId, BackendIdentity, Generation, ProviderHandle, ProviderLaunchSpec,
     provider_seam::{
@@ -43,7 +43,7 @@ async fn fixture_account_store(
 async fn request(stream: &mut BufReader<UnixStream>) -> Value {
     let mut line = String::new();
     stream.read_line(&mut line).await.unwrap();
-    serde_json::from_str(&line).unwrap()
+    studio_json::from_str(&line).unwrap()
 }
 async fn respond(stream: &mut BufReader<UnixStream>, value: Value) {
     stream

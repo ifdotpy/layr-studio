@@ -25,8 +25,8 @@ fn export_request_keeps_canonical_wire_bytes() {
         branch: "main".into(),
         known: studio_runtime_schema::queue_command::Field::Value(vec!["abc".into(), "def".into()]),
     };
-    let bytes = serde_json::to_vec(&request).expect("export request");
-    let value: Value = serde_json::from_slice(&bytes).expect("wire payload");
+    let bytes = studio_json::to_vec(&request).expect("export request");
+    let value: Value = studio_json::from_slice(&bytes).expect("wire payload");
     assert_eq!(
         canonical_json(&value).expect("canonical payload"),
         r#"{"branch":"main","cwd":"/workspace","known":["abc","def"]}"#
@@ -59,7 +59,7 @@ fn seed(directory: &std::path::Path) -> Value {
     std::fs::create_dir(&project).unwrap();
     let cwd = project.to_string_lossy().into_owned();
     let base: Value =
-            serde_json::from_str(&"{\"accountKey\": \"default\", \"executionSettingsAccountKey\": \"default\", \"provider\": \"codex\", \"yoloMode\": true, \"prompt\": \"fixture\", \"cwd\": \"@cwd\", \"role\": \"orchestrator\", \"needsTitle\": false, \"subagentConcurrencyVersion\": 2, \"maxAgentsExplicit\": false, \"model\": \"gpt-6-astra\", \"effort\": \"medium\", \"fastMode\": false, \"daybreakEnabled\": false, \"cyberAccessProgram\": \"standard\", \"concurrency\": 32, \"maxAgents\": 64, \"tokenBudget\": null, \"status\": \"running\", \"autoWake\": true, \"epoch\": 3, \"inFlight\": false, \"turnEpoch\": 3, \"usageResumeEnabled\": true, \"tokensUsed\": 0, \"compactions\": 0, \"compactionsObservedOnly\": false, \"contextUsage\": null, \"events\": 0, \"error\": null, \"profileId\": null, \"profileInstructions\": \"\", \"tail\": \"\", \"worktree\": false, \"workspaceMode\": \"worktree\", \"executionMode\": \"native\", \"hostProjectPath\": \"@cwd\", \"layrReady\": false, \"workspaceBackend\": null, \"workspaceModeExplicit\": false, \"workspaceInGit\": false, \"worktreeReady\": false, \"environment\": \"host\", \"worktreeWarning\": null, \"workerBaseRef\": null, \"workerBaseCommit\": null, \"workerBaseBehindMain\": null, \"workerBaseMainRef\": null, \"workerDefaults\": {\"model\": \"gpt-6-luna\", \"effort\": \"high\", \"fastMode\": false, \"daybreakEnabled\": false, \"delegationDepth\": 1}, \"reviewDefaults\": {\"model\": null, \"effort\": null}, \"agentMode\": \"multi\", \"agentModeRevision\": 0, \"agentModeSupported\": true}".replace("@cwd", &cwd)).unwrap();
+            studio_json::from_str(&"{\"accountKey\": \"default\", \"executionSettingsAccountKey\": \"default\", \"provider\": \"codex\", \"yoloMode\": true, \"prompt\": \"fixture\", \"cwd\": \"@cwd\", \"role\": \"orchestrator\", \"needsTitle\": false, \"subagentConcurrencyVersion\": 2, \"maxAgentsExplicit\": false, \"model\": \"gpt-6-astra\", \"effort\": \"medium\", \"fastMode\": false, \"daybreakEnabled\": false, \"cyberAccessProgram\": \"standard\", \"concurrency\": 32, \"maxAgents\": 64, \"tokenBudget\": null, \"status\": \"running\", \"autoWake\": true, \"epoch\": 3, \"inFlight\": false, \"turnEpoch\": 3, \"usageResumeEnabled\": true, \"tokensUsed\": 0, \"compactions\": 0, \"compactionsObservedOnly\": false, \"contextUsage\": null, \"events\": 0, \"error\": null, \"profileId\": null, \"profileInstructions\": \"\", \"tail\": \"\", \"worktree\": false, \"workspaceMode\": \"worktree\", \"executionMode\": \"native\", \"hostProjectPath\": \"@cwd\", \"layrReady\": false, \"workspaceBackend\": null, \"workspaceModeExplicit\": false, \"workspaceInGit\": false, \"worktreeReady\": false, \"environment\": \"host\", \"worktreeWarning\": null, \"workerBaseRef\": null, \"workerBaseCommit\": null, \"workerBaseBehindMain\": null, \"workerBaseMainRef\": null, \"workerDefaults\": {\"model\": \"gpt-6-luna\", \"effort\": \"high\", \"fastMode\": false, \"daybreakEnabled\": false, \"delegationDepth\": 1}, \"reviewDefaults\": {\"model\": null, \"effort\": null}, \"agentMode\": \"multi\", \"agentModeRevision\": 0, \"agentModeSupported\": true}".replace("@cwd", &cwd)).unwrap();
     let actor = |index: usize, id: &str, name: &str, parent: Option<&str>, lead: bool| {
         let mut record = base.clone();
         record["id"] = json!(id);
@@ -220,7 +220,7 @@ impl MultiServerToolPort for ResumeFetching {
                             state: ServerFetchState::Fetching,
                             export: input
                                 .as_ref()
-                                .map(serde_json::to_string)
+                                .map(studio_json::to_string)
                                 .transpose()
                                 .map_err(StoreError::from)?,
                             admission: token,
@@ -282,7 +282,7 @@ impl PairedTransport for RecordingTransport {
                 .lock()
                 .unwrap()
                 .push(json!({"server": server, "envelope": envelope}));
-            Ok(serde_json::from_str(&reply(envelope).to_string()).expect("fixture reply"))
+            Ok(studio_json::from_str(&reply(envelope).to_string()).expect("fixture reply"))
         })
     }
 }
@@ -481,7 +481,7 @@ async fn call_with_ports(
 
 fn parsed(result: &Value) -> Value {
     let text = result["contentItems"][0]["text"].as_str().unwrap();
-    serde_json::from_str(text).unwrap_or_else(|_| json!(text))
+    studio_json::from_str(text).unwrap_or_else(|_| json!(text))
 }
 
 struct Case {
@@ -1121,7 +1121,7 @@ async fn a_lost_reply_is_unknown_and_an_exact_retry_does_not_send_again_in_fligh
             )?)
         })
         .unwrap();
-    let body: Value = serde_json::from_str(&body).unwrap();
+    let body: Value = studio_json::from_str(&body).unwrap();
     assert!(body["payload"].get("command").is_none(), "{body}");
     assert!(body["payload"]["receiptDigest"].is_string(), "{body}");
     let retry = call_tool(&store, lead, "retry", "new-call", &args, Some(tools)).await;
@@ -1479,7 +1479,7 @@ async fn ready_voice_session(store: &RuntimeStore, lead: &Value) {
             let scope = studio_runtime_store::account_state::current_provider_scope(tx, &agent).expect("attached scope");
             tx.execute(
                 "INSERT INTO voice_sessions(id,agent,created,native_thread,account_key,connection_id,provider_scope,state) VALUES('voice-session',?1,1,?2,'default','connection',?3,'ready')",
-                rusqlite::params![lead_id, thread, serde_json::to_string(&scope).unwrap()],
+                rusqlite::params![lead_id, thread, studio_json::to_string(&scope).unwrap()],
             )?;
             Ok(())
         })
@@ -1766,7 +1766,7 @@ fn exit_events(store: &RuntimeStore) -> Vec<Value> {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows
                 .into_iter()
-                .map(|text| serde_json::from_str(&text).unwrap())
+                .map(|text| studio_json::from_str(&text).unwrap())
                 .collect())
         })
         .unwrap()
@@ -1967,7 +1967,7 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let ExchangeOutcome::Applied(value) = outcome else {
         panic!("{outcome:?}");
     };
-    let decoded: Value = serde_json::from_str(value.value.get()).expect("command reply");
+    let decoded: Value = studio_json::from_str(value.value.as_str()).expect("command reply");
     assert_eq!(decoded["status"], "completed", "{decoded}");
     assert_eq!(decoded["stdout"], "remote");
     // A replay of the same envelope answers from the receipt.
@@ -2004,7 +2004,7 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
             )?)
         })
         .unwrap();
-    let notice: Value = serde_json::from_str(&notice).unwrap();
+    let notice: Value = studio_json::from_str(&notice).unwrap();
     assert_eq!(notice["requestId"], root);
     assert_eq!(notice["payload"]["actor"], "peer-lead");
     assert_eq!(notice["payload"]["handle"], root);
@@ -2032,7 +2032,8 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let ExchangeOutcome::Applied(missing) = missing else {
         panic!("{missing:?}");
     };
-    let missing: Value = serde_json::from_str(missing.value.get()).expect("missing command reply");
+    let missing: Value =
+        studio_json::from_str(missing.value.as_str()).expect("missing command reply");
     assert_eq!(missing["status"], "failed", "{missing}");
     assert_eq!(missing["error"], "No such file or directory");
 }
@@ -2072,7 +2073,7 @@ async fn a_command_without_a_final_record_after_a_restart_stays_unknown() {
             )?)
         })
         .unwrap();
-    let saved: Value = serde_json::from_str(&saved).unwrap();
+    let saved: Value = studio_json::from_str(&saved).unwrap();
     assert_eq!(saved["status"], "unknown");
     assert_eq!(
         saved["error"],

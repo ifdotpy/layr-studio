@@ -1,6 +1,6 @@
 //! Drop the retired exclusive model allowlist; every model starts untouched.
 use rusqlite::Transaction;
-use serde_json::Value;
+use studio_json::Value;
 use studio_runtime_schema::shared_values::RETIRED_MODEL_WHITELIST_KEY;
 
 use crate::{StoreResult, SyncDocumentsRepository};
@@ -9,8 +9,8 @@ pub(super) fn apply(transaction: &Transaction<'_>) -> StoreResult<()> {
     let Some(payload) = SyncDocumentsRepository::preference_payload(transaction, "server")? else {
         return Ok(());
     };
-    let mut envelope: Value = serde_json::from_str(&payload)?;
-    let name = serde_json::to_string(&[RETIRED_MODEL_WHITELIST_KEY])?;
+    let mut envelope: Value = studio_json::from_str(&payload)?;
+    let name = studio_json::to_string(&[RETIRED_MODEL_WHITELIST_KEY])?;
     let removed = envelope
         .pointer_mut("/value/fields")
         .and_then(Value::as_object_mut)
@@ -19,7 +19,7 @@ pub(super) fn apply(transaction: &Transaction<'_>) -> StoreResult<()> {
         SyncDocumentsRepository::put_preferences(
             transaction,
             "server",
-            &serde_json::to_string(&envelope)?,
+            &studio_json::to_string(&envelope)?,
         )?;
     }
     Ok(())
@@ -54,7 +54,7 @@ mod tests {
         transaction.commit().expect("commit");
         drop(db);
         let db = crate::open_database(&canvas, OpenFlags::SQLITE_OPEN_READ_ONLY).expect("reader");
-        let payload: serde_json::Value = serde_json::from_str(
+        let payload: studio_json::Value = studio_json::from_str(
             &SyncDocumentsRepository::preference_payload(&db, "server")
                 .expect("read")
                 .expect("preferences"),

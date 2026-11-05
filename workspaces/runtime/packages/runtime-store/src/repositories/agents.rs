@@ -156,7 +156,7 @@ inventory::submit! {
 #[cfg(test)]
 mod invalid_agent_repair_tests {
     use super::*;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn receipt_domain_quarantine_does_not_decode_malformed_agent() {

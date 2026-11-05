@@ -9,27 +9,27 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     })?;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: serde_json::Value = serde_json::from_str(&raw)?;
+        let mut record: studio_json::Value = studio_json::from_str(&raw)?;
         let Some(object) = record.as_object_mut() else {
             continue;
         };
         let legacy = object
             .get_mut("claudeOptions")
-            .and_then(serde_json::Value::as_object_mut)
+            .and_then(studio_json::Value::as_object_mut)
             .and_then(|options| options.remove("permissionMode"));
         let mode = object
             .get("permissionMode")
-            .and_then(serde_json::Value::as_str)
+            .and_then(studio_json::Value::as_str)
             .filter(|mode| PERMISSION_MODES.contains(mode))
             .or_else(|| {
                 legacy
                     .as_ref()
-                    .and_then(serde_json::Value::as_str)
+                    .and_then(studio_json::Value::as_str)
                     .filter(|mode| PERMISSION_MODES.contains(mode))
             })
             .unwrap_or_else(|| {
                 PermissionMode::from_full_access(
-                    object.get("yoloMode").and_then(serde_json::Value::as_bool) == Some(true),
+                    object.get("yoloMode").and_then(studio_json::Value::as_bool) == Some(true),
                 )
                 .as_str()
             })
@@ -38,7 +38,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         object.insert("permissionMode".into(), mode.into());
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![studio_json::to_string(&record)?, id],
         )?;
     }
     Ok(())

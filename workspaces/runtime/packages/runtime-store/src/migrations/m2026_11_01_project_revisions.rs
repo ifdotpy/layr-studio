@@ -10,7 +10,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        let Ok(serde_json::Value::Object(mut fields)) = serde_json::from_str(&raw) else {
+        let Ok(studio_json::Value::Object(mut fields)) = studio_json::from_str(&raw) else {
             continue;
         };
         let mut changed = false;
@@ -24,21 +24,21 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             "workerEnvironmentRevision",
             "workspacePolicyRevision",
         ] {
-            if let Some(serde_json::Value::Number(number)) = fields.get_mut(name)
+            if let Some(studio_json::Value::Number(number)) = fields.get_mut(name)
                 && number.is_f64()
                 && let Some(value) = number.as_f64()
                 && value >= 0.0
                 && value < u64::MAX as f64
                 && value.fract() == 0.0
             {
-                *number = serde_json::Number::from(value as u64);
+                *number = studio_json::Number::from(value as u64);
                 changed = true;
             }
         }
         if changed {
             tx.execute(
                 "UPDATE runtime_projects SET record=?2 WHERE id=?1",
-                (&id, serde_json::to_string(&fields)?),
+                (&id, studio_json::to_string(&fields)?),
             )?;
         }
     }
@@ -72,7 +72,7 @@ mod tests {
             )
             .unwrap();
         let parsed: studio_runtime_schema::project_record::ProjectLive =
-            serde_json::from_str(&raw).unwrap();
+            studio_json::from_str(&raw).unwrap();
         assert_eq!(parsed.account_revision.value(), Some(&1));
         assert_eq!(parsed.locations_revision.value(), Some(&2));
         assert_eq!(

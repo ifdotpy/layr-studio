@@ -2,7 +2,7 @@
 //! it, and the way back. Fixtures that were written as such records seed the
 //! typed table through [`insert`], and assertions read the card through [`view`].
 use rusqlite::Connection;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_schema::approvals::{
     Answer, Approval, ApprovalId, ApprovalState, Principal, Request, RpcId,
 };
@@ -177,13 +177,13 @@ pub fn view(row: &Approval) -> Value {
     };
     match given {
         Some(Answer::Decision { decision }) => {
-            let decision = serde_json::to_value(decision).unwrap_or(Value::Null);
+            let decision = studio_json::to_value(decision).unwrap_or(Value::Null);
             card.insert("decision".into(), decision);
         }
         Some(Answer::Elicitation { action, .. }) => {
             card.insert(
                 "decision".into(),
-                serde_json::to_value(action).unwrap_or(Value::Null),
+                studio_json::to_value(action).unwrap_or(Value::Null),
             );
         }
         Some(Answer::Answers { answers }) => {

@@ -40,7 +40,7 @@ pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             normalize_active_identity.query_row([normalized], |row| row.get(0))?;
         let normalized: String = normalize_cursors.query_row([normalized], |row| row.get(0))?;
         let room: RoomRecord =
-            serde_json::from_str(&normalized).map_err(|_| StoreError::InvalidStoredRecord {
+            studio_json::from_str(&normalized).map_err(|_| StoreError::InvalidStoredRecord {
                 object: "runtime_rooms",
                 id: id.clone(),
             })?;
@@ -79,7 +79,7 @@ mod tests {
             .query_row("SELECT record FROM runtime_rooms", [], |row| row.get(0))
             .unwrap();
         assert_eq!(first, second);
-        let room: RoomRecord = serde_json::from_str(&first).unwrap();
+        let room: RoomRecord = studio_json::from_str(&first).unwrap();
         assert_eq!(room.custom_name.as_ref().map(String::as_str), Some("new"));
         assert_eq!(
             room.user_hidden,

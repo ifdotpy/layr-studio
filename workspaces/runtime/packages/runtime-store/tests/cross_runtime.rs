@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, MessageRepository, QueueEventId, QueueEventRepository,
     RuntimeLock, RuntimeStore, StoreError, Table, TaskId, TaskRecord, TaskRepository,
@@ -32,7 +32,7 @@ const NUMERIC_CREATED: [(&str, f64); 10] = [
 
 async fn seed_records(store: &RuntimeStore) {
     let fixture: RecordFixture =
-        serde_json::from_str(include_str!("fixtures/record-round-trip.json"))
+        studio_json::from_str(include_str!("fixtures/record-round-trip.json"))
             .expect("historical record fixture decodes");
     store.transaction(move |tx| {
         AgentRepository::put(tx, &fixture.agent)?;
@@ -107,7 +107,7 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
         .expect("cross-runtime test operation succeeds")
         .expect("cross-runtime test operation succeeds");
     assert_eq!(
-        serde_json::from_str::<Value>(&event.text).expect("cross-runtime test operation succeeds")
+        studio_json::from_str::<Value>(&event.text).expect("cross-runtime test operation succeeds")
             ["fixture"],
         true
     );
@@ -234,7 +234,7 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
         .expect("Rust-written event remains readable in Rust");
     assert_eq!(event.status, "reserved");
     assert_eq!(
-        serde_json::from_str::<Value>(&event.text).expect("event text is JSON")["rust"],
+        studio_json::from_str::<Value>(&event.text).expect("event text is JSON")["rust"],
         true
     );
 
@@ -250,7 +250,7 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
     assert_eq!(rust_numeric_rows.len(), NUMERIC_CREATED.len());
     let mut numeric_created = std::collections::BTreeMap::new();
     for (_, encoded, _, _) in &rust_numeric_rows {
-        let payload: Value = serde_json::from_str(encoded).expect("Rust sync payload is JSON");
+        let payload: Value = studio_json::from_str(encoded).expect("Rust sync payload is JSON");
         let id = payload["id"].as_str().expect("sync payload has an id");
         let created = payload["value"]["created"]
             .as_f64()

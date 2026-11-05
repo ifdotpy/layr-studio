@@ -3,8 +3,8 @@ use super::*;
 use crate::notification_dispatch::NotificationPostCommit;
 use crate::notification_runtime_effects::NotificationPostCommitSink;
 use crate::resource_notify::LiveDelta;
-use serde_json::json;
 use std::sync::{Arc, Mutex};
+use studio_json::json;
 
 #[derive(Default)]
 struct LiveSink {
@@ -45,7 +45,7 @@ impl NotificationPostCommitSink for LiveSink {
     }
 }
 
-fn delta_frame(text: &str) -> serde_json::Value {
+fn delta_frame(text: &str) -> studio_json::Value {
     json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn",
         "itemId":"answer","delta":text}})
 }

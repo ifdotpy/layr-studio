@@ -169,7 +169,7 @@ pub(super) async fn record_of(state: &State, agent: &str) -> Value {
                 [agent],
                 |row| row.get(0),
             )?;
-            Ok(serde_json::from_str(&raw).unwrap())
+            Ok(studio_json::from_str(&raw).unwrap())
         })
         .await
         .unwrap()

@@ -1,5 +1,5 @@
 //! Workspace mode names accepted for new chats and managed workers.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn current_tool_catalog_matches_workspace_mode_owner() {
         // The legacy catalog preserves old native prompt contracts and is not a new-chat consumer.
-        let catalog: Value = serde_json::from_str(include_str!(
+        let catalog: Value = studio_json::from_str(include_str!(
             "../../runtime-services/src/account_worker/preparation-resources.json"
         ))
         .expect("current tool catalog");

@@ -88,16 +88,16 @@ mod tests {
     fn codex_permission_modes_reject_claude_only_modes() {
         for mode in ["default", "bypassPermissions"] {
             let parsed =
-                serde_json::from_str::<CodexPermissionMode>(&format!("\"{mode}\"")).unwrap();
+                studio_json::from_str::<CodexPermissionMode>(&format!("\"{mode}\"")).unwrap();
             assert_eq!(parsed.as_mode().as_str(), mode);
             assert_eq!(
-                serde_json::to_string(&parsed).unwrap(),
+                studio_json::to_string(&parsed).unwrap(),
                 format!("\"{mode}\"")
             );
         }
         assert!(CodexPermissionMode::try_from(PermissionMode::Plan).is_err());
         for mode in ["acceptEdits", "auto", "plan", "unknown"] {
-            assert!(serde_json::from_str::<CodexPermissionMode>(&format!("\"{mode}\"")).is_err());
+            assert!(studio_json::from_str::<CodexPermissionMode>(&format!("\"{mode}\"")).is_err());
         }
     }
 }

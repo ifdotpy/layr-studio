@@ -3,7 +3,7 @@ use crate::{
     event_write::truthy, recovery_history::ConnectionScope, recovery_policy::RecoverySnapshot,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use studio_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SupervisorIdentity {

@@ -2,7 +2,7 @@
 use super::notices::{json_text, remove};
 use super::{NotificationDispatchError, suffix};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::task_record::{NonnegativeNumber, ProcessId, TaskStatus, TaskType};
 use studio_runtime_store::TaskRecord;
 

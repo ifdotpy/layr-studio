@@ -1,7 +1,7 @@
 //! Scripted provider consumer with real SQLite and frozen legacy actor records.
 #![allow(clippy::unwrap_used)]
-use serde_json::{Value, json};
 use std::sync::OnceLock;
+use studio_json::{Value, json};
 use studio_runtime_providers::{Frame, Method, RequestFrame, RequestId, ResponseBody};
 use studio_runtime_services::provider_callbacks::*;
 use studio_runtime_store::RuntimeStore;
@@ -12,7 +12,7 @@ struct Template {
 fn template() -> &'static Template {
     static TEMPLATE: OnceLock<Template> = OnceLock::new();
     TEMPLATE.get_or_init(|| Template {
-        value: serde_json::from_str(include_str!("provider_callbacks/expected.json"))
+        value: studio_json::from_str(include_str!("provider_callbacks/expected.json"))
             .expect("frozen callback expectations"),
     })
 }
@@ -112,7 +112,7 @@ fn body(reply: &Reply) -> &Value {
     }
 }
 fn tool_value(reply: &Reply) -> Value {
-    serde_json::from_str(body(reply)["contentItems"][0]["text"].as_str().unwrap()).unwrap()
+    studio_json::from_str(body(reply)["contentItems"][0]["text"].as_str().unwrap()).unwrap()
 }
 
 #[tokio::test]
@@ -192,7 +192,7 @@ async fn provider_callbacks_read_reexecutes_without_a_receipt() {
         &context,
         "read-again",
         "orchestration_peers",
-        serde_json::Map::new().into(),
+        studio_json::Map::new().into(),
     );
     let baseline: i64 = store
         .test_reader()
@@ -725,7 +725,7 @@ async fn provider_callbacks_worker_versioned_progress_reaches_the_parent_once() 
         >,
     }
     let delivery_reply: DeliveryReply =
-        serde_json::from_str(body(&first)["contentItems"][0]["text"].as_str().unwrap()).unwrap();
+        studio_json::from_str(body(&first)["contentItems"][0]["text"].as_str().unwrap()).unwrap();
     let delivery = &delivery_reply.deliveries[lead];
     assert_eq!(
         delivery.status,
@@ -761,7 +761,7 @@ async fn provider_callbacks_worker_versioned_progress_reaches_the_parent_once() 
         let delivered = statement
             .query_map([lead], |row| row.get::<_, String>(0))
             .unwrap()
-            .map(|text| serde_json::from_str::<Value>(&text.unwrap()).unwrap())
+            .map(|text| studio_json::from_str::<Value>(&text.unwrap()).unwrap())
             .filter(|payload| payload["progress_key"] == "task-7")
             .collect::<Vec<_>>();
         assert_eq!(
@@ -824,7 +824,7 @@ async fn provider_callbacks_python_reservations_and_restart() {
                 |r| r.get(0),
             )
             .unwrap();
-        let record: Value = serde_json::from_str(&raw).unwrap();
+        let record: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(
             record["outcome"],
             if index == 0 { "unknown" } else { "not_applied" }
@@ -856,7 +856,7 @@ async fn provider_callbacks_python_reservations_and_restart() {
                 |r| r.get(0),
             )
             .unwrap();
-        let actual: Value = serde_json::from_str(&raw).unwrap();
+        let actual: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(
             uuid::Uuid::parse_str(actual["id"].as_str().unwrap())
                 .unwrap()
@@ -1172,7 +1172,7 @@ async fn provider_callbacks_python_dynamic_read_and_title() {
             |row| row.get(0),
         )
         .unwrap();
-    let lead: Value = serde_json::from_str(&lead).unwrap();
+    let lead: Value = studio_json::from_str(&lead).unwrap();
     assert_eq!(lead["name"], "Unicode 🦀 title");
     assert_eq!(lead["needsTitle"], false);
 }

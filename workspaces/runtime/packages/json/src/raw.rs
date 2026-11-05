@@ -24,6 +24,12 @@ impl RawJson<'_> {
     }
 }
 impl OwnedRawJson {
+    #[cfg(feature = "serde-backend")]
+    #[inline]
+    pub(crate) fn from_raw(raw: Box<serde_json::value::RawValue>) -> Self {
+        Self(raw)
+    }
+
     #[inline]
     pub fn from_string(input: String) -> Result<Self> {
         serde_json::value::RawValue::from_string(input)

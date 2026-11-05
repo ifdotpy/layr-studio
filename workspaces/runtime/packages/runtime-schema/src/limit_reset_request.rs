@@ -61,12 +61,13 @@ fn present_account_key<'de, D: Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::ResetRequest;
-    use serde_json::json;
+    use studio_json::json;
 
     #[test]
     fn reset_request_requires_bounded_identities_and_a_uuid() {
-        let schema: serde_json::Value =
-            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).expect("OpenAPI");
+        let schema: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
         for (field, max) in [
             ("account_id", super::RESET_ACCOUNT_ID_MAX_CHARS),
             ("credit_id", super::RESET_CREDIT_ID_MAX_CHARS),
@@ -91,7 +92,7 @@ mod tests {
             Some(&json!(super::DEFAULT_RESET_ACCOUNT_KEY))
         );
         let valid = json!({"account_id":"a","credit_id":"c","request_id":"0192f3a0-0000-7000-8000-000000000001"});
-        let parsed: ResetRequest = serde_json::from_value(valid.clone()).expect("valid request");
+        let parsed: ResetRequest = studio_json::from_value(valid.clone()).expect("valid request");
         assert!(parsed.account_key.is_none());
         for (field, value) in [
             ("account_id", json!("")),
@@ -101,7 +102,7 @@ mod tests {
         ] {
             let mut invalid = valid.clone();
             invalid[field] = value;
-            assert!(serde_json::from_value::<ResetRequest>(invalid).is_err());
+            assert!(studio_json::from_value::<ResetRequest>(invalid).is_err());
         }
     }
 }

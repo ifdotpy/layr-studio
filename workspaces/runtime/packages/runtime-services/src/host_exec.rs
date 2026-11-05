@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_store::RuntimeStore;
 
 use crate::linux_vm_guest::{GuestError, GuestRpc};
@@ -59,7 +59,7 @@ const VM_ONLY_REFUSAL: &str = "host_exec is available only to VM agents";
 pub(crate) fn tool_definition() -> Option<&'static crate::thread_prepare::ToolDefinition> {
     static DEFINITION: OnceLock<Option<crate::thread_prepare::ToolDefinition>> = OnceLock::new();
     DEFINITION
-        .get_or_init(|| serde_json::from_str(include_str!("host_exec_tool.json")).ok())
+        .get_or_init(|| studio_json::from_str(include_str!("host_exec_tool.json")).ok())
         .as_ref()
 }
 

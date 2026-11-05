@@ -1,13 +1,13 @@
 //! Host-side project vault records and setup facts. Guest RPC and the local Desk executable are
 //! separate effect boundaries; paper words and private key material are never read here.
 
-use serde_json::{Map, Value, json};
 use sha2::Digest;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
+use studio_json::{Map, Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;
 use thiserror::Error;
 
@@ -457,7 +457,7 @@ fn load_view_object(path: &Path) -> Result<Map<String, Value>, ()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
         Err(_) => return Err(()),
     };
-    let value = serde_json::from_slice::<Value>(&bytes).map_err(|_| ())?;
+    let value = studio_json::from_slice::<Value>(&bytes).map_err(|_| ())?;
     Ok(value.as_object().cloned().unwrap_or_default())
 }
 
@@ -729,7 +729,7 @@ fn project_folder(state_dir: &Path, project_id: &str) -> Result<PathBuf, VaultEr
 fn load_object(path: &Path, object: &'static str) -> Result<Map<String, Value>, VaultError> {
     studio_runtime_store::debug_assert_outside_sql();
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
+        Ok(bytes) => studio_json::from_slice::<Value>(&bytes)
             .ok()
             .and_then(|value| value.as_object().cloned())
             .ok_or(VaultError::InvalidStoredRecord(object)),
@@ -744,7 +744,7 @@ fn load_optional_object(
 ) -> Result<Map<String, Value>, VaultError> {
     studio_runtime_store::debug_assert_outside_sql();
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
+        Ok(bytes) => studio_json::from_slice::<Value>(&bytes)
             .ok()
             .and_then(|value| value.as_object().cloned())
             .ok_or(VaultError::InvalidStoredRecord(object)),
@@ -754,7 +754,7 @@ fn load_optional_object(
 }
 
 fn write_json(path: &Path, value: &Value) -> Result<(), VaultError> {
-    let bytes = serde_json::to_vec(value)
+    let bytes = studio_json::to_vec(value)
         .map_err(|_| VaultError::InvalidStoredRecord("vault-site.json"))?;
     crate::atomic_file::replace(path, &bytes, None, false)
         .map_err(|_| VaultError::InvalidStoredRecord("vault-site.json"))
@@ -768,10 +768,10 @@ mod tests {
         setup_facts, store_site, suggested_prefix, valid_prefix, valid_profile, valid_region, view,
         writer_command,
     };
-    use serde_json::{Value, json};
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::fs;
+    use studio_json::{Value, json};
 
     fn state() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
@@ -938,7 +938,7 @@ mod tests {
 
         store_site(root.path(), "p1", "https://desk.example///").unwrap();
 
-        let saved: Value = serde_json::from_slice(
+        let saved: Value = studio_json::from_slice(
             &fs::read(root.path().join("layr-projects/p1/vault-site.json")).unwrap(),
         )
         .unwrap();
@@ -1028,7 +1028,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            serde_json::from_slice::<Value>(&site).unwrap(),
+            studio_json::from_slice::<Value>(&site).unwrap(),
             json!({"site":"https://desk.example.com/"})
         );
         assert!(matches!(
@@ -1078,7 +1078,7 @@ mod tests {
 
         assert_eq!(result.code, Some(0));
         assert_eq!(
-            serde_json::from_str::<Value>(&result.stdout).unwrap(),
+            studio_json::from_str::<Value>(&result.stdout).unwrap(),
             json!({"profiles":[]})
         );
     }

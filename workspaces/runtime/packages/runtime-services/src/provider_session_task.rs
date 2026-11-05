@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures_util::FutureExt;
-use serde_json::{Map, Value};
+use studio_json::{Map, Value};
 use studio_runtime_process::{
     EventCursor, Generation, OperationId, ProviderHandle,
     provider_seam::{

@@ -10,8 +10,8 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
 };
-use serde_json::Value;
 use std::sync::Arc;
+use studio_json::Value;
 use studio_runtime_services::monitor_runtime_wiring::MonitorRuntime;
 use studio_runtime_services::{
     event_write,
@@ -195,7 +195,7 @@ mod tests {
         fn typed_input<F: Future<Output = Result<Json<Value>, ApiError>>>(_: InputHandler<F>) {}
         typed_input(input);
         let request: MonitorInputRequest =
-            serde_json::from_value(serde_json::json!({"id": "monitor"}))
+            studio_json::from_value(studio_json::json!({"id": "monitor"}))
                 .expect("missing dimensions are valid");
         let input: Input = request.input;
         assert_eq!(input.rows, None);
@@ -203,9 +203,9 @@ mod tests {
         assert_eq!(input.text, "");
         assert!(!input.close_stdin);
         for field in ["rows", "cols"] {
-            let mut invalid = serde_json::json!({"id": "monitor"});
+            let mut invalid = studio_json::json!({"id": "monitor"});
             invalid[field] = Value::Null;
-            assert!(serde_json::from_value::<MonitorInputRequest>(invalid).is_err());
+            assert!(studio_json::from_value::<MonitorInputRequest>(invalid).is_err());
         }
     }
 }

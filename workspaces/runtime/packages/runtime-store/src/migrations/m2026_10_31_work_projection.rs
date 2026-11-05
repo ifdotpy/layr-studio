@@ -10,7 +10,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        let Ok(mut value) = studio_json::from_str::<studio_json::Value>(&raw) else {
             continue;
         };
         if let Some(fields) = value.as_object_mut()
@@ -19,7 +19,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 .is_some_and(|value| !value.is_null() && !value.is_string())
         {
             fields.remove("agent");
-            let normalized = serde_json::to_string(&value)?;
+            let normalized = studio_json::to_string(&value)?;
             tx.execute(
                 "UPDATE runtime_work SET record=?2 WHERE id=?1",
                 (&id, normalized),
@@ -70,10 +70,10 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        let parsed: WorkItem = serde_json::from_str(&raw).unwrap();
+        let parsed: WorkItem = studio_json::from_str(&raw).unwrap();
         assert!(parsed.agent_field().is_missing());
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&raw).unwrap()["archive"]["x"],
+            studio_json::from_str::<studio_json::Value>(&raw).unwrap()["archive"]["x"],
             1
         );
         let raw: String = tx
@@ -82,7 +82,7 @@ mod tests {
             })
             .unwrap();
         assert!(matches!(
-            serde_json::from_str::<WorkItem>(&raw)
+            studio_json::from_str::<WorkItem>(&raw)
                 .unwrap()
                 .agent_field(),
             studio_runtime_schema::queue_command::Field::Null
@@ -113,7 +113,7 @@ mod tests {
         for row in rows {
             let (id, raw) = row.unwrap();
             total += 1;
-            if !serde_json::from_str::<WorkItem>(&raw)
+            if !studio_json::from_str::<WorkItem>(&raw)
                 .is_ok_and(|record| record.id().as_ref() == id)
             {
                 refused += 1;

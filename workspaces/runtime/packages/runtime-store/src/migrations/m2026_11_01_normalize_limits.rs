@@ -65,7 +65,7 @@ pub(super) fn apply(tx: &Transaction<'_>, now: f64) -> StoreResult<()> {
                     }) && crate::account_state::persisted_document_within_bounds(bytes)
                 })
                 .and_then(|bytes| {
-                    serde_json::from_slice::<Option<crate::account_state::LimitsStamp>>(bytes).ok()
+                    studio_json::from_slice::<Option<crate::account_state::LimitsStamp>>(bytes).ok()
                 })
                 .flatten()
                 .unwrap_or_else(|| {

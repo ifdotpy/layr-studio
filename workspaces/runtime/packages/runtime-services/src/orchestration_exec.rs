@@ -255,16 +255,16 @@ mod tests {
     #[test]
     fn compact_receipt_is_distinct_and_rejects_command_fields() {
         let compact: ExecPayload =
-            serde_json::from_str(r#"{"actor":"lead","receiptDigest":"abc"}"#).unwrap();
+            studio_json::from_str(r#"{"actor":"lead","receiptDigest":"abc"}"#).unwrap();
         assert!(matches!(compact, ExecPayload::Compacted(_)));
         assert!(
-            serde_json::from_str::<ExecPayload>(
+            studio_json::from_str::<ExecPayload>(
                 r#"{"actor":"lead","receiptDigest":"abc","cwd":"/fixture"}"#
             )
             .is_err()
         );
         assert!(
-            serde_json::from_str::<ExecPayload>(
+            studio_json::from_str::<ExecPayload>(
                 r#"{"actor":"lead","receiptDigest":"abc","unexpected":1}"#
             )
             .is_err()
@@ -274,13 +274,13 @@ mod tests {
     #[test]
     fn close_stdin_without_input_round_trips_and_null_is_refused() {
         let input: InputRequest =
-            serde_json::from_str(r#"{"actor":"a","handle":"h","close_stdin":true}"#).unwrap();
-        let bytes = serde_json::to_vec(&input).unwrap();
-        let decoded: InputRequest = serde_json::from_slice(&bytes).unwrap();
+            studio_json::from_str(r#"{"actor":"a","handle":"h","close_stdin":true}"#).unwrap();
+        let bytes = studio_json::to_vec(&input).unwrap();
+        let decoded: InputRequest = studio_json::from_slice(&bytes).unwrap();
         assert_eq!(decoded.close_stdin, Some(true));
         assert!(decoded.input.is_none());
         assert!(
-            serde_json::from_str::<InputRequest>(
+            studio_json::from_str::<InputRequest>(
                 r#"{"actor":"a","handle":"h","input":null,"close_stdin":true}"#
             )
             .is_err()
@@ -289,10 +289,10 @@ mod tests {
 
     #[test]
     fn equivalent_command_requests_have_identical_typed_signatures() {
-        let left: OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":[],"action":"exec","payload":{"actor":"a","cwd":"/p","command":["true"],"env":{"B":"2","A":"1"}}}"#).unwrap();
-        let right: OrchestrationRequest = serde_json::from_str(r#"{"action":"exec","operation":[],"requestId":"r","payload":{"command":["true"],"cwd":"/p","actor":"a","env":{"A":"1","B":"2"}}}"#).unwrap();
-        let left = serde_json::to_vec(&left).unwrap();
-        let right = serde_json::to_vec(&right).unwrap();
+        let left: OrchestrationRequest = studio_json::from_str(r#"{"requestId":"r","operation":[],"action":"exec","payload":{"actor":"a","cwd":"/p","command":["true"],"env":{"B":"2","A":"1"}}}"#).unwrap();
+        let right: OrchestrationRequest = studio_json::from_str(r#"{"action":"exec","operation":[],"requestId":"r","payload":{"command":["true"],"cwd":"/p","actor":"a","env":{"A":"1","B":"2"}}}"#).unwrap();
+        let left = studio_json::to_vec(&left).unwrap();
+        let right = studio_json::to_vec(&right).unwrap();
         assert_eq!(left, right);
         assert_eq!(
             crate::multi_server_auth::digest(&left),
@@ -316,12 +316,12 @@ pub struct CompletionRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub started_at: studio_runtime_schema::queue_command::Field<serde_json::Number>,
+    pub started_at: studio_runtime_schema::queue_command::Field<studio_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub finished_at: studio_runtime_schema::queue_command::Field<serde_json::Number>,
+    pub finished_at: studio_runtime_schema::queue_command::Field<studio_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -336,7 +336,7 @@ pub struct CompletionRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub duration: studio_runtime_schema::queue_command::Field<serde_json::Number>,
+    pub duration: studio_runtime_schema::queue_command::Field<studio_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -351,7 +351,7 @@ pub struct CompletionRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub output_expires_at: studio_runtime_schema::queue_command::Field<serde_json::Number>,
+    pub output_expires_at: studio_runtime_schema::queue_command::Field<studio_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"

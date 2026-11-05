@@ -5,7 +5,7 @@ use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_schema::annotation_command::{
     AnnotationCommandResponse, AnnotationData, AnnotationEntityRow, AnnotationRowOperation,
 };
@@ -224,7 +224,7 @@ pub(crate) async fn annotation(
             else {
                 return Ok::<_, studio_runtime_store::StoreError>(Vec::new());
             };
-            let payload: Payload = serde_json::from_str(&payload)?;
+            let payload: Payload = studio_json::from_str(&payload)?;
             if payload.collection != RequestReferenceKind::Annotation
                 || payload.id != id
                 || payload.value.id != id
@@ -271,7 +271,7 @@ pub(crate) fn work_request_signature<T: serde::Serialize>(
     actor: Option<&str>,
     body: &T,
 ) -> Result<String, ApiError> {
-    let canonical = serde_json::to_vec(&(agent, actor, body)).map_err(ApiError::json)?;
+    let canonical = studio_json::to_vec(&(agent, actor, body)).map_err(ApiError::json)?;
     Ok(studio_runtime_store::sha256_hex(&canonical))
 }
 
@@ -308,11 +308,11 @@ inventory::submit! {
 #[cfg(test)]
 mod annotation_body_tests {
     use super::AnnotationBody;
-    use serde_json::{Value, json};
+    use studio_json::{Value, json};
 
     #[test]
     fn annotation_limits_match_openapi() {
-        let doc: Value = serde_json::from_str(include_str!("../../openapi.json")).unwrap();
+        let doc: Value = studio_json::from_str(include_str!("../../openapi.json")).unwrap();
         let properties = &doc["components"]["schemas"]["AnnotationBody"]["properties"];
         assert_eq!(
             properties["path"]["maxLength"],
@@ -336,7 +336,7 @@ mod annotation_body_tests {
             json!({"agent":null, "id":null, "path":"p", "line":2, "text":"x", "turnId":null}),
             json!({"agent":"a", "id":"i", "path":"p", "line":3, "text":"x", "turnId":"t"}),
         ] {
-            let body: AnnotationBody = serde_json::from_value(value.clone()).unwrap();
+            let body: AnnotationBody = studio_json::from_value(value.clone()).unwrap();
             value
                 .as_object_mut()
                 .unwrap()
@@ -356,7 +356,7 @@ mod annotation_body_tests {
             json!({"path":"p", "line":1, "text":""}),
             json!({"path":"p", "line":1, "text":"x", "extra":true}),
         ] {
-            assert!(serde_json::from_value::<AnnotationBody>(value).is_err());
+            assert!(studio_json::from_value::<AnnotationBody>(value).is_err());
         }
     }
 }

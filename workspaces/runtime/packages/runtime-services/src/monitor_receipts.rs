@@ -33,7 +33,7 @@ pub struct ResultReceipt {
 
 impl ResultReceipt {
     fn validate(&self) -> Result<(), MonitorError> {
-        let value = serde_json::to_value(self).map_err(studio_runtime_store::StoreError::from)?;
+        let value = studio_json::to_value(self).map_err(studio_runtime_store::StoreError::from)?;
         if !studio_runtime_schema::validate("PersistedMonitorResult", &value)
             .map_err(|_| MonitorError::InvalidResultReceipt("schema"))?
             || (self.code.is_none() && self.error.as_deref().is_none_or(str::is_empty))
@@ -82,7 +82,7 @@ pub fn persist(root: &Path, receipt: &ResultReceipt) -> Result<ResultReceipt, Mo
     if target.exists() {
         return read(&target, Some(&receipt.key));
     }
-    let bytes = serde_json::to_vec(receipt).map_err(studio_runtime_store::StoreError::from)?;
+    let bytes = studio_json::to_vec(receipt).map_err(studio_runtime_store::StoreError::from)?;
     if bytes.len() as u64 > RECEIPT_BYTES {
         return Err(MonitorError::InvalidResultReceipt("size"));
     }
@@ -111,7 +111,7 @@ fn read(path: &Path, id: Option<&str>) -> Result<ResultReceipt, MonitorError> {
         return Err(MonitorError::InvalidResultReceipt("size"));
     }
     let receipt: ResultReceipt =
-        serde_json::from_slice(&bytes).map_err(|_| MonitorError::InvalidResultReceipt("json"))?;
+        studio_json::from_slice(&bytes).map_err(|_| MonitorError::InvalidResultReceipt("json"))?;
     receipt.validate()?;
     if id.is_some_and(|id| receipt.key != id) {
         return Err(MonitorError::InvalidResultReceipt("identity"));

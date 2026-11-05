@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use studio_runtime_store::path_identity::CanonicalPath;
 
 use crate::event_write::truthy;
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::{StoreError, system_reads as records};
 use thiserror::Error;
 

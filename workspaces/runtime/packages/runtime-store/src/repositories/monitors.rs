@@ -183,7 +183,7 @@ mod tests {
             .expect("store");
         store.transaction(|tx| {
             let raw = r#"{"id":"m","agent":"a","epoch":1,"requestId":"r","status":"completed","activityAt":1,"activityGeneration":0,"bytes":0,"command":"","created":1,"cwd":"/","interactive":false,"livenessCommand":"","log":"/log","stallTimeoutSeconds":0,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":1000,"wakeOn":"exit","streamQueue":[{"kind":"exit","cursor":"result:m","code":0,"error":null,"finished":1,"byteLength":0,"operation":{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c"}}]}"#;
-            let mut monitor: super::MonitorRecord = serde_json::from_str(raw)?;
+            let mut monitor: super::MonitorRecord = studio_json::from_str(raw)?;
             crate::Table::<super::MonitorRecord>::new(tx).put(&monitor)?;
             let sql: String = tx.query_row("SELECT sql FROM sqlite_schema WHERE name=?1", [QUEUED_STREAM_INDEX], |row| row.get(0))?;
             assert!(!sql.contains("json_"), "queue index must use a plain column");
@@ -247,7 +247,7 @@ mod tests {
         .unwrap();
         let saved = MonitorsRepository::get(&db, "m").unwrap().unwrap();
         assert!(
-            !serde_json::to_string(&saved)
+            !studio_json::to_string(&saved)
                 .unwrap()
                 .contains("\"future\"")
         );
@@ -266,24 +266,24 @@ mod tests {
     fn historical_thread_is_readable_but_does_not_change_operation_identity() {
         let base = r#"{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c"}"#;
         let historical = r#"{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c","threadId":"thread"}"#;
-        let original: super::MonitorOperation = serde_json::from_str(base).unwrap();
-        let saved: super::MonitorOperation = serde_json::from_str(historical).unwrap();
+        let original: super::MonitorOperation = studio_json::from_str(base).unwrap();
+        let saved: super::MonitorOperation = studio_json::from_str(historical).unwrap();
         assert!(original.same_identity(&saved));
         assert_eq!(
             crate::projection_value(&saved),
-            serde_json::from_str::<serde_json::Value>(historical).unwrap()
+            studio_json::from_str::<studio_json::Value>(historical).unwrap()
         );
         assert_eq!(
-            serde_json::from_str::<super::MonitorOperation>(r#"{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c","threadId":null}"#).unwrap(),
+            studio_json::from_str::<super::MonitorOperation>(r#"{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c","threadId":null}"#).unwrap(),
             original
         );
-        assert!(serde_json::from_str::<super::MonitorOperation>(r#"{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c","unexpected":true}"#).is_ok());
+        assert!(studio_json::from_str::<super::MonitorOperation>(r#"{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c","unexpected":true}"#).is_ok());
     }
 
     #[test]
     fn operation_evidence_rejects_unknown_fields_directly_and_when_flattened() {
         use serde::Deserialize;
-        use serde_json::json;
+        use studio_json::json;
 
         let evidence = json!({"threadId":"t", "rootRequestId":"r", "providerGeneration":3,
             "providerRequest":{"id":"i", "signature":"s", "created":1}});

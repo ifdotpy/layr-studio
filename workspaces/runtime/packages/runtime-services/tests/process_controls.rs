@@ -1,11 +1,11 @@
 #![allow(clippy::unwrap_used)]
 
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{monitor_matches, process_controls};
 use studio_runtime_store::{RuntimeStore, StoreError};
 
 fn corpus() -> Value {
-    serde_json::from_str(include_str!("fixtures/process-controls.json")).unwrap()
+    studio_json::from_str(include_str!("fixtures/process-controls.json")).unwrap()
 }
 #[tokio::test]
 async fn listing_is_atomic_as_a_command_process_starts_and_ends() {
@@ -18,7 +18,7 @@ async fn listing_is_atomic_as_a_command_process_starts_and_ends() {
         for (with_process, expected_process) in [(false, false), (true, true), (false, false)] {
             let process_field = if with_process { r#", "processId":"pid""# } else { "" };
             let raw = format!(r#"{{"id":"task","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"{process_field}}}"#);
-            let task: studio_runtime_store::TaskRecord = serde_json::from_str(&raw).map_err(StoreError::from)?;
+            let task: studio_runtime_store::TaskRecord = studio_json::from_str(&raw).map_err(StoreError::from)?;
             tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('task',?1) ON CONFLICT(id) DO UPDATE SET record=excluded.record", [&raw]).map_err(StoreError::from)?;
             let view = studio_runtime_services::sync_views::project_task_record(&task).unwrap();
             SyncDocumentsRepository::put_entity(tx, "task", "task", view, false)?;
@@ -85,7 +85,7 @@ fn python_process_identities_and_capabilities_match() {
     #[derive(serde::Deserialize)]
     struct Case {
         source: String,
-        raw: serde_json::Map<String, Value>,
+        raw: studio_json::Map<String, Value>,
         owner: Value,
         connection: Option<String>,
         expected: Expected,
@@ -98,7 +98,7 @@ fn python_process_identities_and_capabilities_match() {
         agent: String,
     }
     let cases: Cases =
-        serde_json::from_str(include_str!("fixtures/process-controls.json")).unwrap();
+        studio_json::from_str(include_str!("fixtures/process-controls.json")).unwrap();
     for mut case in cases.processes {
         if case.source == "monitor" {
             continue;
@@ -137,7 +137,7 @@ fn python_process_identities_and_capabilities_match() {
 fn python_output_state_survives_chunk_boundaries_and_restarts() {
     let corpus = corpus();
     let fixture = &corpus["output"];
-    let mut record: studio_runtime_store::MonitorRecord = serde_json::from_str(r#"{"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":"","interactive":false,"livenessCommand":"","log":"watch.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}"#).unwrap();
+    let mut record: studio_runtime_store::MonitorRecord = studio_json::from_str(r#"{"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"request","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":"","interactive":false,"livenessCommand":"","log":"watch.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"}"#).unwrap();
     let initial = &fixture["initial"];
     record.id = initial["id"].as_str().unwrap().to_owned();
     record.epoch = initial["epoch"].as_i64().unwrap().try_into().unwrap();
@@ -167,8 +167,8 @@ fn python_output_state_survives_chunk_boundaries_and_restarts() {
         }
         // Exercise the persisted wire representation between chunks.
         let mut persisted = Vec::new();
-        serde_json::to_writer(&mut persisted, &record).unwrap();
-        record = serde_json::from_slice(&persisted).unwrap();
+        studio_json::to_writer(&mut persisted, &record).unwrap();
+        record = studio_json::from_slice(&persisted).unwrap();
     }
     monitor_matches::flush(&mut record).unwrap();
     let event = monitor_matches::pending(&mut record, 11.4, true)
@@ -218,7 +218,7 @@ fn invalid_matchers_are_rejected_before_admission() {
             "{value:?}"
         );
     }
-    assert!(serde_json::from_str::<Vec<String>>("[true]").is_err());
+    assert!(studio_json::from_str::<Vec<String>>("[true]").is_err());
 }
 #[tokio::test]
 async fn action_receipt_replays_without_dispatch_and_rejects_identity_reuse() {
@@ -249,7 +249,7 @@ async fn action_receipt_replays_without_dispatch_and_rejects_identity_reuse() {
         .await
         .unwrap();
     let process = fixture["expected"].clone();
-    let mut request: studio_runtime_schema::process_controls::ProcessControlRequest = serde_json::from_str(r#"{"action":"stop_selected","requestId":"request","agent":"owner","accountKey":"acct","epoch":3,"process":{"key":"key","generation":"generation","agent":"owner","accountKey":"acct","epoch":3}}"#).unwrap();
+    let mut request: studio_runtime_schema::process_controls::ProcessControlRequest = studio_json::from_str(r#"{"action":"stop_selected","requestId":"request","agent":"owner","accountKey":"acct","epoch":3,"process":{"key":"key","generation":"generation","agent":"owner","accountKey":"acct","epoch":3}}"#).unwrap();
     let studio_runtime_schema::process_controls::ProcessControlRequest::StopSelected {
         process: target,
         ..

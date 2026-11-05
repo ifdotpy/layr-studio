@@ -137,7 +137,7 @@ async fn unclean_held_start_recovers_exact_input_through_worker_history() {
         submitted: bool,
     }
     let record: Saved =
-        serde_json::from_str(&state.record().await.to_string()).expect("saved agent");
+        studio_json::from_str(&state.record().await.to_string()).expect("saved agent");
     assert!(!record.start_attempt.submitted);
     assert!(!record.auto_wake);
     assert!(peer.writes.try_recv().is_err());

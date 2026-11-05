@@ -95,7 +95,7 @@ fn account_session_over(
     std::fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
     std::fs::write(
         &registry_path,
-        serde_json::to_vec(&json!({
+        studio_json::to_vec(&json!({
             "version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
             "defaultAccountKey":"default",
             "accounts":{"default":{

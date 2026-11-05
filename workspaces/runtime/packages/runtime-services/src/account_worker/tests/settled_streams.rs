@@ -14,7 +14,7 @@ async fn persisted_streams(state: &State) -> (usize, usize) {
                     let streams = store::load_streams(tx, "default")?;
                     let raw = studio_runtime_store::account_state::streams(tx, "default")?
                         .expect("current account stream owner");
-                    let saved: Value = serde_json::from_str(&raw).map_err(StoreError::from)?;
+                    let saved: Value = studio_json::from_str(&raw).map_err(StoreError::from)?;
                     assert_eq!(
                         saved["metadata"]["closed"]
                             .as_array()

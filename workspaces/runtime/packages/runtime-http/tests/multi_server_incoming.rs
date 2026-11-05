@@ -5,8 +5,8 @@ use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use futures_util::future::BoxFuture;
-use serde_json::Value;
 use std::sync::{Arc, atomic::Ordering};
+use studio_json::Value;
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::multi_server_auth::{AccessError, OwnerObservation};
 use studio_runtime_services::multi_server_pairing::{MultiServerBoundary, OwnerLookup};
@@ -55,7 +55,7 @@ fn fresh_headers(request: &common::FixtureRequest, nonce: Option<&str>) -> Vec<(
     }
     let headers: BTreeMap<_, _> = request.headers.iter().cloned().collect();
     let mut credentials: FixtureCredentials =
-        serde_json::from_value(serde_json::to_value(headers).expect("credential map"))
+        studio_json::from_value(studio_json::to_value(headers).expect("credential map"))
             .expect("typed fixture credentials");
     let wire = |timestamp: &str, nonce: &str| {
         multi_server_signing_bytes(MultiServerSigningInput {
@@ -90,7 +90,7 @@ fn fresh_headers(request: &common::FixtureRequest, nonce: Option<&str>) -> Vec<(
     }
     credentials.timestamp = timestamp;
     let headers: BTreeMap<String, String> =
-        serde_json::from_value(serde_json::to_value(credentials).expect("credentials"))
+        studio_json::from_value(studio_json::to_value(credentials).expect("credentials"))
             .expect("header map");
     headers.into_iter().collect()
 }
@@ -102,11 +102,11 @@ fn refresh_request_id(case: &Value, request_id: &str) -> Value {
     };
     let mut case = case.clone();
     let mut request: common::FixtureRequest =
-        serde_json::from_value(case.clone()).expect("fixture request");
-    let mut body: Value = serde_json::from_str(&request.raw).expect("fixture body");
-    body["requestId"] = serde_json::json!(request_id);
+        studio_json::from_value(case.clone()).expect("fixture request");
+    let mut body: Value = studio_json::from_str(&request.raw).expect("fixture body");
+    body["requestId"] = studio_json::json!(request_id);
     if body.get("action").is_some() {
-        body["operation"] = serde_json::json!([]);
+        body["operation"] = studio_json::json!([]);
     }
     request.raw = body.to_string();
     let mut headers: std::collections::BTreeMap<_, _> = request.headers.into_iter().collect();
@@ -126,7 +126,7 @@ fn refresh_request_id(case: &Value, request_id: &str) -> Value {
         common::signing_identity().sign(&bytes),
     );
     case["raw"] = request.raw.into();
-    case["headers"] = serde_json::to_value(headers.into_iter().collect::<Vec<_>>()).unwrap();
+    case["headers"] = studio_json::to_value(headers.into_iter().collect::<Vec<_>>()).unwrap();
     case
 }
 
@@ -136,7 +136,7 @@ fn incoming(case: &Value) -> Request<Body> {
 
 fn incoming_with_nonce(case: &Value, nonce: Option<&str>) -> Request<Body> {
     let case: common::FixtureRequest =
-        serde_json::from_value(case.clone()).expect("fixture request");
+        studio_json::from_value(case.clone()).expect("fixture request");
     let raw = &case.raw;
     let mut request = Request::builder()
         .method(case.method.as_str())
@@ -212,7 +212,7 @@ async fn paired_receiver() -> PairedReceiver {
                     caller_identity_for_trust["serverId"]
                         .as_str()
                         .expect("caller ID"),
-                    serde_json::json!({
+                    studio_json::json!({
                         "id":caller_identity_for_trust["serverId"],
                         "clientId":caller_identity_for_trust["serverId"],
                         "kind":"server",
@@ -245,7 +245,7 @@ async fn paired_receiver() -> PairedReceiver {
     .with_credentials(Arc::clone(&receiver_credentials))
     .with_multi_server_boundary(Arc::new(boundary))
     .with_tailscale_whoami(Arc::new(|| {
-        Box::pin(async { Some(serde_json::json!({"user":"owner@example.test"})) })
+        Box::pin(async { Some(studio_json::json!({"user":"owner@example.test"})) })
     }));
     let app = router(state).expect("receiver router");
     PairedReceiver {
@@ -264,7 +264,7 @@ async fn access_snapshot_projects_legacy_missing_fields_as_null() {
     let receiver = paired_receiver().await;
     receiver.receiver_store.transaction(|tx| {
         tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
-            rusqlite::params!["legacy", serde_json::json!({"id":"legacy","clientId":"legacy","kind":"ui","status":"paired","label":"Legacy","created":1,"publicKey":"key"}).to_string()])?;
+            rusqlite::params!["legacy", studio_json::json!({"id":"legacy","clientId":"legacy","kind":"ui","status":"paired","label":"Legacy","created":1,"publicKey":"key"}).to_string()])?;
         Ok(())
     }).await.unwrap();
     let mut request = Request::builder()
@@ -278,8 +278,9 @@ async fn access_snapshot_projects_legacy_missing_fields_as_null() {
     let response = receiver.app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
-    let _: studio_runtime_http::generated::AccessSnapshot = serde_json::from_slice(&bytes).unwrap();
-    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let _: studio_runtime_http::generated::AccessSnapshot =
+        studio_json::from_slice(&bytes).unwrap();
+    let body: Value = studio_json::from_slice(&bytes).unwrap();
     let client = body["clients"]
         .as_array()
         .unwrap()
@@ -313,7 +314,7 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock")
         .as_secs() as i64;
-    let raw = serde_json::to_vec(&serde_json::json!({
+    let raw = studio_json::to_vec(&studio_json::json!({
         "action":"create_invite",
         "requestId":"fake-server-invite",
         "label":null
@@ -373,13 +374,13 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
         String::from_utf8_lossy(&first_body),
         common::rows(&receiver_store)
     );
-    serde_json::from_slice::<studio_runtime_http::generated::InvitationResponse>(&first_body)
+    studio_json::from_slice::<studio_runtime_http::generated::InvitationResponse>(&first_body)
         .expect("signed invitation response matches the generated contract");
-    let first: Value = serde_json::from_slice(&first_body).expect("first invitation JSON");
+    let first: Value = studio_json::from_slice(&first_body).expect("first invitation JSON");
     let mut fractional = first.clone();
-    fractional["expires"] = serde_json::json!(1234.5);
-    fractional["invitation"]["expires"] = serde_json::json!(1234.5);
-    serde_json::from_value::<studio_runtime_http::generated::InvitationResponse>(fractional)
+    fractional["expires"] = studio_json::json!(1234.5);
+    fractional["invitation"]["expires"] = studio_json::json!(1234.5);
+    studio_json::from_value::<studio_runtime_http::generated::InvitationResponse>(fractional)
         .expect("fractional Unix-second expiry matches the generated HTTP contract");
     let snapshot =
         studio_runtime_services::multi_server::snapshot(&receiver_store, &receiver_identity)
@@ -398,7 +399,7 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
         .await
         .expect("recovery response");
     assert_eq!(retry.status(), StatusCode::OK);
-    let retry: Value = serde_json::from_slice(
+    let retry: Value = studio_json::from_slice(
         &to_bytes(retry.into_body(), 16 * 1024)
             .await
             .expect("retry invitation body"),
@@ -406,8 +407,8 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
     .expect("retry invitation JSON");
     assert_eq!(retry, first, "the same logical ID recovers the same secret");
 
-    let name_body = serde_json::json!({"label":"Renamed receiver","requestId":"fake-server-name"});
-    let name_raw = serde_json::to_vec(&name_body).expect("rename body serializes");
+    let name_body = studio_json::json!({"label":"Renamed receiver","requestId":"fake-server-name"});
+    let name_raw = studio_json::to_vec(&name_body).expect("rename body serializes");
     let name_request_id = "fake-server-name";
     let name_url = format!("{origin}/api/multi-server/v1/name");
     let name_signed = MultiServerRequest {
@@ -456,7 +457,7 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
         "{}",
         String::from_utf8_lossy(&rename_body)
     );
-    let renamed: Value = serde_json::from_slice(&rename_body).expect("renamed identity JSON");
+    let renamed: Value = studio_json::from_slice(&rename_body).expect("renamed identity JSON");
     assert_eq!(renamed["label"], "Renamed receiver");
 
     let invite_count = receiver_store
@@ -491,12 +492,12 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
         .as_secs() as i64;
     let url = format!("{origin}/api/multi-server");
     let actions = [
-        serde_json::json!({"action":"ui_invite","serverId":"unpaired-peer","requestId":"phone-invite"}),
-        serde_json::json!({"action":"discover","requestId":"phone-discover"}),
-        serde_json::json!({"action":"alias","serverId":caller_id,"alias":"PHN","requestId":"phone-alias"}),
+        studio_json::json!({"action":"ui_invite","serverId":"unpaired-peer","requestId":"phone-invite"}),
+        studio_json::json!({"action":"discover","requestId":"phone-discover"}),
+        studio_json::json!({"action":"alias","serverId":caller_id,"alias":"PHN","requestId":"phone-alias"}),
     ];
     let request = |body: &Value, signed: Option<&'static str>, token: &str| {
-        let raw = serde_json::to_vec(body).expect("management body serializes");
+        let raw = studio_json::to_vec(body).expect("management body serializes");
         let mut builder = Request::builder()
             .method("POST")
             .uri("/api/multi-server")
@@ -548,7 +549,7 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
                 .expect("response body");
             (
                 status,
-                serde_json::from_slice::<Value>(&body).expect("JSON response"),
+                studio_json::from_slice::<Value>(&body).expect("JSON response"),
             )
         }
     };
@@ -570,7 +571,7 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
             send(request(body, Some(nonce), "")).await,
             (
                 StatusCode::FORBIDDEN,
-                serde_json::json!({"error":message,"code":"local_session_required"})
+                studio_json::json!({"error":message,"code":"local_session_required"})
             ),
             "a paired server credential cannot call {action}"
         );
@@ -585,7 +586,7 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
                 owner,
                 (
                     StatusCode::FORBIDDEN,
-                    serde_json::json!({"error":"The server is not paired or is revoked"})
+                    studio_json::json!({"error":"The server is not paired or is revoked"})
                 )
             );
         } else {
@@ -593,13 +594,13 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
                 owner,
                 (
                     StatusCode::FORBIDDEN,
-                    serde_json::json!({"error":message,"code":"local_session_required"})
+                    studio_json::json!({"error":message,"code":"local_session_required"})
                 ),
                 "the owner session through Serve cannot call {action}"
             );
         }
     }
-    let malformed = serde_json::json!({"action":"ui_invite", "requestId":"malformed-restricted"});
+    let malformed = studio_json::json!({"action":"ui_invite", "requestId":"malformed-restricted"});
     assert_eq!(
         send(request(
             &malformed,
@@ -609,7 +610,7 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
         .await,
         (
             StatusCode::BAD_REQUEST,
-            serde_json::json!({"error":"Invalid multi-server request", "code":"invalid_request"})
+            studio_json::json!({"error":"Invalid multi-server request", "code":"invalid_request"})
         )
     );
     assert_eq!(audit_rows(), before, "no refused request writes state");
@@ -656,10 +657,10 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
     .expect("boundary");
     let app = router(state.with_multi_server_boundary(Arc::new(boundary))).expect("router");
     let mut identity_case = case.clone();
-    identity_case["method"] = serde_json::json!("GET");
-    identity_case["target"] = serde_json::json!("/api/multi-server/v1/identity");
-    identity_case["raw"] = serde_json::json!("");
-    identity_case["headers"] = serde_json::json!([]);
+    identity_case["method"] = studio_json::json!("GET");
+    identity_case["target"] = studio_json::json!("/api/multi-server/v1/identity");
+    identity_case["raw"] = studio_json::json!("");
+    identity_case["headers"] = studio_json::json!([]);
     let response = app
         .clone()
         .oneshot(incoming(&identity_case))
@@ -667,7 +668,7 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         .expect("identity response");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["access-control-allow-origin"], "*");
-    let actual: Value = serde_json::from_slice(
+    let actual: Value = studio_json::from_slice(
         &to_bytes(response.into_body(), 4096)
             .await
             .expect("identity body"),
@@ -728,7 +729,7 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         .await
         .expect("signed auto-pair response");
     assert_eq!(auto_response.status(), StatusCode::OK);
-    let auto_value: Value = serde_json::from_slice(
+    let auto_value: Value = studio_json::from_slice(
         &to_bytes(auto_response.into_body(), 4096)
             .await
             .expect("auto-pair body"),
@@ -788,11 +789,11 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
             forged["refusal"]["status"].as_u64().expect("status") as u16
         );
         let body: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.expect("body"))
+            studio_json::from_slice(&to_bytes(response.into_body(), 4096).await.expect("body"))
                 .expect("JSON");
         assert_eq!(
             body,
-            serde_json::json!({"error":forged["refusal"]["error"],"code":forged["refusal"]["code"]})
+            studio_json::json!({"error":forged["refusal"]["error"],"code":forged["refusal"]["code"]})
         );
         assert_eq!(lookup.calls.load(Ordering::SeqCst), calls);
         assert_eq!(lookup.probes.load(Ordering::SeqCst), probes);
@@ -811,12 +812,12 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.expect("body"))
+        studio_json::from_slice(&to_bytes(response.into_body(), 4096).await.expect("body"))
             .expect("JSON");
     assert_eq!(body, data["identity"]);
     let before = common::rows(&store);
     let mut changed = query.clone();
-    changed["target"] = serde_json::json!("/api/multi-server/v1/status?check=2");
+    changed["target"] = studio_json::json!("/api/multi-server/v1/status?check=2");
     let calls = lookup.calls.load(Ordering::SeqCst);
     let response = app
         .clone()
@@ -825,7 +826,7 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         .expect("response");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.expect("body"))
+        studio_json::from_slice(&to_bytes(response.into_body(), 4096).await.expect("body"))
             .expect("JSON");
     let bad = data["auth"]
         .as_array()
@@ -835,7 +836,7 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         .expect("signature refusal");
     assert_eq!(
         body,
-        serde_json::json!({"code":bad["refusal"]["code"],"error":bad["refusal"]["error"]})
+        studio_json::json!({"code":bad["refusal"]["code"],"error":bad["refusal"]["error"]})
     );
     assert_eq!(lookup.calls.load(Ordering::SeqCst), calls);
     assert_eq!(common::rows(&store), before);
@@ -856,7 +857,7 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         "{}",
         String::from_utf8_lossy(&bytes)
     );
-    let value: Value = serde_json::from_slice(&bytes).expect("JSON");
+    let value: Value = studio_json::from_slice(&bytes).expect("JSON");
     assert_eq!(value["clientId"], "new-client");
     assert_eq!(value["paired"], true);
     let before = common::rows(&store);
@@ -866,11 +867,11 @@ async fn signed_requests_cross_the_http_boundary_and_missing_owner_is_no_write()
         case["replayRefusal"]["status"].as_u64().expect("status") as u16
     );
     let body: Value =
-        serde_json::from_slice(&to_bytes(replay.into_body(), 4096).await.expect("body"))
+        studio_json::from_slice(&to_bytes(replay.into_body(), 4096).await.expect("body"))
             .expect("JSON");
     assert_eq!(
         body,
-        serde_json::json!({"code":case["replayRefusal"]["code"],"error":case["replayRefusal"]["error"]})
+        studio_json::json!({"code":case["replayRefusal"]["code"],"error":case["replayRefusal"]["error"]})
     );
     assert_eq!(common::rows(&store), before);
     // Keep the shared helpers exercised in this binary as well.
@@ -912,8 +913,8 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
     parent.auto_wake = Some(true);
     parent
         .extra
-        .insert("moveImportPending".into(), serde_json::json!(true));
-    let link = serde_json::json!({"id":"fixture-link","side":"home","server":"peer-server","home":"local-server","parent":"event-parent","parentEpoch":3,"workers":[]});
+        .insert("moveImportPending".into(), studio_json::json!(true));
+    let link = studio_json::json!({"id":"fixture-link","side":"home","server":"peer-server","home":"local-server","parent":"event-parent","parentEpoch":3,"workers":[]});
     store
         .transaction_with(move |tx| {
             tx.execute(
@@ -958,7 +959,7 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
             .await
             .expect("signed event response");
         assert_eq!(response.status(), StatusCode::OK);
-        let replay: Value = serde_json::from_slice(
+        let replay: Value = studio_json::from_slice(
             &to_bytes(response.into_body(), 4096)
                 .await
                 .expect("receipt body"),
@@ -1042,7 +1043,7 @@ async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() 
                     caller_identity_for_trust["serverId"]
                         .as_str()
                         .expect("caller ID"),
-                    serde_json::json!({
+                    studio_json::json!({
                         "id":caller_identity_for_trust["serverId"],
                         "clientId":caller_identity_for_trust["serverId"],
                         "kind":"server",
@@ -1063,7 +1064,7 @@ async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() 
 
     let policy = Arc::new(
         studio_runtime_services::account_policy::AccountPolicyState::from_startup(
-            Some(serde_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"alternate","accounts":{"alternate":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"alternate","home":"/alternate","label":"Alternate","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
+            Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"alternate","accounts":{"alternate":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"alternate","home":"/alternate","label":"Alternate","source":"Codex CLI","status":"signedOut"}},"logins":{}}).to_string().as_bytes()),
             [],
         )
         .expect("configured account snapshot"),
@@ -1082,7 +1083,7 @@ async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() 
     .with_credentials(Arc::clone(&receiver_credentials))
     .with_multi_server_boundary(Arc::new(boundary))
     .with_tailscale_whoami(Arc::new(|| {
-        Box::pin(async { Some(serde_json::json!({"user":"owner@example.test"})) })
+        Box::pin(async { Some(studio_json::json!({"user":"owner@example.test"})) })
     }))
     .with_lifecycle_ports(Arc::new(NoopLifecycle));
     let app = router(state).expect("receiver router");
@@ -1093,7 +1094,7 @@ async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() 
     let project_path = receiver_root.path().join("new-remote-project");
     std::fs::create_dir_all(&project_path).expect("unregistered project directory");
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    let raw = serde_json::to_vec(&serde_json::json!({
+    let raw = studio_json::to_vec(&studio_json::json!({
         "action":"add_location",
         "requestId":request_id,
         "operation":[],
@@ -1139,7 +1140,7 @@ async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() 
     ));
     let response = app.oneshot(request).await.expect("project add response");
     assert_eq!(response.status(), StatusCode::OK);
-    let value: Value = serde_json::from_slice(
+    let value: Value = studio_json::from_slice(
         &to_bytes(response.into_body(), 16 * 1024)
             .await
             .expect("project add body"),
@@ -1245,7 +1246,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
                 "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
                 rusqlite::params![
                     row_id,
-                    serde_json::json!({
+                    studio_json::json!({
                         "id":row_id,"clientId":row_id,"kind":"ui","status":"paired",
                         "label":"Studio UI","created":1,"publicKey":window_key,
                         "origin":null,"serverId":null,"revoked":null,
@@ -1292,7 +1293,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .map(str::to_owned);
     let body = to_bytes(read.into_body(), 1024 * 1024).await.expect("body");
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-    let summary: Value = serde_json::from_slice(&body).expect("summary JSON");
+    let summary: Value = studio_json::from_slice(&body).expect("summary JSON");
     assert!(
         summary["chats"].is_array(),
         "the window gets the chat summary"
@@ -1358,7 +1359,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
                 if let (Some(event), Some(data)) = (event, data) {
                     frames.push((
                         event.to_owned(),
-                        serde_json::from_str(data).expect("frame JSON"),
+                        studio_json::from_str(data).expect("frame JSON"),
                     ));
                 }
             }
@@ -1368,7 +1369,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         }
         panic!("missing resource frame");
     }
-    let resources = serde_json::json!([{"kind":"state"}]);
+    let resources = studio_json::json!([{"kind":"state"}]);
     let query = |since: Option<Value>| {
         let mut query = form_urlencoded::Serializer::new(String::new());
         query
@@ -1408,7 +1409,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .1["resourceVersions"][0];
     let cursor = entry["cursor"].clone();
     assert!(cursor.is_object(), "snapshot cursor: {entry}");
-    let since = serde_json::json!([{"resource":{"kind":"state"},"since":cursor}]);
+    let since = studio_json::json!([{"resource":{"kind":"state"},"since":cursor}]);
     let second = app
         .clone()
         .oneshot(signed_api_request(
@@ -1455,7 +1456,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .1["resourceVersions"][0];
     assert_eq!(
         *entry,
-        serde_json::json!({
+        studio_json::json!({
             "resource": {"kind": "state"},
             "revision": cursor["seq"],
             "cursor": cursor,
@@ -1534,10 +1535,10 @@ async fn owner_is_checked_once_per_link_connection_and_only_for_the_link() {
     .with_peer_link_token("link-secret");
     let app = router(state).expect("router");
     let mut identity_case = case.clone();
-    identity_case["method"] = serde_json::json!("GET");
-    identity_case["target"] = serde_json::json!("/api/multi-server/v1/identity");
-    identity_case["raw"] = serde_json::json!("");
-    identity_case["headers"] = serde_json::json!([]);
+    identity_case["method"] = studio_json::json!("GET");
+    identity_case["target"] = studio_json::json!("/api/multi-server/v1/identity");
+    identity_case["raw"] = studio_json::json!("");
+    identity_case["headers"] = studio_json::json!([]);
     let send = |token: Option<&str>, connection: &str| {
         let app = app.clone();
         let mut request = incoming(&identity_case);
@@ -1659,7 +1660,7 @@ async fn pair_window(
         .expect("window key exists");
     let signing = load_multi_server_identity(root.path()).expect("window signing key loads");
     let id = signing.id().to_owned();
-    let mut record = serde_json::json!({
+    let mut record = studio_json::json!({
         "id":id,"clientId":id,"kind":"ui","status":"paired","label":"Studio UI","created":1,
         "publicKey":identity["publicKey"],"origin":null,"serverId":null,"revoked":null,
         "tailscaleUser":"owner@example.test"

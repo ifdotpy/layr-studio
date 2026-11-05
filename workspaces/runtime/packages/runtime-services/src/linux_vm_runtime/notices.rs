@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use serde_json::{Map, Value, json};
+use studio_json::{Map, Value, json};
 use studio_runtime_store::RuntimeStore;
 
 /// The restart outcomes that a chat notice reports.

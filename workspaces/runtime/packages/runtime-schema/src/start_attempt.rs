@@ -28,7 +28,7 @@ pub struct ProviderTicket {
 /// A provider request; legacy agent snapshots can omit its root request ID.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct NativeRequest<R = String, P = serde_json::Value> {
+pub struct NativeRequest<R = String, P = studio_json::Value> {
     pub root_request_id: R,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admitted_request: Option<crate::persistence::AdmittedRequest>,
@@ -413,7 +413,7 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for StartAttemptFields {
     }
     fn finish<E: serde::de::Error>(
         self,
-        extra: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>>,
+        extra: std::collections::BTreeMap<String, studio_json::OwnedRawJson>,
     ) -> Result<Self::Output, E> {
         if let Some((name, _)) = extra.into_iter().next() {
             return Err(E::custom(format!("unknown start attempt field {name}")));
@@ -502,8 +502,8 @@ mod tests {
                 archive_bytes: None,
                 archive_sha256: None,
             };
-            let serialized = serde_json::to_vec(&current).unwrap();
-            let old: BaseProjectImport = serde_json::from_slice(&serialized).unwrap();
+            let serialized = studio_json::to_vec(&current).unwrap();
+            let old: BaseProjectImport = studio_json::from_slice(&serialized).unwrap();
             assert_eq!(old.phase, expected);
             assert_eq!(
                 (
@@ -530,28 +530,28 @@ mod tests {
     #[test]
     fn direct_and_value_attempt_decodes_accept_provider_payload() {
         let raw = r#"{"id":"attempt","nativeRequest":{"ticket":{"operation":"op","agent":"a","epoch":1,"account":"acct","thread":"thread","connection":"c","generation":1,"request":"r"},"method":"review/start","params":{"z":  1,"a":2}}}"#;
-        let direct: StartAttemptView = serde_json::from_str(raw).unwrap();
+        let direct: StartAttemptView = studio_json::from_str(raw).unwrap();
         assert_eq!(
-            direct.native_request.unwrap().params.0.get(),
+            direct.native_request.unwrap().params.0.as_str(),
             r#"{"z":  1,"a":2}"#
         );
         // Existing in-memory callers have already lost the source whitespace.
-        let value: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let value: studio_json::Value = studio_json::from_str(raw).unwrap();
         let projected = StartAttemptView::deserialize(value).unwrap();
         assert_eq!(
-            projected.native_request.unwrap().params.0.get(),
+            projected.native_request.unwrap().params.0.as_str(),
             r#"{"a":2,"z":1}"#
         );
         // The live request type still requires the root identity.
         let native = r#"{"ticket":{"operation":"op","agent":"a","epoch":1,"account":"acct","thread":"thread","connection":"c","generation":1,"request":"r"},"method":"review/start","params":{}}"#;
-        assert!(serde_json::from_str::<NativeRequest>(native).is_err());
+        assert!(studio_json::from_str::<NativeRequest>(native).is_err());
     }
 
     #[test]
     fn attempt_rejects_unknown_duplicate_and_null_action() {
-        assert!(serde_json::from_str::<StartAttemptView>(r#"{"future":1}"#).is_err());
-        assert!(serde_json::from_str::<StartAttemptView>(r#"{"id":null,"id":null}"#).is_err());
-        assert!(serde_json::from_str::<StartAttemptView>(r#"{"action":null}"#).is_err());
-        assert!(serde_json::from_str::<StartAttemptView>(r#"{"action":"review"}"#).is_ok());
+        assert!(studio_json::from_str::<StartAttemptView>(r#"{"future":1}"#).is_err());
+        assert!(studio_json::from_str::<StartAttemptView>(r#"{"id":null,"id":null}"#).is_err());
+        assert!(studio_json::from_str::<StartAttemptView>(r#"{"action":null}"#).is_err());
+        assert!(studio_json::from_str::<StartAttemptView>(r#"{"action":"review"}"#).is_ok());
     }
 }

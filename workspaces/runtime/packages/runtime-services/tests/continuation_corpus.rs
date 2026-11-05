@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::{capacity_retry, continuation::Snapshot};
 
 #[test]
@@ -260,7 +260,7 @@ fn auth_backoff_preserves_integer_and_decimal_alias_behavior() {
 /// The stored-record inputs of the continuation corpus.
 fn cases() -> Value {
     let mut cases: Value =
-        serde_json::from_str(include_str!("continuation/cases.json")).expect("corpus JSON");
+        studio_json::from_str(include_str!("continuation/cases.json")).expect("corpus JSON");
     // The frozen corpus predates explicit identity for these Codex continuations.
     for case in cases.as_array_mut().expect("corpus cases") {
         case["input"]["agent"]["compactions"] = json!(0);

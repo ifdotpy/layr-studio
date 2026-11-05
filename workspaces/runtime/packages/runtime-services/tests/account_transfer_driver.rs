@@ -1,5 +1,5 @@
-use serde_json::{Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use studio_json::{Value, json};
 use studio_runtime_providers::{Method, RequestTicket};
 use studio_runtime_services::{
     account_session_runtime::{
@@ -17,10 +17,10 @@ pub(crate) fn dispatch_from_raw(
     result: Option<Value>,
     certainty: RequestCertainty,
 ) -> TransferDispatch {
-    let scope: ConnectionScope = serde_json::from_value(raw["scope"].clone()).expect("scope");
+    let scope: ConnectionScope = studio_json::from_value(raw["scope"].clone()).expect("scope");
     let ticket = RequestTicket {
         generation: raw["ticket"]["generation"].as_u64().expect("generation"),
-        id: serde_json::from_value(raw["ticket"]["id"].clone()).expect("id"),
+        id: studio_json::from_value(raw["ticket"]["id"].clone()).expect("id"),
         method: Method::from_wire(raw["ticket"]["method"].as_str().expect("method"))
             .expect("known method"),
     };

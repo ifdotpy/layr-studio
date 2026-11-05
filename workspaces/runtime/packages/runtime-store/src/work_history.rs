@@ -7,7 +7,7 @@
 //! durable triggers of each child table write the tombstones.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use serde_json::Value;
+use studio_json::Value;
 
 use crate::entity_publication::WorkHistoryKind;
 use crate::{StoreError, StoreResult};
@@ -71,7 +71,7 @@ pub fn reconcile(connection: &Connection, id: &str, record: &Value) -> StoreResu
                 )
                 .optional()?;
             let unchanged = match stored {
-                Some(raw) => serde_json::from_str::<Value>(&raw)? == *entry,
+                Some(raw) => studio_json::from_str::<Value>(&raw)? == *entry,
                 None => false,
             };
             if !unchanged {
@@ -111,7 +111,7 @@ pub fn entries(
         .map(|(index, raw)| {
             let index = usize::try_from(index)
                 .map_err(|_| StoreError::RecordContract("work history index is negative"))?;
-            Ok((index, serde_json::from_str::<Value>(&raw)?))
+            Ok((index, studio_json::from_str::<Value>(&raw)?))
         })
         .collect()
 }
@@ -130,7 +130,7 @@ pub fn entry(
             |row| row.get(0),
         )
         .optional()?;
-    raw.map(|raw| serde_json::from_str::<Value>(&raw).map_err(StoreError::from))
+    raw.map(|raw| studio_json::from_str::<Value>(&raw).map_err(StoreError::from))
         .transpose()
 }
 
@@ -170,7 +170,7 @@ pub(crate) fn migrate(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Result<Vec<_>, _>>()?;
     for (id, raw) in rows {
         // A record that does not parse has no readable history; the typed decode reports it.
-        let Ok(record) = serde_json::from_str::<Value>(&raw) else {
+        let Ok(record) = studio_json::from_str::<Value>(&raw) else {
             continue;
         };
         if record.get("id").and_then(Value::as_str) != Some(id.as_str()) {
@@ -187,7 +187,7 @@ mod tests {
     use super::*;
     use crate::durable_seq::changes_since;
     use crate::repositories::work_items::WorkItemsRepository;
-    use serde_json::json;
+    use studio_json::json;
 
     fn work(results: Value, decisions: Value) -> Value {
         let mut value = json!({"id":"w","rootId":"lead","title":"t","status":"review","created":1,"updated":1,

@@ -2,7 +2,7 @@
 //! Constructors accept stored records; decisions never read a clock, database or path.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_store::truthy;
 
 #[derive(Debug, thiserror::Error)]
@@ -40,7 +40,7 @@ fn decode<T: serde::de::DeserializeOwned>(schema: &'static str, value: &Value) -
     {
         return Err(invalid(pointer));
     }
-    serde_json::from_value(value.clone()).map_err(|_| invalid(String::new()))
+    studio_json::from_value(value.clone()).map_err(|_| invalid(String::new()))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

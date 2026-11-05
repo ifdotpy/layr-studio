@@ -1,9 +1,9 @@
 //! Thread preparation holds, refusal boundaries, and scoped receipt settlement.
-use serde_json::{Value, json};
+use studio_json::{Value, json};
 use studio_runtime_services::thread_prepare::*;
 
 fn baseline() -> Value {
-    serde_json::from_str(include_str!("thread_prepare/snapshot.json")).expect("snapshot")
+    studio_json::from_str(include_str!("thread_prepare/snapshot.json")).expect("snapshot")
 }
 fn merge(target: &mut Value, patch: &Value) {
     // A presence-aware field becoming absent discards its former payload.
@@ -24,7 +24,7 @@ fn merge(target: &mut Value, patch: &Value) {
     }
 }
 fn snapshot(value: &Value) -> Snapshot {
-    serde_json::from_value(value.clone()).expect("typed snapshot")
+    studio_json::from_value(value.clone()).expect("typed snapshot")
 }
 fn attempt(outcome: Outcome) -> PreparedAttempt {
     match outcome {
@@ -35,7 +35,7 @@ fn attempt(outcome: Outcome) -> PreparedAttempt {
     }
 }
 fn receipt(a: &PreparedAttempt) -> ProviderReceipt {
-    serde_json::from_value(json!({"identity":a.receipt_identity(),"thread_id":"thread","fields":{"model":"native-model"},"reattached":false})).expect("receipt")
+    studio_json::from_value(json!({"identity":a.receipt_identity(),"thread_id":"thread","fields":{"model":"native-model"},"reattached":false})).expect("receipt")
 }
 #[test]
 fn every_hold_releases_and_accepts_without_consuming_input() {
@@ -295,7 +295,7 @@ fn receipt_and_pending_ownership_are_bound_to_exact_attempt() {
         let mut foreign = json!(receipt(&prepared));
         foreign["identity"][key] = value;
         foreign["thread_id"] = json!("foreign-thread");
-        let foreign = serde_json::from_value(foreign).expect("foreign receipt");
+        let foreign = studio_json::from_value(foreign).expect("foreign receipt");
         assert_eq!(
             reduce_receipt(&prepared, &current, Some(&foreign), None, json!(1000)),
             ReceiptOutcome::Stale(StaleReason::ReceiptIdentity),
@@ -322,7 +322,7 @@ fn receipt_and_pending_ownership_are_bound_to_exact_attempt() {
         let mut pending = json!({"agent_id":"agent","epoch":7,"account_key":"account","request_digest":"digest","attempt_id":"attempt","connection_id":"connection","thread_id":null});
         pending[key] = value;
         let mut s = base.clone();
-        s.pending = Some(serde_json::from_value(pending).expect("pending"));
+        s.pending = Some(studio_json::from_value(pending).expect("pending"));
         assert_eq!(
             plan(&s, "new", "new-ticket"),
             Outcome::Refuse(Refusal::PreparationIdentity),
@@ -388,7 +388,10 @@ fn malformed_stored_catalog_family_never_panics() {
     for path in ["inputSchema", "description", "name"] {
         let mut value = baseline();
         value["catalog"]["definitions"][0][path] = json!(false);
-        assert!(serde_json::from_value::<Snapshot>(value).is_err(), "{path}");
+        assert!(
+            studio_json::from_value::<Snapshot>(value).is_err(),
+            "{path}"
+        );
     }
     let mut s = snapshot(&baseline());
     s.actor.thread_id = Some(String::new());

@@ -24,7 +24,7 @@ fn lifecycle_capability_requires_exact_ready_connection_and_boolean_proof() {
         generation,
         initialization: InitializationStatus::Ready,
         initialize_result: Some(Arc::new(
-            serde_json::json!({"capabilities":{CAPABILITY:true}}),
+            studio_json::json!({"capabilities":{CAPABILITY:true}}),
         )),
         barrier_set: false,
         held_entries: 0,
@@ -51,10 +51,10 @@ fn lifecycle_capability_requires_exact_ready_connection_and_boolean_proof() {
     assert!(!status.has_capability(&handle, Generation(8), CAPABILITY));
     for value in [
         Value::Null,
-        serde_json::json!({}),
-        serde_json::json!({"capabilities":{CAPABILITY:false}}),
-        serde_json::json!({"capabilities":{CAPABILITY:"true"}}),
-        serde_json::json!({"capabilities":{CAPABILITY:1}}),
+        studio_json::json!({}),
+        studio_json::json!({"capabilities":{CAPABILITY:false}}),
+        studio_json::json!({"capabilities":{CAPABILITY:"true"}}),
+        studio_json::json!({"capabilities":{CAPABILITY:1}}),
     ] {
         let mut unknown = status.clone();
         unknown.initialize_result = Some(Arc::new(value));
@@ -119,7 +119,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
                         break;
                     }
                     let result = if index == 0 {
-                        CommandReceipt::CachedInitialize(serde_json::json!({}))
+                        CommandReceipt::CachedInitialize(studio_json::json!({}))
                     } else {
                         CommandReceipt::Written {
                             remote_id: None,
@@ -177,7 +177,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
                 id: RequestId::Number(2),
                 operation_id: OperationId("request".into()),
                 method: Method::ModelList,
-                params: serde_json::json!({}),
+                params: studio_json::json!({}),
                 thread_id: None,
                 lightweight: false,
                 timeout_ms: 100,
@@ -193,7 +193,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
                     id: RequestId::Number(3),
                     operation_id: OperationId("unsent".into()),
                     method: Method::ModelList,
-                    params: serde_json::json!({}),
+                    params: studio_json::json!({}),
                     thread_id: None,
                     lightweight: false,
                     timeout_ms: 100,
@@ -210,7 +210,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
                 generation: Generation(1),
                 payload: JournalPayload::Frame(Frame::Response {
                     id: ticket.id.clone(),
-                    body: ResponseBody::Result(serde_json::json!({})),
+                    body: ResponseBody::Result(studio_json::json!({})),
                     fields: Map::new(),
                 }),
             })
@@ -294,7 +294,7 @@ async fn closure_panic_unknown_batch_does_not_return_unknown_twice() {
             expected_generation: None,
         },
         SessionTaskConfig {
-            initialize_params: serde_json::json!({}),
+            initialize_params: studio_json::json!({}),
             generation: Generation(1),
             wire: studio_runtime_providers::ProviderKind::Codex.wire(),
             timeout_ms: 1000,
@@ -322,7 +322,7 @@ async fn closure_panic_unknown_batch_does_not_return_unknown_twice() {
             received_at_ms: 1,
             payload: JournalPayload::Frame(Frame::Response {
                 id: RequestId::Number(1),
-                body: ResponseBody::Error(serde_json::json!({"code":-1,"message":"refused"})),
+                body: ResponseBody::Error(studio_json::json!({"code":-1,"message":"refused"})),
                 fields: Map::new(),
             }),
         })
