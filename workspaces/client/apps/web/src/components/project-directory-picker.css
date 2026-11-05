@@ -9,7 +9,7 @@
   gap: 10px;
   min-width: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .directory-location > span {
   overflow: hidden;
@@ -23,13 +23,13 @@
   height: min(320px, 40vh);
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
 }
 .directory-list > p,
 .directory-list > [role="alert"] {
   padding: 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   overflow-wrap: anywhere;
 }
 .directory-row {
@@ -38,7 +38,7 @@
   width: 100%;
   gap: 10px;
   padding: 11px 12px;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
 }
 .directory-row:hover,
 .directory-row:focus-visible {
@@ -60,7 +60,7 @@
 .directory-error {
   margin: 0;
   color: var(--mantine-color-red-5);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   overflow-wrap: anywhere;
 }
 
@@ -77,7 +77,7 @@
   max-width: 220px;
   flex-shrink: 1;
   height: 32px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 
 .directory-picker[data-server-selector="true"] .directory-list {

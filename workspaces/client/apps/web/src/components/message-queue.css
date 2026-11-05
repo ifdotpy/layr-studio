@@ -10,7 +10,7 @@
   min-width: 0;
   margin: 0 0 var(--mantine-spacing-sm);
   border: var(--studio-border-width) solid var(--line);
-  border-radius: 0;
+  border-radius: var(--studio-radius-card);
   background: var(--surface);
   color: var(--text);
   font-size: var(--studio-text-body);
@@ -266,4 +266,8 @@
   .message-queue-editor-actions > span {
     display: none;
   }
+}
+
+.message-queue[data-studio-state="error"] {
+  border-color: var(--studio-state-error);
 }

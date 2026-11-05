@@ -1612,6 +1612,7 @@ export default function Accounts({
           Cancel
         </Button>
         <Button
+          variant="filled"
           color="red"
           loading={pending === "delete"}
           disabled={!!pending || (deletesDefault && !deleteReplacement)}

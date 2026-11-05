@@ -4,7 +4,7 @@ import {
   useServerApi,
   useServerResources,
 } from "../servers/ServerServicesContext";
-import { Button } from "@mantine/core";
+import { Button, Group, TextInput } from "@mantine/core";
 import { SettingsRow } from "./ui/primitives";
 
 type Configuration = GetResult<"/api/native-layr/settings">;
@@ -44,45 +44,46 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
                   ? "Unavailable"
                   : "Not installed"}
             </SettingsRow>
-            <SettingsRow
-              label={
-                <label htmlFor="layr-store-root">Default store directory</label>
-              }
-            >
-              <input
-                id="layr-store-root"
-                value={storeRoot}
-                onChange={(event) => setStoreRoot(event.currentTarget.value)}
-              />
-            </SettingsRow>
-            <Button
-              loading={busy}
-              onClick={() => {
-                setBusy(true);
-                setError("");
-                void post("/api/native-layr/settings", {
-                  storeRoot: storeRoot.trim(),
-                })
-                  .then(
-                    () => {},
-                    (failure) => setError(errorText(failure)),
-                  )
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Save store directory
-            </Button>
-            <p>Leave the directory empty to use Studio's default store.</p>
+            <TextInput
+              id="layr-store-root"
+              label="Default store directory"
+              description="Leave the directory empty to use Studio's default store."
+              classNames={{ input: "layr-store-input" }}
+              value={storeRoot}
+              onChange={(event) => setStoreRoot(event.currentTarget.value)}
+            />
+            <Group justify="flex-end">
+              <Button
+                loading={busy}
+                onClick={() => {
+                  setBusy(true);
+                  setError("");
+                  void post("/api/native-layr/settings", {
+                    storeRoot: storeRoot.trim(),
+                  })
+                    .then(
+                      () => {},
+                      (failure) => setError(errorText(failure)),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Save store directory
+              </Button>
+            </Group>
             {configuration.readiness?.status === "notReady" && (
-              <p role="status">{configuration.readiness.reason}</p>
+              <p role="status" className="layr-settings-detail">
+                {configuration.readiness.reason}
+              </p>
             )}
-            {configuration.error && <p role="alert">{configuration.error}</p>}
+            {configuration.error && (
+              <p role="alert" className="layr-settings-detail">
+                {configuration.error}
+              </p>
+            )}
           </>
         )}
         {error && <p role="alert">{error}</p>}
-      </section>
-      <section className="settings-group" aria-label="Worktrees">
-        <h2>Worktrees</h2>
       </section>
     </>
   );

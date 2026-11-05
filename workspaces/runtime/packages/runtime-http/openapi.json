@@ -16108,8 +16108,9 @@
             "type": "integer"
           },
           "fontFamily": {
-            "default": "system",
+            "default": "geist",
             "enum": [
+              "geist",
               "system",
               "arial",
               "inter",

@@ -192,9 +192,9 @@ test("levels are counted and displayed in severity order", () => {
     at: 1,
   };
   const markup = render([warning, critical, lost]);
-  expect(markup).toContain("CRITICAL (1)");
-  expect(markup).toContain("ERROR (1)");
-  expect(markup).toContain("WARNING (1)");
+  expect(markup).toContain("Critical (1)");
+  expect(markup).toContain("Error (1)");
+  expect(markup).toContain("Warning (1)");
   expect(markup.indexOf('data-kind="monitor_outcome_lost"')).toBeGreaterThan(
     -1,
   );
@@ -211,7 +211,7 @@ test("local logs share the list without a dismissal checkbox", () => {
   });
   try {
     const markup = render([]);
-    expect(markup).toContain("LOG (1)");
+    expect(markup).toContain("Log (1)");
     expect(markup).toContain("Reconnected");
     expect(markup).toContain("Clear local logs");
     expect(markup).not.toContain('type="checkbox"');
@@ -229,7 +229,7 @@ test("local transfer failures appear as errors", () => {
   });
   try {
     const markup = render([]);
-    expect(markup).toContain("ERROR (1)");
+    expect(markup).toContain("Error (1)");
     expect(markup).toContain("Worker: Receipt missing");
   } finally {
     clearAppLog();

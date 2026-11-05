@@ -2524,7 +2524,7 @@ fn valid_appearance(name: &str, value: &Value) -> bool {
         "typography" | "contentLayout" => matches!(value.as_str(), Some("original" | "custom")),
         "fontFamily" => matches!(
             value.as_str(),
-            Some("system" | "arial" | "inter" | "georgia" | "verdana")
+            Some("geist" | "system" | "arial" | "inter" | "georgia" | "verdana")
         ),
         "sidebarFontSize" | "mainFontSize" => {
             value.as_i64().is_some_and(|n| (12..=24).contains(&n))

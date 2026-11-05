@@ -184,7 +184,9 @@ export default function ProjectServerCards({
                 <Text component="span" size="xs" c="dimmed">
                   {server.disabled ? "Offline" : "Active"}
                 </Text>
-                {folder && <span>{folder.path}</span>}
+                {folder && (
+                  <span className="project-server-path">{folder.path}</span>
+                )}
               </button>
               {!folder && (
                 <Button

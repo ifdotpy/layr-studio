@@ -129,6 +129,7 @@ function ParticipantFields({
       >
         <Popover.Target>
           <Button
+            variant="subtle"
             type="button"
             className="shared-create-chip"
             aria-label={`Settings for agent ${index + 1}`}

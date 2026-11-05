@@ -18,8 +18,7 @@
   :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible,
 .fleet-menu
   :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: var(--studio-focus-ring-width) solid
-    var(--mantine-primary-color-filled);
+  outline: var(--studio-focus-ring-width) solid var(--accent);
   outline-offset: calc(
     -1 * (var(--studio-focus-ring-width) + var(--studio-focus-ring-inset))
   );
@@ -52,9 +51,10 @@
 .brand-name strong {
   font: inherit;
 }
+/* The one primary sidebar action takes the ink color, like Geist. */
 .sidebar-new-chat {
   flex: none;
-  color: var(--studio-state-working);
+  color: var(--text);
 }
 #chat-search {
   font-size: var(--mantine-font-size-sm);
@@ -182,7 +182,7 @@
   align-items: center;
   position: relative;
   min-inline-size: 0;
-  border-radius: 0;
+  border-radius: var(--studio-radius-control);
   margin: 0;
 }
 .sidebar-row:hover {
@@ -208,12 +208,6 @@
   border-radius: 0;
   text-align: start;
 }
-.fleet-strip[data-studio-state="answer"] {
-  background: var(--studio-state-answer-soft);
-}
-.fleet-strip[data-studio-state="error"] {
-  background: var(--studio-state-error-soft);
-}
 .row-copy {
   flex: 1;
   min-inline-size: 0;
@@ -238,6 +232,21 @@
   white-space: nowrap;
   font-size: var(--mantine-font-size-sm);
   font-weight: 400;
+}
+/* The status icon owns a fixed first column, empty for an idle chat, so
+   every title and meta line starts at the same x. */
+.row-copy:has(> .fleet-chat-heading) {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--mantine-spacing-xs);
+}
+.row-copy > .fleet-chat-heading {
+  display: contents;
+}
+.row-copy:has(> .fleet-chat-heading) > :not(.fleet-chat-heading),
+.row-copy > .fleet-chat-heading > strong {
+  grid-column: 2;
 }
 .fleet-chat-heading > .chat-status {
   --agent-activity-color: var(--studio-state);
@@ -404,7 +413,7 @@
   flex: 1;
   min-inline-size: 0;
   overflow-wrap: anywhere;
-  font-family: var(--mantine-font-family-monospace);
+  font-family: var(--studio-font-mono);
 }
 .desktop-inset-titlebar .sidebar-header {
   -webkit-app-region: drag;

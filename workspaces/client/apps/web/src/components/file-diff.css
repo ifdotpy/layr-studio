@@ -2,7 +2,7 @@
   margin: 10px 0;
   min-width: 0;
   color: var(--text, var(--mantine-color-text));
-  font-size: 13px;
+  font-size: var(--studio-text-code);
 }
 .file-change-card > summary {
   display: grid;
@@ -29,7 +29,7 @@
 .file-change-card[data-tool-status="failed"] .file-change-title,
 .file-change-card[data-tool-status="declined"] .file-change-title,
 .file-change-error {
-  color: light-dark(#b42318, #ff9b95);
+  color: var(--studio-diff-delete);
 }
 .file-change-chevron {
   grid-column: 4;
@@ -57,28 +57,28 @@
   margin: 3px 0 6px;
 }
 .file-diff-path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
   min-width: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .file-diff-counts {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--muted);
 }
 .file-diff-added {
-  color: light-dark(#18713a, #87d7a0);
+  color: var(--studio-diff-add);
 }
 .file-diff-removed {
-  color: light-dark(#b42318, #ff9b95);
+  color: var(--studio-diff-delete);
 }
 .file-diff-lines {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
   line-height: 1.6;
   tab-size: 4;
 }
@@ -108,16 +108,16 @@
   color: inherit;
 }
 .file-diff-line[data-kind="add"] {
-  background: light-dark(#eaf6ed, #183329);
+  background: var(--studio-diff-add-bg);
 }
 .file-diff-line[data-kind="delete"] {
-  background: light-dark(#fff0ef, #402424);
+  background: var(--studio-diff-delete-bg);
 }
 .file-diff-line[data-kind="add"] .file-diff-sign {
-  color: light-dark(#18713a, #87d7a0);
+  color: var(--studio-diff-add);
 }
 .file-diff-line[data-kind="delete"] .file-diff-sign {
-  color: light-dark(#b42318, #ff9b95);
+  color: var(--studio-diff-delete);
 }
 .file-diff-line[data-kind="meta"] {
   color: var(--muted);
@@ -126,21 +126,21 @@
 .file-change-error {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
   max-width: 100%;
   margin: 8px 0;
 }
 .file-diff-notice {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   margin: 6px 0;
 }
 .file-diff-expand,
 .file-change-source > summary {
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   background: none;
   border: 0;
   padding: 6px 0;
@@ -151,7 +151,7 @@
 }
 .file-change-card > summary:focus-visible,
 .file-diff-expand:focus-visible {
-  outline: 2px solid var(--mantine-primary-color-filled);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 @media (max-width: 480px) {
