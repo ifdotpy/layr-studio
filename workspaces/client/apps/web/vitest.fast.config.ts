@@ -9,6 +9,7 @@ export default {
     include: [
       "src/accountName.test.ts",
       "src/components/RadioChat.test.ts",
+      "src/components/composerStyleInvalidation.test.ts",
       "src/layout/deriveWorkspaceLayout.test.ts",
       "src/hooks/mobileViewport.test.ts",
       "src/layout/terminalGeometry.test.ts",
