@@ -115,15 +115,6 @@ pub trait ProviderAdapter: Send + Sync + 'static {
     /// Launch spec for the retained session of one host account.
     fn host_launch(&self, input: HostLaunch<'_>) -> Result<ProviderLaunch, WorkerError>;
 
-    /// Command line of the guest provider peer for one VM agent.
-    fn vm_guest_command(&self, guest_home: &str, agent_id: &str) -> Vec<String>;
-
-    /// Profile directory name under a home (`.codex` or `.claude`).
-    fn profile_dir(&self) -> &'static str;
-
-    /// Credential file copied into a VM guest profile.
-    fn guest_credential_file(&self) -> &'static str;
-
     /// Usage, rate-limit or auth cause of a provider turn error, if any.
     fn classify_error(&self, error: &Value) -> Option<UsageCause>;
 
@@ -244,8 +235,7 @@ const CODEX_APP_SERVER_ARGS: [&str; 3] = ["app-server", "--listen", "stdio://"];
 /// unloaded thread costs about as much CPU as a warm turn. A running
 /// app-server started without it is reattached with its own command
 /// (`ProviderLaunchSpec::reattach_commands`) and keeps Codex's default until
-/// it exits. The VM guest launch keeps Codex's default: its guest validates
-/// the exact command, and a guest serves one agent.
+/// it exits.
 const CODEX_THREAD_UNLOAD_DELAY: [&str; 2] = ["-c", "thread_unload_delay_secs=0"];
 /// Names of the MCP servers that the Codex home's `config.toml` defines. The
 /// app-server merges per-thread `config` into that file, so a server can only
@@ -274,8 +264,6 @@ const CLAUDE_BUSY_MESSAGE: &str = "Claude is still working";
 const CLAUDE_DEFAULT_MODEL: &str = "default";
 /// Claude Code model aliases (besides `claude-*` ids).
 const CLAUDE_MODEL_ALIASES: [&str; 4] = [CLAUDE_DEFAULT_MODEL, "sonnet", "opus", "haiku"];
-/// Guest path of the Claude bridge inside the VM image.
-const VM_CLAUDE_BRIDGE: &str = "/opt/codex-studio/claude_bridge/bridge.mjs";
 
 impl ProviderAdapter for CodexAdapter {
     fn kind(&self) -> ProviderKind {
@@ -346,21 +334,6 @@ impl ProviderAdapter for CodexAdapter {
             spec,
             executable: codex_executable.map(str::to_owned),
         })
-    }
-
-    fn vm_guest_command(&self, _guest_home: &str, _agent_id: &str) -> Vec<String> {
-        let mut command = vec![CODEX_EXECUTABLE.to_owned()];
-        command.extend(CODEX_APP_SERVER_ARGS.map(str::to_owned));
-        command.extend(CODEX_FILE_CREDENTIALS.map(str::to_owned));
-        command
-    }
-
-    fn profile_dir(&self) -> &'static str {
-        ".codex"
-    }
-
-    fn guest_credential_file(&self) -> &'static str {
-        "auth.json"
     }
 
     fn classify_error(&self, error: &Value) -> Option<UsageCause> {
@@ -515,8 +488,7 @@ impl ProviderAdapter for ClaudeAdapter {
             bridge_root.clone(),
             input.environment,
         )?;
-        // The bridge gives each Claude session the browser link launcher of this server
-        // (docs/vm-browser-bridge.md, "Native chats").
+        // Give each Claude session this server's browser link launcher.
         #[cfg(unix)]
         if let Err(error) = crate::browser_host::publish(&bridge_root, &input.root) {
             eprintln!("browser launcher for Claude sessions: {error}");
@@ -525,22 +497,6 @@ impl ProviderAdapter for ClaudeAdapter {
             spec,
             executable: Some(executable.to_string_lossy().into_owned()),
         })
-    }
-
-    fn vm_guest_command(&self, guest_home: &str, agent_id: &str) -> Vec<String> {
-        vec![
-            "node".into(),
-            VM_CLAUDE_BRIDGE.into(),
-            format!("{guest_home}/.codex/studio-bridges/{agent_id}"),
-        ]
-    }
-
-    fn profile_dir(&self) -> &'static str {
-        ".claude"
-    }
-
-    fn guest_credential_file(&self) -> &'static str {
-        ".credentials.json"
     }
 
     /// A turn that Claude starts itself, for example for a background task

@@ -1,4 +1,5 @@
 import type { Message } from "../types";
+import { messageRenderKey } from "./message-delivery/messageDelivery";
 import { isQuestionToolItem } from "./questions/questionCardModel";
 import { isMessagePending } from "../messageSendStatus.ts";
 
@@ -79,7 +80,7 @@ export function historyPresentationGroups(
       activityEdge(previous, true) &&
       activityEdge(group, false);
     if (!canJoin) {
-      result.push({ ...group, turns: [group] });
+      result.push(group);
       continue;
     }
     const turns = [...priorTurns, group];
@@ -117,7 +118,7 @@ export function historyGroups(
       last.items[0].turnId === item.turnId
     )
       last.items.push(item);
-    else groups.push({ id: item.id, items: [item] });
+    else groups.push({ id: messageRenderKey(item), items: [item] });
   }
   const replyTurns = new Set(
     items.filter((item) => item.role !== "user").map((item) => item.turnId),

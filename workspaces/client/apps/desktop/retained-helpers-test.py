@@ -23,7 +23,7 @@ class RetainedHelpers(unittest.TestCase):
                  'import desktop_process, desktop_updates, install_update; '
                  'assert desktop_updates.PENDING_FILE == "pending-update.json"; '
                  'assert desktop_process.process_launch_command(__import__("os").getpid()); '
-                 'updates, vm = install_update.load_updates(sys.argv[1]); '
+                 'updates = install_update.load_updates(sys.argv[1]); '
                  'assert updates.PENDING_FILE == desktop_updates.PENDING_FILE', str(root)],
                 capture_output=True, text=True, check=False,
                 env={**os.environ, 'CODEX_AGENTS_PYTHON': '/nonexistent'})

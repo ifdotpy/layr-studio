@@ -112,6 +112,10 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_complaints"),
     // Chat membership edges: an `edge` document per chat edge, built at read time.
     DurableTable::new("graph_edges", "target"),
+    // Window sources: a row in its window (`TASK_WINDOW`, `MONITOR_WINDOW`) is sent
+    // again when it changes.
+    DurableTable::record("runtime_tasks"),
+    DurableTable::record("runtime_monitors"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -237,6 +241,55 @@ pub const AGENT_VIEW_MARK: &str = "agent_views";
 /// The `durable_rows` table name of the chat views: a chat document reads its group,
 /// its member edges and its messages, so their writers mark the chat.
 pub const CHAT_VIEW_MARK: &str = "chat_views";
+
+/// The `durable_rows` tables of the window members: a live entry puts the task or
+/// monitor of that id in its client window, a tombstone takes it out. The writer that
+/// owns the window rule (`sync_policy` in runtime-services) keeps them.
+pub const TASK_WINDOW: &str = "task_window";
+pub const MONITOR_WINDOW: &str = "monitor_window";
+
+/// Put `id` in window `tbl`. An id already in it keeps its number.
+pub fn join_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
+    let changed = connection.execute(
+        &format!(
+            "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
+             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0
+             WHERE durable_rows.deleted=1"
+        ),
+        rusqlite::params![tbl, id],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Take `id` out of window `tbl`: a tombstone at a new number. An id not in it is
+/// left alone.
+pub fn leave_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
+    let changed = connection.execute(
+        &format!(
+            "UPDATE durable_rows SET seq={NEXT},deleted=1,at=CAST(strftime('%s','now') AS INTEGER)
+             WHERE tbl=?1 AND id=?2 AND deleted=0"
+        ),
+        rusqlite::params![tbl, id],
+    )?;
+    Ok(changed > 0)
+}
+
+/// The ids in window `tbl`.
+pub fn window_members(connection: &Connection, tbl: &str) -> StoreResult<Vec<String>> {
+    Ok(connection
+        .prepare_cached("SELECT id FROM durable_rows WHERE tbl=?1 AND deleted=0")?
+        .query_map([tbl], |row| row.get(0))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Whether `id` is in window `tbl`.
+pub fn in_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
+    Ok(connection
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl=?1 AND id=?2 AND deleted=0)",
+        )?
+        .query_row(rusqlite::params![tbl, id], |row| row.get(0))?)
+}
 
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.

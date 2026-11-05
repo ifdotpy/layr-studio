@@ -483,7 +483,7 @@ The lead receives these additional tools:
 | `orchestration_monitor`        | Start or observe a command watch. Optional literal output patterns wake the owner.                                           |
 | `orchestration_cancel_monitor` | Cancel a command watch.                                                                                                      |
 | `orchestration_request`        | List, recover, or cancel your own durable tool requests.                                                                     |
-| `orchestration_sign_in`        | Show the person a sign-in card for a link to open. Every agent has it. See docs/vm-browser-bridge.md, section 7.             |
+| `orchestration_sign_in`        | Show the person a sign-in card for a link to open. Every agent has it.                                                       |
 
 Current sender tool declarations and generated delivery bundles are owned by the
 Rust runtime schema. Use `pnpm run contracts:generate` after changing the owner,
@@ -649,7 +649,7 @@ Unsupported or ambiguous history remains unchanged.
 
 Supervisor connection and reattachment follow one path:
 
-1. Runtime, operator and VM guest clients request the current supervisor protocol and require its version in the reply.
+1. Runtime and operator clients request the current supervisor protocol and require its version in the reply.
 2. The supervisor rejects retired versions before admitting a backend.
 3. Open reuses a running child only when its launch signature matches the configured current command, environment and working directory, or the same values with an earlier command that the launch lists in `ProviderLaunchSpec::reattach_commands`. The child keeps that earlier command until it exits; a child started later gets the current command.
 4. Other changed launch signatures are refused; no unlisted command is adopted and no duplicate child starts. A changed provider launch command lists the command it replaces, so an upgrade does not refuse running children.
@@ -805,10 +805,9 @@ Each team defaults to `DEFAULT_SUBAGENT_CONCURRENCY` concurrent subagents and
 `DEFAULT_GLOBAL_CONCURRENCY`). Lead turns have priority when a slot becomes free.
 Lowering a limit does not interrupt existing turns.
 
-Chat creation selects `workspaceMode`: `layr-native`, `layr`, or `worktree`.
+Chat creation selects `workspaceMode`: `layr-native` or `worktree`.
 New lead chats default to native Layr on macOS. Linux selects native Layr only
 when the server reports a ready native capability; otherwise it selects WT.
-`Layr VM` appears only when the server has the Studio Linux VM.
 `WT` selects a Git worktree.
 
 Workers inherit the chat mode. Native Layr workers use separate owned lines.
@@ -816,17 +815,15 @@ Worktrees use a committed Git base. Shared workers use the selected folder.
 Reviewers keep read-only access.
 Use `server` and an absolute remote `cwd` for work on a paired machine.
 
-The chat badge shows `Layr`, `Layr VM`, or `WT`.
+The chat badge shows `Layr` or `WT`.
 Shared workers show `SHARED`. Hover or focus the badge for its path.
-See [VM chats](linux-vm-workspaces.md).
 
 A Git worktree can select `base_ref` as a branch, tag, or commit.
 Studio gives the resolved commit to the worker before its first turn.
 Ask the worker to commit on a named branch.
-Use a reviewed Layr state for native Layr and VM task acceptance.
+Use a reviewed Layr state for native Layr task acceptance.
 Only the lead creates agents. Unfinished work of a failed or deleted worker returns to ready.
 Native reviewers use the chosen folder. Their sandbox is read-only when YOLO is off.
-VM reviewers always use read-only lines.
 The lead owns review and integration. Acceptance merges a reviewed Layr state.
 Archive removes a safe Git worktree or an owned Layr line.
 Legacy workspaces keep their files and stored records.
@@ -1398,24 +1395,6 @@ visible to the caller. Ambiguous and unknown IDs return candidate full IDs.
 The shared Studio skill documents the workspace bridge for existing native threads.
 Tests: `workspaces/runtime/apps/server/tests/agent-management-contract.py`.
 
-### Layr VM chats
-
-Create a chat with `workspaceMode: "layr"` on a Mac server.
-The lead and all workers run in the Studio Linux VM.
-The first chat imports the source once. Later chats use the same VM main line.
-The Mac source folder stays separate. Export only on the user's request.
-
-Each worker has its own layr line and Linux user. Reviewers have read-only lines.
-Studio saves a state after every turn. Submit the exact layr state ID.
-Acceptance merges the reviewed state with `--expect`. Archive removes the worker line.
-Removed VM workers cannot restore a deleted line.
-The guest receives access credentials only. The host keeps account refresh.
-Studio shutdown keeps native guest processes alive.
-A disconnect does not prove that an operation failed. Preserve its exact request ID.
-`maintenance_report` includes VM disk and memory data.
-Change VM limits only while the VM is stopped.
-See [layr VM chats](linux-vm-workspaces.md) for the protocol and checks.
-
 ### Teleport your execution to another server
 
 `orchestration_teleport` teleports the caller, whether it is a lead or a worker.
@@ -1599,13 +1578,6 @@ change with both options. Cross-machine Claude cache reuse remains unverified.
 2. Recovery probes the Rust supervisor socket with protocol 2 and takes no provider ownership; an unavailable owner makes recovery wait.
 3. Recovery attaches to an existing backend or starts the saved Rust server only when the runtime lease is free.
 4. Recovery restarts its own job without unloading the supervisor or its live provider children. Desktop Python helpers use only local desktop modules.
-
-### Retained guest and desktop helpers
-
-1. Desktop recovery reads process arguments and pending updates from its local helpers.
-2. The installer verifies the staged app and waits for the VM maintenance lock.
-3. The guest relays native provider requests to the Rust process supervisor.
-4. Guest restarts reuse the supervisor socket and journal; an uncertain owner stays blocked.
 
 ## Desktop runtime startup
 

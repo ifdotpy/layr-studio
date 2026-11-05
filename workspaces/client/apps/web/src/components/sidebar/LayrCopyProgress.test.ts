@@ -20,7 +20,7 @@ test("renders server phases with determinate and indeterminate progress", () => 
   expect(unknown).not.toContain("value=");
 });
 
-test("renders line creation and VM copy phases", () => {
+test("renders line creation and workspace copy phases", () => {
   for (const [phase, label] of [
     ["creating_line", "Creating workspace line"],
     ["archiving", "Building archive"],

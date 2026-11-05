@@ -24,8 +24,6 @@ export const MAX_TURN_ATTACHMENTS = 8;
 export const MAX_MANAGED_MESSAGE_CODEPOINTS = 32000;
 export const MAX_DRAFT_TEXT_CODEPOINTS = 100000;
 export const USER_ATTACHMENT_LIMIT_LABEL = "20 MiB";
-export const MAX_PROJECT_SECRET_VALUE_BYTES = 16384;
-export const PROJECT_SECRET_VALUE_LIMIT_LABEL = "16 KiB";
 export const ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS = 60;
 export const SIGN_IN_ALERT_GRACE_SECONDS = 10;
 export const SIGN_IN_REMINDER_SECONDS = 300;
@@ -57,9 +55,5 @@ export const PROVIDER_DISCONNECTED_TURN_ERROR =
   "Codex disconnected. Review the transcript before resuming.";
 export const BACKEND_RESTARTED_TURN_ERROR =
   "Server restarted during a turn. Review history, then send a new instruction.";
-export const VM_PROVIDER_DISCONNECTED_TURN_ERROR =
-  "VM provider disconnected. The turn outcome is unknown. Review the transcript before resuming.";
-export const LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR =
-  "Linux VM provider disconnected. The turn outcome is unknown. Review the transcript before resuming.";
 export const DISK_FULL_ERROR_PATTERN =
   "ENOSPC|No space left on device|database or disk is full|SQLITE_FULL";

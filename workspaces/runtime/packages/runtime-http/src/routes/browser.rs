@@ -15,7 +15,7 @@ use std::{
 use studio_json::{Value, json};
 use studio_runtime_services::{
     browser::{BrowserError, BrowserForwarder, ExchangeOutcome, ForwardInput, PairedExchange},
-    linux_vm_guest::GuestRpc,
+    browser_rpc::BrowserRpc,
     multi_server_orchestration::{ExchangeOutcome as DeliveryOutcome, OrchestrationDriver},
 };
 use tokio::time::Instant;
@@ -77,7 +77,7 @@ pub(crate) fn new_forwarder(driver: Arc<OrchestrationDriver>) -> Arc<BrowserForw
 }
 
 struct GuestCallbackExchange {
-    guest: Arc<dyn GuestRpc>,
+    guest: Arc<dyn BrowserRpc>,
 }
 
 impl PairedExchange for GuestCallbackExchange {
@@ -120,7 +120,7 @@ impl PairedExchange for GuestCallbackExchange {
     }
 }
 
-pub(crate) fn new_local_forwarder(guest: Arc<dyn GuestRpc>) -> Arc<BrowserForwarder> {
+pub(crate) fn new_local_forwarder(guest: Arc<dyn BrowserRpc>) -> Arc<BrowserForwarder> {
     Arc::new(BrowserForwarder::new(Arc::new(GuestCallbackExchange {
         guest,
     })))

@@ -23,7 +23,7 @@ async function setup(
   label = "Local",
   signed = false,
   provider = "codex",
-  hasStudioVm = true,
+  _hasStudioVm = true,
   nativeReady = true,
 ) {
   const creations: PostBody<"/api/leads">[] = [];
@@ -78,7 +78,6 @@ async function setup(
           ready: true,
           busy: false,
           system,
-          hasStudioVm,
           nativeLayr: nativeReady
             ? { status: "ready" }
             : {
@@ -131,7 +130,7 @@ async function setup(
           model: creation.model,
           effort: creation.effort,
           workspaceMode: creation.workspaceMode,
-          executionMode: creation.workspaceMode === "layr" ? "vm" : "native",
+          executionMode: "native",
         };
         snapshot.threads.push(row);
         snapshot.runtime.agents = snapshot.threads;
@@ -188,7 +187,6 @@ async function openNewChat(
 }
 for (const [choice, badge] of [
   ["Layr", "Layr"],
-  ["Layr VM", "Layr VM"],
   ["WT", "WT"],
 ] as const) {
   test(`macOS New chat ${choice} and actual model menus`, async ({ page }) => {
@@ -226,12 +224,7 @@ for (const [choice, badge] of [
         .click();
       await expect.poll(() => creations.length).toBe(1);
       expect(required(creations[0])).toMatchObject({
-        workspaceMode:
-          choice === "Layr"
-            ? "layr-native"
-            : choice === "Layr VM"
-              ? "layr"
-              : "worktree",
+        workspaceMode: choice === "Layr" ? "layr-native" : "worktree",
         model: "gpt-5.6-sol",
         effort: "high",
         worker_defaults: {
@@ -498,7 +491,7 @@ test("a filtered Claude lead keeps the server's Codex worker default without inj
 });
 
 for (const system of ["Darwin", "Linux"]) {
-  test(`${system} defaults to native Layr and hides the absent Studio VM`, async ({
+  test(`${system} defaults to native Layr and offers worktree`, async ({
     page,
   }) => {
     const { server, creations } = await setup(
@@ -527,26 +520,6 @@ for (const system of ["Darwin", "Linux"]) {
     }
   });
 }
-
-test("Linux offers Layr VM only when its server has the Studio VM", async ({
-  page,
-}) => {
-  const { server, creations } = await setup("Linux");
-  try {
-    const dialog = await openNewChat(page, server);
-    await expect(
-      dialog.getByRole("radio", { name: "Layr", exact: true }),
-    ).toBeChecked();
-    await dialog.getByText("Layr VM", { exact: true }).click();
-    await dialog
-      .getByRole("button", { name: "Start chat", exact: true })
-      .click();
-    await expect.poll(() => creations.length).toBe(1);
-    expect(required(creations[0]).workspaceMode).toBe("layr");
-  } finally {
-    await server.close();
-  }
-});
 
 test("Linux without native Layr defaults to WT and explains the unavailable option", async ({
   page,

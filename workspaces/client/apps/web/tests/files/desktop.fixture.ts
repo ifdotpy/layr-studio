@@ -15,7 +15,6 @@ export function desktopFixture(): DesktopBridge {
     pickFiles: async () => [],
     revealPath: async () => {},
     openExternal: async () => {},
-    showVaultKeys: async () => {},
     onNavigate: () => () => {},
     notify: async () => false,
   };

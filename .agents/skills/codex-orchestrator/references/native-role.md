@@ -48,8 +48,7 @@ defaults. Reviewers use the shared folder with read-only access. Use
 `environment: "linux"` for Linux toolchains. Use `server` to run work on another
 paired machine, with an absolute remote `cwd`.
 
-Read the badge in each worker chat: `ASIF` is a macOS image, `VM` is a Linux
-virtual machine, `WT` is a Git worktree, and `SHARED` is the selected folder.
+Read the badge in each worker chat: `ASIF` is a macOS image, `WT` is a Git worktree, and `SHARED` is the selected folder.
 Hover or focus the badge to read the full name and workspace path.
 
 Define each implementation assignment with:

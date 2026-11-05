@@ -2765,8 +2765,6 @@ mod retained_executor_tests {
             claude_account_pin: studio_json::Value::Null,
             account_driver: None,
             account_session: None,
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
 
         let agent = before_start(Arc::clone(&store), None, &catalog, &resources, "lead", 2.0)
@@ -2890,8 +2888,6 @@ mod retained_executor_tests {
             claude_account_pin: studio_json::Value::Null,
             account_driver,
             account_session: Some(session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
 
         let result = before_start(
@@ -3001,8 +2997,6 @@ mod retained_executor_tests {
             claude_account_pin: studio_json::Value::Null,
             account_driver: None,
             account_session: Some(session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
 
         let result = before_start(
@@ -3168,8 +3162,6 @@ mod retained_executor_tests {
             claude_account_pin: Value::Null,
             account_driver: None,
             account_session: Some(session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
         if !cold_catalog {
             crate::account_transfer_driver::begin_read(&store, transfer_id, "lead", 1.5)
@@ -3426,8 +3418,6 @@ mod retained_executor_tests {
             claude_account_pin: Value::Null,
             account_driver: None,
             account_session: Some(recovered_session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
         assert!(
             before_start(

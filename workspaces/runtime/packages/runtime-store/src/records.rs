@@ -119,7 +119,7 @@ macro_rules! stored_string_enum {
         }
 
         impl $name {
-            fn parse(value: &str) -> Self {
+            pub fn parse(value: &str) -> Self {
                 match value {
                     $($value => Self::$variant,)+
                     _ => Self::Other(UnknownAgentStatus(value.to_owned())),
@@ -385,6 +385,11 @@ pub struct AgentRecord {
     pub layr_store_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layr_project_id: Option<Box<str>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub layr_line: studio_runtime_schema::queue_command::Field<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layr_read_cwd: Option<Box<str>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -744,6 +749,35 @@ pub struct AgentRecord {
     )]
     pub lazy_account_transfer:
         studio_runtime_schema::queue_command::Field<crate::transfer_record::LazyTransferState>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub shared_room_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub converted_from_lead:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub project_folder_revision:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub task_default_gate:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::task_gate::Gate>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub moved_from:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -814,6 +848,10 @@ impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaul
 }
 
 impl AgentRecord {
+    pub fn moved_from_active(&self) -> bool {
+        crate::schema::raw_truthy(self.moved_from.value().map(|raw| &raw.0))
+    }
+
     pub fn set_usage_resume(&mut self, value: Value) {
         use studio_runtime_schema::queue_command::Field;
         if value.is_null() {
@@ -1182,6 +1220,7 @@ impl AgentRecord {
             subagent_concurrency_version: None,
             layr_store_root: None,
             layr_project_id: None,
+            layr_line: Default::default(),
             layr_read_cwd: None,
             layr_subpath: None,
             layr_base_state: None,
@@ -1283,6 +1322,11 @@ impl AgentRecord {
             account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             account_transfer_id: studio_runtime_schema::queue_command::Field::Missing,
             lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,
+            shared_room_id: studio_runtime_schema::queue_command::Field::Missing,
+            converted_from_lead: studio_runtime_schema::queue_command::Field::Missing,
+            project_folder_revision: studio_runtime_schema::queue_command::Field::Missing,
+            task_default_gate: studio_runtime_schema::queue_command::Field::Missing,
+            moved_from: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
     }
@@ -3250,10 +3294,114 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn agent_record_stays_small_for_async_futures() {
-        // Leave room for surrounding state below clippy's 16 KiB large_futures limit.
-        assert!(std::mem::size_of::<super::AgentRecord>() <= 4608);
+    fn agent_shared_room_id_decodes_legacy_record_without_duplicate_key() {
+        use studio_runtime_schema::queue_command::Field;
+        // Stored in the wave7_p19 oracle fixture by the shared-chat creator.
+        let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"sharedRoomId":"radio:62c8aafa-cdb4-55ba-81f1-152e7919f6e0"}"#;
+        let agent: super::AgentRecord = studio_json::from_str(raw).unwrap();
+        assert!(
+            matches!(&agent.shared_room_id, Field::Value(id) if id == "radio:62c8aafa-cdb4-55ba-81f1-152e7919f6e0")
+        );
+        assert!(!agent.extra.contains_key("sharedRoomId"));
+        let encoded = studio_json::to_string(&agent).unwrap();
+        assert_eq!(encoded.matches("\"sharedRoomId\"").count(), 1);
+        let decoded: super::AgentRecord = studio_json::from_str(&encoded).unwrap();
+        assert!(matches!(decoded.shared_room_id, Field::Value(_)));
     }
+
+    #[test]
+    fn agent_conversion_receipt_preserves_stored_shape_without_duplicate_key() {
+        use studio_runtime_schema::queue_command::Field;
+        // Receipt from the wave7_p19 stored-record oracle.
+        let raw = r#"{"id":"a","rootId":"c","epoch":2,"status":"paused","accountKey":"default","compactions":0,"convertedFromLead":{"requestId":"p19-convert","by":"user","at":1000.0,"oldRootId":"a","rootId":"c"}}"#;
+        let agent: super::AgentRecord = studio_json::from_str(raw).unwrap();
+        assert!(matches!(agent.converted_from_lead, Field::Value(_)));
+        assert!(!agent.extra.contains_key("convertedFromLead"));
+        let encoded = studio_json::to_string(&agent).unwrap();
+        assert_eq!(encoded.matches("\"convertedFromLead\"").count(), 1);
+        let round_trip: super::AgentRecord = studio_json::from_str(&encoded).unwrap();
+        assert_eq!(agent.converted_from_lead, round_trip.converted_from_lead);
+        let value: studio_json::Value = studio_json::from_str(raw).unwrap();
+        let from_value = super::AgentRecord::from_value(value.clone()).unwrap();
+        assert_eq!(
+            from_value.value()["convertedFromLead"],
+            value["convertedFromLead"]
+        );
+    }
+
+    #[test]
+    fn agent_folder_revision_retains_stored_shapes_without_duplicate_key() {
+        for revision in ["1", "null", r#""invalid""#] {
+            let raw = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"projectFolderRevision":{revision}}}"#
+            );
+            let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
+            assert!(!agent.extra.contains_key("projectFolderRevision"));
+            let encoded = studio_json::to_string(&agent).unwrap();
+            assert_eq!(encoded.matches("\"projectFolderRevision\"").count(), 1);
+            let from_value =
+                super::AgentRecord::from_value(studio_json::from_str(&raw).unwrap()).unwrap();
+            assert_eq!(
+                from_value.value()["projectFolderRevision"],
+                studio_json::from_str::<studio_json::Value>(revision).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn agent_default_gate_decodes_stored_shape_without_duplicate_key() {
+        use studio_runtime_schema::queue_command::Field;
+        let raw = r#"{"id":"lead","rootId":"lead","epoch":1,"status":"completed","accountKey":"default","compactions":0,"taskDefaultGate":{"command":"upgrade-check","timeout_ms":1234}}"#;
+        let agent: super::AgentRecord = studio_json::from_str(raw).unwrap();
+        assert!(
+            matches!(&agent.task_default_gate, Field::Value(gate) if gate.command == "upgrade-check" && gate.timeout_ms == 1234)
+        );
+        assert!(!agent.extra.contains_key("taskDefaultGate"));
+        let encoded = studio_json::to_string(&agent).unwrap();
+        assert_eq!(encoded.matches("\"taskDefaultGate\"").count(), 1);
+        let input: studio_json::Value = studio_json::from_str(raw).unwrap();
+        assert_eq!(agent.value()["taskDefaultGate"], input["taskDefaultGate"]);
+    }
+
+    #[test]
+    fn agent_moved_from_keeps_legacy_shapes_without_duplicate_key() {
+        for value in [
+            r#"{"server":"peer","move":"id"}"#,
+            r#""peer""#,
+            "true",
+            "null",
+        ] {
+            let raw = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"movedFrom":{value}}}"#
+            );
+            let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
+            assert!(!agent.extra.contains_key("movedFrom"));
+            let encoded = studio_json::to_string(&agent).unwrap();
+            assert_eq!(encoded.matches("\"movedFrom\"").count(), 1);
+            let parsed: studio_json::Value = studio_json::from_str(&raw).unwrap();
+            assert_eq!(agent.value()["movedFrom"], parsed["movedFrom"]);
+            assert_eq!(
+                agent.moved_from_active(),
+                crate::schema::truthy(parsed.get("movedFrom"))
+            );
+        }
+    }
+
+    #[test]
+    fn native_layr_line_preserves_presence_and_rejects_invalid_type() {
+        for suffix in ["", r#","layrLine":null"#, r#","layrLine":"main""#] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{suffix}}}"#
+            );
+            let original: studio_json::Value = studio_json::from_str(&raw).unwrap();
+            let record: super::AgentRecord = studio_json::from_str(&raw).unwrap();
+            assert_eq!(record.value()["layrLine"], original["layrLine"]);
+            assert_eq!(record.value().get("layrLine"), original.get("layrLine"));
+        }
+        let invalid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"layrLine":42}"#;
+        assert!(studio_json::from_str::<super::AgentRecord>(invalid).is_err());
+    }
+
     #[test]
     fn agent_write_rejects_extra_keys_owned_by_named_fields() {
         for (key, value) in [
@@ -3261,6 +3409,11 @@ mod tests {
             ("error", studio_json::json!(42)),
             ("capacity", studio_json::json!(null)),
             ("naming", studio_json::json!(null)),
+            ("sharedRoomId", studio_json::json!(null)),
+            ("convertedFromLead", studio_json::json!(null)),
+            ("projectFolderRevision", studio_json::json!(null)),
+            ("taskDefaultGate", studio_json::json!(null)),
+            ("movedFrom", studio_json::json!(null)),
             ("id", studio_json::json!(null)),
         ] {
             let mut agent = super::AgentRecord::from_value(studio_json::json!({

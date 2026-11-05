@@ -11,6 +11,20 @@ fn snapshot() -> PreparationSnapshot {
     }))
     .expect("snapshot")
 }
+#[test]
+fn legacy_attachment_paths_decode_without_changing_current_snapshot_bytes() {
+    let current = snapshot();
+    let before = studio_json::to_string(&current).expect("current snapshot");
+    assert!(!before.contains("asset_paths"));
+    let mut old: Value = studio_json::from_str(&before).expect("snapshot JSON");
+    old["asset_paths"] = json!({"asset": {"source_fingerprint":"old", "path":"/guest/file"}});
+    let decoded: PreparationSnapshot =
+        studio_json::from_str(&old.to_string()).expect("old snapshot");
+    assert_eq!(
+        studio_json::to_string(&decoded).expect("decoded snapshot"),
+        before
+    );
+}
 fn event(id: &str, kind: &str, text: String) -> Event {
     Event {
         id: id.into(),

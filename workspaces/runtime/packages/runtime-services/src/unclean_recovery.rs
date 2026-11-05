@@ -80,7 +80,7 @@ fn hold_entity(tx: &Transaction<'_>, kind: OutboxKind, id: &str) -> Result<(), R
         | OutboxKind::StreamFlush
         | OutboxKind::FollowupEffect
         | OutboxKind::WorkArchive
-        | OutboxKind::WorkVm
+        | OutboxKind::WorkLayr
         | OutboxKind::TerminalAction
         | OutboxKind::MonitorInput
         | OutboxKind::McpReconnect

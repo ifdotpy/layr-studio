@@ -164,7 +164,7 @@ fn status(state: &HttpState, disk_space: DiskSpaceStatus) -> Value {
         "supervisor": supervisor.as_ref().and_then(|snapshot| snapshot.health.clone()),
         "supervisorFallback": supervisor.as_ref().is_some_and(|snapshot| snapshot.fallback),
         "supervisorNotice": supervisor.and_then(|snapshot| snapshot.notice),
-        "stateDir": state.state_dir, "linuxVm": null,
+        "stateDir": state.state_dir,
         "diskSpace": disk_space
     })
 }

@@ -1,3 +1,5 @@
+mod openapi_build;
+
 // The TypeScript generator owns freshness; Cargo must never compile stale wire
 // types after a committed vendor schema changes. No CLI, network or state is used.
 // Cargo stores rerun-if-changed paths as printed. Absolute paths differ in every layr
@@ -66,5 +68,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Provider wire contracts are stale; run pnpm run contracts:vendor:generate".into(),
         );
     }
+    openapi_build::generate()?;
     Ok(())
 }

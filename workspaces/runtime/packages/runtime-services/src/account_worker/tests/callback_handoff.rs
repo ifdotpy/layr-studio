@@ -1437,28 +1437,12 @@ async fn a_burst_beyond_the_callback_limits_is_answered_once_each() {
 }
 
 /// Accept a record directly, as an earlier worker run would have left it.
-async fn leave_record(
-    state: &State,
-    generation: u64,
-    cursor: u64,
-    frame: &Value,
-    actor: Option<(&str, i64)>,
-) {
+async fn leave_record(state: &State, generation: u64, cursor: u64, frame: &Value) {
     let entry = entry(generation, cursor, frame);
-    let scope = actor.map_or_else(
-        || SCOPE.to_owned(),
-        |(actor, _)| format!("default:vm:{actor}"),
-    );
-    let actor = actor.map(|(actor, epoch)| (actor.to_owned(), epoch));
     state
         .bridge
         .store
-        .transaction_with(move |tx| {
-            let actor = actor
-                .as_ref()
-                .map(|(actor, epoch)| (actor.as_str(), *epoch));
-            callback_record::accept(tx, "default", &scope, actor, &entry)
-        })
+        .transaction_with(move |tx| callback_record::accept(tx, "default", SCOPE, None, &entry))
         .await
         .expect("leave record");
 }
@@ -1477,7 +1461,7 @@ async fn the_same_cursor_in_two_generations_is_two_records() {
     let mut worker = peer.worker(state.bridge.clone()).await;
     worker_barrier(&worker).await;
     // An ended generation's record with the same cursor appears next to it.
-    leave_record(&state, 1, 1, &request("old"), None).await;
+    leave_record(&state, 1, 1, &request("old")).await;
     peer.frame(tool_call).await;
     let mut changes = state.commits();
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -1512,7 +1496,7 @@ async fn a_submitted_record_of_an_ended_generation_is_retired_unsent() {
     let state = State::new().await;
     let mut peer = Peer::identity("default", 6, None);
     let mut worker = peer.worker(state.bridge.clone()).await;
-    leave_record(&state, 5, 1, &request("old"), None).await;
+    leave_record(&state, 5, 1, &request("old")).await;
     let operation = callback_record::operation(SCOPE, 5, 1);
     submit_response(
         &state,
@@ -1540,81 +1524,5 @@ async fn a_submitted_record_of_an_ended_generation_is_retired_unsent() {
         peer.writes.try_recv().is_err(),
         "the ended generation's answer is not sent"
     );
-    worker.shutdown().await.unwrap();
-}
-
-/// The guest provider outlives a server restart and its actor reattaches, so
-/// a record of a VM actor waits at startup; only a stale epoch retires it.
-#[tokio::test]
-async fn a_vm_actor_record_waits_for_reattach_and_a_stale_epoch_retires() {
-    let state = State::new().await;
-    let agent = state.agent.clone();
-    state
-        .bridge
-        .run(move |store| async move {
-            store
-                .transaction(move |tx| {
-                    let mut record =
-                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                    record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    AgentRepository::put(tx, &record)
-                })
-                .await?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let actor = state.agent.as_str();
-    leave_record(
-        &state,
-        GENERATION,
-        1,
-        &request("live"),
-        Some((actor, state.epoch)),
-    )
-    .await;
-    leave_record(
-        &state,
-        GENERATION,
-        2,
-        &request("stale"),
-        Some((actor, state.epoch + 1)),
-    )
-    .await;
-    let mut peer = Peer::new();
-    let mut worker = peer.worker(state.bridge.clone()).await;
-    // Any journaled request runs a scan.
-    peer.frame(request("host")).await;
-    let host = peer.next_write().await;
-    assert_eq!(host.value["id"], "host");
-    host.receipt
-        .send(CommandReceipt::Written {
-            remote_id: None,
-            duplicate: false,
-        })
-        .ok()
-        .unwrap();
-    worker_barrier(&worker).await;
-    let scope = format!("default:vm:{actor}");
-    let task_of = |cursor| {
-        let db = state.bridge.store.test_reader().unwrap();
-        tool_requests::get_callback::<callback_record::CallbackObligation>(
-            &db,
-            &callback_record::operation(&scope, GENERATION, cursor),
-        )
-        .unwrap()
-        .unwrap()
-    };
-    assert_eq!(
-        task_of(1).status,
-        ToolRequestStatus::Queued,
-        "the current epoch waits for its actor"
-    );
-    assert_eq!(
-        task_of(2).status,
-        ToolRequestStatus::Completed,
-        "the stale epoch is retired"
-    );
-    assert!(peer.writes.try_recv().is_err());
     worker.shutdown().await.unwrap();
 }

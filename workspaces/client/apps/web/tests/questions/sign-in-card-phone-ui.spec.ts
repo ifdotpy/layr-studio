@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import { phoneSignInUrl } from "./sign-in.fixture.ts";
 import type {} from "./sign-in-card-phone-ui.fixture.tsx";
 import { createFixtureViteServer } from "../playwright.ts";
-// A sign-in card at phone width (docs/vm-browser-bridge.md, section 6.2). The window has no
+// A sign-in card at phone width. The window has no
 // desktop bridge and is not on the server's own Mac, so it opens the link in paste mode,
 // then sends the pasted address of the page that did not load once. A device code card
 // shows the code with a copy button. The card fits the screen without a horizontal scroll.

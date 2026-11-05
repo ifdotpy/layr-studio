@@ -79,8 +79,8 @@ fn submit(mut db: Connection) -> Connection {
                 files: vec![],
                 prepared_files: None,
                 state_dir: std::env::temp_dir(),
-                vm_evidence: None,
-                vm_evidence_request_id: None,
+                layr_evidence: None,
+                layr_evidence_request_id: None,
             }),
         )
         .expect("submit"),

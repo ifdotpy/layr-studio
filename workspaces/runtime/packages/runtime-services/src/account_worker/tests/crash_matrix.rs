@@ -2,8 +2,8 @@
 use super::*;
 use std::sync::atomic::Ordering;
 type SavedState = (StoreBridge, String, i64, PathBuf);
-const SCENARIO_COUNT: usize = 31;
-const FAST_SCENARIOS: [usize; 4] = [0, 8, 23, 30];
+const SCENARIO_COUNT: usize = 30;
+const FAST_SCENARIOS: [usize; 4] = [0, 8, 22, 29];
 #[derive(Default)]
 pub(super) struct Context {
     pub faults: Arc<Faults>,
@@ -55,19 +55,18 @@ async fn scenario(index: usize) {
         15 => scenario_stream_base_survives_replaced_visible_item().await,
         16 => scenario_new_thread_freezes_settings_and_accepts_context().await,
         17 => scenario_child_result_materializes_before_submission().await,
-        18 => scenario_workspace_refusal_retains_queue().await,
-        19 => scenario_workspace_pending_reuses_reserved_attempt().await,
-        20 => preparation_review::scenario_completed_repair_and_missing_complaint_deliver().await,
-        21 => Box::pin(preparation_review::scenario_late_context_change_refuses_submission()).await,
-        22 => Box::pin(preparation_review::scenario_sibling_completion_does_not_refuse_non_lead()).await,
-        23 => closure::pending_text_recovery(true).await,
-        24 => closure::pending_text_recovery(false).await,
-        25 => closure::scenario_retained_submit_and_settlement_keep_one_replay_identity().await,
-        26 => closure::scenario_old_generation_pending_text_is_materialized_and_receipts_retire().await,
-        27 => closure::scenario_preparation_drains_journal_and_stop().await,
-        28 => closure::unresolved_thread_receipt_survives_replacement(false).await,
-        29 => closure::unresolved_thread_receipt_survives_replacement(true).await,
-        30 => closure::scenario_workspace_retry_wakes_after_restart().await,
+        18 => scenario_workspace_pending_reuses_reserved_attempt().await,
+        19 => preparation_review::scenario_completed_repair_and_missing_complaint_deliver().await,
+        20 => Box::pin(preparation_review::scenario_late_context_change_refuses_submission()).await,
+        21 => Box::pin(preparation_review::scenario_sibling_completion_does_not_refuse_non_lead()).await,
+        22 => closure::pending_text_recovery(true).await,
+        23 => closure::pending_text_recovery(false).await,
+        24 => closure::scenario_retained_submit_and_settlement_keep_one_replay_identity().await,
+        25 => closure::scenario_old_generation_pending_text_is_materialized_and_receipts_retire().await,
+        26 => closure::scenario_preparation_drains_journal_and_stop().await,
+        27 => closure::unresolved_thread_receipt_survives_replacement(false).await,
+        28 => closure::unresolved_thread_receipt_survives_replacement(true).await,
+        29 => closure::scenario_workspace_retry_wakes_after_restart().await,
         _ => unreachable!(),
     }
 }

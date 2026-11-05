@@ -52,8 +52,6 @@ probes may only read health, backend actions require a nonempty admitted
 verified child identity. Older guest operator handshakes may include `backendId`;
 it is ignored and never grants backend ownership. Unidentified clients and
 ambiguous probe roles are refused before commands run.
-The retained VM guest uses v2 too; its fast boundary test checks version parity
-against the Rust owner.
 
 Supervisor close and restart recovery verify the entire recorded process group
 through the native group owner in

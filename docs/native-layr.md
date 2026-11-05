@@ -2,7 +2,6 @@
 
 The `layr-native` workspace mode runs agents on the host.
 The chat selector calls this mode **Layr**.
-**Layr VM** uses `layr` and runs in the Studio Linux VM.
 **WT** uses Git worktrees.
 
 ## Store and installation
@@ -131,7 +130,6 @@ Use the socket from `native-layr paths` when you start that root's daemon.
 ## First import
 
 The native import omits Git-ignored data, including ignored `.env` files.
-The VM archive rules remain unchanged.
 
 Studio selects all paths and rejects case or Unicode collisions before it writes imported entries.
 It sorts path references and checks sibling names once per directory.
@@ -375,7 +373,7 @@ It does not permit changes to main or worker lines.
 Reviewer turn completion does not save or repair main.
 
 The host user owns the entire store.
-Native mode does not create separate Unix users as the VM mode does.
+Native mode does not create separate Unix users.
 The native `layr_read` tool also accepts `try <state> -- <command>`.
 Studio runs the command in a temporary Layr copy.
 On macOS, `sandbox-exec` permits writes only in that copy and the private scratch folder.

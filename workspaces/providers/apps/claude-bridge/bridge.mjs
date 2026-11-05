@@ -1,5 +1,5 @@
 // @ts-check
-// Stable VM and host entrypoint; this check precedes every TypeScript import.
+// Stable bridge entrypoint; this check precedes every TypeScript import.
 if (!process.features.typescript) {
   console.error(
     "Claude bridge requires Node.js with built-in TypeScript support enabled. See docs/typescript.md#how-typescript-runs.",

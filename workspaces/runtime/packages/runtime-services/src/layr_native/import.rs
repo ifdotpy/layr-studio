@@ -1,7 +1,7 @@
 //! Select and admit the complete tree before writing imported entries.
 use super::{NativeLayrError, private_tree::Directory};
 mod filesystem_ffi;
-use crate::vm_preparation::vm_archive_identity;
+use crate::workspace_paths::vm_archive_identity;
 #[cfg(target_os = "macos")]
 pub(super) use filesystem_ffi::is_copy_on_write;
 use filesystem_ffi::{case_sensitive, clone_file};
@@ -860,7 +860,7 @@ pub(super) fn verify_imported_head(main: &Path, repository: &Path, head: &str) -
         let git = if marker.is_dir() {
             marker
         } else {
-            crate::vm_preparation::read_gitdir_pointer(&folder, &marker)?.into_path_buf()
+            crate::workspace_paths::read_gitdir_pointer(&folder, &marker)?.into_path_buf()
         };
         metadata::validate_stored_git(&main, &git)?;
         let git = git
@@ -916,7 +916,7 @@ fn collect_tree(
         tree.project_root = root.to_owned();
     }
     let path = root.join(relative);
-    if !cache && tree.ignored.contains(relative) && !crate::vm_preparation::regenerable_path(&path)
+    if !cache && tree.ignored.contains(relative) && !crate::workspace_paths::regenerable_path(&path)
     {
         return Ok(());
     }
@@ -925,7 +925,7 @@ fn collect_tree(
     if !inside_git && directory {
         if !relative.as_os_str().is_empty()
             && !cache
-            && crate::vm_preparation::regenerable_path(&path)
+            && crate::workspace_paths::regenerable_path(&path)
         {
             cache = true;
             tree.caches.push(relative.to_owned());
@@ -959,7 +959,7 @@ fn collect_tree(
                         if relative.as_os_str().is_empty() && worktree {
                             // Validate this pointer against the original project boundary below.
                         } else {
-                            match crate::vm_preparation::read_gitdir_pointer(&path, &marker) {
+                            match crate::workspace_paths::read_gitdir_pointer(&path, &marker) {
                                 Ok(target)
                                     if internal_worktree(tree.project_root.as_path(), &target) =>
                                 {

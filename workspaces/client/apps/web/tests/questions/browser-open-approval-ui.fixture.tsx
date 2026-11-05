@@ -25,7 +25,7 @@ const signInCard = signInCards({
   clientId: "kube",
   scope: "openid",
   linuxUser: "studio-a-0123",
-  source: "vm",
+  source: "host",
 });
 const requests = [
   signInCard("approve", browserSignInUrl, "accounts.example.com", {

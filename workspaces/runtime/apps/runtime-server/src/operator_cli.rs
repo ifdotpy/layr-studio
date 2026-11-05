@@ -1,8 +1,6 @@
 //! Operator entry points run before Tokio or any runtime state is opened.
 mod backup;
 mod install;
-mod linux_vm;
-mod mac_sync;
 mod native_layr;
 mod service;
 mod stored_text;
@@ -36,13 +34,11 @@ pub(crate) fn dispatch() -> Option<ExitCode> {
         Some("backup") => backup::run(&args[1..]),
         Some("service") => service::run(&args[1..]),
         Some("install-cli") => install::run(&args[1..]),
-        Some("linux-vm") => linux_vm::run(&args[1..]),
         Some("native-layr") => native_layr::run(&args[1..]),
         Some("stored-text") => stored_text::run(&args[1..]),
-        Some("mac-sync") => mac_sync::run(&args[1..]),
         Some("--help" | "-h") => {
             println!(
-                "usage: studio-runtime-server [--port PORT]\n       studio-runtime-server service <install|status|uninstall> [--state DIRECTORY]\n       studio-runtime-server install-cli [--bin-dir DIRECTORY] [--project DIRECTORY]\n       studio-runtime-server linux-vm <start|stop|status> [--state DIRECTORY]\n       studio-runtime-server stored-text inflate --state DIRECTORY\n       studio-runtime-server mac-sync plan PROJECT --state DIRECTORY\n       studio-runtime-server backup <enable|disable|status|restore> (see docs/backup.md)\n\nService installation enables startup without starting or restarting a service.\nUse just deliver-server to change the server release."
+                "usage: studio-runtime-server [--port PORT]\n       studio-runtime-server service <install|status|uninstall> [--state DIRECTORY]\n       studio-runtime-server install-cli [--bin-dir DIRECTORY] [--project DIRECTORY]\n       studio-runtime-server stored-text inflate --state DIRECTORY\n       studio-runtime-server backup <enable|disable|status|restore> (see docs/backup.md)\n\nService installation enables startup without starting or restarting a service.\nUse just deliver-server to change the server release."
             );
             Ok(ExitCode::SUCCESS)
         }

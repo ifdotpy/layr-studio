@@ -244,7 +244,7 @@
 .row-copy > .fleet-chat-heading {
   display: contents;
 }
-.row-copy:has(> .fleet-chat-heading) > :not(.fleet-chat-heading),
+.row-copy > .fleet-chat-heading ~ *,
 .row-copy > .fleet-chat-heading > strong {
   grid-column: 2;
 }
@@ -362,58 +362,6 @@
 }
 #sidebar [data-drop-edge="after"]::after {
   inset-block-end: 0;
-}
-.project-tree-heading:has(> .project-tree-layr) {
-  flex-wrap: wrap;
-}
-.project-tree-layr {
-  flex: 1 0 100%;
-  padding: 0 0 var(--mantine-spacing-xs) var(--mantine-spacing-lg);
-}
-.project-tree-layr .project-layr-readiness {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--mantine-spacing-xs) / 2);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-family: inherit;
-  font-size: var(--mantine-font-size-xs);
-  font-weight: 400;
-  cursor: pointer;
-}
-.project-layr-readiness::before {
-  content: "";
-  inline-size: var(--studio-dot-size);
-  block-size: var(--studio-dot-size);
-  border-radius: 50%;
-  background: currentColor;
-}
-.project-layr-readiness[data-state="ready"]::before,
-.project-layr-readiness[data-vault] svg {
-  color: var(--studio-state-unread);
-}
-.project-layr-readiness[data-state="importing"]::before {
-  color: var(--studio-state-working);
-}
-.project-layr-readiness[data-state="not_imported"]::before {
-  background: transparent;
-  outline: var(--studio-border-width) solid currentColor;
-}
-.project-layr-readiness[data-vault]::before {
-  display: none;
-}
-.project-layr-readiness[data-state="failed"]::before,
-.project-layr-readiness[data-vault="error"] svg,
-.project-layr-readiness[data-attention="true"] {
-  color: var(--studio-state-answer);
-}
-.mac-sync-conflict-path {
-  flex: 1;
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
-  font-family: var(--studio-font-mono);
 }
 .desktop-inset-titlebar .sidebar-header {
   -webkit-app-region: drag;

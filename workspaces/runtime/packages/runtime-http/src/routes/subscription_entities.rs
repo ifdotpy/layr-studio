@@ -41,8 +41,6 @@ pub(super) fn selection(
         | ResourceRef::VoiceResource(_)
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::AuthProgressResource(_)
-        | ResourceRef::VaultReadinessResource(_)
-        | ResourceRef::VaultJobProgressResource(_)
         | ResourceRef::RenameProgressResource(_)
         | ResourceRef::ProcessesResource(_)
         | ResourceRef::ComplaintResource(_)

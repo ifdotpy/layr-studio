@@ -73,9 +73,7 @@ not establish that a real microphone or external voice service works on this Mac
 The host also exposes folder and file pickers, Finder reveal, file saving,
 notifications, and sign-in links. A remote sign-in must match its explicit server owner.
 The host waits for the local backend to confirm the redirect port before opening
-the browser. Vault paper keys open only in the person's Terminal through the
-bundled vault tool; their output is not captured by Studio. Hidden checks reject
-these privileged actions without native input and do not launch Terminal.
+the browser. Hidden checks reject privileged actions without native input.
 
 Local writes currently cross asynchronous Tauri IPC. The renderer preserves
 request identities after uncertain replies and waits for pending draft commits

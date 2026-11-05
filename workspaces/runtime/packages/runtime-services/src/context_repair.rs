@@ -957,6 +957,9 @@ fn apply(
 
 /// The scheduler and explicit repair route share the same unresolved-receipt gate.
 pub fn assert_available(agent: &Value) -> Result<(), RepairError> {
+    if agent["executionMode"] == "vm" {
+        return Err(RepairError::AccountSession);
+    }
     validate_agent(agent)?;
     if active_repair(agent) || studio_runtime_store::truthy(agent.get("contextRepairWait")) {
         return Err(RepairError::ReceiptHold);
@@ -980,20 +983,8 @@ pub async fn repair_idle(
 ) -> Result<Value, RepairError> {
     let id = id.to_owned();
     store.transaction_with(move |db| {
-        let mut agent = ContextRepairRepository::agent(db, &id)?.ok_or(RepairError::MissingAgent)?;
+        let agent = ContextRepairRepository::agent(db, &id)?.ok_or(RepairError::MissingAgent)?;
         assert_available(&agent)?;
-        if agent["executionMode"] == "vm"
-        {
-            const NOTE: &str = "Automatic context repair is skipped for VM workers. The rollout stays in the guest. The next turn can proceed.";
-            if agent.get("contextRepairNote").and_then(Value::as_str) != Some(NOTE) {
-                agent["contextRepairNote"] = json!(NOTE);
-                ContextRepairRepository::put_agent(db, &agent)?;
-            }
-            return Ok(json!({
-                "id": &id,
-                "repair": agent.get("contextRepair").cloned().unwrap_or(Value::Null)
-            }));
-        }
         if !crate::provider_adapter::native_history(&agent)
             || agent["threadId"].is_null()
             || agent["threadId"] == ""
@@ -1108,12 +1099,14 @@ async fn repair_idle_with_broker_inner(
             ContextRepairRepository::agent(db, &stage_id)?.ok_or(RepairError::MissingAgent)
         })
         .await?;
+    if initial["executionMode"] == "vm" {
+        return Err(RepairError::AccountSession);
+    }
     let initial_account = string_default(&initial, "accountKey", "default")?.to_owned();
     let scope_before = if crate::provider_adapter::native_history(&initial)
         && initial["threadId"]
             .as_str()
             .is_some_and(|thread| !thread.is_empty())
-        && initial["executionMode"] != "vm"
     {
         broker.current_scope(&initial_account)
     } else {
@@ -1123,7 +1116,6 @@ async fn repair_idle_with_broker_inner(
         && initial["threadId"]
             .as_str()
             .is_some_and(|thread| !thread.is_empty())
-        && initial["executionMode"] != "vm"
     {
         let receipt_id = id.to_owned();
         let rows = store
@@ -1169,13 +1161,6 @@ async fn repair_idle_with_broker_inner(
             return Err(RepairError::ReceiptHold);
         }
         assert_available(&agent)?;
-        if agent["executionMode"] == "vm"
-        {
-            const NOTE: &str = "Automatic context repair is skipped for VM workers. The rollout stays in the guest. The next turn can proceed.";
-            agent["contextRepairNote"] = json!(NOTE);
-            ContextRepairRepository::put_agent(tx, &agent)?;
-            return Ok((agent, Vec::new(), Vec::new(), Vec::new(), None, String::new()));
-        }
         if !crate::provider_adapter::native_history(&agent)
             || agent["threadId"].as_str().is_none_or(str::is_empty)
         {

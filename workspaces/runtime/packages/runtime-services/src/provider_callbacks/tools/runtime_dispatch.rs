@@ -301,7 +301,7 @@ pub enum WorkActionOutcome {
 
 /// Python `model_work` hands claim, submit and accept to `work_action`, the
 /// same owner as `POST /api/work`. The HTTP host supplies that owner here, so
-/// the tool and the route share one implementation (receipts, VM evidence,
+/// the tool and the route share one implementation (receipts, Layr evidence,
 /// rule checks, result files, and the archive after accept).
 pub trait WorkActionPort: Send + Sync {
     fn act<'a>(
@@ -380,12 +380,6 @@ pub(crate) struct LatePorts {
     >,
     /// The browser bridges that take `orchestration_sign_in` links.
     pub(crate) sign_in: std::sync::Arc<std::sync::OnceLock<crate::sign_in::SignInSources>>,
-    /// The VM guest channel and Mac service of `host_exec`.
-    pub(crate) host_exec:
-        std::sync::Arc<std::sync::OnceLock<std::sync::Arc<crate::host_exec::HostExecRuntime>>>,
-    /// The VM guest channel of `layr_read`.
-    pub(crate) layr_read:
-        std::sync::Arc<std::sync::OnceLock<std::sync::Arc<dyn crate::linux_vm_guest::GuestRpc>>>,
 }
 
 /// The dependency that a remote worker's forwarded tool names until the host
@@ -435,7 +429,7 @@ pub(super) async fn dispatch(
     // home server answers as the `message` worker call.
     let remote_send = if tool == "orchestration_send"
         && studio_runtime_store::truthy(actor.record().extra.get("remoteOrigin"))
-        && !studio_runtime_store::truthy(actor.record().extra.get("movedFrom"))
+        && !actor.record().moved_from_active()
         && let Some(target) = args.get("agent_id").and_then(Value::as_str)
         && !(target == "user" || target.starts_with("remote:") || target.starts_with("federated:"))
     {
@@ -688,33 +682,11 @@ pub(super) async fn dispatch(
                 WorkActionOutcome::Unknown(message) => unknown(&json!(message), Vec::new()),
             }
         }
-        crate::host_exec::TOOL => {
-            let Some(runtime) = ports.late.host_exec.get() else {
-                return Ok(Some(not_sent(Error::Unavailable(
-                    crate::host_exec::DEPENDENCY,
-                ))));
-            };
-            crate::host_exec::run(
-                std::sync::Arc::clone(&store),
-                actor,
-                args,
-                request_id,
-                runtime,
-            )
-            .await
-        }
         crate::layr_read::TOOL => {
-            if crate::layr_native::is_native(&actor.record().value()) {
-                return Ok(Some(
-                    crate::layr_read::run_native(&store, actor, args, request_id).await,
-                ));
+            if !crate::layr_native::is_native(&actor.record().value()) {
+                return Ok(Some(not_sent(Error::Unavailable("native-layr/read"))));
             }
-            let Some(guest) = ports.late.layr_read.get() else {
-                return Ok(Some(not_sent(Error::Unavailable(
-                    crate::layr_read::DEPENDENCY,
-                ))));
-            };
-            crate::layr_read::run(actor, args, request_id, std::sync::Arc::clone(guest)).await
+            crate::layr_read::run_native(&store, actor, args, request_id).await
         }
         "orchestration_agent_manage" if args["action"] == "maintenance_report" => {
             if execution_move {

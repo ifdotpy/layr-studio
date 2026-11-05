@@ -1,4 +1,4 @@
-//! Durable browser-open card answers bridged to the VM guest.
+//! Durable browser-open card answers bridged to the host browser.
 
 use std::{sync::Arc, time::Duration};
 
@@ -16,7 +16,6 @@ use crate::browser_cards::{self, BrowserCardError, waits_for_address};
 
 const BROWSER_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 const BROWSER_TOKEN_BYTES: usize = 32;
-const LOCAL_FORWARD_SECONDS: u64 = 600;
 const BROWSER_DECLINED: &str = "The person declined to open the requested page in the browser. The sign-in command keeps waiting until its own timeout.";
 /// One relayed pasted redirect may take this long (`Bridge.relay` of the Python server).
 const PASTE_RELAY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -41,7 +40,7 @@ pub enum BrowserAnswerError {
     #[error("browser bridge outcome is unknown")]
     Unknown,
     #[error(transparent)]
-    Guest(#[from] crate::linux_vm_guest::GuestError),
+    Guest(#[from] crate::browser_rpc::BrowserRpcError),
     #[error(transparent)]
     Forward(#[from] crate::browser::BrowserError),
     #[error(transparent)]
@@ -87,8 +86,7 @@ pub struct BrowserAnswerResult {
 
 pub struct BrowserAnswerContext {
     pub local_window: bool,
-    pub guest: Arc<dyn crate::linux_vm_guest::GuestRpc>,
-    pub local_forwarder: Option<Arc<crate::browser::BrowserForwarder>>,
+    pub guest: Arc<dyn crate::browser_rpc::BrowserRpc>,
     pub now: f64,
     /// Test provider origins that may use http (`browser_policy`). Production passes none.
     pub http_providers: std::collections::BTreeSet<String>,
@@ -157,7 +155,6 @@ pub async fn answer(
     let BrowserAnswerContext {
         local_window,
         guest,
-        local_forwarder,
         now,
         http_providers,
     } = context;
@@ -170,6 +167,11 @@ pub async fn answer(
     else {
         return Ok(None);
     };
+    if card.source != studio_runtime_schema::approvals::BrowserSource::Host {
+        return Err(BrowserAnswerError::Invalid(
+            "This sign-in source is unavailable",
+        ));
+    }
     let decision = data
         .get("decision")
         .and_then(Value::as_str)
@@ -255,37 +257,11 @@ pub async fn answer(
     }
 
     let rpc_decision = if accept { "approve" } else { "decline" };
-    let local_forward = if accept
-        && local_window
-        && !paste_mode
-        && card.source == studio_runtime_schema::approvals::BrowserSource::Vm
-    {
-        if let Some(redirect) = &card.redirect {
-            let forwarder = local_forwarder.ok_or(BrowserAnswerError::Unknown)?;
-            let input = crate::browser::ForwardInput::new(
-                store
-                    .local_server_id()?
-                    .ok_or(BrowserAnswerError::Unknown)?,
-                bridge_id.to_owned(),
-                format!("local-browser-forward:{bridge_id}"),
-                redirect.host.clone(),
-                redirect.port,
-                redirect.path.clone(),
-                now + LOCAL_FORWARD_SECONDS as f64,
-            );
-            forwarder.open(input, now, None).await?;
-            Some(forwarder)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
     let guest = Arc::clone(&guest);
     let guest_params = json!({"id":bridge_id,"decision":rpc_decision});
     let guest_request_id = format!("browser-answer:{bridge_id}:{rpc_decision}");
     let call = studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-services/browser_answer_guest_rpc",
+        "runtime-services/browser_answer_rpc",
         move || {
             guest.call(
                 "browser.answer",
@@ -301,9 +277,6 @@ pub async fn answer(
         Ok(value) => Some(value),
         Err(_error) if !accept => None,
         Err(error) if error.code() == Some("stale") => {
-            if let Some(forwarder) = &local_forward {
-                drop(forwarder.close(bridge_id).await);
-            }
             let id = id.to_owned();
             store
                 .transaction_with_error(move |tx| expire(tx, &id, now))
@@ -311,9 +284,6 @@ pub async fn answer(
             return Err(BrowserAnswerError::Stale);
         }
         Err(error) => {
-            if let Some(forwarder) = &local_forward {
-                drop(forwarder.close(bridge_id).await);
-            }
             return Err(BrowserAnswerError::Guest(error));
         }
     };
@@ -411,7 +381,7 @@ async fn cancel(
     id: &str,
     bridge_id: &str,
     host: &str,
-    guest: Arc<dyn crate::linux_vm_guest::GuestRpc>,
+    guest: Arc<dyn crate::browser_rpc::BrowserRpc>,
     now: f64,
 ) -> Result<BrowserAnswerResult, BrowserAnswerError> {
     browser_cards::close_guest(guest, bridge_id, "cancelled").await;
@@ -457,7 +427,7 @@ async fn cancel(
 }
 
 struct PasteContext {
-    guest: Arc<dyn crate::linux_vm_guest::GuestRpc>,
+    guest: Arc<dyn crate::browser_rpc::BrowserRpc>,
     now: f64,
     http_providers: std::collections::BTreeSet<String>,
 }
@@ -484,7 +454,7 @@ fn relay_status(result: &Value) -> Option<u16> {
 }
 
 /// Relay the address that the person pasted after a sign-in in paste mode, once
-/// (docs/vm-browser-bridge.md, section 6.3). Studio stores no pasted address.
+/// Studio stores no pasted address.
 async fn paste(
     store: &RuntimeStore,
     id: &str,
@@ -709,7 +679,7 @@ fn finish(
 mod tests {
     use super::{BrowserAnswerContext, answer};
     use crate::browser_cards::fixture;
-    use crate::linux_vm_guest::{GuestError, GuestRpc};
+    use crate::browser_rpc::{BrowserRpc, BrowserRpcError};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use studio_json::{Value, json};
@@ -720,15 +690,15 @@ mod tests {
         fail_unknown_once: Mutex<bool>,
     }
 
-    impl GuestRpc for FakeGuest {
+    impl BrowserRpc for FakeGuest {
         fn stream(
             &self,
             method: &str,
             params: &Value,
             request_id: Option<&str>,
             _timeout: Duration,
-            _on_frame: &mut dyn FnMut(Value) -> Result<(), GuestError>,
-        ) -> Result<Value, GuestError> {
+            _on_frame: &mut dyn FnMut(Value) -> Result<(), BrowserRpcError>,
+        ) -> Result<Value, BrowserRpcError> {
             let request_id = request_id.unwrap_or_default().to_owned();
             self.calls
                 .lock()
@@ -738,7 +708,7 @@ mod tests {
                 &mut *self.fail_unknown_once.lock().expect("fake failure lock"),
                 false,
             ) {
-                Err(GuestError::Transport {
+                Err(BrowserRpcError::Transport {
                     message: "reply lost".to_owned(),
                     uncertain: true,
                 })
@@ -752,7 +722,6 @@ mod tests {
         BrowserAnswerContext {
             local_window: true,
             guest,
-            local_forwarder: None,
             now,
             http_providers: Default::default(),
         }
@@ -779,11 +748,6 @@ mod tests {
     #[tokio::test]
     async fn host_source_follows_the_stored_card() {
         let (_dir, store, id) = store_with_browser_request().await;
-        assert!(
-            !super::is_host_source(&store, id.clone())
-                .await
-                .expect("source")
-        );
         let mut card = fixture::card(fixture::BRIDGE);
         card.source = BrowserSource::Host;
         fixture::seed(&store, "browser-answer-agent", card).await;

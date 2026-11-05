@@ -102,7 +102,7 @@ export function simpleRequest({
 type BrowserFields = {
   bridgeId?: string;
   host?: string;
-  source?: "vm" | "host";
+  source?: "host";
   redirect?: { host: string; port: number; path: string } | null;
   clientId?: string | null;
   scope?: string | null;

@@ -61,17 +61,6 @@ export function createFileDialogs(owner: string) {
     await nativeRequest("desktop.revealPath", { value: path });
   }
 
-  function canShowVaultKeys() {
-    return local && (!!window.codexDesktop?.showVaultKeys || hasNativeClient());
-  }
-  async function showVaultKeys(prefix: string): Promise<void> {
-    if (!canShowVaultKeys())
-      throw new Error("Vault keys are unavailable in this server view.");
-    if (window.codexDesktop?.showVaultKeys)
-      return window.codexDesktop.showVaultKeys(prefix);
-    await nativeRequest("desktop.showVaultKeys", { value: prefix });
-  }
-
   return {
     canPickDirectory,
     pickDirectory,
@@ -79,8 +68,6 @@ export function createFileDialogs(owner: string) {
     pickFiles,
     canRevealPath,
     revealPath,
-    canShowVaultKeys,
-    showVaultKeys,
   };
 }
 
@@ -91,6 +78,4 @@ export const {
   pickFiles,
   canRevealPath,
   revealPath,
-  canShowVaultKeys,
-  showVaultKeys,
 } = createFileDialogs(isRemoteServerView ? "remote" : "local");

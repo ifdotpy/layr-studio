@@ -316,9 +316,6 @@ const WorkerCardView = memo(function WorkerCardView({
                   {agent.overview.task}
                 </span>
               )}
-              {agent.environment === "linux" && (
-                <span className="worker-environment">VM</span>
-              )}
             </span>
           </span>
         </UnstyledButton>

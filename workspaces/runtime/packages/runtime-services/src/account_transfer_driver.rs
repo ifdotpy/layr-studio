@@ -1095,7 +1095,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
                 | crate::account_worker::WorkerError::Session(_)
                 | crate::account_worker::WorkerError::Notification(_)
                 | crate::account_worker::WorkerError::PreparationRefused(_)
-                | crate::account_worker::WorkerError::StaleVmActor
+                | crate::account_worker::WorkerError::UnavailableActor
                 | crate::account_worker::WorkerError::PreparationPending(_)
                 | crate::account_worker::WorkerError::PreparationAwaitsAgent(_)
                 | crate::account_worker::WorkerError::CleanupUnconfirmed(_)
@@ -1127,7 +1127,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
 /// are prepared outside the writer transaction from these checked records.
 pub struct TransferPreparation {
     operation: TransferRecord,
-    agent: studio_runtime_store::AgentRecord,
+    agent: Box<studio_runtime_store::AgentRecord>,
 }
 impl TransferPreparation {
     pub fn operation(&self) -> &TransferRecord {
@@ -1203,7 +1203,7 @@ pub async fn execute_member(
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
                 operation: decision.operation.clone(),
-                agent: snapshot.agent(&transaction_agent_id)?.clone(),
+                agent: Box::new(snapshot.agent(&transaction_agent_id)?.clone()),
             };
             persist(tx, decision, now)?;
             Ok::<_, TransferError>(Ok(input))
@@ -1777,6 +1777,16 @@ mod request_tests {
             }
         }
         let (_root, store) = store_with_agents();
+        let executor = NoNative;
+        let future = execute_member(&store, &executor, "transfer", "lead", 2.0);
+        let limit: usize = include_str!("../../../clippy.toml")
+            .lines()
+            .find_map(|line| line.strip_prefix("future-size-threshold = "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(std::mem::size_of_val(&future) <= limit);
+        drop(future);
         run_async(store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",[crate::monitor_policy::complete_test_monitor(json!({"id":"watch","agent":"lead","epoch":1,"status":"running","operation":{"agent":"lead","epoch":1,"accountKey":"source","connectionId":"original"}})).to_string()])?;
             Ok(())

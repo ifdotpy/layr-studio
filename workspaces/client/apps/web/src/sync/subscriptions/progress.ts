@@ -1,10 +1,7 @@
 import type { ConnectionHealth } from "../connectionState";
 import type { ResourceProgress, ResourceRef, ResourceVersion } from "./events";
 
-type ProgressResource = Extract<
-  ResourceRef,
-  { kind: "auth-progress" | "vault-readiness" | "vault-job-progress" }
->;
+type ProgressResource = Extract<ResourceRef, { kind: "auth-progress" }>;
 type ProgressEvents = {
   watchResourceChanges: (
     resource: ResourceRef,

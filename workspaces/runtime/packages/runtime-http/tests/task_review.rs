@@ -224,20 +224,20 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
 
 async fn archive_fixture(
     owner: Option<&str>,
-    vm: bool,
+    fail_archive: bool,
 ) -> (tempfile::TempDir, Arc<RuntimeStore>, axum::Router) {
     let directory = tempfile::tempdir().unwrap();
     let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
     let owner = owner.map(str::to_owned);
     store.transaction(move |tx| {
         for agent in [
-            json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"executionMode":if vm { "vm" } else { "host" }}),
-            json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","parentId":"lead","epoch":2,"status":"failed","autoWake":true,"executionMode":"vm"}),
+            json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"executionMode":"native","workspaceMode":if fail_archive { "layr-native" } else { "shared" }}),
+            json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","parentId":"lead","epoch":2,"status":"failed","autoWake":true,"executionMode":"native","workspaceMode":"layr-native"}),
         ] { AgentRepository::put(tx, &AgentRecord::from_value(agent)?)?; }
         let mut work = json!({"id":"archive-task","rootId":"lead","owner":owner,"status":"review","title":"archive-task","description":"","created":1.0,"updated":1.0,"version":2,"dependencies":[],"results":[{"id":"result-1","agent":"lead","text":"done","checks":"checked","revision":"state","files":[]}],"decisions":[],"createdBy":"lead"});
-        if vm { work["vmAccept"] = json!({"status":"completed","requestId":"layr-accept:result-1","taskId":"archive-task","owner":"worker","revision":"state","resultId":"result-1","created":1.0}); }
+        if fail_archive { work["vmAccept"] = json!({"status":"completed","requestId":"layr-accept:result-1","taskId":"archive-task","owner":"worker","revision":"state","resultId":"result-1","created":1.0}); }
         studio_runtime_store::WorkItemsRepository::put_work(tx, "archive-task", &work)?;
-        if vm { tx.execute_batch("CREATE TRIGGER fail_archive BEFORE UPDATE ON runtime_agents WHEN NEW.id='worker' AND json_type(NEW.record,'$.agentArchive')='object' BEGIN SELECT RAISE(ABORT, 'archive failure'); END;")?; }
+        if fail_archive { tx.execute_batch("CREATE TRIGGER fail_archive BEFORE UPDATE ON runtime_agents WHEN NEW.id='worker' AND json_type(NEW.record,'$.agentArchive')='object' BEGIN SELECT RAISE(ABORT, 'archive failure'); END;")?; }
         Ok(())
     }).await.unwrap();
     let app = router(HttpState::new(

@@ -250,7 +250,7 @@ it("keeps save transfers bound to the originating frame", async () => {
   });
 });
 
-it("binds a sign-in forward to its remote frame and denies local vault keys", async () => {
+it("binds a sign-in forward to its remote frame", async () => {
   let listener: (event: MessageEvent) => Promise<void>;
   vi.stubGlobal("window", {
     addEventListener: (_name: string, callback: typeof listener) => {
@@ -284,7 +284,6 @@ it("binds a sign-in forward to its remote frame and denies local vault keys", as
     value: { url: "https://example.com", forward: { server: "other" } },
     signInOwner: "other",
   });
-  await send("desktop.showVaultKeys", { value: "project" });
   expect(invoke).not.toHaveBeenCalled();
   const value = { url: "https://example.com", forward: { server: "remote" } };
   await send("desktop.openSignIn", { value, signInOwner: "forged" });

@@ -16,8 +16,6 @@ test("desktop transport validators use their closed contract owners", () => {
   expect(isCredentialAction("toString")).toBe(false);
   expect(isServerNativeMethod("openSignIn")).toBe(true);
   expect(isServerNativeMethod("getBackendUpdate")).toBe(true);
-  // Local frames expose vault keys directly, never through the server wrapper.
-  expect(isServerNativeMethod("showVaultKeys")).toBe(false);
   expect(isServerNativeMethod("notify")).toBe(false);
   expect(isServerNativeMethod("toString")).toBe(false);
 });

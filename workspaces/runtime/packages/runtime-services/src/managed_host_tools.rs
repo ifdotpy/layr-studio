@@ -756,7 +756,7 @@ fn remote_dependency(
     if !actor.remote_origin {
         return Ok(None);
     }
-    let moved_from = truthy(actor.record.extra.get("movedFrom"));
+    let moved_from = actor.record.moved_from_active();
     let dependency = match call.tool {
         ManagedHostTool::Send => {
             // Python routes every moved remote-origin send through move_send

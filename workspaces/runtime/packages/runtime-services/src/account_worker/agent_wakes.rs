@@ -1,7 +1,7 @@
 //! Addressed wakes of pending preparations by committed agent rows.
 //!
 //! A pending preparation waits for the agent rows it depends on: its own row
-//! (workspace or VM readiness recorded on the agent), or, when its blocker is
+//! (workspace readiness recorded on the agent), or, when its blocker is
 //! not known, any agent row. The store's row hints carry the rowids of each
 //! commit, so a commit wakes only the waiters of the rows it wrote. A commit
 //! without row identity (hint overflow, unknown outcome) wakes every waiter.

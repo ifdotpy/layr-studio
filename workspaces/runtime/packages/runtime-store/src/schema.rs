@@ -378,6 +378,19 @@ pub fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
+/// Apply the stored-record truthiness rule to an already validated opaque JSON value.
+pub fn raw_truthy(value: Option<&studio_json::OwnedRawJson>) -> bool {
+    let Some(value) = value else { return false };
+    let raw = value.as_str().trim();
+    match raw.as_bytes()[0] {
+        b'n' | b'f' => false,
+        b't' => true,
+        b'"' => raw.len() > 2,
+        b'[' | b'{' => !raw[1..raw.len() - 1].trim().is_empty(),
+        _ => raw.parse::<f64>().is_ok_and(|number| number != 0.0),
+    }
+}
+
 // Keep existing storage callers on the shared legacy receipt serialization owner.
 pub use studio_runtime_schema::json_compat::{
     python_float_json, python_json, python_json_compact, python_json_utf8,
@@ -660,6 +673,34 @@ fn connection_pragmas(connection: &Connection) -> StoreResult<(String, i64)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raw_truthiness_matches_the_stored_value_owner() {
+        for raw in [
+            "null",
+            "false",
+            "true",
+            "0",
+            "-0.0",
+            "1e-300",
+            r#""""#,
+            r#""x""#,
+            r#""\u0000""#,
+            "[]",
+            "[ null ]",
+            "{}",
+            r#"{ "a": 0 }"#,
+        ] {
+            let parsed: studio_json::Value = studio_json::from_str(raw).unwrap();
+            let opaque = studio_json::OwnedRawJson::from_string(raw.into()).unwrap();
+            assert_eq!(
+                super::raw_truthy(Some(&opaque)),
+                super::truthy(Some(&parsed)),
+                "{raw}"
+            );
+        }
+        assert!(!super::raw_truthy(None));
+    }
+
     use super::{
         PayloadMigrationState, event_payload, python_float_json, python_json, python_json_compact,
         verify_payload_migration,

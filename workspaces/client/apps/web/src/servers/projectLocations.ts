@@ -26,7 +26,6 @@ export type ProjectServerChoice = {
   disabled?: boolean;
   serverId?: string;
   system?: string | undefined;
-  hasStudioVm?: boolean | undefined;
   nativeLayr?: GetResult<"/api/ui-summary">["nativeLayr"] | undefined;
   nativeLayrMessage?: string | undefined;
   defaultWorkspaceMode?:

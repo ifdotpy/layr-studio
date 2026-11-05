@@ -27,69 +27,25 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
-type NativeActionPorts = (
-    Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>,
-    Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
-);
-
 pub(super) fn native_action_provider(
-    store: &RuntimeStore,
     agent: &AgentRecord,
     host_port: Option<
         Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>,
     >,
-    configured_guest: Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
-) -> Result<NativeActionPorts, ApiError> {
-    if agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        return host_port
-            .map(|port| (port, configured_guest))
-            .ok_or_else(|| {
-                ApiError::new(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "Not implemented: requires provider-session/native-request",
-                )
-            });
+) -> Result<Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>, ApiError>
+{
+    if agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
+        return Err(ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "The workspace is unavailable",
+        ));
     }
-    #[cfg(unix)]
-    let guest = configured_guest.unwrap_or_else(|| {
-        Arc::new(studio_runtime_services::linux_vm_guest::UnixGuestRpc::new(
-            vm_guest_state_dir(
-                store.state_dir(),
-                std::env::var_os("CODEX_LINUX_VM_STATE_DIR").map(std::path::PathBuf::from),
-            ),
-        ))
-    });
-    #[cfg(not(unix))]
-    let guest = configured_guest.ok_or_else(|| {
+    host_port.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
-            "Not implemented: requires workspace-state/vm-guest",
+            "Not implemented: requires provider-session/native-request",
         )
-    })?;
-    let account = agent.account_key.as_str();
-    let epoch = u64::try_from(agent.epoch).map_err(|_| ApiError::internal())?;
-    let notification_sink = host_port.clone().ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_IMPLEMENTED,
-            "Not implemented: requires account-worker/vm-notification",
-        )
-    })?;
-    let provider = super::vm_native_provider::VmNativeProvider::new(
-        Arc::clone(&guest),
-        notification_sink,
-        account,
-        agent.id.0.as_str(),
-        epoch,
-    );
-    Ok((Arc::new(provider), Some(guest)))
-}
-
-#[cfg(unix)]
-fn vm_guest_state_dir(
-    runtime_state_dir: &std::path::Path,
-    configured: Option<std::path::PathBuf>,
-) -> std::path::PathBuf {
-    configured.unwrap_or_else(|| runtime_state_dir.join("linux-vm"))
+    })
 }
 
 async fn native_action(
@@ -164,113 +120,92 @@ async fn run_native_action(
         studio_runtime_schema::usage_limits::UsageLimitsResponse,
     )>,
 ) -> Result<Json<Value>, ApiError> {
-    let value = studio_json::to_value(body).map_err(|_| ApiError::internal())?;
-    let Some(action) = value.get("action").and_then(Value::as_str) else {
-        let port = state.account_session.clone().ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_IMPLEMENTED,
-                "Not implemented: requires provider-session/native-request",
-            )
-        })?;
-        let store = state.store.clone().ok_or_else(ApiError::internal)?;
-        let account_driver = state.account_driver.clone();
-        let lifecycle = lifecycle.map(|Extension(ports)| ports);
-        let resources = preparation
-            .clone()
-            .map(|Extension(resources)| resources)
-            .ok_or_else(|| {
+    let agent = body.id.as_str().to_owned();
+    let action = match body.action {
+        generated::NativeActionRequestAction::SafetyActionRequest(data) => {
+            let port = state.account_session.clone().ok_or_else(|| {
                 ApiError::new(
                     StatusCode::NOT_IMPLEMENTED,
-                    "Not implemented: requires native-action/preparation-and-settings",
+                    "Not implemented: requires provider-session/native-request",
                 )
             })?;
-        let agent = value["id"].as_str().unwrap_or_default().to_owned();
-        let data = value.get("action").cloned().unwrap_or(Value::Null);
-        let safety_action = data["safety"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Choose wait, retry or cancel"))?
-            .to_owned();
-        if !matches!(safety_action.as_str(), "wait" | "retry" | "cancel") {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "Choose wait, retry or cancel",
-            ));
-        }
-        let turn_id = data["turnId"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A turn ID is required"))?
-            .to_owned();
-        let read_agent = agent.clone();
-        let (account, epoch) = store
-            .read_async("runtime-http/routes/agent_management", move |tx| {
-                let record = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?
-                    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Agent not found"))?;
-                let account = record.account_key.as_str().to_owned();
-                Ok::<_, ApiError>((account, record.epoch))
-            })
-            .await?;
-        let actor = studio_runtime_services::account_worker::retained::RequestActor {
-            agent: agent.clone(),
-            epoch,
-        };
-        let account_driver = account_driver.ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_IMPLEMENTED,
-                "Not implemented: requires account-driver/provider-home",
+            let store = state.store.clone().ok_or_else(ApiError::internal)?;
+            let account_driver = state.account_driver.clone();
+            let lifecycle = lifecycle.map(|Extension(ports)| ports);
+            let resources = preparation
+                .clone()
+                .map(|Extension(resources)| resources)
+                .ok_or_else(|| {
+                    ApiError::new(
+                        StatusCode::NOT_IMPLEMENTED,
+                        "Not implemented: requires native-action/preparation-and-settings",
+                    )
+                })?;
+            let safety_action = data.safety.as_str();
+            let turn_id = data.turn_id.as_str();
+            let read_agent = agent.clone();
+            let (account, epoch) = store
+                .read_async("runtime-http/routes/agent_management", move |tx| {
+                    let record = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?
+                        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Agent not found"))?;
+                    let account = record.account_key.as_str().to_owned();
+                    Ok::<_, ApiError>((account, record.epoch))
+                })
+                .await?;
+            let actor = studio_runtime_services::account_worker::retained::RequestActor {
+                agent: agent.clone(),
+                epoch,
+            };
+            let account_driver = account_driver.ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "Not implemented: requires account-driver/provider-home",
+                )
+            })?;
+            let accounts = account_driver
+                .snapshot()
+                .map_err(|_| ApiError::internal())?;
+            let provider_home = accounts
+                .accounts
+                .iter()
+                .find(|row| row.id.as_str() == Some(account.as_str()))
+                .and_then(|row| row.home.as_str())
+                .ok_or_else(ApiError::internal)?;
+            let mut resources = resources.as_ref().clone();
+            resources.account_home = provider_home.to_owned();
+            let resources = Arc::new(resources);
+            let result = studio_runtime_services::safety_buffering::execute_action(
+                store,
+                port.as_ref(),
+                &resources,
+                lifecycle,
+                studio_runtime_services::safety_buffering::SafetyAction {
+                    agent_id: &agent,
+                    actor,
+                    turn_id,
+                    choice: safety_action,
+                },
             )
-        })?;
-        let accounts = account_driver
-            .snapshot()
-            .map_err(|_| ApiError::internal())?;
-        let provider_home = accounts
-            .accounts
-            .iter()
-            .find(|row| row.id.as_str() == Some(account.as_str()))
-            .and_then(|row| row.home.as_str())
-            .ok_or_else(ApiError::internal)?;
-        let mut resources = resources.as_ref().clone();
-        resources.account_home = provider_home.to_owned();
-        let resources = Arc::new(resources);
-        let result = studio_runtime_services::safety_buffering::execute_action(
-            store,
-            port.as_ref(),
-            &resources,
-            lifecycle,
-            studio_runtime_services::safety_buffering::SafetyAction {
-                agent_id: &agent,
-                actor,
-                turn_id: &turn_id,
-                choice: &safety_action,
-            },
-        )
-        .await
-        .map_err(safety_error)?;
-        return Ok(Json(result));
-    };
-    let action = match action {
-        "compact" => native_actions::Action::Compact,
-        "review" => native_actions::Action::Review,
-        _ => {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "Choose compact or review",
-            ));
+            .await
+            .map_err(safety_error)?;
+            return Ok(Json(result));
         }
+        generated::NativeActionRequestAction::NativeAction(action) => match action {
+            generated::NativeAction::Compact => native_actions::Action::Compact,
+            generated::NativeAction::Review => native_actions::Action::Review,
+        },
     };
-    let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
+    let Some(request_id) = body.request_id.flatten() else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "Reload Studio before Review or Compact. This client has no durable action request ID.",
         ));
     };
-    let context = value
-        .get("context")
-        .filter(|value| !value.is_null())
-        .cloned()
-        .unwrap_or_else(|| studio_json::json!({}));
+    let context = studio_json::to_value(body.context.flatten().unwrap_or_default())
+        .map_err(|_| ApiError::internal())?;
     let request = native_actions::Request {
-        request_id: request_id.to_owned(),
-        agent: value["id"].as_str().unwrap_or_default().to_owned(),
+        request_id: request_id.as_str().to_owned(),
+        agent,
         action,
         context,
     };
@@ -328,7 +263,6 @@ async fn run_native_action(
     let execute_store = Arc::clone(&store);
     let execute_request = request.clone();
     let account_driver = state.account_driver.clone();
-    let guest = state.browser_answer_guest.clone();
     let admission_override = state.message_admission.clone();
     let read_agent = request.agent.clone();
     let use_prepared = admission_override.is_some();
@@ -358,7 +292,7 @@ async fn run_native_action(
         })
         .await?;
     let prepared = prepared.prepare().await.map_err(|_| ApiError::internal())?;
-    let (provider, guest) = native_action_provider(&store, &agent, host_port, guest)?;
+    let provider = native_action_provider(&agent, host_port)?;
     let admission: Arc<dyn MessageAdmission> =
         admission_override.unwrap_or_else(|| Arc::from(prepared));
     let bridge: Arc<dyn Admission> =
@@ -379,7 +313,6 @@ async fn run_native_action(
         account_driver,
         repair,
         preparation: resources,
-        guest,
     };
     let now = unix_time();
     let result = native_actions::execute_provider_prepared(
@@ -414,7 +347,6 @@ struct NativeActionPreparationRun {
     account_driver: Option<Arc<studio_runtime_services::account_driver::AccountDriver>>,
     repair: Option<Arc<dyn NativeContextRepairPort>>,
     preparation: Arc<studio_runtime_services::account_worker::preparation::PreparationResources>,
-    guest: Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
 }
 impl NativeActionPreparationRun {
     async fn agent(
@@ -456,16 +388,8 @@ impl NativeActionPreparationRun {
     }
 
     fn provider_home(&self, agent: &AgentRecord) -> native_actions::Result<std::path::PathBuf> {
-        if let Some(home) = self.host_provider_home(agent)? {
-            return Ok(home);
-        }
-        agent
-            .extra
-            .get("layrHome")
-            .and_then(Value::as_str)
-            .filter(|home| !home.is_empty())
-            .map(std::path::PathBuf::from)
-            .ok_or(NativeError::Unavailable("workspace-state/vm-home"))
+        self.host_provider_home(agent)?
+            .ok_or(NativeError::Unavailable("workspace-state/unavailable"))
     }
 
     async fn repair_before_reserve(
@@ -491,42 +415,6 @@ impl NativeActionPreparationRun {
             .await?;
         Ok(())
     }
-
-    async fn prepare_vm_workspace(
-        &self,
-        request: &native_actions::Request,
-        ticket: &studio_runtime_services::workspace_operations::ProviderTicket,
-    ) -> native_actions::Result<()> {
-        let agent = self.agent(request).await?;
-        if agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) {
-            return Ok(());
-        }
-        let guest = self
-            .guest
-            .clone()
-            .ok_or(NativeError::Unavailable("workspace-state/vm-workspace"))?;
-        if agent.is_lead == Some(true) {
-            studio_runtime_services::vm_preparation::prepare_lead(
-                self.store.as_ref(),
-                guest,
-                &request.agent,
-                &ticket.operation,
-                &request.request_id,
-                ticket.epoch,
-            )
-            .await
-        } else {
-            studio_runtime_services::vm_preparation::prepare_child(
-                self.store.as_ref(),
-                guest,
-                &request.agent,
-                &ticket.operation,
-                &request.request_id,
-                ticket.epoch,
-            )
-            .await
-        }
-    }
 }
 impl native_actions::Preparation for NativeActionPreparationRun {
     fn before_reserve<'a>(
@@ -551,9 +439,6 @@ impl native_actions::Preparation for NativeActionPreparationRun {
             let preparation = self.clone();
             let request_for_prepare = request.clone();
             let ticket_for_prepare = ticket.clone();
-            preparation
-                .prepare_vm_workspace(&request_for_prepare, &ticket_for_prepare)
-                .await?;
             let provider_home = preparation.provider_home(&preparation.agent(request).await?)?;
             let mut resources = preparation.preparation.as_ref().clone();
             resources.account_home = provider_home.to_string_lossy().into_owned();
@@ -735,10 +620,7 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
 #[allow(clippy::disallowed_methods)]
 mod native_review_preflight_tests {
     use super::*;
-    use base64::Engine;
     use std::{
-        fs::File,
-        io::Read,
         path::Path,
         sync::{
             Arc,
@@ -746,7 +628,6 @@ mod native_review_preflight_tests {
         },
     };
     use studio_json::json;
-    use studio_runtime_services::vm_preparation;
     use studio_runtime_services::{
         account_session_runtime::{
             AccountSessionError, AccountSessionPort, ConnectionScope, ProviderRequest,
@@ -785,6 +666,140 @@ mod native_review_preflight_tests {
                 Ok(Value::Null)
             })
         }
+    }
+
+    #[tokio::test]
+    async fn native_action_http_wire_and_replay_equivalence() {
+        use axum::{body::Body, http::Request, routing::post};
+        use studio_runtime_schema::persistence::RequestIdentity;
+        use studio_runtime_store::request_results::{Admission, RequestResults, ResultEnvelope};
+        use tower::ServiceExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let agent = AgentRecord::from_value(json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "provider":"codex", "accountKey":"default",
+            "idleCompactionEpisode": {"id":"reserved", "cache":{"requestId":"cache", "ttl":"1h", "warm":true,
+                "lastActivityAt":1.0, "contextTokens":1, "prefix":"prefix"}, "fireAt":2.0, "expiresAt":3.0,
+                "identity":{}, "prefixInputs":[], "attempt":{}}
+        })).unwrap();
+        let root = RequestIdentity::issue_root();
+        let identity = RequestIdentity::new("native-action", &[], &root, &[]).unwrap();
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &agent)?;
+                let signature = studio_runtime_store::python_json_with_separators(
+                    &json!({"agent":"agent","action":"compact","context":{}}),
+                    ",",
+                    ":",
+                );
+                let Admission::Fresh(admitted) =
+                    RequestResults::admit(tx, &identity, &signature, (unix_time() * 1000.0) as i64)
+                        .unwrap()
+                else {
+                    panic!("fresh")
+                };
+                RequestResults::settle(
+                    tx,
+                    &admitted,
+                    &ResultEnvelope {
+                        actor: Some("agent".into()),
+                        reply: json!({"result":"saved"}),
+                        references: vec![],
+                    },
+                )
+                .unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let state = HttpState::new(
+            "token".into(),
+            "fixture".into(),
+            directory.path().display().to_string(),
+            49172,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let app = axum::Router::new()
+            .route("/api/action", post(native_action))
+            .with_state(state);
+        async fn send(app: &axum::Router, body: Value) -> (StatusCode, String) {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/action")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (status, String::from_utf8(bytes.to_vec()).unwrap())
+        }
+        let invalid = (
+            StatusCode::BAD_REQUEST,
+            "{\"error\":\"Invalid request\",\"location\":[\"body\",\"action\"]}".to_owned(),
+        );
+        for action in [
+            json!("other"),
+            json!({"safety":"other","turnId":"t"}),
+            json!({"safety":"wait"}),
+            json!({"safety":"wait","turnId":null}),
+            json!({"safety":"wait","turnId":1}),
+            json!({"safety":"wait","turnId":""}),
+            json!({"safety":"wait","turnId":"é".repeat(201)}),
+        ] {
+            assert_eq!(
+                send(&app, json!({"id":"agent","action":action})).await,
+                invalid
+            );
+        }
+        for n in [1, 200] {
+            assert_eq!(
+                send(
+                    &app,
+                    json!({"id":"agent","action":{"safety":"wait","turnId":"é".repeat(n)}})
+                )
+                .await,
+                (
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{\"error\":\"Not implemented: requires provider-session/native-request\"}"
+                        .into()
+                )
+            );
+        }
+        for body in [
+            json!({"id":"agent","action":"compact"}),
+            json!({"id":"agent","action":"compact","request_id":null}),
+        ] {
+            assert_eq!(send(&app,body).await, (StatusCode::BAD_REQUEST,"{\"error\":\"Reload Studio before Review or Compact. This client has no durable action request ID.\"}".into()));
+        }
+        assert_eq!(
+            send(
+                &app,
+                json!({"id":"agent","action":"compact","request_id":"reserved"})
+            )
+            .await,
+            (
+                StatusCode::BAD_REQUEST,
+                "{\"error\":\"This request ID is reserved for idle compaction.\"}".into()
+            )
+        );
+        let body = json!({"id":"agent","action":"compact","request_id":root});
+        let expected = (StatusCode::OK, "{\"result\":\"saved\"}".into());
+        assert_eq!(send(&app, body.clone()).await, expected);
+        assert_eq!(send(&app, body).await, expected);
+        let read = store.test_reader().unwrap();
+        let count: i64 = read
+            .query_row("SELECT COUNT(*) FROM request_results", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
@@ -833,10 +848,54 @@ mod native_review_preflight_tests {
             .unwrap_err();
             assert!(error.message().contains(expected), "{}", error.message());
         }
+        for action in ["compact", "review"] {
+            for request_id in [None, Some(Value::Null)] {
+                let mut body = json!({"id":"agent", "action":action, "context":null});
+                if let Some(request_id) = request_id {
+                    body["request_id"] = request_id;
+                }
+                let body = studio_json::from_value(body).unwrap();
+                let error = Box::pin(native_action(
+                    State(state.clone()),
+                    None,
+                    None,
+                    None,
+                    ApiJson(body),
+                ))
+                .await
+                .unwrap_err();
+                assert!(error.message().contains("no durable action request ID"));
+            }
+        }
+        for safety in [
+            generated::SafetyAction::Wait,
+            generated::SafetyAction::Retry,
+            generated::SafetyAction::Cancel,
+        ] {
+            let body = generated::NativeActionRequest::new(
+                generated::NativeActionRequestAction::SafetyActionRequest(
+                    generated::SafetyActionRequest {
+                        safety,
+                        turn_id: "turn".to_owned().try_into().unwrap(),
+                    },
+                ),
+                "agent".to_owned().try_into().unwrap(),
+            );
+            let error = Box::pin(native_action(
+                State(state.clone()),
+                None,
+                None,
+                None,
+                ApiJson(body),
+            ))
+            .await
+            .unwrap_err();
+            assert!(error.message().contains("provider-session/native-request"));
+        }
     }
 
     #[tokio::test]
-    async fn remote_origin_and_vm_review_preflight_use_the_provider_home_owner() {
+    async fn remote_origin_review_preflight_uses_the_provider_home_owner() {
         let directory = tempfile::tempdir().expect("isolated store directory");
         let store = Arc::new(
             RuntimeStore::open(Some(directory.path()))
@@ -895,7 +954,6 @@ mod native_review_preflight_tests {
             account_driver: None,
             repair: Some(repair.clone()),
             preparation: Arc::new(resources),
-            guest: Some(Arc::new(GuestSpy::new(json!({})))),
         };
         let request = native_actions::Request {
             request_id: "review-request".into(),
@@ -923,33 +981,6 @@ mod native_review_preflight_tests {
         ));
         assert_eq!(repair.0.load(Ordering::SeqCst), 0);
         assert_eq!(provider.0.load(Ordering::SeqCst), 0);
-        let mut vm_value = original.value();
-        vm_value["executionMode"] = json!("vm");
-        vm_value["layrHome"] = json!("/guest/provider-home");
-        let vm_agent = AgentRecord::from_value(vm_value).expect("valid VM agent record");
-        let vm_agent_for_write = vm_agent.clone();
-        store
-            .transaction(move |tx| AgentRepository::put(tx, &vm_agent_for_write))
-            .await
-            .expect("save VM agent");
-        let vm_result = native_actions::Preparation::before_reserve(
-            &preparation,
-            store.as_ref(),
-            provider.as_ref(),
-            &request,
-            &scope,
-        )
-        .await;
-        assert!(vm_result.is_ok());
-        assert_eq!(
-            preparation
-                .provider_home(&preparation.agent(&request).await.expect("stored VM agent"))
-                .expect("VM provider home comes from layr")
-                .as_path(),
-            Path::new("/guest/provider-home")
-        );
-        assert_eq!(repair.0.load(Ordering::SeqCst), 0);
-        assert_eq!(provider.0.load(Ordering::SeqCst), 0);
         let connection = store.test_reader().expect("read unchanged store");
         let after_agent = AgentRepository::get(&connection, &original.id)
             .expect("read unchanged agent")
@@ -963,604 +994,7 @@ mod native_review_preflight_tests {
             )
             .expect("count unchanged receipts");
         assert_eq!(before_agent["remoteOrigin"], true);
-        assert_eq!(after_agent, vm_agent.value());
+        assert_eq!(after_agent, original.value());
         assert_eq!(after_receipts, before_receipts);
-    }
-
-    struct GuestSpy {
-        calls: std::sync::Mutex<Vec<(String, Value, Option<String>)>>,
-        result: Value,
-        uncertain: bool,
-        intent_store: Option<Arc<RuntimeStore>>,
-    }
-
-    struct NotificationSink;
-
-    impl studio_runtime_services::account_session_runtime::AccountSessionPort for NotificationSink {
-        fn deliver_vm_notification<'a>(
-            &'a self,
-            _account: &'a str,
-            _agent_id: &'a str,
-            _epoch: u64,
-            _sequence: u64,
-            _frame: studio_runtime_providers::Frame,
-        ) -> futures_util::future::BoxFuture<
-            'a,
-            Result<(), studio_runtime_services::account_session_runtime::AccountSessionError>,
-        > {
-            Box::pin(async { Ok(()) })
-        }
-    }
-
-    impl GuestSpy {
-        fn new(result: Value) -> Self {
-            Self {
-                calls: std::sync::Mutex::new(Vec::new()),
-                result,
-                uncertain: false,
-                intent_store: None,
-            }
-        }
-
-        fn uncertain(result: Value) -> Self {
-            Self {
-                calls: std::sync::Mutex::new(Vec::new()),
-                result,
-                uncertain: true,
-                intent_store: None,
-            }
-        }
-
-        fn with_intent_store(mut self, store: Arc<RuntimeStore>) -> Self {
-            self.intent_store = Some(store);
-            self
-        }
-    }
-
-    impl studio_runtime_services::linux_vm_guest::GuestRpc for GuestSpy {
-        fn stream(
-            &self,
-            method: &str,
-            params: &Value,
-            request_id: Option<&str>,
-            _timeout: std::time::Duration,
-            _on_frame: &mut dyn FnMut(
-                Value,
-            ) -> std::result::Result<
-                (),
-                studio_runtime_services::linux_vm_guest::GuestError,
-            >,
-        ) -> std::result::Result<Value, studio_runtime_services::linux_vm_guest::GuestError>
-        {
-            self.calls.lock().expect("guest call lock").push((
-                method.to_owned(),
-                params.clone(),
-                request_id.map(str::to_owned),
-            ));
-            if method == "upload.begin"
-                && let Some(store) = &self.intent_store
-            {
-                let connection = store.test_reader().expect("read durable import intent");
-                let agent = AgentRepository::get(&connection, &AgentId::from("vm-lead"))
-                    .expect("read VM lead")
-                    .expect("VM lead exists")
-                    .value();
-                let intent = &agent["startAttempt"]["vmWorkspacePreparation"]["projectImport"];
-                assert_eq!(intent["phase"], "uploading");
-                assert!(intent["projectId"].as_str().is_some());
-                assert!(intent["requestId"].as_str().is_some());
-                assert!(intent["source"].as_str().is_some());
-            }
-            if self.uncertain && method == "line.bind" {
-                return Err(
-                    studio_runtime_services::linux_vm_guest::GuestError::Transport {
-                        message: "fixture lost the response".into(),
-                        uncertain: true,
-                    },
-                );
-            }
-            if method == "project.ensure" {
-                return Err(
-                    studio_runtime_services::linux_vm_guest::GuestError::Rejected {
-                        code: Some("not_found".into()),
-                        detail: None,
-                        uncertain: false,
-                    },
-                );
-            }
-            if method == "project.import" {
-                return Ok(
-                    studio_json::json!({"projectId":params["projectId"],"stateId":"imported-state"}),
-                );
-            }
-            if method == "provider.rpc" {
-                return Ok(match params["action"].as_str() {
-                    Some("info") => json!({"lastSeq":0,"acknowledged":0,"state":"running"}),
-                    Some("write") => json!({"remoteId":7,"accepted":true}),
-                    Some("next") => json!({
-                        "event":{"sequence":1,"kind":"stdout","payload":"{\"id\":7,\"result\":{\"ok\":true}}"},
-                        "returnCode":null
-                    }),
-                    Some("ack") => json!({"acknowledged":params["sequence"]}),
-                    _ => self.result.clone(),
-                });
-            }
-            Ok(self.result.clone())
-        }
-    }
-
-    #[tokio::test]
-    async fn vm_native_action_selects_fake_guest_with_retained_notifications() {
-        use std::time::{Duration, Instant};
-        use studio_runtime_providers::Method;
-        use studio_runtime_services::account_session_runtime::RequestCertainty;
-
-        let directory = tempfile::tempdir().expect("isolated store directory");
-        let store = RuntimeStore::open(Some(directory.path()))
-            .await
-            .expect("open store");
-        let agent = AgentRecord::from_value(
-            json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
-                "id":"vm-native", "rootId":"vm-native", "epoch":5,
-                "status":"idle", "executionMode":"vm", "accountKey":"vm-account"
-            }),
-        )
-        .expect("VM agent record");
-        let guest = Arc::new(GuestSpy::new(json!({"ok":true})));
-        let guest_port: Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc> = guest.clone();
-        let (provider, selected_guest) = native_action_provider(
-            &store,
-            &agent,
-            Some(Arc::new(NotificationSink)),
-            Some(guest_port),
-        )
-        .expect("VM provider selection uses retained notification ingress");
-        let scope = provider.current_scope("vm-account").expect("guest scope");
-        let receipt = provider
-            .provider_request(ProviderRequest {
-                root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                admitted_request: None,
-                account: "vm-account".into(),
-                operation: "vm-native-op".into(),
-                actor: None,
-                expected_scope: Some(scope.clone()),
-                deleted_actor_session: None,
-                method: Method::ThreadCompactStart,
-                params: json!({"threadId":"guest-thread"}),
-                deadline: Instant::now() + Duration::from_secs(3),
-            })
-            .await
-            .expect("guest request receipt");
-        assert!(selected_guest.is_some());
-        assert_eq!(receipt.scope, scope);
-        assert_eq!(receipt.certainty(), RequestCertainty::Written);
-        assert_eq!(
-            guest.calls.lock().expect("guest calls")[0].0,
-            "provider.rpc"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn vm_guest_default_path_appends_linux_vm_once() {
-        let root = tempfile::tempdir().expect("isolated state root");
-        assert_eq!(
-            vm_guest_state_dir(root.path(), None),
-            root.path().join("linux-vm")
-        );
-        assert_eq!(
-            vm_guest_state_dir(root.path(), Some(root.path().join("custom-vm"))),
-            root.path().join("custom-vm")
-        );
-    }
-
-    #[test]
-    fn vm_archive_matches_code_only_exclusions_and_refuses_worktree_pointer() {
-        let temporary = tempfile::tempdir().expect("source tempdir");
-        let root = temporary.path();
-        std::fs::write(root.join(".gitignore"), "data/\nignored-dir/\n").unwrap();
-        std::fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
-        std::fs::create_dir_all(root.join("data/downloads")).unwrap();
-        std::fs::create_dir_all(root.join("ignored-dir")).unwrap();
-        std::fs::create_dir_all(root.join("target/debug")).unwrap();
-        std::fs::write(root.join("data/downloads/archive.zip"), "data").unwrap();
-        std::fs::write(root.join("ignored-dir/cache"), "ignored").unwrap();
-        std::fs::write(root.join("target/debug/output"), "build").unwrap();
-        std::fs::write(root.join("source.rs"), "fn main() {}\n").unwrap();
-        let archive = vm_preparation::vm_project_archive(root).expect("archive source");
-        let mut tar = Vec::new();
-        flate2::read::GzDecoder::new(File::open(archive.file.path()).unwrap())
-            .read_to_end(&mut tar)
-            .unwrap();
-        assert!(
-            tar.windows(b"source.rs".len())
-                .any(|window| window == b"source.rs")
-        );
-        for excluded in [
-            b"data/downloads/archive.zip".as_slice(),
-            b"ignored-dir/cache",
-            b"target/debug/output",
-        ] {
-            assert!(!tar.windows(excluded.len()).any(|window| window == excluded));
-        }
-
-        std::fs::remove_file(root.join(".gitignore")).unwrap();
-        std::fs::write(
-            root.join(".git"),
-            "gitdir: /outside/repository/.git/worktrees/source\n",
-        )
-        .unwrap();
-        assert!(
-            vm_preparation::vm_project_archive(root).is_err(),
-            "linked worktree metadata is not self-contained"
-        );
-    }
-
-    #[tokio::test]
-    async fn local_archive_failure_does_not_persist_submitted_intent() {
-        let directory = tempfile::tempdir().expect("isolated store directory");
-        let missing_source = directory.path().join("missing-project");
-        let store = RuntimeStore::open(Some(directory.path()))
-            .await
-            .expect("open store");
-        let record = AgentRecord::from_value(json!({"compactions":0,
-            "id":"vm-local-archive-failure", "rootId":"vm-local-archive-failure",
-            "epoch":1, "status":"starting", "provider":"codex", "executionMode":"vm", "accountKey":"default",
-            "isLead":true, "autoWake":true, "cwd":missing_source,
-            "startAttempt":{"id":"attempt-local-archive-failure"}
-        }))
-        .expect("valid VM agent");
-        let record_id = record.id.clone();
-        store
-            .transaction_with(move |tx| AgentRepository::put(tx, &record))
-            .await
-            .expect("save VM agent");
-        let guest = Arc::new(GuestSpy::new(Value::Null));
-        let guest_port: Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc> = guest.clone();
-
-        assert!(matches!(
-            vm_preparation::prepare_lead(
-                &store,
-                guest_port,
-                "vm-local-archive-failure",
-                "attempt-local-archive-failure",
-                "vm-turn-preparation:attempt-local-archive-failure",
-                1,
-            )
-            .await,
-            Err(NativeError::Unavailable(_))
-        ));
-        let connection = store.test_reader().expect("read store");
-        let saved = AgentRepository::get(&connection, &record_id)
-            .expect("read agent")
-            .expect("agent exists")
-            .value();
-        assert!(
-            saved["startAttempt"]
-                .get("vmWorkspacePreparation")
-                .is_none()
-        );
-        assert_eq!(
-            guest
-                .calls
-                .lock()
-                .expect("guest calls")
-                .iter()
-                .map(|call| call.0.as_str())
-                .collect::<Vec<_>>(),
-            ["project.ensure"]
-        );
-    }
-
-    #[tokio::test]
-    async fn vm_lead_workspace_binding_is_durably_recorded_with_python_identity() {
-        let directory = tempfile::tempdir().expect("isolated store directory");
-        let source_directory = tempfile::tempdir().expect("isolated host project directory");
-        let source = source_directory.path().join("project");
-        std::fs::create_dir_all(&source).expect("create source tree");
-        std::fs::write(source.join("README.md"), "hello from the host\n")
-            .expect("write project source");
-        let git_object = source.join(".git/objects/aa/fixture-object");
-        std::fs::create_dir_all(git_object.parent().unwrap()).expect("create Git object store");
-        std::fs::write(&git_object, "fixture git object bytes").expect("write Git object fixture");
-        let store = Arc::new(
-            RuntimeStore::open(Some(directory.path()))
-                .await
-                .expect("open store"),
-        );
-        let record = AgentRecord::from_value(json!({"compactions":0,
-            "id":"vm-lead", "rootId":"vm-lead", "epoch":7, "status":"starting",
-            "provider":"codex", "executionMode":"vm", "isLead":true, "autoWake":true,
-            "cwd":source, "hostProjectPath":source, "projectId":"logical-project-id", "threadId":"thread-vm",
-            "accountKey":"default", "startAttempt":{"id":"native-attempt","actionRequestId":"vm-review"}
-        })).expect("valid VM agent");
-        let record_for_write = record.clone();
-        store
-            .transaction(move |tx| AgentRepository::put(tx, &record_for_write))
-            .await
-            .expect("save VM agent");
-        let root =
-            CanonicalPath::existing(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .unwrap();
-        let resources = PreparationResources::bundled_at(
-            String::new(),
-            ModelCatalogService::new(),
-            root.clone().to_path_buf(),
-        )
-        .expect("preparation resources");
-        let guest = Arc::new(
-            GuestSpy::new(json!({
-                "cwd":"/home/studio/project","projectId":"project-key","line":"main",
-                "owner":"vm-lead","home":"/home/studio","stateId":"state-1"
-            }))
-            .with_intent_store(store.clone()),
-        );
-        let preparation = NativeActionPreparationRun {
-            store: store.clone(),
-            provider: Arc::new(ProviderSpy(AtomicUsize::new(0))),
-            account_driver: None,
-            repair: Some(Arc::new(RepairSpy(Arc::new(AtomicUsize::new(0))))),
-            preparation: Arc::new(resources),
-            guest: Some(guest.clone()),
-        };
-        let request = native_actions::Request {
-            request_id: "vm-review".into(),
-            agent: "vm-lead".into(),
-            action: native_actions::Action::Review,
-            context: Value::Null,
-        };
-        let ticket = studio_runtime_services::workspace_operations::ProviderTicket {
-            operation: "native-attempt".into(),
-            agent: "vm-lead".into(),
-            epoch: 7,
-            account: "default".into(),
-            thread: Some("thread-vm".into()),
-            connection: "connection-vm".into(),
-            generation: 3,
-            request: "vm-review".into(),
-        };
-        preparation
-            .prepare_vm_workspace(&request, &ticket)
-            .await
-            .expect("bind layr line");
-        let calls = guest.calls.lock().expect("guest calls");
-        assert_eq!(calls.len(), 8);
-        assert_eq!(calls[0].0, "project.ensure");
-        assert_eq!(calls[1].0, "upload.begin");
-        assert_eq!(calls[1].1["mode"], "full");
-        assert_eq!(calls[2].0, "upload.chunk");
-        let compressed = base64::engine::general_purpose::STANDARD
-            .decode(calls[2].1["data"].as_str().expect("archive chunk"))
-            .expect("base64 archive chunk");
-        let mut tar = Vec::new();
-        flate2::read::GzDecoder::new(compressed.as_slice())
-            .read_to_end(&mut tar)
-            .expect("decompress project archive");
-        assert!(
-            tar.windows(b"hello from the host".len())
-                .any(|window| { window == b"hello from the host" })
-        );
-        assert!(
-            tar.windows(b"fixture git object bytes".len())
-                .any(|window| { window == b"fixture git object bytes" }),
-            "full imports include Git objects as Python does"
-        );
-        assert_eq!(calls[3].0, "upload.commit");
-        assert_eq!(calls[4].0, "project.import");
-        assert_eq!(calls[4].1["incremental"], false);
-        assert_eq!(calls[5].0, "line.bind");
-        assert_eq!(
-            calls[5].2.as_deref(),
-            Some("layr-bind:ec1ba18479610216ce57fdf070f4c843ed49e4008fb3dbc8993a6e08d3d11443")
-        );
-        assert_eq!(calls[5].1["line"], "main");
-        assert_eq!(calls[6].0, "health");
-        assert_eq!(calls[7].0, "agent.context");
-        assert_eq!(
-            calls[7].2.as_deref(),
-            Some("layr-context:ec1ba18479610216ce57fdf070f4c843ed49e4008fb3dbc8993a6e08d3d11443")
-        );
-        drop(calls);
-        let connection = store.test_reader().expect("read store");
-        let saved = AgentRepository::get(&connection, &record.id)
-            .expect("read VM agent")
-            .expect("agent exists")
-            .value();
-        assert_eq!(saved["layrReady"], true);
-        assert_eq!(saved["cwd"], "/home/studio/project");
-        assert_eq!(saved["layrProjectId"], "project-key");
-        assert_eq!(
-            saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
-            "completed"
-        );
-        assert_eq!(
-            saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"],
-            "imported"
-        );
-    }
-
-    #[tokio::test]
-    async fn vm_reviewer_branches_from_ready_parent_as_read_only() {
-        let directory = tempfile::tempdir().expect("isolated store directory");
-        let store = Arc::new(
-            RuntimeStore::open(Some(directory.path()))
-                .await
-                .expect("open store"),
-        );
-        let parent = AgentRecord::from_value(json!({"compactions":0,
-            "id":"vm-parent", "rootId":"vm-parent", "epoch":2, "status":"idle", "accountKey":"default",
-            "provider":"codex", "executionMode":"vm", "isLead":true, "autoWake":true,
-            "cwd":"/home/studio/project", "layrReady":true,
-            "layrProjectId":"project-key", "layrLine":"main"
-        }))
-        .expect("valid parent");
-        let reviewer = AgentRecord::from_value(json!({"compactions":0,
-            "id":"vm-reviewer", "rootId":"vm-parent", "parentId":"vm-parent",
-            "epoch":4, "status":"starting", "provider":"codex", "executionMode":"vm", "accountKey":"default",
-            "isLead":false, "role":"reviewer", "autoWake":true, "layrReady":false,
-            "layrSubpath":"review", "layrBaseState":"base-1", "cwd":"/host/project",
-            "threadId":"thread-review",
-            "startAttempt":{"id":"review-attempt","actionRequestId":"review-req"}
-        }))
-        .expect("valid reviewer");
-        store
-            .transaction(move |tx| {
-                AgentRepository::put(tx, &parent)?;
-                AgentRepository::put(tx, &reviewer)
-            })
-            .await
-            .expect("save VM lines");
-        let root =
-            CanonicalPath::existing(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .unwrap();
-        let resources = PreparationResources::bundled_at(
-            String::new(),
-            ModelCatalogService::new(),
-            root.clone().to_path_buf(),
-        )
-        .expect("preparation resources");
-        let guest = Arc::new(GuestSpy::new(json!({
-            "cwd":"/home/studio/project/review","projectId":"project-key","line":"reviewer-vm-reviewer",
-            "owner":"vm-reviewer","home":"/home/studio","stateId":"state-review"
-        })));
-        let preparation = NativeActionPreparationRun {
-            store: store.clone(),
-            provider: Arc::new(ProviderSpy(AtomicUsize::new(0))),
-            account_driver: None,
-            repair: Some(Arc::new(RepairSpy(Arc::new(AtomicUsize::new(0))))),
-            preparation: Arc::new(resources),
-            guest: Some(guest.clone()),
-        };
-        let request = native_actions::Request {
-            request_id: "review-req".into(),
-            agent: "vm-reviewer".into(),
-            action: native_actions::Action::Review,
-            context: Value::Null,
-        };
-        let ticket = studio_runtime_services::workspace_operations::ProviderTicket {
-            operation: "review-attempt".into(),
-            agent: "vm-reviewer".into(),
-            epoch: 4,
-            account: "default".into(),
-            thread: Some("thread-review".into()),
-            connection: "connection-vm".into(),
-            generation: 3,
-            request: "review-req".into(),
-        };
-        preparation
-            .prepare_vm_workspace(&request, &ticket)
-            .await
-            .expect("branch layr reviewer");
-        let calls = guest.calls.lock().expect("guest calls");
-        assert_eq!(calls[0].0, "line.branch");
-        assert_eq!(calls[0].1["parentAgentId"], "vm-parent");
-        assert_eq!(calls[0].1["readOnly"], true);
-        assert_eq!(calls[0].1["stateId"], "base-1");
-        assert_eq!(
-            calls[0].2.as_deref(),
-            Some("layr-branch:109dc95d1bea82df9f8dad0978f66af8cf0cafe9d487e058e51899b0d49227ed")
-        );
-    }
-
-    #[test]
-    fn vm_guest_request_ids_are_stable_and_bounded() {
-        let identity = "agent".repeat(10_000);
-        let first = vm_preparation::vm_guest_request_id("layr-bind", &identity);
-        assert_eq!(
-            first,
-            vm_preparation::vm_guest_request_id("layr-bind", &identity)
-        );
-        assert!(
-            first.chars().count()
-                <= studio_runtime_services::linux_vm_guest::GUEST_REQUEST_ID_MAX_CHARS
-        );
-        assert!(first.starts_with("layr-bind:"));
-    }
-
-    #[tokio::test]
-    async fn uncertain_vm_binding_is_durable_and_never_resent() {
-        let directory = tempfile::tempdir().expect("isolated store directory");
-        let source_directory = tempfile::tempdir().expect("isolated host project directory");
-        let source = source_directory.path().join("project");
-        std::fs::create_dir_all(&source).expect("create source tree");
-        std::fs::write(source.join("main.py"), "print('hello')\n").expect("write project source");
-        let store = Arc::new(
-            RuntimeStore::open(Some(directory.path()))
-                .await
-                .expect("open store"),
-        );
-        let record = AgentRecord::from_value(json!({"compactions":0,
-            "id":"vm-unknown", "rootId":"vm-unknown", "epoch":1, "status":"starting", "accountKey":"default",
-            "provider":"codex", "executionMode":"vm", "isLead":true, "autoWake":true,
-            "cwd":source, "hostProjectPath":source, "threadId":"thread-unknown",
-            "startAttempt":{"id":"attempt-unknown"}
-        }))
-        .expect("valid VM agent");
-        let record_for_write = record.clone();
-        store
-            .transaction(move |tx| AgentRepository::put(tx, &record_for_write))
-            .await
-            .expect("save VM agent");
-        let root =
-            CanonicalPath::existing(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .unwrap();
-        let resources = PreparationResources::bundled_at(
-            String::new(),
-            ModelCatalogService::new(),
-            root.clone().to_path_buf(),
-        )
-        .expect("preparation resources");
-        let guest = Arc::new(GuestSpy::uncertain(json!({})));
-        let preparation = NativeActionPreparationRun {
-            store: store.clone(),
-            provider: Arc::new(ProviderSpy(AtomicUsize::new(0))),
-            account_driver: None,
-            repair: Some(Arc::new(RepairSpy(Arc::new(AtomicUsize::new(0))))),
-            preparation: Arc::new(resources),
-            guest: Some(guest.clone()),
-        };
-        let request = native_actions::Request {
-            request_id: "request-unknown".into(),
-            agent: "vm-unknown".into(),
-            action: native_actions::Action::Review,
-            context: Value::Null,
-        };
-        let ticket = studio_runtime_services::workspace_operations::ProviderTicket {
-            operation: "attempt-unknown".into(),
-            agent: "vm-unknown".into(),
-            epoch: 1,
-            account: "default".into(),
-            thread: Some("thread-unknown".into()),
-            connection: "connection-vm".into(),
-            generation: 1,
-            request: "request-unknown".into(),
-        };
-        assert!(matches!(
-            preparation.prepare_vm_workspace(&request, &ticket).await,
-            Err(NativeError::Unknown)
-        ));
-        assert!(matches!(
-            preparation.prepare_vm_workspace(&request, &ticket).await,
-            Err(NativeError::Unknown)
-        ));
-        let calls = guest.calls.lock().expect("guest calls");
-        assert_eq!(
-            calls
-                .iter()
-                .filter(|(method, _, _)| method == "line.bind")
-                .count(),
-            1
-        );
-        assert_eq!(calls.len(), 6);
-        drop(calls);
-        let connection = store.test_reader().expect("read store");
-        let saved = AgentRepository::get(&connection, &record.id)
-            .expect("read agent")
-            .unwrap()
-            .value();
-        assert_eq!(
-            saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
-            "unknown"
-        );
     }
 }

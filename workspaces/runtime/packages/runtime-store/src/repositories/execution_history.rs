@@ -163,48 +163,7 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     bootstrap_connection_functions: &[],
 };
 pub struct ExecutionHistoryRepository;
-#[derive(Clone, Copy)]
-enum VmAdmission {
-    AuthBootstrap,
-    CredentialRefresh,
-}
-impl VmAdmission {
-    fn path(self) -> &'static str {
-        match self {
-            Self::AuthBootstrap => "$.vm_auth_bootstrap_admission",
-            Self::CredentialRefresh => "$.vm_credential_refresh_admission",
-        }
-    }
-}
 impl ExecutionHistoryRepository {
-    pub fn vm_auth_bootstrap_admission(
-        db: &rusqlite::Connection,
-        id: &str,
-    ) -> StoreResult<Option<AdmittedRequest>> {
-        Self::admission_at(db, id, VmAdmission::AuthBootstrap.path())
-    }
-    pub fn vm_credential_refresh_admission(
-        db: &rusqlite::Connection,
-        id: &str,
-    ) -> StoreResult<Option<AdmittedRequest>> {
-        Self::admission_at(db, id, VmAdmission::CredentialRefresh.path())
-    }
-    pub fn set_vm_auth_bootstrap_admission(
-        tx: &Transaction<'_>,
-        id: &str,
-        source: &AdmittedRequest,
-        admitted: &AdmittedRequest,
-    ) -> StoreResult<()> {
-        Self::set_vm_admission(tx, id, VmAdmission::AuthBootstrap, source, admitted)
-    }
-    pub fn set_vm_credential_refresh_admission(
-        tx: &Transaction<'_>,
-        id: &str,
-        source: &AdmittedRequest,
-        admitted: &AdmittedRequest,
-    ) -> StoreResult<()> {
-        Self::set_vm_admission(tx, id, VmAdmission::CredentialRefresh, source, admitted)
-    }
     fn admission_at(
         db: &rusqlite::Connection,
         id: &str,
@@ -219,32 +178,6 @@ impl ExecutionHistoryRepository {
         .flatten()
         .map(|raw| studio_json::from_str(&raw).map_err(StoreError::from))
         .transpose()
-    }
-    fn set_vm_admission(
-        tx: &Transaction<'_>,
-        id: &str,
-        kind: VmAdmission,
-        source: &AdmittedRequest,
-        admitted: &AdmittedRequest,
-    ) -> StoreResult<()> {
-        if Self::admission(tx, id)?.as_ref() != Some(source) {
-            return Err(Self::invalid("runtime_execution_attempts", id));
-        }
-        if let Some(saved) = Self::admission_at(tx, id, kind.path())? {
-            return if saved == *admitted {
-                Ok(())
-            } else {
-                Err(Self::invalid("runtime_execution_attempts", id))
-            };
-        }
-        let changed = tx.execute(
-            "UPDATE runtime_execution_attempts SET record=json_set(record,?1,json(?2)) WHERE id=?3",
-            params![kind.path(), studio_json::to_string(admitted)?, id],
-        )?;
-        if changed != 1 {
-            return Err(Self::invalid("runtime_execution_attempts", id));
-        }
-        Ok(())
     }
     /// Domain settlement survives response-cache expiry and never grants a fresh dispatch.
     pub fn start_settled(db: &rusqlite::Connection, id: &str) -> StoreResult<bool> {
@@ -1175,45 +1108,6 @@ mod tests {
             [studio_json::to_string(&admission).expect("token")],
         )
         .expect("persist admission");
-        let final_effect = admission.derive_result("provider-call", &["bootstrap"], "fingerprint");
-        ExecutionHistoryRepository::set_vm_auth_bootstrap_admission(
-            &tx,
-            "attempt",
-            &admission,
-            &final_effect,
-        )
-        .expect("reserve exact source");
-        assert_eq!(
-            ExecutionHistoryRepository::vm_auth_bootstrap_admission(&tx, "attempt")
-                .expect("final pointer"),
-            Some(final_effect.clone())
-        );
-        ExecutionHistoryRepository::set_vm_auth_bootstrap_admission(
-            &tx,
-            "attempt",
-            &admission,
-            &final_effect,
-        )
-        .expect("same final pointer");
-        let wrong_source = admission.derive_result("wrong-source", &[], "different");
-        assert!(
-            ExecutionHistoryRepository::set_vm_auth_bootstrap_admission(
-                &tx,
-                "attempt",
-                &wrong_source,
-                &final_effect
-            )
-            .is_err()
-        );
-        assert!(
-            ExecutionHistoryRepository::set_vm_auth_bootstrap_admission(
-                &tx,
-                "attempt",
-                &admission,
-                &wrong_source
-            )
-            .is_err()
-        );
         tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.submission','unknown') WHERE id='attempt'",[]).expect("unknown start");
         assert!(
             !ExecutionHistoryRepository::start_settled(&tx, "attempt")

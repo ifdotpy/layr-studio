@@ -166,6 +166,49 @@ fn agent(id: &str, parent: Option<&str>, path: &str) -> Value {
 }
 
 #[tokio::test]
+async fn project_deletion_ignores_cwd_of_another_projects_child() {
+    let mut child = agent("child", Some("other"), "/p");
+    child["rootId"] = json!("other");
+    let f = Fixture::new(vec![agent("other", None, "/prefix"), child], vec![], false).await;
+    let (status, reply) = f.call(f.body.clone()).await;
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(reply["deletedAgentIds"], json!([]));
+    assert_eq!(f.agent("child")["epoch"], 1);
+}
+
+#[tokio::test]
+async fn project_deletion_ignores_cwd_of_bound_foreign_chat() {
+    let mut other = agent("other", None, "/p");
+    other["projectId"] = json!("/prefix");
+    other["projectServerId"] = json!("owner");
+    let mut child = agent("child", Some("other"), "/p");
+    child["rootId"] = json!("other");
+    let f = Fixture::new(vec![other, child], vec![], false).await;
+    let (status, reply) = f.call(f.body.clone()).await;
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(reply["deletedAgentIds"], json!([]));
+    assert_eq!(f.agent("other")["epoch"], 1);
+    assert_eq!(f.agent("child")["epoch"], 1);
+    assert!(f.agent("other")["deletedAt"].is_null());
+    assert!(f.agent("child")["deletedAt"].is_null());
+}
+
+#[tokio::test]
+async fn project_deletion_prefers_host_project_path_to_cwd() {
+    let mut outside = agent("outside", None, "/p");
+    outside["hostProjectPath"] = json!("/prefix");
+    let mut inside = agent("inside", None, "/prefix");
+    inside["hostProjectPath"] = json!("/p");
+    let f = Fixture::new(vec![outside, inside], vec![], false).await;
+    let (status, reply) = f.call(f.body.clone()).await;
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(reply["deletedAgentIds"], json!(["inside"]));
+    assert_eq!(f.agent("outside")["epoch"], 1);
+    assert!(f.agent("outside")["deletedAt"].is_null());
+    assert!(f.agent("inside")["deletedAt"].is_number());
+}
+
+#[tokio::test]
 async fn project_deletion_membership_and_retention() {
     let mut lead = agent("lead", None, "/p");
     lead["archivedAt"] = json!(2);
@@ -452,17 +495,15 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
         .read_async("project-deletion/rebuild", |tx| {
             Ok::<_, studio_runtime_store::StoreError>((
                 studio_runtime_services::sync_entity_context::RoomSources::read_for_sync(tx)?,
-                studio_runtime_services::sync_policy::ProjectVaultSnapshot::stored_projects(tx)?,
+                studio_runtime_services::sync_policy::ProjectSnapshot::stored_projects(tx)?,
             ))
         })
         .await
         .expect("sources");
     let directory = studio_runtime_services::sync_entity_context::RoomDirectory::prepare(sources)
         .expect("directory");
-    let vault = studio_runtime_services::sync_policy::ProjectVaultSnapshot::capture(
-        f.store.root(),
-        &projects,
-    );
+    let vault =
+        studio_runtime_services::sync_policy::ProjectSnapshot::capture(f.store.root(), &projects);
     let root = f.store.root().to_string_lossy().into_owned();
     f.store
         .transaction(move |tx| {

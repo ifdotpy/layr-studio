@@ -131,9 +131,6 @@ export function sidebarSnapshot(
         "accountGroupsRevision",
         "created",
         "updated",
-        "layrReadiness",
-        "layrSync",
-        "vault",
       ]),
     ),
     rooms: (runtime?.rooms || []).map((room) =>

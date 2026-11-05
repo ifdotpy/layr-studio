@@ -435,9 +435,8 @@ pub async fn create_with(
                             "prepared shared participant identity changed",
                         ));
                     }
-                    draft
-                        .extra
-                        .insert("sharedRoomId".to_owned(), json!(room_id));
+                    draft.shared_room_id =
+                        studio_runtime_schema::queue_command::Field::Value(room_id.clone());
                     draft.naming.set_needs_title(Some(false));
                     records::validate("runtime_agents", id.as_ref(), draft.value())?;
                 }

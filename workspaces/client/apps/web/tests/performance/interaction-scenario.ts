@@ -178,7 +178,6 @@ import type { Host } from "../../src/native/host.ts";
       "Appearance",
       "Federation",
       "Servers",
-      "Linux VM",
       "Hotkeys",
     ]) {
       await measure(

@@ -14,7 +14,7 @@ hashes stay equal ("Other version" does not stay on the server card).
   "builtAt": 1791980000.0,
   "commit": "<git sha>",
   "commitTime": 1791979000,
-  "branch": "release/vault-menu"
+  "branch": "release/example"
 }
 ```
 
@@ -96,8 +96,7 @@ The backend never replaces the installed app itself.
 (installed), 75 (waiting, try again later) or 1 (failed or obsolete; the pending file is removed):
 
 1. Wait while `supervisorEnabled` is not true: without the supervisor, a backend restart ends
-   the agents. Wait while a VM upgrade holds `linux-vm/maintenance.lock`; hold that lock for the
-   rest of the install.
+   the agents.
 2. Stop as obsolete when the installed app is this build or a newer one. Verify the staged app
    again, as in step 5 above.
 3. Note whether the desktop window runs, and close it. When `desktop-recovery.json` records
@@ -128,8 +127,7 @@ The backend never replaces the installed app itself.
    way. Limit: a turn silent for 10 minutes is not seen as live work.
 
 A failed step before the swap leaves the installed app unchanged. A failed swap moves the
-previous app back. After a failure the installer opens the window again if it quit it. The VM
-guest is not upgraded: a VM upgrade restarts VM chats and needs the user's consent.
+previous app back. After a failure the installer opens the window again if it quit it.
 
 ## Setting and status
 

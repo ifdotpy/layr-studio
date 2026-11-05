@@ -6,7 +6,8 @@ export type PromptComposerRenderProbe = (
     | "sidebar-row"
     | "team-row"
     | "prompt-composer"
-    | "turn-history",
+    | "turn-history"
+    | "history-row",
   id?: string,
 ) => void;
 

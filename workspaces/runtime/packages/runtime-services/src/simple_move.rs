@@ -344,6 +344,15 @@ mod tests {
     }
 }
 
+fn legacy_vm_workspace(record: &Value) -> bool {
+    crate::workspace_ready::vm_workspace_unsupported(
+        record["executionMode"].as_str(),
+        record["workspaceMode"].as_str(),
+        record["layrReady"] == true,
+        record["layrLine"].as_str().is_some(),
+    )
+}
+
 /// The readable transcript of a chat from its Studio items, oldest first.
 fn transcript(items: &[Value]) -> String {
     let mut text = String::new();
@@ -403,6 +412,9 @@ pub async fn move_across_providers(
     let Some((agent, items)) = read else {
         return Ok(None);
     };
+    if legacy_vm_workspace(&agent) {
+        return Err(TransferError::Refused("VmWorkspaceUnsupported"));
+    }
     let source_provider = agent["provider"].as_str().unwrap_or("codex").to_owned();
     let busy = agent["inFlight"].as_bool() == Some(true)
         || matches!(agent["status"].as_str(), Some("running" | "starting"));
@@ -443,6 +455,9 @@ pub async fn move_across_providers(
             let value = AgentRepository::get(tx, &AgentId::from(id.as_str()))?
                 .ok_or(TransferError::Refused("Unknown managed agent"))?
                 .value();
+            if legacy_vm_workspace(&value) {
+                return Err(TransferError::Refused("VmWorkspaceUnsupported"));
+            }
             if value["epoch"] != source_epoch
                 || value["inFlight"].as_bool() == Some(true)
                 || value["provider"].as_str() != Some(source_provider.as_str())
@@ -516,6 +531,43 @@ mod cross_tests {
             .unwrap();
         assert!(released.get("nativeFailureHold").is_none());
         assert!(released["error"].is_null());
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_move_is_refused_before_writing_host_transcript() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        let cwd = root.path().to_path_buf();
+        let record = json!({"id":"a","rootId":"a","epoch":1,"compactions":0,
+            "status":"idle","isLead":true,"provider":"codex","accountKey":"source",
+            "workspaceMode":"layr","nativeRoleGuidance":"role","cwd":cwd});
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(
+                    tx,
+                    &studio_runtime_store::AgentRecord::from_value(record).unwrap(),
+                )
+            })
+            .await
+            .unwrap();
+        let result = move_across_providers(
+            &store,
+            "a",
+            "target",
+            studio_runtime_providers::ProviderKind::Claude,
+            "request",
+            "team",
+            1.0,
+        )
+        .await;
+        assert!(
+            matches!(
+                result,
+                Err(TransferError::Refused("VmWorkspaceUnsupported"))
+            ),
+            "{result:?}"
+        );
+        assert!(!root.path().join(".studio-history").exists());
     }
 
     #[test]

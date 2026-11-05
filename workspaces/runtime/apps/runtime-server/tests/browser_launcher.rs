@@ -1,6 +1,5 @@
-//! The launcher of agent sign-in links runs this binary (docs/vm-browser-bridge.md,
-//! "Native chats"): `xdg-open URL` in the host bridge's PATH folder reaches the bridge with
-//! no Python, with the exit codes and messages of `studio_browser.py`.
+//! The sign-in launcher runs this binary: `xdg-open URL` in the host bridge PATH
+//! reaches the bridge with the launcher's exit codes and messages.
 #![cfg(unix)]
 
 use std::process::Command;

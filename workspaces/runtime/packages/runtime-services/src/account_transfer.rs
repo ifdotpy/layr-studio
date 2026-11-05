@@ -2048,7 +2048,7 @@ pub fn typed_enroll(
     ) && source != *target
     {
         return Err(TransferError::Refused(
-            "Archive VM workers before changing the team account",
+            "Archive workers in this environment before changing the team account",
         ));
     }
     let done = source == *target;
