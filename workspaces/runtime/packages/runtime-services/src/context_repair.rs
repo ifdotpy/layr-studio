@@ -2175,8 +2175,10 @@ fn ensure_local_idle(tx: &Transaction<'_>, agent: &Value) -> Result<(), RepairEr
     }
     Ok(())
 }
+const VERIFIED_REPAIR_EVENTS_SQL: &str = "SELECT e.id,e.kind,e.text,e.turn_id,m.record FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id WHERE e.agent=?1 AND e.status='delivered' AND e.kind IN ('monitor_exit','agent_message','work_review','work_decision') AND ((length(CAST(e.text AS BLOB))>3000 AND coalesce(json_extract(m.record,'$.modelEventProjection'),0)!=1) OR json_extract(m.record,'$.contextManifest.versions.roleSkill') IS NOT NULL) ORDER BY e.created,e.id";
+
 fn verified_repair_events(tx: &Transaction<'_>, agent: &Value) -> Result<Vec<Value>, RepairError> {
-    let mut statement=tx.prepare("SELECT e.id,e.kind,e.text,e.turn_id,m.record FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id WHERE e.agent=?1 AND e.status='delivered' AND e.kind IN ('monitor_exit','agent_message','work_review','work_decision') AND ((length(CAST(e.text AS BLOB))>3000 AND coalesce(json_extract(m.record,'$.modelEventProjection'),0)!=1) OR json_extract(m.record,'$.contextManifest.versions.roleSkill') IS NOT NULL) ORDER BY e.created,e.id")?;
+    let mut statement = tx.prepare(VERIFIED_REPAIR_EVENTS_SQL)?;
     let rows = statement.query_map([agent["id"].as_str()], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -2218,6 +2220,57 @@ fn verified_repair_events(tx: &Transaction<'_>, agent: &Value) -> Result<Vec<Val
         }
     }
     Ok(events)
+}
+
+#[cfg(test)]
+mod repair_event_query_tests {
+    use super::VERIFIED_REPAIR_EVENTS_SQL;
+
+    #[test]
+    fn repair_events_use_ordered_index_without_a_temp_sort() {
+        let db = studio_runtime_store::test_canvas();
+        let mut plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {VERIFIED_REPAIR_EVENTS_SQL}"))
+            .unwrap();
+        let steps: Vec<String> = plan
+            .query_map(["agent"], |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("runtime_event_repair_candidates_v3")),
+            "{steps:?}"
+        );
+        assert!(
+            !steps.iter().any(|step| step.contains("TEMP B-TREE")),
+            "{steps:?}"
+        );
+    }
+
+    #[test]
+    fn repair_event_order_preserves_id_ties() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,status TEXT,kind TEXT,text TEXT,turn_id TEXT,created REAL); CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT); CREATE INDEX runtime_event_repair_candidates_v3 ON runtime_events(agent,created,id) WHERE status='delivered' AND kind IN ('monitor_exit','agent_message','work_review','work_decision');").unwrap();
+        for (id, created) in [("z", 1), ("b", 2), ("a", 2)] {
+            db.execute("INSERT INTO runtime_events VALUES(?1,'agent','delivered','monitor_exit',?2,'turn',?3)", rusqlite::params![id,"x".repeat(3001),created]).unwrap();
+            db.execute("INSERT INTO runtime_event_meta VALUES(?1,'{}')", [id])
+                .unwrap();
+        }
+        let ids = |sql: &str| -> Vec<String> {
+            db.prepare(sql)
+                .unwrap()
+                .query_map(["agent"], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let baseline = VERIFIED_REPAIR_EVENTS_SQL
+            .replace("runtime_events e LEFT", "runtime_events e NOT INDEXED LEFT");
+        assert_eq!(ids(VERIFIED_REPAIR_EVENTS_SQL), ids(&baseline));
+        assert_eq!(ids(VERIFIED_REPAIR_EVENTS_SQL), ["z", "a", "b"]);
+    }
 }
 fn repair_receipt(receipt: &crate::context_repair_files::HistoryRewriteReceipt) -> Value {
     json!({"sourcePath":receipt.source_path,"sourceSha256":receipt.source_sha256,"sourceBytes":receipt.source_bytes,
