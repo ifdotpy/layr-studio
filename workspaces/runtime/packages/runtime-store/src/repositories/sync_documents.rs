@@ -130,9 +130,15 @@ pub const AGENT_VIEW_COLLECTIONS: &[&str] =
     &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
 
 /// Window collections: a document per member of a window in `durable_rows`
+<<<<<<< head
 /// (`durable_seq::TASK_WINDOW`, `durable_seq::MONITOR_WINDOW`), the newest events and
 /// the message receipts of user events, built at read time.
 pub const WINDOW_COLLECTIONS: &[&str] = &["task", "monitor", "event", "messageReceipt"];
+||||||| base
+=======
+/// (`durable_seq::TASK_WINDOW`, `durable_seq::MONITOR_WINDOW`), built at read time.
+pub const WINDOW_COLLECTIONS: &[&str] = &["task", "monitor"];
+>>>>>>> https/main
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncDocument {

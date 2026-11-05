@@ -17,9 +17,14 @@
   color: var(--agent-activity-color, var(--muted));
 }
 
+/* The wait row grows with its summary (a touch target on touch screens), so
+   the dots, label and chevron stay on one centered line. */
 .agent-phase[data-wait-state] {
-  height: 30px;
+  height: auto;
+  min-height: 30px;
+  padding-block: 4px;
   flex-wrap: nowrap;
+  align-items: center;
 }
 .agent-phase[data-wait-state] > svg,
 .agent-phase .wait-dots {
@@ -36,21 +41,33 @@
   min-width: 0;
 }
 .agent-phase-wait > summary {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  cursor: pointer;
+}
+.agent-phase-wait-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-  padding-right: 16px;
 }
 .agent-phase-wait > summary::-webkit-details-marker {
   display: none;
 }
 .agent-phase-wait > summary::after {
-  content: "⌄";
-  position: absolute;
-  right: 0;
-  top: 0;
+  content: "";
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform 120ms ease;
+}
+.agent-phase-wait[open] > summary::after {
+  transform: rotate(180deg);
 }
 .agent-phase-wait-details {
   position: absolute;

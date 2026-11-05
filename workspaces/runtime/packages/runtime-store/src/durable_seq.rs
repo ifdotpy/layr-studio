@@ -116,8 +116,12 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     // again when it changes.
     DurableTable::record("runtime_tasks"),
     DurableTable::record("runtime_monitors"),
+<<<<<<< head
     // The newest events form the event window, built at read time.
     DurableTable::new("runtime_events", "status"),
+||||||| base
+=======
+>>>>>>> https/main
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -244,10 +248,14 @@ pub const AGENT_VIEW_MARK: &str = "agent_views";
 /// its member edges and its messages, so their writers mark the chat.
 pub const CHAT_VIEW_MARK: &str = "chat_views";
 
+<<<<<<< head
 /// The `durable_rows` table name of the message receipts: a receipt reads its event,
 /// the event metadata and the transcript items, so their writers mark the event.
 pub const RECEIPT_VIEW_MARK: &str = "receipt_views";
 
+||||||| base
+=======
+>>>>>>> https/main
 /// The `durable_rows` tables of the window members: a live entry puts the task or
 /// monitor of that id in its client window, a tombstone takes it out. The writer that
 /// owns the window rule (`sync_policy` in runtime-services) keeps them.

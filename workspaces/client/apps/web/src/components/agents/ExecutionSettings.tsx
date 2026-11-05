@@ -1629,7 +1629,7 @@ function ScopedExecutionSettings({
       {role === "review" && reviewCurrent.fast_mode === undefined && (
         <p className="notice">
           Native reviews use this agent’s Fast setting; review tasks use
-          Workers. Choose Fast here to override both.
+          Workers.
         </p>
       )}
       {role === "worker" &&

@@ -92,7 +92,11 @@ mod m2026_11_03_request_signature_digest;
 mod m2026_11_04_agent_views_read_time;
 mod m2026_11_04_chat_read_time;
 mod m2026_11_04_direct_read_time;
+<<<<<<< head
 mod m2026_11_04_event_read_time;
+||||||| base
+=======
+>>>>>>> https/main
 mod m2026_11_04_window_read_time;
 mod m2026_11_04_work_read_time;
 
@@ -1568,6 +1572,7 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_04_window_read_time::apply(c.transaction),
     },
+<<<<<<< head
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-04-event-read-time",
@@ -1578,6 +1583,9 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_04_event_read_time::apply(c.transaction),
     },
+||||||| base
+=======
+>>>>>>> https/main
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.

@@ -222,12 +222,18 @@ member's document is built from `runtime_tasks` or `runtime_monitors` at read ti
 change of a member row or of its membership is sent at the later number; a member that
 left is a delete. `task_window_state` keeps the owner, created time and running state the
 task window compares. A task that moves to another agent resets the scoped readers of
+<<<<<<< head
 both owners. Migration `2026-11-04-window-read-time` moved the members of the copies. The event window is
 the newest `runtime_events` rows (`EVENT_WINDOW_ROWS`), built at read time; a delta sends
 each changed event (a delete when it is outside the window) and a delete for each event
 the changes may have pushed out. Message receipts are built from the event, its
 metadata and its transcript items; their writers mark the event (`receipt_views`).
 Migration `2026-11-04-event-read-time` dropped the event window triggers and the copies. They are built
+||||||| base
+numbered these rows, marked every chat and deleted the copies. They are built
+=======
+both owners. Migration `2026-11-04-window-read-time` moved the members of the copies. They are built
+>>>>>>> https/main
 at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
 their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
 agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that

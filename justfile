@@ -204,6 +204,10 @@ benchmark-client-interactions baseline output:
 test-browser-smoke *args:
     @node {{quote(facade)}} test-browser-smoke {{args}}
 
+[doc("Manual: drive agent turns through every layout configuration and device profile (desktop, phone, Duo, with and without the keyboard) and report layout shifts. Needs the renderer build and a debug server. Flags: --profile NAME,... --out DIR --chromium PATH.")]
+layout-shift-matrix *args:
+    @node workspaces/client/apps/web/scripts/layout-shift-matrix.ts {{args}}
+
 [doc("Check the main user scenarios on the app installed on this Mac, with its own test chats. See docs/testing.md, Installed scenario smoke.")]
 smoke-installed *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/installed-smoke/smoke.ts")}} "$@"
@@ -211,6 +215,14 @@ smoke-installed *args:
 [doc("Install a newer build over the current one on an isolated clone with real processes, before a live install. See docs/testing.md, Upgrade canary.")]
 upgrade-canary *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/upgrade-canary/canary.ts")}} "$@"
+
+[doc("Regenerate the web client large entity transfer fixture from the Rust server.")]
+regenerate-entity-server-frames:
+    @STUDIO_REGENERATE_ENTITY_FRAMES=1 cargo test -j 4 -p studio-runtime-http --lib cold_entity_client_fixture_matches_server_frames
+
+[doc("Manual heavy check: replay a real large entity SSE snapshot after a failed write.")]
+test-entity-server-heavy:
+    @STUDIO_ENTITY_SERVER_HEAVY=1 pnpm --filter codex-agents-web exec vitest run --config vitest.unit.config.ts src/sync/client.entityServer.test.ts -t "stages a cold" --maxWorkers=1
 
 [doc("Run the full browser project as a manual heavy check.")]
 test-heavy:

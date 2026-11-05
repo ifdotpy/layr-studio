@@ -510,7 +510,12 @@ for (const attachmentCase of [false, true])
             atBottom,
             `${mode}: explicit send reveals the newest message`,
           );
-          assert.match(await row(firstText).innerText(), /Sending/);
+          // A pending send shows no outcome; "Sending" appears only after
+          // it lasts (SettledDelivery), so the row itself is the witness.
+          assert.doesNotMatch(
+            await row(firstText).innerText(),
+            /\bSent\b|Not sent/,
+          );
           await page.waitForTimeout(220);
           assert.equal(
             await row(firstText).count(),

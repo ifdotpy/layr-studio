@@ -355,6 +355,28 @@ mod tests {
             &task_record(id, agent, status),
         )
         .map_err(|_| studio_runtime_store::StoreError::RecordContract("task write"))
+<<<<<<< head
+||||||| base
+    ) -> studio_runtime_schema::process_controls::TaskProjection {
+        use studio_runtime_schema::task_record::{TaskStatus, TaskType};
+        let mut record = studio_runtime_store::TaskRecord::new(
+            agent.into(),
+            id.into(),
+            "turn".into(),
+            studio_json::from_str("1").expect("valid timestamp"),
+            TaskType::CommandExecution,
+            "commandExecution".into(),
+        );
+        record.set_status(match status {
+            "running" => TaskStatus::Running,
+            "completed" => TaskStatus::Completed,
+            _ => panic!("unsupported fixture status"),
+        });
+        let mut projection = studio_runtime_services::sync_views::project_task_record(&record)
+            .expect("task projection");
+        projection.id = id.into();
+        projection
+=======
     }
 
     fn delete_task(
@@ -363,8 +385,21 @@ mod tests {
     ) -> Result<(), studio_runtime_store::StoreError> {
         studio_runtime_services::notification_dispatch::test_delete_task(tx, id)
             .map_err(|_| studio_runtime_store::StoreError::RecordContract("task delete"))
+>>>>>>> https/main
     }
 
+<<<<<<< head
+    fn delete_task(
+        tx: &rusqlite::Transaction<'_>,
+        id: &str,
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        studio_runtime_services::notification_dispatch::test_delete_task(tx, id)
+            .map_err(|_| studio_runtime_store::StoreError::RecordContract("task delete"))
+    }
+
+||||||| base
+=======
+>>>>>>> https/main
     /// A task row with the given id, owner and status.
     fn task_record(id: &str, agent: &str, status: &str) -> studio_runtime_store::TaskRecord {
         studio_json::from_str(
@@ -852,6 +887,94 @@ mod tests {
                 Ok(())
             })
             .expect("bounded snapshot continuation");
+    }
+
+    #[tokio::test]
+    async fn cold_entity_client_fixture_matches_server_frames() {
+        use studio_runtime_store::{AgentRecord, AgentRepository};
+        let (_directory, state) = fixture().await;
+        let store = state.store.as_ref().expect("store");
+        studio_runtime_services::entity_publication::install(store)
+            .await
+            .expect("entity publisher");
+        store
+            .transaction_with(|tx| {
+                for index in 0..=SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+                    let id = format!("older-{index}");
+                    AgentRepository::put(
+                        tx,
+                        &AgentRecord::from_value(json!({
+                            "provider":"codex", "id":id, "rootId":id, "epoch":1,
+                            "status":"idle", "accountKey":"default", "name":id, "compactions":0
+                        }))?,
+                    )?;
+                }
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .expect("entity baseline");
+        let resource = studio_json::from_str(r#"{"kind":"state"}"#).expect("resource");
+        let (_, reader, _) = prepare(&state, &event(&state), resource, None)
+            .await
+            .expect("snapshot");
+        let mut reader = reader.expect("large snapshot");
+        let mut frames = Vec::new();
+        let mut transfer_id = None;
+        let mut workspace_rows = 0;
+        while let Some(frame) = reader.next().await.expect("frame") {
+            let bytes = wire(frame).await;
+            let text = std::str::from_utf8(&bytes).expect("utf8");
+            let mut value: Value = studio_json::from_str(
+                text.lines()
+                    .find_map(|line| line.strip_prefix("data: "))
+                    .expect("data"),
+            )
+            .expect("frame json");
+            assert_eq!(value["workspaceId"], state.workspace_id);
+            assert_eq!(value["cursor"]["workspaceId"], state.workspace_id);
+            let id = value["transferId"].as_str().expect("transfer ID");
+            uuid::Uuid::parse_str(id).expect("valid transfer ID");
+            assert_eq!(
+                transfer_id.get_or_insert_with(|| id.to_owned()).as_str(),
+                id
+            );
+            assert_eq!(value["partCount"], 1);
+            let data = value["data"].as_str().expect("frame data");
+            let batch: Value = studio_json::from_str(data).expect("batch");
+            for row in batch["documents"].as_array().expect("documents") {
+                if row["collection"] == "workspace" && row["id"] == "current" {
+                    assert_eq!(
+                        row["value"]["stateDir"],
+                        _directory.path().display().to_string()
+                    );
+                    workspace_rows += 1;
+                }
+            }
+            let data = data.replace(&*_directory.path().display().to_string(), "/fixture-state");
+            value["data"] = json!(data);
+            value["workspaceId"] = json!("00000000000000000000000000000000");
+            value["cursor"]["workspaceId"] = json!("00000000000000000000000000000000");
+            value["transferId"] = json!("00000000-0000-0000-0000-000000000000");
+            frames.push(value);
+        }
+        assert_eq!(workspace_rows, 1);
+        let actual = format!(
+            "{}\n",
+            studio_json::to_string_pretty(&frames).expect("json")
+        );
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../client/apps/web/src/sync/entityServerFrames.fixture.json"
+        );
+        if std::env::var_os("STUDIO_REGENERATE_ENTITY_FRAMES").is_some() {
+            tokio::fs::write(path, &actual)
+                .await
+                .expect("write fixture");
+        }
+        assert!(
+            actual == tokio::fs::read_to_string(path).await.expect("fixture"),
+            "regenerate with: just regenerate-entity-server-frames"
+        );
     }
 
     #[tokio::test]

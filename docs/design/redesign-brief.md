@@ -108,6 +108,17 @@ Alignment: text left aligned; numbers right aligned in their column.
 6. Component CSS uses tokens only. Raw sizes live in the token files.
 7. Copy names things by what the operator does, in plain sentence case. Show
    separate facts as separate elements, not as `A · B · C` strings.
+8. Agent work never moves a control. A state change of a turn (start,
+   reasoning, command, usage, stream, end) keeps every header, composer and
+   footer control in place:
+   - transient notices (errors, retries, sync) float in the zero-height
+     `.workspace-notices` stack under the header, over the transcript;
+   - a control that appears with a state, such as Stop, owns a reserved slot
+     at its own position;
+   - text that changes with a state (phase, context, rate, counts) keeps one
+     width with tabular numerals, or swaps inside one fixed slot.
+     `tests/layout/agent-turn-stability.spec.ts` guards it in browser smoke;
+     `just layout-shift-matrix` measures every layout and device by hand.
 
 ## Review against generic defaults
 

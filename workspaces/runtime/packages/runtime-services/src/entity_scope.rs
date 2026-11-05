@@ -380,6 +380,7 @@ pub fn continue_page(
             agent.map(|agent| (agent, include_team_members)),
             fetch,
         )?);
+<<<<<<< head
         // The event window belongs only to the global list.
         if id.is_none() && agent.is_none() && wanted.contains("event") {
             units.extend(event_units(
@@ -399,6 +400,9 @@ pub fn continue_page(
                 fetch,
             )?);
         }
+||||||| base
+=======
+>>>>>>> https/main
     }
     units.sort_by_key(|unit| unit.seq);
     let truncated = units.len() as i64 > limit;
@@ -802,6 +806,7 @@ fn window_units(
     Ok(units)
 }
 
+<<<<<<< head
 /// Units of the event window in `(after, through]`: the newest events. A snapshot
 /// sends the window. A delta sends each changed event (a delete when it is not in the
 /// window), and a delete for each event that the changes may have pushed out: one per
@@ -928,6 +933,9 @@ fn receipt_units(
     Ok(units)
 }
 
+||||||| base
+=======
+>>>>>>> https/main
 /// Whether `agent` is a live member of the team of `root`.
 fn team_member(connection: &Connection, agent: &str, root: &str) -> StoreResult<bool> {
     Ok(connection

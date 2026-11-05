@@ -91,6 +91,8 @@ is excluded by the root Cargo workspace.
 | Workspace boundaries                                  | `just boundaries-check`                  |
 | Cargo dependency bans                                 | `just deny-bans`                         |
 | Browser smoke                                         | `just test-browser-smoke`                |
+| Layout shifts across UI states, manual                | `just layout-shift-matrix`               |
+| Real entity stream, manual heavy                      | `just test-entity-server-heavy`          |
 | Full browser project, manual heavy                    | `just test-browser` or `just test-heavy` |
 | Multi-server browser recovery, manual heavy           | `just test-browser-multi-server`         |
 | Full deterministic Rust corpora, manual heavy         | `just test-rust-runtime-corpora`         |
@@ -103,10 +105,12 @@ is excluded by the root Cargo workspace.
 | Load-sensitive Rust tests, manual heavy               | `just test-quarantine`                   |
 | Real launcher process probe (lsof), manual            | `just test-real-process-probe`           |
 | Many-agent scenario, manual heavy                     | `just test-rust-many-agents`             |
-| Backend instruction and allocation profiles, manual | `just bench-gungraun`                   |
+| Backend instruction and allocation profiles, manual   | `just bench-gungraun`                    |
 | Continuation corpus and store faults, manual heavy    | `just test-rust-usage-resume-corpora`    |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
+
+Refresh the captured entity transfer fixture with `just regenerate-entity-server-frames`.
 
 Eight Rust tests failed only under load and are `#[ignore]` until
 [issue #616](https://github.com/ifdotpy/layr-studio/issues/616) is fixed; `just test-quarantine`
@@ -131,6 +135,13 @@ compress-every-write mode of [`stored_text.rs`](../workspaces/runtime/packages/r
 every writer of a compressed text column then stores the compressed form, so
 the selected tests check that every reader decodes it. For example,
 `STUDIO_STORE_COMPRESS_EVERY_WRITE=1 just test studio-runtime-services notification_dispatch`.
+
+`just layout-shift-matrix` is a manual diagnostic. It drives held agent turns
+through the fixture provider in every layout configuration (sidebar, right
+panel, terminals, draft) on desktop, phone and Duo profiles, with and without
+the on-screen keyboard, and writes `index.html` with the layout-shift score and
+the moved controls of each edge. The browser smoke witness for the same rule is
+`tests/layout/agent-turn-stability.spec.ts`.
 
 Heavy runs are announced and selected by hand. A test that needs repeated runs
 to be trusted must be rewritten or moved to the heavy tier. New tests fit the

@@ -20,6 +20,8 @@
   --studio-form-max: 40rem;
   /* Model picker column: 65% of the previous desktop form width, in rem. */
   --studio-model-picker-size: calc(var(--studio-form-max) * 0.65);
+  /* Model picker height, one for every role; touch rows are taller. */
+  --studio-model-picker-height: 23rem;
   /* New chat dialog outer width: model column plus its Mantine body padding. */
   --studio-model-dialog-padding: var(--mantine-spacing-md);
   --studio-model-dialog-size: calc(
@@ -48,4 +50,10 @@
      Inset rings stay inside scroll containers and clear the state rail. */
   --studio-focus-ring-width: 0.125rem;
   --studio-focus-ring-inset: 0.125rem;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --studio-model-picker-height: 30rem;
+  }
 }

@@ -66,7 +66,13 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
     let sync_entities = {
         let mut statement = db
             .prepare(
+<<<<<<< head
                 "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor','event','messageReceipt') ORDER BY collection,id",
+||||||| base
+                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree') ORDER BY collection,id",
+=======
+                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor') ORDER BY collection,id",
+>>>>>>> https/main
             )
             .expect("prepare projection snapshot");
         let mut rows = statement
@@ -91,6 +97,19 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
         rows.extend(
             super::agent_view_fixtures::read_time_rows(&db)
                 .into_iter()
+<<<<<<< head
+||||||| base
+                .filter(|row| row.collection == "agent")
+=======
+                .filter(|row| row.collection == "agent")
+                .chain(
+                    studio_runtime_services::entity_scope::live_documents(
+                        &db,
+                        r#"["task","monitor"]"#,
+                    )
+                    .expect("window documents"),
+                )
+>>>>>>> https/main
                 .map(|row| {
                     json!({"collection": row.collection, "id": row.id, "deleted": 0,
                         "payload": studio_json::from_str::<Value>(row.payload.as_deref().expect("agent view"))

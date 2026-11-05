@@ -188,6 +188,8 @@ export default function AgentPhase({
       data-wait-state={waiting ? (wait?.live ? "live" : "ended") : undefined}
       data-agent-provider={agent.provider || ""}
     >
+      {/* The phase icon stays in its slot and pulses while the agent works,
+          so a changing phase label never moves an activity marker. */}
       {liveWait ? (
         <span className="phase-dots wait-dots" aria-hidden="true">
           <i />
@@ -199,7 +201,9 @@ export default function AgentPhase({
       )}
       {liveWait ? (
         <details className="agent-phase-wait">
-          <summary>{wait.label}</summary>
+          <summary>
+            <span className="agent-phase-wait-label">{wait.label}</span>
+          </summary>
           <div className="agent-phase-wait-details">
             <p>{wait.label}</p>
             <ul>
@@ -247,13 +251,6 @@ export default function AgentPhase({
             </details>
           )}
         </div>
-      )}
-      {active && !waiting && !notice && (
-        <span className="phase-dots" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
       )}
       {phase === "tool" && (agent.activity?.tools?.length ?? 0) > 1 && (
         <small>{agent.activity?.tools?.length} tools</small>
