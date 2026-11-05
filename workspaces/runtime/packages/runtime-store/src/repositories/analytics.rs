@@ -186,6 +186,8 @@ impl AnalyticsRepository {
         let path = self.state_root.join("canvas.sqlite3");
         let uri = read_only_uri(&path)?;
         connection.execute("ATTACH DATABASE ?1 AS canvas", [uri])?;
+        crate::configure_read_pages(&connection, "main")?;
+        crate::configure_read_pages(&connection, "canvas")?;
         #[cfg(any(test, feature = "test-support"))]
         COST_READ_WITNESS.update(|mut counts| {
             counts.attaches += 1;

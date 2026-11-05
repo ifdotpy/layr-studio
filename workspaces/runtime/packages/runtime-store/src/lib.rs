@@ -194,6 +194,16 @@ pub use repositories::workspace_views::{
 };
 
 const DATABASE_BUSY_TIMEOUT_MS: u32 = 15_000;
+/// Maximum mapped database bytes per connection; SQLite may cap or disable mapping.
+const DATABASE_MMAP_SIZE_BYTES: i64 = 0;
+/// Suggested maximum SQLite page-cache memory per connection, in KiB.
+const DATABASE_CACHE_SIZE_KIB: i64 = 4096;
+
+fn configure_read_pages(connection: &Connection, schema: &str) -> rusqlite::Result<()> {
+    connection.pragma_update(Some(schema), "mmap_size", DATABASE_MMAP_SIZE_BYTES)?;
+    connection.pragma_update(Some(schema), "cache_size", -DATABASE_CACHE_SIZE_KIB)
+}
+
 /// A Rust repository-owned index whose SQL is shared by bootstrap and the
 /// fresh-state cross-language schema parity check.
 #[doc(hidden)]
@@ -1379,6 +1389,7 @@ impl RuntimeStore {
                 sqlite_durability::configure_synchronous(connection).map_err(StoreError::from)?;
                 schema::verify_serving_pragmas(connection, "canvas.sqlite3")?;
                 schema::register_python_trigger_functions(connection)?;
+                configure_read_pages(connection, "main")?;
                 install_table_change_hooks(
                     connection,
                     hook_table_change_flags,
@@ -2472,6 +2483,7 @@ fn open_database(path: &Path, flags: OpenFlags) -> StoreResult<Connection> {
         Some("canvas.sqlite3") => StoreDatabaseKind::Canvas,
         _ => StoreDatabaseKind::Other,
     };
+    configure_read_pages(&connection, "main")?;
     install_profile(&mut connection, database);
     connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
     connection.busy_timeout(std::time::Duration::from_millis(u64::from(
@@ -2486,6 +2498,46 @@ mod read_pool_tests {
     use std::sync::mpsc;
 
     const READ_POOL_TEST_WATCHDOG: Duration = Duration::from_secs(5);
+
+    #[tokio::test]
+    async fn serving_connections_set_read_page_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let read = |db: &Connection| -> rusqlite::Result<(i64, i64)> {
+            Ok((
+                db.query_row("PRAGMA mmap_size", [], |r| r.get(0))?,
+                db.query_row("PRAGMA cache_size", [], |r| r.get(0))?,
+            ))
+        };
+        let writer = store
+            .transaction_with(move |tx| -> StoreResult<_> { Ok(read(tx)?) })
+            .await
+            .unwrap();
+        let reader = store
+            .read_async("test/page-policy", move |tx| -> StoreResult<_> {
+                Ok(read(tx)?)
+            })
+            .await
+            .unwrap();
+        let analytics = read(&store.analytics.lock().expect("analytics connection")).unwrap();
+        let version = read(&store.version_reader.lock().expect("version reader")).unwrap();
+        let cost = store
+            .with_cost_reader(
+                move |db| -> Result<_, repositories::analytics::AnalyticsStoreError> {
+                    Ok((
+                        read(db)?,
+                        db.query_row("PRAGMA canvas.mmap_size", [], |r| r.get::<_, i64>(0))?,
+                        db.query_row("PRAGMA canvas.cache_size", [], |r| r.get::<_, i64>(0))?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(writer, (0, -DATABASE_CACHE_SIZE_KIB));
+        assert_eq!(reader, writer);
+        assert_eq!(analytics, writer);
+        assert_eq!(version, writer);
+        assert_eq!(cost, (writer, writer.0, writer.1));
+    }
 
     #[tokio::test]
     async fn sequential_reads_reuse_a_bounded_connection() {
