@@ -1557,7 +1557,6 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_04_chat_read_time::apply(c.transaction),
     },
-<<<<<<< head
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-04-window-read-time",
@@ -1568,9 +1567,6 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_04_window_read_time::apply(c.transaction),
     },
-||||||| base
-=======
->>>>>>> https/main
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.

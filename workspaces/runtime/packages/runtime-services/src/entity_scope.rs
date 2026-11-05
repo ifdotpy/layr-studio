@@ -710,7 +710,6 @@ pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
     )
 }
 
-<<<<<<< head
 /// Units of the window collections in `(after, through]`, at most `fetch` per window:
 /// one per member change or change of a member's row, at the later number. A member
 /// that left the window is a delete in a delta. `agent` keeps the documents of one
@@ -793,9 +792,6 @@ fn team_member(connection: &Connection, agent: &str, root: &str) -> StoreResult<
         .query_row([agent, root], |row| row.get(0))?)
 }
 
-||||||| base
-=======
->>>>>>> https/main
 /// The `edge` document of a chat membership edge; None for another kind.
 fn edge_view(connection: &Connection, id: &str) -> StoreResult<Option<Value>> {
     Ok(connection
