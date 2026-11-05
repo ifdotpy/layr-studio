@@ -94,6 +94,7 @@ mod m2026_11_04_chat_read_time;
 mod m2026_11_04_direct_read_time;
 mod m2026_11_04_window_read_time;
 mod m2026_11_04_work_read_time;
+mod m2026_11_05_repair_event_order;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -203,6 +204,11 @@ const NOVEMBER_4: MigrationDate = MigrationDate {
     year: 2026,
     month: 11,
     day: 4,
+};
+const NOVEMBER_5: MigrationDate = MigrationDate {
+    year: 2026,
+    month: 11,
+    day: 5,
 };
 const OCTOBER_30: MigrationDate = MigrationDate {
     year: 2026,
@@ -1566,6 +1572,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_04_window_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-05-repair-event-order",
+            introduced: NOVEMBER_5,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the repair event candidate index",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_05_repair_event_order::apply(c.transaction),
     },
 ];
 

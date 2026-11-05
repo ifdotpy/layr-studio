@@ -80,6 +80,9 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
     (package(=studio-runtime-store) & kind(lib) & test(native_layr_line_preserves_presence_and_rejects_invalid_type)) |
     (package(=studio-runtime-services) & kind(lib) & test(native_terminal_stages_a_save_without_resetting_a_completed_receipt)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/task_process_query_uses_status_index|process_claim_reuses_its_admitted_token_after_expiry_without_another_effect|repair_events_use_ordered_index_without_a_temp_sort|repair_event_order_preserves_id_ties/)) |
+    (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=process_controls::task_rows_include_only_running_tasks_for_the_owner)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=migrations::m2026_11_05_repair_event_order::tests::replaces_old_index_and_is_repeatable_on_fresh_schema)) |
     (package(=studio-runtime-schema) & kind(lib) & test(json_compat::serialization_tests::)) |
     (package(=studio-json) & binary(=parity) & test(serde_raw_marker_matches_backend)) |
     (package(=studio-runtime-http) & kind(lib) & (test(=json_body::tests::serde_private_number_key_remains_an_object_in_raw_json) | test(=validation::tests::parsed_numbers_follow_json_schema_and_object_keys_remain_data))) |
@@ -495,6 +498,9 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
     (package(=studio-runtime-store) & kind(lib) & test(native_layr_line_preserves_presence_and_rejects_invalid_type)) |
     (package(=studio-runtime-services) & kind(lib) & test(native_terminal_stages_a_save_without_resetting_a_completed_receipt)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/task_process_query_uses_status_index|process_claim_reuses_its_admitted_token_after_expiry_without_another_effect|repair_events_use_ordered_index_without_a_temp_sort|repair_event_order_preserves_id_ties/)) |
+    (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=process_controls::task_rows_include_only_running_tasks_for_the_owner)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=migrations::m2026_11_05_repair_event_order::tests::replaces_old_index_and_is_repeatable_on_fresh_schema)) |
     (package(=studio-runtime-schema) & kind(lib) & test(json_compat::serialization_tests::)) |
     (package(=studio-json) & binary(=parity) & test(serde_raw_marker_matches_backend)) |
     (package(=studio-runtime-http) & kind(lib) & (test(=json_body::tests::serde_private_number_key_remains_an_object_in_raw_json) | test(=validation::tests::parsed_numbers_follow_json_schema_and_object_keys_remain_data))) |
