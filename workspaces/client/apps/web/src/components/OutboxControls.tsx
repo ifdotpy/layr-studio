@@ -16,15 +16,20 @@ export default function OutboxControls({
   const { changeOutbox } = useServerOutbox();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Only a send that needs the user's decision shows actions. A send in flight
+  // has its own remove control, so its bubble keeps one size until delivery.
   if (
     !entry ||
     !(
-      entry.status.source === "device" ||
-      entry.status.status === MessageSendStatus.uncertain ||
-      entry.status.status === MessageSendStatus.failed
+      (entry.status.source === "device" &&
+        (entry.status.state.kind === "transport_failed" ||
+          entry.status.state.kind === "receipt_expired")) ||
+      (entry.status.source === "server" &&
+        (entry.status.status === MessageSendStatus.uncertain ||
+          entry.status.status === MessageSendStatus.failed))
     )
   )
-    return <div className="outbox-controls" aria-hidden="true" />;
+    return null;
   const run = async (action: "resume" | "cancel") => {
     if (busy) return;
     setBusy(true);

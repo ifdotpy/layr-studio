@@ -1,5 +1,7 @@
 /* Owner of the custom column: ratio of the available conversation width.
-   Original layout remains owned by workspace-layout.css. */
+   It sets the reading width of messages only; the composer, its footer and
+   the queue keep the standard column, so the input never changes width with
+   a reading preference. Original layout remains owned by workspace-layout.css. */
 :root {
   --studio-content-width-ratio: 1;
 }
@@ -39,15 +41,6 @@
   max-width: 100%;
   align-self: center;
   margin-inline: auto;
-}
-
-:root:not([data-studio-content-layout="original"])
-  #conversation
-  :is(#composer, .conversation-composer-footer, .message-queue) {
-  width: var(--studio-content-column);
-  max-width: none;
-  margin-inline: auto;
-  align-self: center;
 }
 
 :root:not([data-studio-content-layout="original"]) #conversation #messages {
@@ -162,12 +155,6 @@
     :is(.message-content, .conversation-navigation, .room-footer) {
     width: var(--studio-content-column);
     max-width: 100%;
-  }
-
-  :root:not([data-studio-content-layout="original"])
-    #conversation
-    :is(#composer, .conversation-composer-footer, .message-queue) {
-    width: var(--studio-content-column);
   }
 }
 

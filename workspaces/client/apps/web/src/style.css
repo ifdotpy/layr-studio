@@ -219,9 +219,39 @@ p {
 #team-close {
   display: none;
 }
+/* Notices above the transcript take no height in the flow: the stack floats
+   under the header, so a notice that appears or leaves moves nothing. */
+.workspace-notices {
+  position: relative;
+  z-index: 40;
+  flex: none;
+  height: 0;
+}
+.workspace-notices-stack {
+  position: absolute;
+  inset-block-start: var(--mantine-spacing-xs);
+  inset-inline: var(--chat-gutter, var(--mantine-spacing-md));
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+  max-height: 40dvh;
+  overflow: auto;
+  pointer-events: none;
+}
+.workspace-notices-stack > *,
+.workspace-notices-stack .sync-status {
+  pointer-events: auto;
+}
+.workspace-notices-stack:empty,
+.workspace-notices-stack .sync-notices:empty {
+  display: none;
+}
 #error {
-  padding: 12px 24px;
-  background: var(--studio-state-error-soft);
+  padding: 10px 14px;
+  border: var(--studio-border-width) solid
+    color-mix(in srgb, var(--studio-state-error) 40%, var(--line));
+  border-radius: var(--studio-radius-card);
+  background: color-mix(in srgb, var(--studio-state-error) 10%, var(--overlay));
+  box-shadow: var(--studio-shadow-md);
   color: var(--studio-state-error);
   margin: 0;
   font-size: var(--studio-text-body);
@@ -940,6 +970,9 @@ p {
   gap: 3px;
   margin-left: 2px;
 }
+.agent-phase.active:not([data-wait-state]) > svg {
+  animation: phase-pulse 1.2s ease-in-out infinite;
+}
 .phase-dots i {
   width: 3px;
   height: 3px;
@@ -1128,6 +1161,7 @@ p {
 @media (prefers-reduced-motion: reduce) {
   .markdown-block,
   .phase-dots i,
+  .agent-phase.active > svg,
   .spin {
     animation: none;
   }
@@ -1600,7 +1634,8 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
     --modal-y-offset: 16px;
   }
   .workspace-header .mantine-ActionIcon-root,
-  #composer .mantine-ActionIcon-root {
+  #composer .mantine-ActionIcon-root,
+  #composer .composer-stop-slot {
     min-width: 44px;
     min-height: 44px;
   }
@@ -1625,19 +1660,20 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 }
 .sync-status {
   flex-shrink: 0;
-  margin: 4px 12px;
+  margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: var(--studio-radius-card);
+  background: var(--overlay);
+  box-shadow: var(--studio-shadow-md);
   font-size: var(--studio-text-body);
   max-height: 160px;
   overflow: auto;
   overflow-wrap: anywhere;
 }
 .sync-notices {
-  flex-shrink: 0;
-  max-height: 25dvh;
-  overflow: auto;
+  display: grid;
+  gap: var(--mantine-spacing-xs);
 }
 
 .draft-versions {
@@ -1812,13 +1848,24 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 /* Delivery status and message actions both sit under a user bubble. Stack
    them so the status never covers the action buttons. */
 @media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  /* The hover actions hang under the bubble: the gap below it holds them,
+     so they never cover the next answer. */
+  #conversation.ai-conversation .message.user {
+    margin-bottom: 2.5rem;
+  }
   .ai-conversation
-    .message.user:has(.message-delivery-heading, .message-delivery-inline)
+    .message.user:has(
+      .message-delivery-heading:not(:has(> .sr-only:only-child)),
+      .message-delivery-inline
+    )
     .message-bottom {
     top: calc(100% + 24px);
   }
   .ai-conversation
-    .message.user:has(.message-delivery-heading, .message-delivery-inline) {
+    .message.user:has(
+      .message-delivery-heading:not(:has(> .sr-only:only-child)),
+      .message-delivery-inline
+    ) {
     margin-bottom: 52px;
   }
 }

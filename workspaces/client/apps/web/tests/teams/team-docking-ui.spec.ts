@@ -133,16 +133,19 @@ test("Team docks beside readable chats and uses a modal sheet below that width",
               gutter: parseFloat(
                 getComputedStyle(workspace).getPropertyValue("--chat-gutter"),
               ),
-              composer: workspace
-                .querySelector("#composer")!
-                .getBoundingClientRect().width,
+              message:
+                workspace
+                  .querySelector(".message-content")
+                  ?.getBoundingClientRect().width ?? null,
             }));
-          expect(
-            Math.abs(
-              column.composer -
-                (column.width - 2 * column.gutter) * contentRatio,
-            ),
-          ).toBeLessThan(1);
+          // The reading width follows the preference; the composer does not.
+          if (column.message !== null)
+            expect(
+              Math.abs(
+                column.message -
+                  (column.width - 2 * column.gutter) * contentRatio,
+              ),
+            ).toBeLessThan(1);
         } else {
           const dialog = page.getByRole("dialog", {
             name: "Team",

@@ -44,8 +44,13 @@
   align-items: center;
   gap: var(--mantine-spacing-xs);
 }
+/* The recommendation sits right after the name as a small pill; the right
+   edge belongs to the check. */
 .setup-models .mantine-Button-label > small {
-  margin-inline-start: auto;
+  padding: 0 0.375rem;
+  border: var(--studio-border-width) solid var(--line);
+  border-radius: var(--studio-radius-pill);
+  line-height: 1.4;
 }
 /* A fixed slot keeps names aligned whether or not a row is selected. */
 .setup-model-check {
@@ -54,9 +59,7 @@
   width: 0.875rem;
   margin-inline-start: auto;
 }
-.setup-models .mantine-Button-label > small + .setup-model-check {
-  margin-inline-start: 0;
-}
+
 .setup-models small {
   color: var(--mantine-color-dimmed);
   font-size: var(--mantine-font-size-xs);
