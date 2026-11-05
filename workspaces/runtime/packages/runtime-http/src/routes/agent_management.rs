@@ -937,9 +937,13 @@ mod native_review_preflight_tests {
                 .expect("count receipts")
         };
 
-        let root =
-            CanonicalPath::existing(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .expect("repository root");
+        let root = CanonicalPath::existing(
+            Path::new(
+                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../../.."),
+        )
+        .expect("repository root");
         let resources = PreparationResources::bundled_at(
             String::new(),
             ModelCatalogService::new(),

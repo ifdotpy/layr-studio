@@ -927,17 +927,17 @@ mod tests {
             "{}\n",
             studio_json::to_string_pretty(&frames).expect("json")
         );
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../client/apps/web/src/sync/entityServerFrames.fixture.json"
-        );
+        let path = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../../client/apps/web/src/sync/entityServerFrames.fixture.json");
         if std::env::var_os("STUDIO_REGENERATE_ENTITY_FRAMES").is_some() {
-            tokio::fs::write(path, &actual)
+            tokio::fs::write(&path, &actual)
                 .await
                 .expect("write fixture");
         }
         assert!(
-            actual == tokio::fs::read_to_string(path).await.expect("fixture"),
+            actual == tokio::fs::read_to_string(&path).await.expect("fixture"),
             "regenerate with: just regenerate-entity-server-frames"
         );
     }

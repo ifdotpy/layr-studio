@@ -20,15 +20,18 @@ fn fixture(root: &Path) {
 // Every service witness that drives the CLI through systemctl is Linux-only.
 #[cfg(target_os = "linux")]
 fn cli(root: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .args(args)
-        .env_clear()
-        .env("HOME", root)
-        .env("XDG_CONFIG_HOME", root.join("config"))
-        .env("PATH", root.join("tools"))
-        .env("CODEX_AGENTS_PYTHON", "/nonexistent")
-        .output()
-        .unwrap()
+    Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .args(args)
+    .env_clear()
+    .env("HOME", root)
+    .env("XDG_CONFIG_HOME", root.join("config"))
+    .env("PATH", root.join("tools"))
+    .env("CODEX_AGENTS_PYTHON", "/nonexistent")
+    .output()
+    .unwrap()
 }
 
 /// The node of the test tooling: `CODEX_NODE` as the test recipes set it,
@@ -147,13 +150,14 @@ fn command_installation_migrates_only_owned_links_and_preflights_conflicts() {
     let destination = root.path().join("commands");
     fs::create_dir_all(&binaries).unwrap();
     fs::create_dir(&destination).unwrap();
-    let source = env!("CARGO_BIN_EXE_studio-runtime-server");
+    let source = std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+        .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server");
     let relocated = binaries.join("studio-runtime-server");
-    if let Err(error) = fs::hard_link(source, &relocated) {
+    if let Err(error) = fs::hard_link(&source, &relocated) {
         if error.kind() != std::io::ErrorKind::CrossesDevices {
             panic!("{error}");
         }
-        fs::copy(source, &relocated).expect("cross-device copy");
+        fs::copy(&source, &relocated).expect("cross-device copy");
     }
     for name in [
         "codex-process-supervisor",
@@ -268,12 +272,18 @@ impl DeliveryFixture {
         // The bypass marker exists only beside a disposable copy, never beside
         // the production checkout's delivery script.
         fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("deliver.sh"),
+            Path::new(
+                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("deliver.sh"),
             root.path().join("deliver.sh"),
         )
         .unwrap();
         fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("service-layout.json"),
+            Path::new(
+                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("service-layout.json"),
             root.path().join("service-layout.json"),
         )
         .unwrap();
@@ -385,12 +395,17 @@ exit $?
         let mut command = Command::new("/bin/bash");
         command
             .arg(self.root.path().join("deliver.sh"))
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .current_dir(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
             .env_clear()
             .env("HOME", self.root.path())
             .env("XDG_CONFIG_HOME", self.root.path().join("config"))
             .env("CODEX_STUDIO_SERVER_ROOT", &self.release_root)
-            .env("PROJECT", env!("CARGO_MANIFEST_DIR"))
+            .env(
+                "PROJECT",
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
             .env("RELEASE", &self.release)
             .env("PATH", self.root.path().join("tools"));
         command
@@ -534,13 +549,16 @@ fn delivery_uses_unique_units_and_replays_only_the_current_invocation() {
 
 #[cfg(target_os = "linux")]
 fn invocation_record_budget() -> usize {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deliver.sh"))
-        .unwrap()
-        .lines()
-        .find_map(|line| line.strip_prefix("readonly KEPT_INVOCATION_RECORDS="))
-        .expect("deliver.sh owns the invocation history budget")
-        .parse()
-        .unwrap()
+    fs::read_to_string(
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("deliver.sh"),
+    )
+    .unwrap()
+    .lines()
+    .find_map(|line| line.strip_prefix("readonly KEPT_INVOCATION_RECORDS="))
+    .expect("deliver.sh owns the invocation history budget")
+    .parse()
+    .unwrap()
 }
 
 #[test]
@@ -731,15 +749,18 @@ fn delivery_unit_refuses_another_delivery_holding_the_release_lock() {
 #[cfg(target_os = "linux")]
 fn delivery_and_service_install_share_the_same_escaped_release_command() {
     let fixture = DeliveryFixture::new();
-    let install = Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .args(["service", "install"])
-        .env_clear()
-        .env("HOME", fixture.root.path())
-        .env("PATH", fixture.root.path().join("tools"))
-        .env("XDG_CONFIG_HOME", fixture.root.path().join("config"))
-        .env("CODEX_STUDIO_SERVER_ROOT", &fixture.release_root)
-        .output()
-        .unwrap();
+    let install = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .args(["service", "install"])
+    .env_clear()
+    .env("HOME", fixture.root.path())
+    .env("PATH", fixture.root.path().join("tools"))
+    .env("XDG_CONFIG_HOME", fixture.root.path().join("config"))
+    .env("CODEX_STUDIO_SERVER_ROOT", &fixture.release_root)
+    .output()
+    .unwrap();
     assert!(
         install.status.success(),
         "{}",

@@ -16,9 +16,10 @@ async fn transcript_cases(group: usize) {
     } else {
         "default"
     };
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/wave7_p13_transcript")
-        .join(mode);
+    let fixtures =
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("tests/wave7_p13_transcript")
+            .join(mode);
     let cases: Vec<Value> = studio_json::from_str(
         &std::fs::read_to_string(fixtures.join("cases.json"))
             .expect("frozen transcript corpus")
