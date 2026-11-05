@@ -203,11 +203,6 @@ tombstones above it, or a snapshot when the cursor is absent, in the future, or 
 `durable_floor.floor`. The floor is the highest `seq` of a pruned tombstone.
 Tombstones live `TOMBSTONE_RETENTION_SECONDS` (90 days); a delete prunes older ones.
 
-`durable_view_log` mirrors, without payload, the `sync_entities` rows of the derived
-view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree).
-`view_changes_since(cursor)` lists the view ids that changed after a cursor. A parity
-test compares it with the published views.
-
 Status: every entity reader (stream, scoped subscription, REST pull, mutation reply)
 reads through [`entity_scope`](../workspaces/runtime/packages/runtime-services/src/entity_scope.rs).
 It builds the work documents (`WORK_COLLECTIONS`: work, workDetail, workResult,
@@ -215,9 +210,21 @@ workDecision, workRelease) from `runtime_work`, its history tables and `durable_
 read time. They have no copy in `sync_entities`; migration `2026-11-04-work-read-time`
 deleted the old copies. The direct collections (`DIRECT_COLLECTIONS`) have one document
 per row of a main table: `plan` (`runtime_plans`), `annotation` (`runtime_annotations`),
-`rule` (`runtime_rules`), and `request` and `questionHistory` (`approvals`). They are built
+`rule` (`runtime_rules`), `request` and `questionHistory` (`approvals`), `complaint`
+(`runtime_complaints`, with the current names of its author and lead) and `edge`
+(chat rows of `graph_edges`). A `chat` document reads its group, its member edges and
+its messages; their writers mark the chat (`durable_rows` table `chat_views`), so a
+member change or a new message refreshes it. Migration `2026-11-04-chat-read-time`
+numbered these rows, marked every chat and deleted the copies. They are built
 at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
-their copies. An approval that is not open (or not a question) is a delete in a delta and
+their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
+agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that
+changes a view without a change of the agent row (team counts, attention, command
+progress, account state) writes a mark: a `durable_rows` entry with table `agent_views`
+and no payload. A view takes the higher number of the agent row and its mark. Team
+visibility of agent-scoped documents reads `root_id` of `runtime_agents`; the agent row
+triggers move the team fence. Migration `2026-11-04-agent-views-read-time` deleted the
+copies and the view log. An approval that is not open (or not a question) is a delete in a delta and
 absent from a snapshot. An update that leaves a record-only row unchanged takes no new
 number. A document built from one main-table change carries that row's number, so
 several documents can share a number; a page is cut only between numbers. The other

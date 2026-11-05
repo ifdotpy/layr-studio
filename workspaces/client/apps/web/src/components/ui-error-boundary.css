@@ -1,14 +1,14 @@
 .ui-error-boundary {
   padding: 20px;
   margin: 12px;
-  border: 1px solid var(--border, #777);
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-card);
   min-width: 0;
   overflow: auto;
   color: var(--text, inherit);
 }
 .ui-error-boundary h2 {
-  font-size: 18px;
+  font-size: var(--studio-text-section);
   margin: 0 0 12px;
 }
 .ui-error-boundary button {

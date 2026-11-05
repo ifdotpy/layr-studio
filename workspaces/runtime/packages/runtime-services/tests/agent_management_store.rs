@@ -296,7 +296,7 @@ async fn stop_failures_roll_back_rows_and_projections_after_restart() {
             "runtime_agents",
             "approvals",
             "runtime_events",
-            "sync_entities",
+            "durable_rows",
         ],
     )
     .await;

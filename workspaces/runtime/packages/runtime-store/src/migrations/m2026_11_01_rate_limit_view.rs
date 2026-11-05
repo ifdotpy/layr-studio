@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn later_migration_normalizes_existing_observations_without_dropping_accounts() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(seq INTEGER);").unwrap();
+        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));").unwrap();
         db.execute("INSERT INTO sync_entities VALUES('rateLimit','a',1,'old',?1,0)", [r#"{"collection":"rateLimit","id":"a","value":{"observation":{"accountKey":"a","data":{"ordinaryUsageAllowed":null,"rateLimits":{"primary":{"usedPercent":80,"vendor":true}}}},"projection":{}}}"#]).unwrap();
         let tx = db.transaction().unwrap();
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn normalizes_unwrapped_legacy_observation_before_view_migration() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(seq INTEGER);").unwrap();
+        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));").unwrap();
         db.execute("INSERT INTO sync_entities VALUES('rateLimit','a',1,'old',?1,0)", [r#"{"collection":"rateLimit","id":"a","value":{"accountKey":"a","data":{"rateLimits":{"primary":{"usedPercent":80}}}}}"#]).unwrap();
         let tx = db.transaction().unwrap();
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn wraps_existing_observation_and_advances_entity_sequence() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(seq INTEGER); INSERT INTO sync_entities VALUES('rateLimit','a',1,'old','{\"collection\":\"rateLimit\",\"id\":\"a\",\"value\":{\"accountKey\":\"a\",\"at\":100,\"data\":{\"rateLimits\":{\"primary\":{\"usedPercent\":80,\"resetsAt\":110,\"windowDurationMins\":10080}}}}}',0);").unwrap();
+        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); INSERT INTO sync_entities VALUES('rateLimit','a',1,'old','{\"collection\":\"rateLimit\",\"id\":\"a\",\"value\":{\"accountKey\":\"a\",\"at\":100,\"data\":{\"rateLimits\":{\"primary\":{\"usedPercent\":80,\"resetsAt\":110,\"windowDurationMins\":10080}}}}}',0);").unwrap();
         db.execute(
             "INSERT INTO sync_entities VALUES('rateLimit','bad',2,'old',?1,0)",
             [r#"{"collection":"rateLimit","id":"bad","value":{"accountKey":"other"}}"#],

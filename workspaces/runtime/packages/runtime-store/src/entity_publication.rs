@@ -31,6 +31,9 @@ pub trait EntityPublisher: Send + Sync {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PendingEntities {
     pub agents: BTreeSet<String>,
+    /// Team leads whose members changed. Their views depend on the members only
+    /// through the team counts, so the publisher marks them only when those change.
+    pub team_roots: BTreeSet<String>,
     pub receipt_events: BTreeSet<String>,
     pub receipt_items: BTreeSet<String>,
     pub tasks: BTreeSet<String>,
@@ -44,6 +47,7 @@ pub struct PendingEntities {
 impl PendingEntities {
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
+            && self.team_roots.is_empty()
             && self.receipt_events.is_empty()
             && self.receipt_items.is_empty()
             && self.tasks.is_empty()
@@ -297,14 +301,14 @@ pub(crate) fn pending(
                     .query_row([id], |row| row.get(0))
                     .optional()?;
                 if let Some(root) = root {
-                    pending.agents.insert(root);
+                    pending.team_roots.insert(root);
                 }
             } else {
                 let mut statement = transaction.prepare_cached(
                     "SELECT id FROM runtime_agents WHERE root_id=id AND deleted_at IS NULL",
                 )?;
                 for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-                    pending.agents.insert(row?);
+                    pending.team_roots.insert(row?);
                 }
             }
         }
@@ -381,9 +385,8 @@ pub(crate) fn pending(
                 pending.agents.insert(agent);
             }
         } else {
-            let mut statement = transaction.prepare_cached(
-                "SELECT id FROM sync_entities WHERE collection='agentSummary' AND deleted=0",
-            )?;
+            let mut statement = transaction
+                .prepare_cached("SELECT id FROM runtime_agents WHERE deleted_at IS NULL")?;
             for row in statement.query_map([], |row| row.get::<_, String>(0))? {
                 pending.agents.insert(row?);
             }
@@ -405,7 +408,7 @@ pub(crate) fn pending(
                 published.insert((source, id), index);
             }
             Event::TeamRoot(id) => {
-                pending.agents.insert(id);
+                pending.team_roots.insert(id);
             }
         }
     }
@@ -463,7 +466,8 @@ mod tests {
             .collect();
         events.push(Event::Row(Source::Event, 101));
         let result = pending(&tx, Journal(events)).unwrap();
-        assert_eq!(result.agents.len(), 101);
+        assert_eq!(result.agents.len(), 100);
+        assert_eq!(result.team_roots, BTreeSet::from(["root".to_owned()]));
         let expected_queues: BTreeSet<_> = (0..100)
             .map(|i| format!("agent-{i}"))
             .chain(["event-only-owner".to_owned()])

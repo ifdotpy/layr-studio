@@ -858,17 +858,28 @@ async fn complaint_read_projects_a_page_with_one_agent_scan() {
             .iter()
             .all(|row| row["readAt"] == 200.0)
     );
-    let projected: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='complaint' AND deleted=0 AND json_extract(payload,'$.value.readAt')=200", [], |row| row.get(0)).unwrap();
+    let complaint = |id: &str| -> Value {
+        let row = crate::entity_scope::direct_document(&tx, "complaint", id)
+            .unwrap()
+            .expect("complaint document");
+        studio_json::from_str(row.payload.as_deref().unwrap()).unwrap()
+    };
+    let projected = read["complaints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| complaint(row["id"].as_str().unwrap())["value"]["readAt"] == 200.0)
+        .count();
     assert_eq!(projected, 50);
     let first = &read["complaints"][0];
-    let projected: String = tx.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='complaint' AND id=?1 AND deleted=0",
-        [first["id"].as_str().unwrap()], |row| row.get(0),
-    ).unwrap();
-    let projected: Value = studio_json::from_str(&projected).unwrap();
+    let projected = complaint(first["id"].as_str().unwrap());
     assert_eq!(projected["value"]["authorName"], worker["name"]);
     assert_eq!(projected["value"]["leadName"], lead["name"]);
-    assert_eq!(AGENT_SCANS.get(), 1, "one agent scan for the whole page");
+    assert_eq!(
+        AGENT_SCANS.get(),
+        0,
+        "the page writes scan no agents; views are built at read time"
+    );
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@
     const status = document.getElementById("studio-startup-status");
     const help = document.getElementById("studio-startup-help");
     if (status) status.textContent = text;
+    document.querySelector(".studio-startup")?.setAttribute("data-slow", "");
     if (help)
       help.textContent =
         "Check the connection to your computer, then reload Studio.";

@@ -13,7 +13,7 @@
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--mantine-color-default-border);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
 }
 .task-review-actions {
   display: flex;
@@ -39,7 +39,7 @@
   gap: 4px;
   text-align: left;
   border: 1px solid var(--mantine-color-default-border);
-  border-radius: 6px;
+  border-radius: var(--studio-radius-control);
   padding: 10px;
   color: inherit;
   background: var(--mantine-color-body);
@@ -50,7 +50,7 @@
   border-color: var(--mantine-primary-color-filled);
 }
 .task-review-list span {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .task-review fieldset {
   display: grid;
@@ -64,7 +64,7 @@
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 12px;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
 }
 .task-review dd {
   margin: 0;
@@ -73,7 +73,7 @@
   font-weight: 600;
 }
 .task-review-json {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 10px;
@@ -92,7 +92,7 @@
 .task-review-dependencies {
   display: grid;
   gap: 4px;
-  font-size: 14px;
+  font-size: var(--studio-text-body);
 }
 .task-review-dependencies select {
   width: 100%;

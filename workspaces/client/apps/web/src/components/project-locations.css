@@ -10,7 +10,7 @@
 }
 .project-server-card {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   min-width: 0;
 }
 .project-server-card > button {
@@ -22,13 +22,20 @@
   color: inherit;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   text-align: left;
   overflow-wrap: anywhere;
 }
+.project-server-card:has(> button[aria-pressed="true"]) {
+  border-color: var(--text);
+}
 .project-server-card > button[aria-pressed="true"] {
-  background: var(--line);
-  outline: 2px solid var(--mantine-primary-color-filled);
+  background: var(--selected);
+}
+.project-server-path {
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-meta);
+  color: var(--muted);
 }
 .project-server-card > button:disabled {
   opacity: 0.5;

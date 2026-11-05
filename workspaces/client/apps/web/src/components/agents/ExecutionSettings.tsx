@@ -1880,6 +1880,7 @@ function ScopedExecutionSettings({
   };
   const trigger = (
     <Button
+      variant="subtle"
       ref={triggerRef}
       className="execution-menu"
       rightSection={<ChevronDown size={14} />}

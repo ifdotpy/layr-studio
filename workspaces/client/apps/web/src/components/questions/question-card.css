@@ -2,13 +2,13 @@
   margin: 4px 0 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--studio-radius-card);
   background: var(--surface);
   color: var(--text);
   font-size: var(--studio-text-body);
 }
 .question-card[data-question-state="waiting"] {
-  border-color: var(--accent);
+  border-color: var(--studio-state-answer);
 }
 .question-card-head {
   display: flex;
@@ -16,16 +16,21 @@
   flex-wrap: wrap;
   gap: 4px 8px;
 }
+/* A request that waits for the user takes the answer state, never the
+   working blue. */
 .question-card-icon {
-  color: var(--accent);
+  color: var(--muted);
   flex: none;
+}
+.question-card[data-question-state="waiting"] .question-card-icon {
+  color: var(--studio-state-answer);
 }
 .question-card-state {
   color: var(--muted);
   font-size: var(--studio-text-meta);
 }
 .question-card[data-question-state="waiting"] .question-card-state {
-  color: var(--accent);
+  color: var(--studio-state-answer);
 }
 .question-card[data-question-state="failed"] .question-card-state,
 .question-card-result.danger > span {
@@ -48,7 +53,7 @@
 .question-card-header,
 .question-card-mode {
   font-size: var(--studio-text-meta);
-  border-radius: 6px;
+  border-radius: var(--studio-radius-control);
   padding: 1px 6px;
 }
 .question-card-header {
@@ -78,18 +83,18 @@
   min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   font-size: var(--studio-text-meta);
 }
 .question-card-option[data-chosen] {
-  background: #8075ff25;
-  border-color: var(--accent);
+  background: var(--selected);
+  border-color: var(--text);
 }
 .question-card-mark {
   flex: none;
   width: 14px;
   padding-top: 2px;
-  color: var(--accent);
+  color: var(--text);
 }
 .question-card-choice {
   display: flex;
@@ -118,7 +123,7 @@
 .question-card-own p {
   margin: 0;
   padding: 6px 10px;
-  border-left: 2px solid var(--accent);
+  border-left: calc(2 * var(--studio-border-width)) solid var(--line-strong);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

@@ -2,14 +2,14 @@
   padding: 0;
 }
 .workspace-drawer .mantine-Drawer-header {
-  border-bottom: 1px solid var(--line, #292b32);
+  border-bottom: 1px solid var(--line);
   padding: 12px 18px;
 }
 .workspace-drawer-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .workspace-shell {
   display: grid;
@@ -18,8 +18,8 @@
 }
 .workspace-nav {
   padding: 12px 8px;
-  border-right: 1px solid var(--line, #292b32);
-  background: rgba(0, 0, 0, 0.06);
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
 }
 .workspace-nav-item {
   width: 100%;
@@ -28,18 +28,18 @@
   align-items: center;
   padding: 10px 12px;
   margin: 2px 0;
-  border-radius: 8px;
-  color: var(--muted, #999ca7);
-  font-size: 13px;
+  border-radius: var(--studio-radius-card);
+  color: var(--muted);
+  font-size: var(--studio-text-body);
   white-space: nowrap;
 }
 .workspace-nav-item:hover {
-  background: rgba(128, 128, 128, 0.07);
-  color: var(--text, #eee);
+  background: var(--hover);
+  color: var(--text);
 }
 .workspace-nav-item.selected {
-  color: var(--text, #eee);
-  background: rgba(128, 128, 128, 0.12);
+  color: var(--text);
+  background: var(--selected);
   font-weight: 600;
 }
 .workspace-count {
@@ -47,7 +47,7 @@
   font-size: var(--studio-text-meta);
   background: var(--mantine-color-orange-light);
   color: var(--mantine-color-orange-light-color);
-  border-radius: 4px;
+  border-radius: var(--studio-radius-control);
   padding: 1px 4px;
 }
 .workspace-content {
@@ -63,14 +63,14 @@
 }
 .workspace-heading h2 {
   margin: 0 0 8px;
-  font-size: 23px;
-  font-weight: 650;
-  letter-spacing: -0.5px;
+  font-size: var(--studio-text-display);
+  font-weight: 600;
+  letter-spacing: var(--studio-tracking-section);
 }
 .workspace-heading p {
   margin: 0;
-  color: var(--muted, #999ca7);
-  font-size: 13px;
+  color: var(--muted);
+  font-size: var(--studio-text-body);
   line-height: 1.6;
   max-width: 580px;
 }
@@ -98,19 +98,19 @@
 .workspace-empty {
   padding: 12px 0;
   text-align: left;
-  color: var(--muted, #999ca7);
-  font-size: 13px;
+  color: var(--muted);
+  font-size: var(--studio-text-body);
   line-height: 1.7;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--studio-radius-card);
   margin: 12px 0;
 }
 .workspace-error {
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--mantine-color-red-light);
   color: var(--mantine-color-red-light-color);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   overflow-wrap: anywhere;
 }
 .workspace-load {
@@ -121,27 +121,27 @@
 .workspace-muted,
 .workspace-row small,
 .workspace-result small {
-  color: var(--muted, #999ca7);
-  font-size: 12px;
+  color: var(--muted);
+  font-size: var(--studio-text-meta);
   line-height: 1.6;
 }
 .workspace-row {
   display: block;
   width: 100%;
   text-align: left;
-  border: 1px solid var(--line, #292b32);
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-control);
   padding: 10px;
   margin: 0 0 6px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 button.workspace-row:hover {
-  background: rgba(128, 128, 128, 0.05);
+  background: var(--hover);
 }
 .workspace-row.selected {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(129, 140, 248, 0.4);
+  background: var(--selected);
+  border-color: var(--line-strong);
 }
 .workspace-row-head {
   display: flex;
@@ -152,11 +152,11 @@ button.workspace-row:hover {
   margin-bottom: 7px;
 }
 .workspace-row-head strong {
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   line-height: 1.5;
 }
 .workspace-row p {
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   margin: 7px 0;
   line-height: 1.6;
 }
@@ -166,7 +166,7 @@ button.workspace-row:hover {
 .workspace-prose {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   line-height: 1.7;
 }
 .workspace-actions {
@@ -183,13 +183,13 @@ button.workspace-row:hover {
   text-overflow: ellipsis;
 }
 .workspace-result {
-  border-top: 1px solid var(--line, #292b32);
+  border-top: 1px solid var(--line);
   margin-top: 22px;
   padding-top: 18px;
 }
 .workspace-result h3,
 .workspace-result h4 {
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   margin: 0 0 14px;
 }
 .workspace-form {
@@ -213,17 +213,17 @@ button.workspace-row:hover {
     Menlo,
     monospace;
   padding: 14px;
-  background: rgba(0, 0, 0, 0.14);
-  border: 1px solid var(--line, #292b32);
-  border-radius: 7px;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-control);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 420px;
   overflow: auto;
 }
 .workspace-diff {
-  border: 1px solid var(--line, #292b32);
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-card);
   overflow: auto;
   max-height: 66dvh;
   padding: 0;
@@ -244,10 +244,10 @@ button.workspace-row:hover {
   width: 48px;
   flex-shrink: 0;
   border: 0;
-  border-right: 1px solid var(--line, #292b32);
+  border-right: 1px solid var(--line);
   background: var(--mantine-color-body);
   font: inherit;
-  color: var(--muted, #999ca7);
+  color: var(--muted);
   margin-right: 12px;
   cursor: pointer;
 }
@@ -263,16 +263,20 @@ button.workspace-row:hover {
   padding-right: 12px;
 }
 .workspace-diff-line.addition {
-  background: rgba(40, 167, 100, 0.1);
-  color: #a3d7b4;
+  background: var(--studio-diff-add-bg);
+  color: var(--studio-diff-add);
 }
 .workspace-diff-line.deletion {
-  background: rgba(225, 87, 89, 0.09);
-  color: #e8a5aa;
+  background: var(--studio-diff-delete-bg);
+  color: var(--studio-diff-delete);
 }
 .workspace-diff-line.hunk {
-  color: #a7b4e7;
-  background: rgba(110, 133, 200, 0.08);
+  color: var(--accent);
+  background: color-mix(
+    in srgb,
+    var(--accent) var(--studio-diff-tint),
+    transparent
+  );
 }
 .workspace-file-list {
   display: flex;
@@ -288,7 +292,7 @@ button.workspace-row:hover {
   text-overflow: ellipsis;
 }
 .workspace-section-title {
-  font-size: 14px;
+  font-size: var(--studio-text-body);
   margin: 26px 0 13px;
 }
 .workspace-tools {
@@ -297,7 +301,7 @@ button.workspace-row:hover {
 }
 .workspace-tool {
   border: 0;
-  border-bottom: 1px solid var(--line, #292b32);
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
   margin: 0;
   padding: 10px 0;
@@ -308,18 +312,18 @@ button.workspace-row:hover {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   overflow-wrap: anywhere;
 }
 .workspace-tool summary::before {
   content: "›";
-  color: var(--muted, #999ca7);
+  color: var(--muted);
 }
 .workspace-tool[open] summary::before {
   transform: rotate(90deg);
 }
 .workspace-tool p {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   line-height: 1.65;
 }
 .workspace-tool summary strong {
@@ -331,7 +335,7 @@ button.workspace-row:hover {
   align-items: start;
   gap: 12px;
   margin: 12px 0;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
 }
 .workspace-clamp {
   overflow: hidden;
@@ -342,8 +346,8 @@ button.workspace-row:hover {
 .workspace-preview-frame {
   width: 100%;
   height: 68dvh;
-  border: 1px solid var(--line, #292b32);
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-card);
   background: white;
 }
 @media (max-width: 760px) {
@@ -356,7 +360,7 @@ button.workspace-row:hover {
     overflow-x: auto;
     padding: 8px;
     border-right: 0;
-    border-bottom: 1px solid var(--line, #292b32);
+    border-bottom: 1px solid var(--line);
     gap: 4px;
   }
   .workspace-nav-item {
@@ -378,15 +382,6 @@ button.workspace-row:hover {
   .workspace-drawer .mantine-Drawer-header {
     padding: 16px;
   }
-}
-[data-mantine-color-scheme="light"] .workspace-diff-line.addition {
-  color: #236238;
-}
-[data-mantine-color-scheme="light"] .workspace-diff-line.deletion {
-  color: #92363d;
-}
-[data-mantine-color-scheme="light"] .workspace-diff-line.hunk {
-  color: #3b4fc4;
 }
 
 .workspace-shell.workspace-focused-messages {
@@ -550,7 +545,7 @@ details.workspace-error > summary {
 .workspace-mcp-server {
   padding: 12px;
   border: 1px solid var(--mantine-color-default-border);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   overflow-wrap: anywhere;
 }
 .workspace-mcp-server > button {

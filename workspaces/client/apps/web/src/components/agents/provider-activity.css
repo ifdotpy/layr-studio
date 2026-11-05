@@ -1,8 +1,14 @@
 [data-agent-provider="codex"] {
-  --agent-activity-color: light-dark(#1971c2, #74c0fc);
+  --agent-activity-color: light-dark(
+    var(--mantine-color-blue-7),
+    var(--mantine-color-blue-4)
+  );
 }
 [data-agent-provider="claude"] {
-  --agent-activity-color: light-dark(#c45b14, #ffa94d);
+  --agent-activity-color: light-dark(
+    var(--mantine-color-yellow-7),
+    var(--mantine-color-yellow-4)
+  );
 }
 .chat-status-working[data-agent-provider],
 .agent-phase.active[data-agent-provider],
@@ -56,7 +62,7 @@
   overflow-wrap: anywhere;
   padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--surface);
   color: var(--text);
 }

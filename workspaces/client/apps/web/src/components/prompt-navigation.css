@@ -15,7 +15,7 @@
 }
 .prompt-history-toggle {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .current-prompt {
   flex: 1;
@@ -25,7 +25,7 @@
   text-overflow: ellipsis;
   text-align: left;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -47,11 +47,11 @@
 .prompt-history-heading {
   justify-content: space-between;
   margin-bottom: 10px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .prompt-history-heading > span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .prompt-history-search > :first-child {
   flex: 1;
@@ -64,11 +64,11 @@
 }
 .prompt-history-row {
   align-items: flex-start;
-  border-radius: 7px;
+  border-radius: var(--studio-radius-control);
   padding: 4px;
 }
 .prompt-history-row:hover {
-  background: #ffffff06;
+  background: var(--hover);
 }
 .prompt-history-entry {
   display: flex;
@@ -81,25 +81,25 @@
   color: var(--text);
   text-align: left;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   cursor: pointer;
 }
 .prompt-history-entry > :first-child {
   color: var(--muted);
   min-width: 18px;
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .prompt-history-entry > :last-child {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .prompt-history-entry[aria-current] > :first-child {
-  color: #b5a8ff;
+  color: var(--text);
 }
 .prompt-history-empty {
   color: var(--muted);
   text-align: center;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   padding: 16px 8px;
 }
 @media (max-width: 760px) {
