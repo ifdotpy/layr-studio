@@ -1288,11 +1288,9 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
                     "SELECT hold_status='invalid' AND hold_incident IS NOT NULL FROM runtime_agents WHERE id=?1",
                     [&bad_id], |row| row.get(0),
                 )?;
-                let projected: String = db.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
-                    [&bad_id],
-                    |row| row.get(0),
-                )?;
+                let projected = crate::entity_scope::direct_document(&db, "agent", &bad_id)?
+                    .and_then(|row| row.payload)
+                    .expect("held agent projection");
                 Ok((raw, diagnostic, json_extract_safe, projected))
             }
         })

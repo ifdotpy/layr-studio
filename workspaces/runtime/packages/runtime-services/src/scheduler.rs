@@ -269,29 +269,23 @@ fn project_changed_agents(
             StoreError::InvalidSyncObjectField { scope, id, .. }
                 if scope == "runtime_agents" && id == &row_id
         );
-        let Some(message) = parsed.get("error").and_then(Value::as_str).filter(|_| held) else {
+        if parsed
+            .get("error")
+            .and_then(Value::as_str)
+            .filter(|_| held)
+            .is_none()
+        {
             return Err(error);
-        };
+        }
         if !is_agent_error {
             return Err(error);
         }
-        // Keep a valid, privacy-safe sync projection for the held
-        // row while preserving the malformed source for repair.
-        let agent = crate::sync_views::invalid_agent_view(&row_id, &parsed, message);
-        let context = crate::sync_entity_context::agent_view_context(tx, &agent, server_id)?;
-        let projection =
-            crate::sync_views::agent_entity_view(&agent, &context).ok_or_else(|| {
-                StoreError::InvalidSyncObject {
-                    scope: "runtime_agents".into(),
-                    id: row_id.clone(),
-                }
-            })?;
+        // Readers build a valid, privacy-safe view of the held row (with its
+        // error message) while the malformed source stays for repair.
         crate::sync_policy::publish_agent_projection(
             tx,
             &row_id,
-            projection,
-            crate::event_write::truthy(agent.get("deletedAt")),
-            &|_, _, _, _| true,
+            crate::event_write::truthy(parsed.get("deletedAt")),
         )?;
     }
     crate::sync_policy::publish_entity_changes(tx, &changes, server_id, &|_, _, _, _| true)

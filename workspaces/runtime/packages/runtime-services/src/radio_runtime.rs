@@ -483,22 +483,8 @@ pub async fn create_with(
             }
             for draft in &drafts {
                 let id = draft.id.as_ref();
-                let value = draft.value();
                 AgentRepository::put(db, draft)?;
-                let context = crate::sync_entity_context::agent_view_context(
-                    db,
-                    &value,
-                    prepared.server().ok(),
-                )?;
-                let view = crate::sync_views::agent_entity_view(&value, &context)
-                    .ok_or(ProjectsError::Invalid("draft projection unavailable"))?;
-                crate::sync_policy::publish_agent_projection(
-                    db,
-                    id,
-                    view,
-                    false,
-                    &|_, _, _, _| true,
-                )?;
+                crate::sync_policy::publish_agent_projection(db, id, false)?;
             }
             let now = crate::projects::now_seconds();
             let mut record = studio_runtime_schema::room_record::RoomRecord::new(

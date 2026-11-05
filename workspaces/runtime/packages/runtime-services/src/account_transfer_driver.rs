@@ -33,7 +33,7 @@ pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Op
     Some(summary.id.as_str())
 }
 
-pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
+pub fn load(tx: &rusqlite::Connection, id: &str) -> Result<Snapshot, TransferError> {
     if !Repository::available(tx)? {
         return Err(TransferError::Requires(
             "store-bootstrap/account-transfer-schema",

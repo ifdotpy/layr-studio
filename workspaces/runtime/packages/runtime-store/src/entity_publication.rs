@@ -381,9 +381,8 @@ pub(crate) fn pending(
                 pending.agents.insert(agent);
             }
         } else {
-            let mut statement = transaction.prepare_cached(
-                "SELECT id FROM sync_entities WHERE collection='agentSummary' AND deleted=0",
-            )?;
+            let mut statement = transaction
+                .prepare_cached("SELECT id FROM runtime_agents WHERE deleted_at IS NULL")?;
             for row in statement.query_map([], |row| row.get::<_, String>(0))? {
                 pending.agents.insert(row?);
             }

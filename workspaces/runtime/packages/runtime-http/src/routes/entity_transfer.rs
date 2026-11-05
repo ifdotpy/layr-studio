@@ -530,6 +530,16 @@ mod tests {
             format!("event: entity-transfer\ndata: {saved}\n\n").as_bytes()
         );
     }
+    fn put_member(
+        tx: &rusqlite::Transaction<'_>,
+        id: &str,
+        root: &str,
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":id,
+            "rootId":root,"epoch":1,"status":"idle","accountKey":"default","provider":"codex"}))?;
+        studio_runtime_store::AgentRepository::put(tx, &agent)
+    }
+
     #[tokio::test]
     async fn scoped_membership_swaps_and_reassignment_reset_but_unrelated_moves_and_appends_stay_delta()
      {
@@ -547,13 +557,7 @@ mod tests {
                     )?;
                 }
                 for (id, root) in [("a", "lead"), ("b", "other")] {
-                    SyncDocumentsRepository::put_entity(
-                        tx,
-                        "agentSummary",
-                        id,
-                        json!({"id":id,"rootId":root,"status":"idle","source":"managed"}),
-                        false,
-                    )?;
+                    put_member(tx, id, root)?;
                 }
                 Ok(())
             })
@@ -566,7 +570,9 @@ mod tests {
             .expect("baseline");
         store
             .transaction(|tx| {
-                tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.rootId',CASE id WHEN 'a' THEN 'other' ELSE 'lead' END),seq=seq+100 WHERE collection='agentSummary'", [])?;
+                for (id, root) in [("a", "other"), ("b", "lead")] {
+                    put_member(tx, id, root)?;
+                }
                 Ok(())
             })
             .await

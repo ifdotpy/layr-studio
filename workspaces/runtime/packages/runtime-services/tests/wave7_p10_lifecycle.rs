@@ -719,7 +719,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
         true,
         512,
     )
-    .expect("work documents");
+    .expect("read-time documents");
     let payload = page
         .rows
         .into_iter()
@@ -780,10 +780,16 @@ fn state(store: &RuntimeStore) -> Value {
         .expect("rows")
         .collect::<Result<Vec<_>, _>>()
         .expect("sync rows");
-    // Work documents have no copy in sync_entities; a reader builds them at read time.
+    // Work documents and agent views have no copy in sync_entities; a reader builds
+    // them at read time.
     let mut sync = sync;
-    let collections =
-        serde_json::to_string(studio_runtime_store::WORK_COLLECTIONS).expect("collections");
+    let collections = serde_json::to_string(
+        &studio_runtime_store::WORK_COLLECTIONS
+            .iter()
+            .chain(&["agent", "agentSummary", "agentDetail"])
+            .collect::<Vec<_>>(),
+    )
+    .expect("collections");
     let page = studio_runtime_services::entity_scope::resume(
         &db,
         None,

@@ -507,7 +507,7 @@ async fn durable_written_title_recovers_after_final_transaction_failure() {
         "CREATE TRIGGER title_final_fail BEFORE UPDATE ON runtime_agents WHEN json_extract(NEW.record,'$.name')='Recovered title' BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
         "CREATE TRIGGER title_final_fail AFTER INSERT ON request_results BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
         "CREATE TRIGGER title_final_fail AFTER DELETE ON runtime_outbox BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
-        "CREATE TRIGGER title_final_fail BEFORE INSERT ON sync_entities WHEN NEW.collection='agentSummary' AND json_extract(NEW.payload,'$.value.name')='Recovered title' BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
+        "CREATE TRIGGER title_final_fail BEFORE INSERT ON durable_rows WHEN NEW.tbl='agent_views' BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
     ] {
         let (root, store) = fixture().await;
         let id = request_id();

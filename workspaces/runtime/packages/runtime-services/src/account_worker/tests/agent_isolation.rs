@@ -795,7 +795,6 @@ async fn invalid_attempt_identity_is_a_terminal_error_with_input_preserved() {
             scheduler::lifecycle_transaction_with(&store, move |tx| {
                 agent_fault::hold_agent(
                     tx,
-                    None,
                     &fault_id,
                     agent_fault::FaultStage::TurnPreparation,
                     "invalid attempt",
@@ -844,7 +843,6 @@ async fn orphaned_reservation_is_a_terminal_error() {
                 scheduler::lifecycle_transaction_with(&store, move |tx| {
                     agent_fault::hold_agent(
                         tx,
-                        None,
                         &fault_id,
                         agent_fault::FaultStage::TurnPreparation,
                         "orphaned reservation",

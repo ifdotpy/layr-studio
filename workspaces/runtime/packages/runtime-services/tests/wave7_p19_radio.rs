@@ -439,6 +439,21 @@ fn pending_question(raw: &Value) -> studio_runtime_schema::approvals::Approval {
     .expect("typed approval fixture")
 }
 
+/// Every agent row has a view, built at read time. The Python oracle kept copies only
+/// for the agents it published, so compare the views of those agents.
+fn oracle_agent_views(actual: &mut Value, expected: &Value) {
+    let published = expected["sync_entities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["collection"] == "agent")
+        .map(|row| row["id"].clone())
+        .collect::<Vec<_>>();
+    if let Some(rows) = actual["sync_entities"].as_array_mut() {
+        rows.retain(|row| row["collection"] != "agent" || published.contains(&row["id"]));
+    }
+}
+
 fn state(store: &RuntimeStore, tables: &Value) -> Value {
     let db = store.test_reader().expect("read");
     super::agent_view_fixtures::assert_agent_view_projections(&db);
@@ -527,6 +542,20 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
             .expect("rows")
             .collect::<Result<Vec<_>, _>>()
             .expect("rows read");
+        let mut rows = rows;
+        if table == "sync_entities" {
+            // The agent views are built at read time; compare them as the old copies.
+            for row in studio_runtime_services::entity_scope::agent_snapshot(&db)
+                .expect("agent views")
+                .into_iter()
+                .filter(|row| row.collection == "agent")
+            {
+                rows.push(
+                    json!({"collection":row.collection,"id":row.id,"seq":row.sequence,
+                    "hash":"","payload":row.payload,"deleted":0}),
+                );
+            }
+        }
         result.insert(table.clone(), json!(rows));
     }
     Value::Object(result)
@@ -856,6 +885,7 @@ async fn python_written_radio_corpus_and_restart_replay() {
                 })
                 .collect::<Vec<_>>()
         );
+        oracle_agent_views(&mut actual, &expected);
         normalize(&mut actual);
         normalize(&mut expected);
         assert_eq!(actual, expected, "{}", original_case["name"]);

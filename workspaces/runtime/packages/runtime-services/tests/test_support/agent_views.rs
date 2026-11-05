@@ -66,19 +66,17 @@ fn normalize_agent(
 /// Frozen Python snapshots predate the two view collections. Validate their
 /// generated field ownership and values before comparing the legacy snapshot.
 pub(crate) fn assert_agent_view_projections(db: &rusqlite::Connection) {
-    let mut statement = db.prepare(
-        "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection IN ('agent','agentSummary','agentDetail')",
-    ).expect("agent view rows");
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
-                (row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?),
-            ))
+    let rows = studio_runtime_services::entity_scope::agent_snapshot(db)
+        .expect("agent views")
+        .into_iter()
+        .filter(|row| row.collection != "retainedWorktree")
+        .map(|row| {
+            (
+                (row.collection, row.id),
+                (row.payload, i64::from(row.deleted)),
+            )
         })
-        .expect("view query")
-        .collect::<Result<BTreeMap<_, _>, _>>()
-        .expect("view rows");
+        .collect::<BTreeMap<_, _>>();
     let schemas =
         &studio_runtime_services::sync_policy::openapi_document()["components"]["schemas"];
     for ((collection, id), (raw, deleted)) in &rows {

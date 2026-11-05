@@ -471,9 +471,11 @@ mod tests {
             tx.execute_batch(&old_table)?;
             tx.execute_batch(
                 "INSERT INTO runtime_agents_legacy_start_fixture(rowid,id,record) SELECT rowid,id,record FROM runtime_agents;\
+                 PRAGMA legacy_alter_table=ON;\
                  ALTER TABLE runtime_agents RENAME TO runtime_agents_before_start_fixture;\
                  DROP TABLE runtime_agents_before_start_fixture;\
                  ALTER TABLE runtime_agents_legacy_start_fixture RENAME TO runtime_agents;\
+                 PRAGMA legacy_alter_table=OFF;\
                  CREATE INDEX runtime_agent_account_wake_candidates_v5 ON runtime_agents(account_key,id) WHERE start_attempt_submitted=1 AND start_attempt_connection_generation IS NOT NULL;\
                  CREATE INDEX runtime_agent_callback_context_v2 ON runtime_agents(account_key,start_attempt_connection_generation,thread_id,turn_id) WHERE status='running' AND auto_wake=1;\
                  CREATE INDEX runtime_agent_deleted_unsettled_v2 ON runtime_agents(id) WHERE COALESCE(deleted_at,0)!=0 AND COALESCE(start_attempt_active_at_reservation,0)!=0;\

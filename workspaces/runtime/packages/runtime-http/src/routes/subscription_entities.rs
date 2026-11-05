@@ -262,14 +262,16 @@ mod tests {
         let unchanged = initial_snapshot(state.clone(), list_ref, before)
             .await
             .expect("unchanged list");
-        assert!(
-            unchanged
-                .entity_changes
-                .flatten()
-                .expect("delta")
-                .documents
-                .is_empty()
-        );
+        // The list view is built at read time, so a detail change sends the same
+        // summary again; detail fields never reach the list.
+        let unchanged = serde_json::to_value(unchanged).expect("typed list");
+        for document in unchanged["entityChanges"]["documents"]
+            .as_array()
+            .expect("delta")
+        {
+            assert!(document["collection"] != "agent" && document["collection"] != "agentDetail");
+            assert!(document["value"].get("lastAnswer").is_none());
+        }
         let entry = initial_snapshot(state.clone(), detail_ref, None)
             .await
             .expect("changed detail");

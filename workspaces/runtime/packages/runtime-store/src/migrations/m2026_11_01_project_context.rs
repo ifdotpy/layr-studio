@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn drops_invalid_context_and_keeps_valid_context_idempotently() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
         let tx = db.transaction().unwrap();
         SyncDocumentsRepository::put_entity(&tx, "project", "p", json!({"id":"p","layrReadiness":{"state":"ready"},"layrSync":{"state":"bad"},"vault":{"projectId":"p","state":"none"}}), false).unwrap();
         apply(&tx).unwrap();

@@ -298,12 +298,9 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
     let agent: Value = serde_json::from_str(&agent).unwrap();
     assert_eq!(agent["threadId"], "restored");
     assert_eq!(agent["status"], "paused");
-    let projected: String = db
-        .query_row(
-            "SELECT payload FROM sync_entities WHERE collection='agent' AND id='worker'",
-            [],
-            |row| row.get(0),
-        )
+    let projected = studio_runtime_services::entity_scope::direct_document(&db, "agent", "worker")
+        .unwrap()
+        .and_then(|row| row.payload)
         .unwrap();
     let projected: Value = serde_json::from_str(&projected).unwrap();
     assert_eq!(projected["value"]["threadId"], "restored");

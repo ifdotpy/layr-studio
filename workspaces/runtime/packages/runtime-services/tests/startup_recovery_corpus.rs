@@ -66,10 +66,10 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
     let sync_entities = {
         let mut statement = db
             .prepare(
-                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agentSummary','agentDetail') ORDER BY collection,id",
+                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree') ORDER BY collection,id",
             )
             .expect("prepare projection snapshot");
-        statement
+        let mut rows = statement
             .query_map([], |row| {
                 Ok(json!({
                     "collection": row.get::<_, String>(0)?, "id": row.get::<_, String>(1)?,
@@ -85,7 +85,24 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
                 .expect("projection JSON");
                 projection
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        // The agent views are built at read time; compare them as the old copies.
+        rows.extend(
+            studio_runtime_services::entity_scope::agent_snapshot(&db)
+                .expect("agent views")
+                .into_iter()
+                .filter(|row| row.collection == "agent")
+                .map(|row| {
+                    json!({"collection": row.collection, "id": row.id, "deleted": 0,
+                        "payload": serde_json::from_str::<Value>(row.payload.as_deref().expect("agent view"))
+                            .expect("agent view JSON")})
+                }),
+        );
+        rows.sort_by(|a, b| {
+            (a["collection"].as_str(), a["id"].as_str())
+                .cmp(&(b["collection"].as_str(), b["id"].as_str()))
+        });
+        rows
     };
     json!({
         "agents": records("runtime_agents"),

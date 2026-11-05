@@ -1046,7 +1046,6 @@ pub async fn hold_invalid_agent_record(
     expected_reason: &str,
     diagnostic: &str,
 ) -> Result<(), WorkerError> {
-    let server_id = store.local_server_id()?;
     let agent_id = agent_id.to_owned();
     let expected_pointer = expected_pointer.to_owned();
     let expected_reason = expected_reason.to_owned();
@@ -1055,7 +1054,6 @@ pub async fn hold_invalid_agent_record(
         .transaction_with(move |tx| {
             hold_invalid_agent_record_in(
                 tx,
-                server_id.as_deref(),
                 &agent_id,
                 &expected_pointer,
                 &expected_reason,
@@ -1067,7 +1065,6 @@ pub async fn hold_invalid_agent_record(
 /// [`hold_invalid_agent_record`] inside the caller's transaction.
 pub(super) fn hold_invalid_agent_record_in(
     tx: &studio_runtime_store::Transaction<'_>,
-    server_id: Option<&str>,
     agent_id: &str,
     expected_pointer: &str,
     expected_reason: &str,
@@ -1097,7 +1094,7 @@ pub(super) fn hold_invalid_agent_record_in(
         Err(StoreError::InvalidSyncObjectField { .. }) => return Ok(()),
         Err(error) => return Err(error.into()),
     }
-    let parsed: Value = serde_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
+    serde_json::from_str::<Value>(&raw).map_err(|_| StoreError::InvalidSyncObject {
         scope: "runtime_agents".into(),
         id: agent_id.to_owned(),
     })?;
@@ -1108,26 +1105,9 @@ pub(super) fn hold_invalid_agent_record_in(
         Some(diagnostic),
     )?;
 
-    // Publish a minimal safe agent view so the renderer can show that this
-    // row is held while the malformed persisted bytes remain untouched.
-    let public = crate::sync_views::invalid_agent_view(agent_id, &parsed, diagnostic);
-    let context = crate::sync_views::AgentViewContext {
-        project_server_id: server_id.map(str::to_owned),
-        ..Default::default()
-    };
-    let projection = crate::sync_views::agent_entity_view(&public, &context).ok_or_else(|| {
-        StoreError::InvalidSyncObject {
-            scope: "runtime_agents".into(),
-            id: agent_id.to_owned(),
-        }
-    })?;
-    crate::sync_policy::publish_agent_projection(
-        tx,
-        agent_id,
-        projection,
-        false,
-        &|_, _, _, _| true,
-    )?;
+    // Readers build a minimal safe view from the held row and its diagnostic, so the
+    // renderer shows that it is held while the malformed bytes stay untouched.
+    crate::sync_policy::publish_agent_projection(tx, agent_id, false)?;
     Ok(())
 }
 fn account_key(agent: &studio_runtime_store::AgentRecord) -> &str {
@@ -1493,7 +1473,6 @@ pub(super) async fn outcome(
             .await?,
     );
     let state_root = store.root().to_path_buf();
-    let server_id = store.local_server_id()?;
     let step = OutcomeStep {
         account,
         resources,
@@ -1502,7 +1481,7 @@ pub(super) async fn outcome(
         session_closed,
     };
     scheduler::lifecycle_transaction_with(&store, move |tx| {
-        settle_outcome_isolated(tx, &state_root, server_id.as_deref(), step)
+        settle_outcome_isolated(tx, &state_root, step)
     })
     .await
 }
@@ -1514,7 +1493,6 @@ pub(super) async fn outcome(
 fn settle_outcome_isolated(
     tx: &studio_runtime_store::Transaction<'_>,
     state_root: &std::path::Path,
-    server_id: Option<&str>,
     step: OutcomeStep,
 ) -> Result<(SettledOutcome, Option<agent_fault::AgentFault>), WorkerError> {
     let context = Arc::clone(&step.context);
@@ -1547,7 +1525,6 @@ fn settle_outcome_isolated(
     };
     let fault = match agent_fault::isolate(
         tx,
-        server_id,
         agent_fault::FaultStage::ProviderReply,
         &mut subject,
         |_| settle_outcome(tx, state_root, step),
@@ -2332,9 +2309,7 @@ pub(super) async fn journal_batch(
     let expected_vm_actor = expected_vm_actor.map(|(actor, epoch)| (actor.to_owned(), epoch));
     let streams = streams.clone();
     let state_root = store.root().to_path_buf();
-    let server_id = store.local_server_id()?;
     scheduler::lifecycle_transaction_with(&store, move |tx| {
-        let server_id = server_id.as_deref();
         // A background recovery can commit before its cache handoff arrives.
         // Validate the cached snapshot under the writer, reconstructing only
         // after a newer commit or rollback invalidated its revision.
@@ -2345,7 +2320,7 @@ pub(super) async fn journal_batch(
         // The outcome a reply carries settles before its own journal entry.
         let settled = match outcome {
             Some(step) => {
-                let (settled, fault) = settle_outcome_isolated(tx, &state_root, server_id, *step)?;
+                let (settled, fault) = settle_outcome_isolated(tx, &state_root, *step)?;
                 faults.extend(fault);
                 Some(settled)
             }
@@ -2373,7 +2348,6 @@ pub(super) async fn journal_batch(
             let applied = crate::diagnostics::measure_runtime_stage(stage, || {
                 agent_fault::isolate(
                     tx,
-                    server_id,
                     agent_fault::FaultStage::JournalFrame,
                     &mut subject,
                     |subject| {
