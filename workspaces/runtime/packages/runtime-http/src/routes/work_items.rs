@@ -61,11 +61,8 @@ pub(crate) async fn work_for_agent(state: HttpState, agent_id: String) -> Result
         let lead = AgentRepository::get(connection, &agent.root_id)?
             .ok_or_else(|| invalid_stored("runtime_agents", &agent.root_id.0))?;
         list["rootId"] = json!(agent.root_id.0);
-        list["taskDefaultGate"] = lead
-            .extra
-            .get("taskDefaultGate")
-            .cloned()
-            .unwrap_or(Value::Null);
+        list["taskDefaultGate"] =
+            studio_runtime_store::projection_value(&lead.task_default_gate.value());
         let records_by_id: std::collections::BTreeMap<_, _> = records
             .iter()
             .map(|record| (record.id().0.as_str(), record))

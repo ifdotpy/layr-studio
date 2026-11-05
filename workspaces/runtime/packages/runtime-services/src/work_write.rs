@@ -2762,10 +2762,14 @@ fn create(
     let gate = match input.gate {
         Field::Value(gate) => Some(gate.normalize().map_err(Error::InvalidRequest)?),
         Field::Null => None,
-        Field::Missing => studio_runtime_schema::task_gate::parse(
-            root.extra.get("taskDefaultGate").unwrap_or(&Value::Null),
-        )
-        .map_err(Error::InvalidRequest)?,
+        Field::Missing => root
+            .task_default_gate
+            .value()
+            .cloned()
+            .map(studio_runtime_schema::task_gate::GateInput::Config)
+            .map(studio_runtime_schema::task_gate::GateInput::normalize)
+            .transpose()
+            .map_err(Error::InvalidRequest)?,
     };
     let mut work = json!({
         "gate":gate,

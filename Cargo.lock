@@ -6864,7 +6864,6 @@ dependencies = [
  "http-range-header",
  "inventory",
  "jsonschema 0.60.0",
- "openapi-to-rust",
  "rusqlite",
  "serde",
  "serde_path_to_error",
@@ -6941,6 +6940,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "jsonschema 0.60.0",
+ "openapi-to-rust",
  "regex",
  "rusqlite",
  "schemars 1.2.3",

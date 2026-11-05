@@ -980,10 +980,7 @@ impl ServerTools {
         let worker_id = field(args, "agent_id").to_owned();
         let worker = self
             .read(move |tx| {
-                Ok(AgentRepository::get(
-                    tx,
-                    &AgentId::from(worker_id.as_str()),
-                )?)
+                Ok(AgentRepository::get(tx, &AgentId::from(worker_id.as_str()))?.map(Box::new))
             })
             .await?;
         let Some(worker) = worker else {
@@ -1483,7 +1480,7 @@ pub(crate) fn worker_route(
     if !studio_runtime_store::truthy(actor.extra.get("remoteOrigin")) {
         return None;
     }
-    let moved = studio_runtime_store::truthy(actor.extra.get("movedFrom"));
+    let moved = actor.moved_from_active();
     match tool {
         "orchestration_agent_manage" if moved && args.get("action") != Some(&json!("park")) => {
             Some(Err("The home server does not support this action"))

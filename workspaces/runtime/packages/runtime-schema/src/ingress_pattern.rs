@@ -24,9 +24,7 @@ impl<'de, T: serde::de::DeserializeOwned, const MIN: usize, const MAX: usize> De
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(transparent)]
-pub struct BoundedSafeInteger<const MIN: u64, const MAX: u64>(
-    studio_runtime_schema::recovery_record::SafeInteger,
-);
+pub struct BoundedSafeInteger<const MIN: u64, const MAX: u64>(crate::recovery_record::SafeInteger);
 impl<const MIN: u64, const MAX: u64> BoundedSafeInteger<MIN, MAX> {
     pub fn get(&self) -> i64 {
         self.0.get() as i64
@@ -34,7 +32,7 @@ impl<const MIN: u64, const MAX: u64> BoundedSafeInteger<MIN, MAX> {
 }
 impl<'de, const MIN: u64, const MAX: u64> Deserialize<'de> for BoundedSafeInteger<MIN, MAX> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let value = studio_runtime_schema::recovery_record::SafeInteger::deserialize(d)?;
+        let value = crate::recovery_record::SafeInteger::deserialize(d)?;
         if (MIN as f64..=MAX as f64).contains(&value.get()) {
             Ok(Self(value))
         } else {
