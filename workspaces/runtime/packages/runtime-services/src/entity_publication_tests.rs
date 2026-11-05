@@ -1812,10 +1812,13 @@ async fn a_claude_sign_in_repair_reaches_the_client() {
     )
     .await;
     let store = Arc::new(store);
-    crate::claude_login::chats::StoredChats(Arc::clone(&store))
-        .refresh("claude-account")
-        .await
-        .expect("the repair commits");
+    crate::claude_login::chats::StoredChats::new(
+        Arc::clone(&store),
+        Arc::new(tokio::sync::Notify::new()),
+    )
+    .refresh("claude-account")
+    .await
+    .expect("the repair commits");
     let view = chat_view(&store, CHAT);
     assert_eq!(
         view["status"], "idle",
