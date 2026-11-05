@@ -3013,7 +3013,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     let run_id = "run:spawn-review-corpus";
     let run = json!({"id":run_id,"agent":actor_value["id"],"accountKey":"default",
         "epoch":context.epoch as i64,"threadId":actor_value.get("threadId").cloned().unwrap_or(Value::Null),
-        "turnId":null,"created":10.0,"status":"pending","firstAttemptId":null,
+        "turnId":actor_value["turnId"],"created":10.0,"status":"pending","firstAttemptId":null,
         "rootAttemptId":null,"latestAttemptId":null});
     let actor_id_for_run = actor_value["id"].as_str().unwrap().to_owned();
     let actor_thread_for_run = actor_value
@@ -3021,11 +3021,12 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         .and_then(Value::as_str)
         .map(str::to_owned);
     let run_record = run.to_string();
+    let actor_turn_for_run = actor_value["turnId"].as_str().unwrap().to_owned();
     let epoch = context.epoch as i64;
     store.transaction_with::<_, StoreError>(move |tx| {
-        tx.execute("INSERT INTO runtime_execution_runs(id,agent,account,epoch,thread,turn,created,record) VALUES(?1,?2,?3,?4,?5,NULL,10,?6)",
+        tx.execute("INSERT INTO runtime_execution_runs(id,agent,account,epoch,thread,turn,created,record) VALUES(?1,?2,?3,?4,?5,?6,10,?7)",
             rusqlite::params![run_id, actor_id_for_run, "default", epoch,
-                actor_thread_for_run, run_record])?;
+                actor_thread_for_run, actor_turn_for_run, run_record])?;
         Ok(())
     }).await.unwrap();
 
@@ -3086,6 +3087,35 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     assert_eq!(spawned_child["nativeEffort"], "low");
     assert_eq!(spawned_child["profileId"], "profile-reviewer");
     assert_eq!(spawned_child["profileInstructions"], "profile instructions");
+    let effect: String = read
+        .query_row(
+            "SELECT record FROM runtime_execution_effects WHERE id=?1",
+            [format!("spawn:{spawned_child_id}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let node: String = read
+        .query_row(
+            "SELECT record FROM runtime_execution_nodes WHERE id=?1",
+            [format!("worker:{spawned_child_id}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        studio_json::from_str::<Value>(&effect).unwrap(),
+        json!({
+            "id":format!("spawn:{spawned_child_id}"), "runId":run_id, "kind":"spawn",
+            "referenceId":spawned_child_id, "attemptId":null, "requestId":"dispatcher-spawn-api",
+            "status":spawned_child["status"]
+        })
+    );
+    assert_eq!(
+        studio_json::from_str::<Value>(&node).unwrap(),
+        json!({
+            "id":format!("worker:{spawned_child_id}"), "runId":run_id, "kind":"managed_worker",
+            "agentId":spawned_child_id, "status":spawned_child["status"]
+        })
+    );
     assert_eq!(
         spawned.result().test_value()["agents"][0]["baseRef"],
         "HEAD~1"

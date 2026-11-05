@@ -891,7 +891,7 @@ pub(crate) async fn spawn_agents(
             let record = &draft.record;
             AgentRepository::put(tx, record)?;
             let record_value = record.value();
-            record_spawn_effect(tx, &actor_record, &record_value, &request_id);
+            record_spawn_effect(tx, &actor_record, record, &request_id);
             crate::agents_create::publish_agent(tx, &record_value)?;
             if let Some(task_id) = &draft.task_id {
                 crate::work_assignment_runtime::assign_in_transaction(tx, task_id, &draft.id, &actor_record, now)
@@ -1043,7 +1043,12 @@ fn active_agents(
 /// Preserve Python's best-effort execution history for a spawned child. The
 /// child row itself is authoritative; a broken optional history table must not
 /// turn successful child creation into a refusal.
-fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value, request_id: &str) {
+fn record_spawn_effect(
+    tx: &Transaction<'_>,
+    actor: &AgentRecord,
+    child: &AgentRecord,
+    request_id: &str,
+) {
     let result = (|| -> Result<(), rusqlite::Error> {
         tx.execute_batch("SAVEPOINT managed_spawn_execution_effect")?;
         let write = (|| -> Result<(), rusqlite::Error> {
@@ -1055,13 +1060,9 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
             if !has_runs {
                 return Ok(());
             }
-            let actor_value = actor.value();
-            let account = actor_value
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default");
-            let thread = actor_value.get("threadId").and_then(Value::as_str);
-            let turn = actor_value.get("turnId").and_then(Value::as_str);
+            let account = actor.account_key.as_str();
+            let thread = actor.thread_id.as_deref();
+            let turn = actor.turn_id.as_deref();
             let active_turn = turn.filter(|turn| !turn.is_empty());
             let run = if let Some(turn) = active_turn {
                 let mut statement = tx.prepare_cached(
@@ -1096,9 +1097,7 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
             {
                 return Ok(());
             }
-            let Some(child_id) = child.get("id").and_then(Value::as_str) else {
-                return Ok(());
-            };
+            let child_id = child.id.0.as_str();
             let effect_id = format!("spawn:{child_id}");
             let previous: Option<String> = tx
                 .query_row(
@@ -1121,14 +1120,14 @@ fn record_spawn_effect(tx: &Transaction<'_>, actor: &AgentRecord, child: &Value,
                 .unwrap_or(Value::Null);
             let effect = json!({"id":effect_id,"runId":effect_run,"kind":"spawn",
                 "referenceId":child_id,"attemptId":attempt_id,"requestId":request_id,
-                "status":child.get("status").cloned().unwrap_or(Value::Null)});
+                "status":child.status});
             tx.execute(
                 "INSERT INTO runtime_execution_effects(id,run,kind,reference,record) VALUES(?1,?2,'spawn',?3,?4) ON CONFLICT(id) DO UPDATE SET run=excluded.run,kind=excluded.kind,reference=excluded.reference,record=excluded.record",
                 rusqlite::params![effect_id, effect_run, child_id, effect.to_string()],
             )?;
             let node_id = format!("worker:{child_id}");
             let node = json!({"id":node_id,"runId":run_id,"kind":"managed_worker",
-                "agentId":child_id,"status":child.get("status").cloned().unwrap_or(Value::Null)});
+                "agentId":child_id,"status":child.status});
             tx.execute(
                 "INSERT INTO runtime_execution_nodes(id,run,record) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET run=excluded.run,record=excluded.record",
                 rusqlite::params![node_id, run_id, node.to_string()],
