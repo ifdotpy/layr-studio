@@ -209,7 +209,7 @@ Every agent and developer follows these rules:
    with `STUDIO_RETEST=1` (see "Retest" below). It is not the default. It builds a second
    copy of the tests with coverage, and the measured runs below were slower than the
    default path.
-7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same command as the gate (checked by `layr-sweep-parity.test.ts`).
+7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same commands as the gate: the Rust workspace build (with `--lib`, which builds the libraries that nextest needs) and the clippy of `clippy-ratchet.ts`. Its `env` sets the ratchet's `CLIPPY_CONF_DIR` as a relative path. Then a new line takes warm units for the build, the first nextest run and clippy (checked by `layr-sweep-parity.test.ts`).
 
 ### Child scheduling and priority-sensitive tests
 

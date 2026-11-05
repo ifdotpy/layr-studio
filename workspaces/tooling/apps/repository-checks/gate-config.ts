@@ -44,14 +44,48 @@ if (process.argv[1] === fileURLToPath(import.meta.url))
 // Native WebView tests run separately on the prepared native CI builder.
 export const NATIVE_PACKAGE = "studio-native-client";
 // Rust workspace build of the gate, as cargo arguments. Owner of the command: the `sweep` list
-// in the root Cargo.toml must equal it (tests/layr-sweep-parity.test.ts).
+// in the root Cargo.toml must hold it (tests/layr-sweep-parity.test.ts). `--lib` builds the
+// libraries that no other crate uses: nextest (`cargo test --no-run`) needs them, so a new line
+// that takes the cache compiles nothing for its first test run.
 export const RUST_WORKSPACE_BUILD_ARGS = [
   "build",
   "--workspace",
   "--exclude",
   NATIVE_PACKAGE,
+  "--lib",
   "--tests",
   "--bins",
   "--examples",
   "--locked",
 ] as const;
+// Clippy of the gate (clippy-ratchet.ts), as cargo arguments without the job count and the
+// message format: these do not change the units. The `sweep` list in the root Cargo.toml holds
+// it too, so the layr cache keeps the checked units and a new line checks only its own crates.
+export const RUST_CLIPPY_ARGS = [
+  "clippy",
+  "--workspace",
+  "--exclude",
+  NATIVE_PACKAGE,
+  "--all-targets",
+  "--locked",
+  "--",
+  "-D",
+  "warnings",
+  "--cap-lints",
+  "warn",
+  "-W",
+  "clippy::struct_excessive_bools",
+  "-W",
+  "clippy::option_option",
+  "-W",
+  "clippy::redundant_clone",
+  "-W",
+  "clippy::needless_pass_by_value",
+  "-W",
+  "clippy::disallowed_methods",
+] as const;
+// The Clippy configuration of the ratchet, relative to the repository root (cargo runs clippy
+// there). Clippy records the variable in each unit: an absolute path names one checkout, so a
+// unit taken into another line would be checked again. The retest env in Cargo.toml sets it too.
+export const CLIPPY_CONF_DIR =
+  "workspaces/tooling/apps/repository-checks/clippy-ratchet";
