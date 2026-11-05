@@ -120,113 +120,92 @@ async fn run_native_action(
         studio_runtime_schema::usage_limits::UsageLimitsResponse,
     )>,
 ) -> Result<Json<Value>, ApiError> {
-    let value = studio_json::to_value(body).map_err(|_| ApiError::internal())?;
-    let Some(action) = value.get("action").and_then(Value::as_str) else {
-        let port = state.account_session.clone().ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_IMPLEMENTED,
-                "Not implemented: requires provider-session/native-request",
-            )
-        })?;
-        let store = state.store.clone().ok_or_else(ApiError::internal)?;
-        let account_driver = state.account_driver.clone();
-        let lifecycle = lifecycle.map(|Extension(ports)| ports);
-        let resources = preparation
-            .clone()
-            .map(|Extension(resources)| resources)
-            .ok_or_else(|| {
+    let agent = body.id.as_str().to_owned();
+    let action = match body.action {
+        generated::NativeActionRequestAction::SafetyActionRequest(data) => {
+            let port = state.account_session.clone().ok_or_else(|| {
                 ApiError::new(
                     StatusCode::NOT_IMPLEMENTED,
-                    "Not implemented: requires native-action/preparation-and-settings",
+                    "Not implemented: requires provider-session/native-request",
                 )
             })?;
-        let agent = value["id"].as_str().unwrap_or_default().to_owned();
-        let data = value.get("action").cloned().unwrap_or(Value::Null);
-        let safety_action = data["safety"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Choose wait, retry or cancel"))?
-            .to_owned();
-        if !matches!(safety_action.as_str(), "wait" | "retry" | "cancel") {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "Choose wait, retry or cancel",
-            ));
-        }
-        let turn_id = data["turnId"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A turn ID is required"))?
-            .to_owned();
-        let read_agent = agent.clone();
-        let (account, epoch) = store
-            .read_async("runtime-http/routes/agent_management", move |tx| {
-                let record = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?
-                    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Agent not found"))?;
-                let account = record.account_key.as_str().to_owned();
-                Ok::<_, ApiError>((account, record.epoch))
-            })
-            .await?;
-        let actor = studio_runtime_services::account_worker::retained::RequestActor {
-            agent: agent.clone(),
-            epoch,
-        };
-        let account_driver = account_driver.ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_IMPLEMENTED,
-                "Not implemented: requires account-driver/provider-home",
+            let store = state.store.clone().ok_or_else(ApiError::internal)?;
+            let account_driver = state.account_driver.clone();
+            let lifecycle = lifecycle.map(|Extension(ports)| ports);
+            let resources = preparation
+                .clone()
+                .map(|Extension(resources)| resources)
+                .ok_or_else(|| {
+                    ApiError::new(
+                        StatusCode::NOT_IMPLEMENTED,
+                        "Not implemented: requires native-action/preparation-and-settings",
+                    )
+                })?;
+            let safety_action = data.safety.as_str();
+            let turn_id = data.turn_id.as_str();
+            let read_agent = agent.clone();
+            let (account, epoch) = store
+                .read_async("runtime-http/routes/agent_management", move |tx| {
+                    let record = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?
+                        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Agent not found"))?;
+                    let account = record.account_key.as_str().to_owned();
+                    Ok::<_, ApiError>((account, record.epoch))
+                })
+                .await?;
+            let actor = studio_runtime_services::account_worker::retained::RequestActor {
+                agent: agent.clone(),
+                epoch,
+            };
+            let account_driver = account_driver.ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "Not implemented: requires account-driver/provider-home",
+                )
+            })?;
+            let accounts = account_driver
+                .snapshot()
+                .map_err(|_| ApiError::internal())?;
+            let provider_home = accounts
+                .accounts
+                .iter()
+                .find(|row| row.id.as_str() == Some(account.as_str()))
+                .and_then(|row| row.home.as_str())
+                .ok_or_else(ApiError::internal)?;
+            let mut resources = resources.as_ref().clone();
+            resources.account_home = provider_home.to_owned();
+            let resources = Arc::new(resources);
+            let result = studio_runtime_services::safety_buffering::execute_action(
+                store,
+                port.as_ref(),
+                &resources,
+                lifecycle,
+                studio_runtime_services::safety_buffering::SafetyAction {
+                    agent_id: &agent,
+                    actor,
+                    turn_id,
+                    choice: safety_action,
+                },
             )
-        })?;
-        let accounts = account_driver
-            .snapshot()
-            .map_err(|_| ApiError::internal())?;
-        let provider_home = accounts
-            .accounts
-            .iter()
-            .find(|row| row.id.as_str() == Some(account.as_str()))
-            .and_then(|row| row.home.as_str())
-            .ok_or_else(ApiError::internal)?;
-        let mut resources = resources.as_ref().clone();
-        resources.account_home = provider_home.to_owned();
-        let resources = Arc::new(resources);
-        let result = studio_runtime_services::safety_buffering::execute_action(
-            store,
-            port.as_ref(),
-            &resources,
-            lifecycle,
-            studio_runtime_services::safety_buffering::SafetyAction {
-                agent_id: &agent,
-                actor,
-                turn_id: &turn_id,
-                choice: &safety_action,
-            },
-        )
-        .await
-        .map_err(safety_error)?;
-        return Ok(Json(result));
-    };
-    let action = match action {
-        "compact" => native_actions::Action::Compact,
-        "review" => native_actions::Action::Review,
-        _ => {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "Choose compact or review",
-            ));
+            .await
+            .map_err(safety_error)?;
+            return Ok(Json(result));
         }
+        generated::NativeActionRequestAction::NativeAction(action) => match action {
+            generated::NativeAction::Compact => native_actions::Action::Compact,
+            generated::NativeAction::Review => native_actions::Action::Review,
+        },
     };
-    let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
+    let Some(request_id) = body.request_id.flatten() else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "Reload Studio before Review or Compact. This client has no durable action request ID.",
         ));
     };
-    let context = value
-        .get("context")
-        .filter(|value| !value.is_null())
-        .cloned()
-        .unwrap_or_else(|| studio_json::json!({}));
+    let context = studio_json::to_value(body.context.flatten().unwrap_or_default())
+        .map_err(|_| ApiError::internal())?;
     let request = native_actions::Request {
-        request_id: request_id.to_owned(),
-        agent: value["id"].as_str().unwrap_or_default().to_owned(),
+        request_id: request_id.as_str().to_owned(),
+        agent,
         action,
         context,
     };
@@ -690,6 +669,140 @@ mod native_review_preflight_tests {
     }
 
     #[tokio::test]
+    async fn native_action_http_wire_and_replay_equivalence() {
+        use axum::{body::Body, http::Request, routing::post};
+        use studio_runtime_schema::persistence::RequestIdentity;
+        use studio_runtime_store::request_results::{Admission, RequestResults, ResultEnvelope};
+        use tower::ServiceExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let agent = AgentRecord::from_value(json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "provider":"codex", "accountKey":"default",
+            "idleCompactionEpisode": {"id":"reserved", "cache":{"requestId":"cache", "ttl":"1h", "warm":true,
+                "lastActivityAt":1.0, "contextTokens":1, "prefix":"prefix"}, "fireAt":2.0, "expiresAt":3.0,
+                "identity":{}, "prefixInputs":[], "attempt":{}}
+        })).unwrap();
+        let root = RequestIdentity::issue_root();
+        let identity = RequestIdentity::new("native-action", &[], &root, &[]).unwrap();
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &agent)?;
+                let signature = studio_runtime_store::python_json_with_separators(
+                    &json!({"agent":"agent","action":"compact","context":{}}),
+                    ",",
+                    ":",
+                );
+                let Admission::Fresh(admitted) =
+                    RequestResults::admit(tx, &identity, &signature, (unix_time() * 1000.0) as i64)
+                        .unwrap()
+                else {
+                    panic!("fresh")
+                };
+                RequestResults::settle(
+                    tx,
+                    &admitted,
+                    &ResultEnvelope {
+                        actor: Some("agent".into()),
+                        reply: json!({"result":"saved"}),
+                        references: vec![],
+                    },
+                )
+                .unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let state = HttpState::new(
+            "token".into(),
+            "fixture".into(),
+            directory.path().display().to_string(),
+            49172,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let app = axum::Router::new()
+            .route("/api/action", post(native_action))
+            .with_state(state);
+        async fn send(app: &axum::Router, body: Value) -> (StatusCode, String) {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/action")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (status, String::from_utf8(bytes.to_vec()).unwrap())
+        }
+        let invalid = (
+            StatusCode::BAD_REQUEST,
+            "{\"error\":\"Invalid request\",\"location\":[\"body\",\"action\"]}".to_owned(),
+        );
+        for action in [
+            json!("other"),
+            json!({"safety":"other","turnId":"t"}),
+            json!({"safety":"wait"}),
+            json!({"safety":"wait","turnId":null}),
+            json!({"safety":"wait","turnId":1}),
+            json!({"safety":"wait","turnId":""}),
+            json!({"safety":"wait","turnId":"é".repeat(201)}),
+        ] {
+            assert_eq!(
+                send(&app, json!({"id":"agent","action":action})).await,
+                invalid
+            );
+        }
+        for n in [1, 200] {
+            assert_eq!(
+                send(
+                    &app,
+                    json!({"id":"agent","action":{"safety":"wait","turnId":"é".repeat(n)}})
+                )
+                .await,
+                (
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{\"error\":\"Not implemented: requires provider-session/native-request\"}"
+                        .into()
+                )
+            );
+        }
+        for body in [
+            json!({"id":"agent","action":"compact"}),
+            json!({"id":"agent","action":"compact","request_id":null}),
+        ] {
+            assert_eq!(send(&app,body).await, (StatusCode::BAD_REQUEST,"{\"error\":\"Reload Studio before Review or Compact. This client has no durable action request ID.\"}".into()));
+        }
+        assert_eq!(
+            send(
+                &app,
+                json!({"id":"agent","action":"compact","request_id":"reserved"})
+            )
+            .await,
+            (
+                StatusCode::BAD_REQUEST,
+                "{\"error\":\"This request ID is reserved for idle compaction.\"}".into()
+            )
+        );
+        let body = json!({"id":"agent","action":"compact","request_id":root});
+        let expected = (StatusCode::OK, "{\"result\":\"saved\"}".into());
+        assert_eq!(send(&app, body.clone()).await, expected);
+        assert_eq!(send(&app, body).await, expected);
+        let read = store.test_reader().unwrap();
+        let count: i64 = read
+            .query_row("SELECT COUNT(*) FROM request_results", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
     async fn native_action_rejects_reserved_idle_request_and_missing_id() {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
@@ -734,6 +847,50 @@ mod native_review_preflight_tests {
             .await
             .unwrap_err();
             assert!(error.message().contains(expected), "{}", error.message());
+        }
+        for action in ["compact", "review"] {
+            for request_id in [None, Some(Value::Null)] {
+                let mut body = json!({"id":"agent", "action":action, "context":null});
+                if let Some(request_id) = request_id {
+                    body["request_id"] = request_id;
+                }
+                let body = studio_json::from_value(body).unwrap();
+                let error = Box::pin(native_action(
+                    State(state.clone()),
+                    None,
+                    None,
+                    None,
+                    ApiJson(body),
+                ))
+                .await
+                .unwrap_err();
+                assert!(error.message().contains("no durable action request ID"));
+            }
+        }
+        for safety in [
+            generated::SafetyAction::Wait,
+            generated::SafetyAction::Retry,
+            generated::SafetyAction::Cancel,
+        ] {
+            let body = generated::NativeActionRequest::new(
+                generated::NativeActionRequestAction::SafetyActionRequest(
+                    generated::SafetyActionRequest {
+                        safety,
+                        turn_id: "turn".to_owned().try_into().unwrap(),
+                    },
+                ),
+                "agent".to_owned().try_into().unwrap(),
+            );
+            let error = Box::pin(native_action(
+                State(state.clone()),
+                None,
+                None,
+                None,
+                ApiJson(body),
+            ))
+            .await
+            .unwrap_err();
+            assert!(error.message().contains("provider-session/native-request"));
         }
     }
 
