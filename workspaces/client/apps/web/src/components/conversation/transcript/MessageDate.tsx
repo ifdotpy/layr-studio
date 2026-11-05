@@ -1,7 +1,17 @@
-import { localDateTime } from "../../../local-time";
 import "./message-date.css";
 
 export type MessageDateProps = { at?: number | string | null | undefined };
+
+// The device time zone is captured here; reload after changing it.
+// The device locale is also captured at load; changing it takes effect after reload.
+const formatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 export default function MessageDate({ at }: MessageDateProps) {
   const value =
@@ -16,15 +26,7 @@ export default function MessageDate({ at }: MessageDateProps) {
       className="message-date"
       dateTime={valid ? value.toISOString() : undefined}
     >
-      {valid
-        ? localDateTime(value, {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "Date unavailable"}
+      {valid ? formatter.format(value) : "Date unavailable"}
     </time>
   );
 }

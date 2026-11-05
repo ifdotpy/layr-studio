@@ -140,6 +140,7 @@ export default {
       "src/components/useTurnErrors.test.ts",
       "src/components/conversation/transcript/TurnHistory.uncertain.test.ts",
       "src/components/conversation/transcript/TurnHistory.questions.test.ts",
+      "src/components/conversation/transcript/MessageDate.test.ts",
       "src/components/questions/QuestionCard.test.ts",
       "src/components/questions/Requests.test.ts",
       "src/components/shell/WorkerPermissions.test.ts",
