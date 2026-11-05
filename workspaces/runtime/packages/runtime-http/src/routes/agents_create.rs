@@ -327,6 +327,17 @@ mod workspace_admission_tests {
     use super::*;
 
     #[test]
+    fn legacy_layr_parent_is_refused() {
+        let parent = studio_runtime_store::AgentRecord::from_value(studio_json::json!({
+            "compactions":0,"accountKey":"default","id":"parent","rootId":"parent",
+            "epoch":1,"status":"queued","workspaceMode":"layr","cwd":"/guest/line",
+            "layrReady":true,"layrProjectId":"project","layrLine":"main"
+        }))
+        .unwrap();
+        assert!(prepare_parent_workspace(&parent).is_err());
+    }
+
+    #[test]
     fn lead_intent_preserves_native_store_override_for_replay() {
         let request = generated::CreateLeadRequest {
             layr_store_root: Some("/store".to_owned()),

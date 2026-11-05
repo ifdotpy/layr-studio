@@ -1312,24 +1312,26 @@ pub(crate) fn stage_turn_save(
     agent_id: &str,
     turn_id: &str,
 ) -> std::result::Result<(), StoreError> {
-    let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
+    let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(());
     };
-    let mut record = agent.value();
-    if !is_native(&record) || record["layrReady"] != true {
+    if agent.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
+        || agent.layr_ready != Some(true)
+    {
         return Ok(());
     }
-    if !record["layrTurnSaves"].is_object() {
-        record["layrTurnSaves"] = json!({});
+    let saves = agent
+        .extra
+        .entry("layrTurnSaves".into())
+        .or_insert_with(|| json!({}));
+    if !saves.is_object() {
+        *saves = json!({});
     }
-    if record["layrTurnSaves"][turn_id]["status"] == "saved" {
+    if saves[turn_id]["status"] == "saved" {
         return Ok(());
     }
-    record["layrTurnSaves"][turn_id] = json!({"status":"pending"});
-    AgentRepository::put(
-        tx,
-        &AgentRecord::from_value(record).map_err(StoreError::from)?,
-    )?;
+    saves[turn_id] = json!({"status":"pending"});
+    AgentRepository::put(tx, &agent)?;
     Ok(())
 }
 

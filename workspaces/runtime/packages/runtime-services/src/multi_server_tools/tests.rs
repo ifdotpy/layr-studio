@@ -235,7 +235,7 @@ impl MultiServerToolPort for ResumeFetching {
                     Step::Store(error) => Error::Store(error),
                     Step::Refused(message) | Step::Failed(message) => Error::StoredAt(message),
                 })?;
-            let first = self.tools.fetch(actor, args, key, PEER).await;
+            let first = Box::pin(self.tools.fetch(actor, args, key, PEER)).await;
             if self.input.is_none() {
                 return settle(first);
             }
@@ -255,7 +255,7 @@ impl MultiServerToolPort for ResumeFetching {
                 })
                 .await
                 .unwrap();
-            settle(self.tools.fetch(actor, args, key, PEER).await)
+            settle(Box::pin(self.tools.fetch(actor, args, key, PEER)).await)
         })
     }
     fn worker_call<'a>(
