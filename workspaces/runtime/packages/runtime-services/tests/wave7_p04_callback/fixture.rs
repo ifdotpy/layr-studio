@@ -268,7 +268,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
             for row in studio_runtime_services::entity_scope::agent_snapshot(&connection).unwrap() {
                 if row.collection == "agent" {
                     let payload: Value =
-                        serde_json::from_str(row.payload.as_deref().unwrap()).unwrap();
+                        studio_json::from_str(row.payload.as_deref().unwrap()).unwrap();
                     rows.push(json!([row.collection, row.id, payload, 0]));
                 }
             }

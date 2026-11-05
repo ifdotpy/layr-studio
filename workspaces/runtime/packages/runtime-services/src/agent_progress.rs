@@ -466,16 +466,8 @@ mod tests {
             let mut decision = snapshot.decision();
             decision.record.tail = "first\nlast gate passed".to_owned().try_into().expect("tail");
             crate::monitor_runtime::apply(tx,&snapshot,&actor,&decision,20.0)?;
-<<<<<<< head
             let raw = crate::entity_scope::direct_document(tx,"agent","worker")?.and_then(|row| row.payload).expect("test fixture value");
-            let view: serde_json::Value = serde_json::from_str(&raw).expect("test fixture value");
-||||||| base
-            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='agent' AND id='worker'",[],|r|r.get(0)).expect("test fixture value");
-            let view: serde_json::Value = serde_json::from_str(&raw).expect("test fixture value");
-=======
-            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='agent' AND id='worker'",[],|r|r.get(0)).expect("test fixture value");
             let view: studio_json::Value = studio_json::from_str(&raw).expect("test fixture value");
->>>>>>> https/main
             assert_eq!(view["value"]["commandProgress"][0]["lastOutputLine"],"last gate passed");
             assert_eq!(AgentRepository::get(tx,&AgentId::from("worker"))?.expect("test fixture value").status,AgentStatus::Running);
             let (before, actor) = crate::monitor_runtime::snapshot(tx, "m")?;

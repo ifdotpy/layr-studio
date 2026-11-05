@@ -265,7 +265,7 @@ mod tests {
             .expect("unchanged list");
         // The list view is built at read time, so a detail change sends the same
         // summary again; detail fields never reach the list.
-        let unchanged = serde_json::to_value(unchanged).expect("typed list");
+        let unchanged = studio_json::to_value(unchanged).expect("typed list");
         for document in unchanged["entityChanges"]["documents"]
             .as_array()
             .expect("delta")

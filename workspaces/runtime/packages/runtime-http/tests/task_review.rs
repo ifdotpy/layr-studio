@@ -203,7 +203,6 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
     }
     store
         .test_read_transaction(|tx| {
-<<<<<<< head
             let raw: String = if studio_runtime_store::AGENT_VIEW_COLLECTIONS.contains(&collection)
             {
                 studio_runtime_services::entity_scope::direct_document(tx, collection, id)?
@@ -218,22 +217,7 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
                     |row| row.get(0),
                 )?
             };
-            Ok(serde_json::from_str::<Value>(&raw)?["value"].clone())
-||||||| base
-            let raw: String = tx.query_row(
-                "SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0",
-                [collection, id],
-                |row| row.get(0),
-            )?;
-            Ok(serde_json::from_str::<Value>(&raw)?["value"].clone())
-=======
-            let raw: String = tx.query_row(
-                "SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0",
-                [collection, id],
-                |row| row.get(0),
-            )?;
             Ok(studio_json::from_str::<Value>(&raw)?["value"].clone())
->>>>>>> https/main
         })
         .unwrap()
 }

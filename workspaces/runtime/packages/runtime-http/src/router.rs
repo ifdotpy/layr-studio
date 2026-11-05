@@ -1235,13 +1235,7 @@ mod tests {
                     .expect("validator");
             let app = super::with_boundary(Router::new().route("/api/commands", post(move || async move {
                 store.transaction(|tx| {
-<<<<<<< head
-                    SyncDocumentsRepository::put_entity(tx, "project", "project", serde_json::json!({"id": "project", "name":"Project", "tail": "entity content ".repeat(512)}), false)?;
-||||||| base
-                    SyncDocumentsRepository::put_entity(tx, "agent", "agent", serde_json::json!({"id": "agent", "name":"Agent", "status":"idle", "source":"managed", "tail": "entity content ".repeat(512)}), false)?;
-=======
-                    SyncDocumentsRepository::put_entity(tx, "agent", "agent", studio_json::json!({"id": "agent", "name":"Agent", "status":"idle", "source":"managed", "tail": "entity content ".repeat(512)}), false)?;
->>>>>>> https/main
+                    SyncDocumentsRepository::put_entity(tx, "project", "project", studio_json::json!({"id": "project", "name":"Project", "tail": "entity content ".repeat(512)}), false)?;
                     Ok(())
                 }).await.expect("entity mutation");
                 Json(studio_json::json!({
@@ -1393,13 +1387,7 @@ mod tests {
         assert_eq!(view.resources, entities);
         assert!(!view.entity_reset, "known entity writes remain incremental");
         store.transaction(|tx| {
-<<<<<<< head
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "project", "project", serde_json::json!({"id":"project"}), false)?;
-||||||| base
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "agent", "agent", serde_json::json!({"id":"agent","status":"idle"}), false)?;
-=======
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "agent", "agent", studio_json::json!({"id":"agent","status":"idle"}), false)?;
->>>>>>> https/main
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "project", "project", studio_json::json!({"id":"project"}), false)?;
             tx.execute("INSERT INTO runtime_items(id,agent,created,record) VALUES('mixed','agent',1,'{}')", [])?;
             Ok(())
         }).await.expect("mixed commit");

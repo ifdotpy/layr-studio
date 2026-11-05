@@ -101,26 +101,10 @@ async fn long_answers_use_canonical_bounded_agent_sync_projection() {
     store
         .transaction(|tx| {
             for (id, _) in AGENTS {
-<<<<<<< head
                 let raw = crate::entity_scope::direct_document(tx, "agent", id)?
                     .and_then(|row| row.payload)
                     .expect("agent projection");
-                let envelope: Value = serde_json::from_str(&raw)?;
-||||||| base
-                let raw: String = tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
-                    [id],
-                    |row| row.get(0),
-                )?;
-                let envelope: Value = serde_json::from_str(&raw)?;
-=======
-                let raw: String = tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
-                    [id],
-                    |row| row.get(0),
-                )?;
                 let envelope: Value = studio_json::from_str(&raw)?;
->>>>>>> https/main
                 let payload = &envelope["value"];
                 assert_eq!(
                     payload["lastAnswer"].as_str().map(str::len),

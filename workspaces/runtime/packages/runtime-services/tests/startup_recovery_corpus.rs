@@ -94,7 +94,7 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
                 .filter(|row| row.collection == "agent")
                 .map(|row| {
                     json!({"collection": row.collection, "id": row.id, "deleted": 0,
-                        "payload": serde_json::from_str::<Value>(row.payload.as_deref().expect("agent view"))
+                        "payload": studio_json::from_str::<Value>(row.payload.as_deref().expect("agent view"))
                             .expect("agent view JSON")})
                 }),
         );

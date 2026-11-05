@@ -783,21 +783,13 @@ fn state(store: &RuntimeStore) -> Value {
     // Work documents and agent views have no copy in sync_entities; a reader builds
     // them at read time.
     let mut sync = sync;
-<<<<<<< head
-    let collections = serde_json::to_string(
+    let collections = studio_json::to_string(
         &studio_runtime_store::WORK_COLLECTIONS
             .iter()
             .chain(&["agent", "agentSummary", "agentDetail"])
             .collect::<Vec<_>>(),
     )
     .expect("collections");
-||||||| base
-    let collections =
-        serde_json::to_string(studio_runtime_store::WORK_COLLECTIONS).expect("collections");
-=======
-    let collections =
-        studio_json::to_string(studio_runtime_store::WORK_COLLECTIONS).expect("collections");
->>>>>>> https/main
     let page = studio_runtime_services::entity_scope::resume(
         &db,
         None,

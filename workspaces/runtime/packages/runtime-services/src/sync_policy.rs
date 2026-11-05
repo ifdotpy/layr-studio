@@ -1115,7 +1115,7 @@ pub(crate) fn agent_view_documents(
         }
         // A row that does not decode is held for repair; readers see a minimal safe view.
         Err(error) => {
-            let parsed: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({"id": id}));
+            let parsed: Value = studio_json::from_str(&raw).unwrap_or_else(|_| json!({"id": id}));
             let diagnostic = incident
                 .or_else(|| {
                     parsed

@@ -296,36 +296,12 @@ mod tests {
 
     /// The client view of the chat, as the renderer pulls it.
     fn client_view(store: &RuntimeStore) -> Value {
-<<<<<<< head
         let payload = store
             .test_read_transaction(|tx| crate::entity_scope::direct_document(tx, "agent", CHAT))
             .expect("the chat entity reads")
             .and_then(|row| row.payload)
             .expect("the chat entity is live");
-        serde_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
-||||||| base
-        let payload: String = store
-            .test_read_transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0",
-                    [CHAT],
-                    |row| row.get(0),
-                )?)
-            })
-            .expect("the chat entity reads");
-        serde_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
-=======
-        let payload: String = store
-            .test_read_transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0",
-                    [CHAT],
-                    |row| row.get(0),
-                )?)
-            })
-            .expect("the chat entity reads");
         studio_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
->>>>>>> https/main
     }
 
     async fn organize(store: &RuntimeStore, body: &str) {

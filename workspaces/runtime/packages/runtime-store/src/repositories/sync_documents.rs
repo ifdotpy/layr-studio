@@ -1177,32 +1177,8 @@ mod tests {
 
     #[test]
     fn scope_visibility_tracks_predicate_moves_atomically_without_replaying_appends() {
-<<<<<<< head
-        use serde_json::json;
-        let mut connection = crate::fresh_state::test_canvas();
-||||||| base
-        use serde_json::json;
-        let mut connection = Connection::open_in_memory().expect("memory SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common schema"),
-            )
-            .expect("bootstrap owner");
-=======
         use studio_json::json;
-        let mut connection = Connection::open_in_memory().expect("memory SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common schema"),
-            )
-            .expect("bootstrap owner");
->>>>>>> https/main
+        let mut connection = crate::fresh_state::test_canvas();
         let tx = connection.transaction().expect("transaction");
         for (id, root) in [("a", "alpha"), ("b", "beta")] {
             member(&tx, id, root);
@@ -1270,32 +1246,8 @@ mod tests {
 
     #[test]
     fn scope_visibility_retains_deleted_owner_until_restore() {
-<<<<<<< head
-        use serde_json::json;
-        let mut connection = crate::fresh_state::test_canvas();
-||||||| base
-        use serde_json::json;
-        let mut connection = Connection::open_in_memory().expect("SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common sync schema section"),
-            )
-            .expect("bootstrap scope fixture schema");
-=======
         use studio_json::json;
-        let mut connection = Connection::open_in_memory().expect("SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common sync schema section"),
-            )
-            .expect("bootstrap scope fixture schema");
->>>>>>> https/main
+        let mut connection = crate::fresh_state::test_canvas();
         let tx = connection.transaction().expect("scope fixture transaction");
         for (id, root) in [("a", "alpha"), ("b", "beta")] {
             member(&tx, id, root);

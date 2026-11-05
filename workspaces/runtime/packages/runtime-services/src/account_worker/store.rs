@@ -1094,13 +1094,7 @@ pub(super) fn hold_invalid_agent_record_in(
         Err(StoreError::InvalidSyncObjectField { .. }) => return Ok(()),
         Err(error) => return Err(error.into()),
     }
-<<<<<<< head
-    serde_json::from_str::<Value>(&raw).map_err(|_| StoreError::InvalidSyncObject {
-||||||| base
-    let parsed: Value = serde_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
-=======
-    let parsed: Value = studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
->>>>>>> https/main
+    studio_json::from_str::<Value>(&raw).map_err(|_| StoreError::InvalidSyncObject {
         scope: "runtime_agents".into(),
         id: agent_id.to_owned(),
     })?;
