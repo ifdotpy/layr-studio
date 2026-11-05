@@ -2942,6 +2942,14 @@ fn journal_one(
                             "uncertain",
                             None,
                         )?;
+                        // A running turn can no longer report its end: interrupt it.
+                        if SchedulerRepository::settle_unloaded_turn(tx, &identity, now())? {
+                            crate::lifecycle_effects::notify_parent_of_disconnect(
+                                tx,
+                                &identity.agent_id,
+                                now(),
+                            )?;
+                        }
                     }
                     _ => {
                         let dispatched = dispatch_notification_with_effects(
