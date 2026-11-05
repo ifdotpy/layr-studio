@@ -78,15 +78,66 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The phone sheet sizes to its content up to three quarters of the screen,
+   so the backdrop above it always offers a tap to close. A grip on the title
+   row closes it with a downward swipe; the model list scrolls inside. */
 .setup-sheet .mantine-Drawer-content {
-  max-height: 92dvh;
-  border-radius: var(--mantine-radius-lg) var(--mantine-radius-lg) 0 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 75dvh;
+  border-radius: var(--studio-radius-dialog) var(--studio-radius-dialog) 0 0;
+}
+.setup-sheet .mantine-Drawer-header {
+  position: relative;
+  padding-block-start: var(--mantine-spacing-lg);
+}
+.setup-sheet .mantine-Drawer-header::before {
+  content: "";
+  position: absolute;
+  inset-block-start: var(--mantine-spacing-xs);
+  inset-inline-start: 50%;
+  width: 2.25rem;
+  height: 0.25rem;
+  border-radius: var(--studio-radius-pill);
+  background: var(--line-strong);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.setup-sheet .mantine-Drawer-title {
+  flex: 1;
+  min-width: 0;
+}
+.sheet-grip {
+  display: block;
+  margin-block: calc(-1 * var(--mantine-spacing-lg))
+    calc(-1 * var(--mantine-spacing-sm));
+  padding-block: var(--mantine-spacing-lg) var(--mantine-spacing-sm);
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.setup-sheet .mantine-Drawer-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.setup-sheet .execution-dropdown > div {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-height: 0;
 }
 .setup-sheet .execution-dropdown {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-height: 0;
   inline-size: auto;
   max-width: none;
   padding: 0;
-  max-height: none;
   overflow: visible;
 }
 .execution-profile {
