@@ -440,5 +440,14 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
         .as_array_mut()
         .unwrap()
         .retain(|request| kept.contains(&request["id"]));
+    // Readers build a document for every source row; the oracle kept what it published.
+    let oracle = python["sync_entities"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    super::agent_view_fixtures::keep_oracle_rows(
+        rust["sync_entities"].as_array_mut().unwrap(),
+        &oracle,
+    );
     assert_eq!(rust, python, "complete startup rows and projections differ");
 }

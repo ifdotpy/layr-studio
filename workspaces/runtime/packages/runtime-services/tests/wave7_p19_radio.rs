@@ -439,18 +439,15 @@ fn pending_question(raw: &Value) -> studio_runtime_schema::approvals::Approval {
     .expect("typed approval fixture")
 }
 
-/// Every agent row has a view, built at read time. The Python oracle kept copies only
-/// for the agents it published, so compare the views of those agents.
+/// Every source row has a document, built at read time. The Python oracle kept copies
+/// only of what it published, so compare those documents.
 fn oracle_agent_views(actual: &mut Value, expected: &Value) {
-    let published = expected["sync_entities"]
+    let expected = expected["sync_entities"]
         .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|row| row["collection"] == "agent")
-        .map(|row| row["id"].clone())
-        .collect::<Vec<_>>();
+        .cloned()
+        .unwrap_or_default();
     if let Some(rows) = actual["sync_entities"].as_array_mut() {
-        rows.retain(|row| row["collection"] != "agent" || published.contains(&row["id"]));
+        super::agent_view_fixtures::keep_oracle_rows(rows, &expected);
     }
 }
 

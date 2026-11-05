@@ -394,16 +394,11 @@ async fn python_send_and_receipt_corpus() {
                         || row["deleted"] == 0
                             && row["id"].as_str().is_some_and(|id| agents.contains_key(id))
                 });
-                let published = python
-                    .as_array()
-                    .expect("sync rows")
-                    .iter()
-                    .filter(|row| row["collection"] == "agent")
-                    .map(|row| row["id"].clone())
-                    .collect::<Vec<_>>();
-                rows.as_array_mut()
-                    .expect("sync rows")
-                    .retain(|row| row["collection"] != "agent" || published.contains(&row["id"]));
+                let oracle = python.as_array().expect("sync rows").clone();
+                crate::agent_view_fixtures::keep_oracle_rows(
+                    rows.as_array_mut().expect("sync rows"),
+                    &oracle,
+                );
                 // Agent views are built at read time, so their copies have no rowid order.
                 for list in [&mut rows, &mut python] {
                     list.as_array_mut()

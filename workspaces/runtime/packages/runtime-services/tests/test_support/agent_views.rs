@@ -158,3 +158,24 @@ pub(crate) fn read_time_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_st
         )
         .collect()
 }
+
+/// Collections of [`read_time_rows`].
+#[allow(dead_code)]
+pub(crate) const READ_TIME_COLLECTIONS: [&str; 5] =
+    ["agent", "task", "monitor", "event", "messageReceipt"];
+
+/// Readers build a document for every source row; the frozen oracle kept copies only
+/// of what it published. Keep the read-time rows of `actual` that the oracle has.
+#[allow(dead_code)]
+pub(crate) fn keep_oracle_rows(actual: &mut Vec<Value>, expected: &[Value]) {
+    let published = expected
+        .iter()
+        .map(|row| (row["collection"].to_string(), row["id"].to_string()))
+        .collect::<std::collections::BTreeSet<_>>();
+    actual.retain(|row| {
+        !READ_TIME_COLLECTIONS
+            .iter()
+            .any(|collection| row["collection"] == *collection)
+            || published.contains(&(row["collection"].to_string(), row["id"].to_string()))
+    });
+}
