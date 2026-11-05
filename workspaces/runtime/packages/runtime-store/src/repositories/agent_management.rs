@@ -292,6 +292,29 @@ pub fn settle_inputs(transaction: &Transaction<'_>, agent: &str) -> StoreResult<
     settle_deleted_inputs(transaction, Some(agent))
 }
 
+/// A stop of an agent with no running turn: cancel the input of the interrupted
+/// start with `reason`, and move the rest of the input that was pending at
+/// `from_epoch` to `to_epoch`, so the queue goes on after the fence.
+pub fn requeue_inputs(
+    transaction: &Transaction<'_>,
+    agent: &str,
+    from_epoch: i64,
+    to_epoch: i64,
+    interrupted: &[String],
+    reason: &str,
+) -> StoreResult<()> {
+    transaction.execute(
+        "UPDATE runtime_events SET status='cancelled',error=?4 \
+         WHERE agent=?1 AND epoch=?2 AND status='pending' AND id IN (SELECT value FROM json_each(?3))",
+        rusqlite::params![agent, from_epoch, studio_json::to_string(interrupted)?, reason],
+    )?;
+    transaction.execute(
+        "UPDATE runtime_events SET epoch=?3 WHERE agent=?1 AND epoch=?2 AND status='pending'",
+        rusqlite::params![agent, from_epoch, to_epoch],
+    )?;
+    Ok(())
+}
+
 /// Stored on input that an archive settled before any turn claimed it.
 pub const ARCHIVED_INPUT_ERROR: &str = "Worker archived before delivery";
 
@@ -531,5 +554,41 @@ mod tests {
             .expect("plan rows")
             .join(" ");
         assert!(plan.contains("runtime_task_agent"), "{plan}");
+    }
+
+    #[test]
+    fn a_stop_requeue_cancels_the_interrupted_start_and_moves_the_rest_of_the_queue() {
+        let mut db = rusqlite::Connection::open_in_memory().expect("memory SQLite");
+        db.execute_batch(
+            "CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,
+               status TEXT,created REAL,epoch INTEGER,turn_id TEXT,error TEXT);
+             INSERT INTO runtime_events VALUES
+               ('started','a','user','x','pending',1,3,NULL,NULL),
+               ('queued','a','user','y','pending',2,3,NULL,NULL),
+               ('old','a','user','z','pending',0,2,NULL,NULL),
+               ('done','a','user','w','delivered',0,3,NULL,NULL),
+               ('other','b','user','v','pending',1,3,NULL,NULL);",
+        )
+        .expect("events");
+        let tx = db.transaction().expect("transaction");
+        super::requeue_inputs(&tx, "a", 3, 4, &["started".to_owned()], "Stopped by user")
+            .expect("requeue");
+        let row = |id: &str| -> (String, i64) {
+            tx.query_row(
+                "SELECT status,epoch FROM runtime_events WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("event")
+        };
+        assert_eq!(row("started"), ("cancelled".to_owned(), 3));
+        assert_eq!(row("queued"), ("pending".to_owned(), 4));
+        assert_eq!(row("old"), ("pending".to_owned(), 2), "another epoch stays");
+        assert_eq!(row("done"), ("delivered".to_owned(), 3));
+        assert_eq!(
+            row("other"),
+            ("pending".to_owned(), 3),
+            "another agent stays"
+        );
     }
 }
