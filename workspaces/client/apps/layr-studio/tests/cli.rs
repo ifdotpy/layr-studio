@@ -2,11 +2,14 @@
 use std::process::{Command, Output};
 
 fn layr_studio(profile: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_layr-studio"))
-        .args(args)
-        .env("CODEX_DESKTOP_PROFILE", profile)
-        .output()
-        .unwrap()
+    Command::new(
+        std::env::var_os("CARGO_BIN_EXE_layr-studio")
+            .expect("cargo sets CARGO_BIN_EXE_layr-studio"),
+    )
+    .args(args)
+    .env("CODEX_DESKTOP_PROFILE", profile)
+    .output()
+    .unwrap()
 }
 
 fn profile() -> tempfile::TempDir {

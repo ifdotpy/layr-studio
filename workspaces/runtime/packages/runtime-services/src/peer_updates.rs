@@ -1101,10 +1101,7 @@ mod tests {
 
     #[test]
     fn desktop_installer_contract_matches_rust_owner() {
-        const INSTALLER: &str = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../client/apps/desktop/desktop_updates.py"
-        ));
+        const INSTALLER: &str = include_str!("../../../../client/apps/desktop/desktop_updates.py");
         // Rust owns the shared values; the retained Python helper is the consumer.
         for line in [
             format!("BUILD_STAMP = Path('{}')", super::BUILD_STAMP),

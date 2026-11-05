@@ -57,7 +57,9 @@ fn outcome(name: &str, case: Case) -> Value {
 
 #[test]
 fn recorded_management_commands_replay_through_decide() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/command_replay");
+    let directory =
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("tests/command_replay");
     let mut cases: Vec<PathBuf> = std::fs::read_dir(&directory)
         .expect("replay fixture directory")
         .map(|entry| entry.expect("replay fixture entry").path())

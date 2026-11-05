@@ -2901,7 +2901,10 @@ async fn supervised_child_observes_explicit_and_inherited_working_directories() 
     let root = tempfile::tempdir().unwrap();
     let executable = root.path().join("provider.mts");
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/native-provider.mts"),
         &executable,
     )
     .unwrap();
@@ -3255,7 +3258,10 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
     .unwrap();
     let executable = fixture._root.path().join("provider.mts");
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/native-provider.mts"),
         &executable,
     )
     .unwrap();
@@ -3581,8 +3587,10 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         .unwrap();
         std::fs::set_permissions(&fake_cli, std::fs::Permissions::from_mode(0o700)).unwrap();
         let bridge_node_modules = CanonicalPath::existing(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../providers/apps/claude-bridge/node_modules"),
+            PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../../providers/apps/claude-bridge/node_modules"),
         )
         .unwrap();
         std::os::unix::fs::symlink(bridge_node_modules, temp.path().join("node_modules")).unwrap();
@@ -4091,7 +4099,10 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
     .unwrap();
     let executable = fixture._root.path().join("provider.mts");
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/native-provider.mts"),
         &executable,
     )
     .unwrap();
@@ -4296,7 +4307,10 @@ async fn direct_generation_and_journal_identity_survive_backend_restart() {
     .unwrap();
     let executable = fixture._root.path().join("provider.mts");
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/native-provider.mts"),
         &executable,
     )
     .unwrap();
@@ -4435,7 +4449,10 @@ async fn direct_child_sigkill_settles_unknown_without_resend() {
     .unwrap();
     let executable = fixture._root.path().join("provider.mts");
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/native-provider.mts"),
         &executable,
     )
     .unwrap();
@@ -4609,7 +4626,10 @@ async fn direct_child_crash_before_turn_write_retries_queued_input_once() {
     .unwrap();
     let executable = fixture._root.path().join("provider.mts");
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/native-provider.mts"),
         &executable,
     )
     .unwrap();
@@ -5091,7 +5111,10 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
     assert!(node.status.success());
     let node = String::from_utf8(node.stdout).unwrap().trim().to_owned();
     let script = std::fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/restart-provider.mts"),
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("tests/fixtures/restart-provider.mts"),
     )
     .unwrap();
     let body = script.split_once('\n').map_or("", |(_, body)| body);

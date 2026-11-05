@@ -19,7 +19,8 @@ use studio_runtime_store::analytics_capture::{AnalyticsCaptureRepository, Captur
 use studio_runtime_store::{RuntimeStore, StoreError};
 
 fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/costs/session-cost-golden.json")
+    PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+        .join("tests/costs/session-cost-golden.json")
 }
 
 fn agent(id: &str, root: &str, provider: &str, account: &str, extra: Value) -> Value {

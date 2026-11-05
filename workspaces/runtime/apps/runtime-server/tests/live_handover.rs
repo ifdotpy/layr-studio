@@ -67,23 +67,26 @@ async fn site() -> Site {
 
 fn server(site: &Site, name: &str, extra: &[&str]) -> Child {
     let log = fs::File::create(site.home.join(format!("{name}.log"))).unwrap();
-    Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .args(["--port", "0"])
-        .args(extra)
-        .current_dir(&site.home)
-        .env_clear()
-        .env("HOME", &site.home)
-        .env("PATH", "/usr/bin:/bin")
-        .env("XDG_STATE_HOME", site.home.join("xdg-state"))
-        .env("XDG_CACHE_HOME", site.home.join("cache"))
-        .env("TMPDIR", &site.home)
-        .env("CODEX_AGENTS_STATE_DIR", &site.state)
-        .stdout(Stdio::piped())
-        .stderr(log)
-        .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap()
+    Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .args(["--port", "0"])
+    .args(extra)
+    .current_dir(&site.home)
+    .env_clear()
+    .env("HOME", &site.home)
+    .env("PATH", "/usr/bin:/bin")
+    .env("XDG_STATE_HOME", site.home.join("xdg-state"))
+    .env("XDG_CACHE_HOME", site.home.join("cache"))
+    .env("TMPDIR", &site.home)
+    .env("CODEX_AGENTS_STATE_DIR", &site.state)
+    .stdout(Stdio::piped())
+    .stderr(log)
+    .stdin(Stdio::null())
+    .kill_on_drop(true)
+    .spawn()
+    .unwrap()
 }
 
 /// The port from the readiness line of a started server.

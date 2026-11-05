@@ -6081,10 +6081,7 @@ mod tests {
     }
 
     mod token_rate_difference {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../runtime-services/tests/support/token_rate_difference.rs"
-        ));
+        include!("../../../runtime-services/tests/support/token_rate_difference.rs");
     }
 
     #[tokio::test]
