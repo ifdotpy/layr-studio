@@ -153,6 +153,7 @@ mod lifecycle;
 pub use lifecycle::START_RETURN_LIMIT;
 pub(crate) use lifecycle::{StartSubmission, ValidatedAttempt};
 mod selection;
+pub use selection::{TERMINALS_CLEAN_HOLD_SECONDS, TERMINALS_CLEAN_PENDING};
 mod steer;
 use lifecycle::*;
 use selection::*;

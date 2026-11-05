@@ -136,6 +136,10 @@ pub struct TerminalCleanup {
 const INTERRUPT_OPERATION_PREFIX: &str = "lifecycle-interrupt:";
 const TERMINALS_OPERATION_PREFIX: &str = "lifecycle-terminals:";
 
+/// The agent field that holds the next queued turn while a stop's command cleanup is
+/// on its way (owner of the hold: `SchedulerRepository` selection).
+pub(crate) const TERMINALS_CLEAN_PENDING: &str = studio_runtime_store::TERMINALS_CLEAN_PENDING;
+
 /// The command cleanup operation of the stop whose interrupt ticket is
 /// `ticket`, or `None` when the ticket is not a stop's. A worker that sends a
 /// stop's unsettled requests later uses these exact operation ids, so the
@@ -331,7 +335,6 @@ impl ProductionLifecyclePorts {
             .and_then(|attempt| attempt.interrupt.as_mut())
             .ok_or(ManagementError::Invalid("Missing interrupt intent"))?
             .root_request_id = Some(root_request_id.clone());
-        AgentRepository::put(tx, &owner)?;
         let terminals = studio_runtime_providers::ProviderKind::of_field(before.get("provider"))
             .ok()
             .and_then(studio_runtime_providers::stop_terminals_method)
@@ -339,6 +342,15 @@ impl ProductionLifecyclePorts {
                 operation: format!("{TERMINALS_OPERATION_PREFIX}{signature}"),
                 method,
             });
+        if terminals.is_some() {
+            // The next queued turn waits for the command cleanup of this one: the
+            // cleanup must not reach the thread after the next turn has started.
+            owner.extra.insert(
+                TERMINALS_CLEAN_PENDING.to_owned(),
+                json!({"ticket": ticket, "at": event_write::unix_time().map_err(|_| ManagementError::Invalid("Invalid clock"))?}),
+            );
+        }
+        AgentRepository::put(tx, &owner)?;
         let request = InterruptRequest {
             ticket,
             root_request_id,
@@ -453,6 +465,30 @@ impl ProductionLifecyclePorts {
                         request.agent, request.thread
                     );
                 }
+            }
+            if request.terminals.is_some() {
+                // The cleanup was sent (or provably not needed): release the next turn.
+                let (agent, ticket) = (request.agent.clone(), request.ticket.clone());
+                self.store
+                    .transaction_with_error(move |tx| {
+                        let Some(mut owner) =
+                            AgentRepository::get(tx, &AgentId::from(agent.as_str()))?
+                        else {
+                            return Ok::<_, ManagementError>(());
+                        };
+                        if owner
+                            .extra
+                            .get(TERMINALS_CLEAN_PENDING)
+                            .and_then(|hold| hold.get("ticket"))
+                            .and_then(Value::as_str)
+                            == Some(ticket.as_str())
+                        {
+                            owner.extra.remove(TERMINALS_CLEAN_PENDING);
+                            AgentRepository::put(tx, &owner)?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
             }
         }
         Ok(())

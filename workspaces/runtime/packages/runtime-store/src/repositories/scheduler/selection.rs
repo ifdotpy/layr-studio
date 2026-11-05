@@ -158,12 +158,21 @@ fn agent_provider_turn(a: &str) -> String {
     unfinished_provider_turn_sql(&agent_id(a))
 }
 
+/// The agent field that a stop of a Codex turn sets until its command cleanup is
+/// sent: `{"ticket":..., "at": seconds}`. A queued turn waits for it, at most
+/// [`TERMINALS_CLEAN_HOLD_SECONDS`], so a cleanup never reaches the next turn and a
+/// lost cleanup never blocks the chat.
+pub const TERMINALS_CLEAN_PENDING: &str = "terminalsCleanPending";
+pub const TERMINALS_CLEAN_HOLD_SECONDS: i64 = 60;
+
 fn account_wake_queued_candidate(a: &str) -> String {
     format!(
         "({status}='queued' \
          AND {auto_wake} \
          AND NOT {busy} \
-         AND COALESCE({a}native_failure_hold,0)=0)",
+         AND COALESCE({a}native_failure_hold,0)=0 \
+         AND COALESCE(json_extract({a}record,'$.{TERMINALS_CLEAN_PENDING}.at'),0) \
+             <= CAST(strftime('%s','now') AS REAL)-{TERMINALS_CLEAN_HOLD_SECONDS})",
         status = agent_chat_status(a),
         auto_wake = chat_has(a, "ch.auto_wake=1"),
         busy = chat_busy_sql(&agent_id(a)),
@@ -2259,6 +2268,41 @@ mod account_wake_index_tests {
         assert_eq!(page["default"].len(), 1);
         assert_eq!(page["default"][0].agent_id, "pending-review");
         assert_eq!(page["default"][0].epoch, 0);
+    }
+
+    #[test]
+    fn a_queued_turn_waits_for_a_recent_stop_cleanup_only() {
+        let mut connection = old_schema();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs_f64();
+        for (id, at) in [("held", now), ("released", now - 120.0)] {
+            put_agent(
+                &connection,
+                id,
+                json!({
+                    "provider":"codex", "accountKey":"default", "epoch":1, "status":"queued",
+                    "autoWake":true, "inFlight":false, "nativeFailureHold":false,
+                    super::TERMINALS_CLEAN_PENDING: {"ticket":"stop","at":at}
+                }),
+            );
+            connection
+                .execute(
+                    "INSERT INTO runtime_events VALUES(?1,?2,'user','input','pending',1,1,NULL,NULL)",
+                    [format!("event-{id}"), id.to_owned()],
+                )
+                .expect("pending event");
+        }
+        install_index(&mut connection);
+        let page =
+            SchedulerRepository::account_wake_page(&connection, "", &BTreeMap::new(), 8, 8, 0.0)
+                .expect("wake page");
+        let ids = page["default"]
+            .iter()
+            .map(|candidate| candidate.agent_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["released"], "a stale hold never blocks the chat");
     }
 
     #[test]
