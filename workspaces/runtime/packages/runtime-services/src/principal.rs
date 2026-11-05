@@ -75,6 +75,8 @@ pub enum CommandClass {
     Host,
     /// Pairing, grants, revoke, settings.
     OwnerOnly,
+    /// Sign-in of a provider account: the owner and a device with full access.
+    AccountSignIn,
     Federation,
 }
 

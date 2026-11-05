@@ -194,14 +194,15 @@ async fn transfer(
             .filter_map(|row| Some((row.id.as_str()?.to_owned(), row.home.as_str()?.to_owned())))
             .collect();
         let home = move |account: &str| homes.get(account).cloned();
-        let simple = if target_provider == ProviderKind::Claude.key() {
+        let scope_name = scope.as_ref().map_or("team", |value| value.as_str());
+        let mut simple = if target_provider == ProviderKind::Claude.key() {
             studio_runtime_services::simple_move::move_claude_chat(
                 &store,
                 lead,
                 &home,
                 target,
                 request_id.as_str(),
-                scope.as_ref().map_or("team", |value| value.as_str()),
+                scope_name,
                 now,
             )
             .await
@@ -209,6 +210,21 @@ async fn transfer(
         } else {
             None
         };
+        if simple.is_none()
+            && let Ok(provider) = target_provider.parse::<ProviderKind>()
+        {
+            simple = studio_runtime_services::simple_move::move_across_providers(
+                &store,
+                lead,
+                target,
+                provider,
+                request_id.as_str(),
+                scope_name,
+                now,
+            )
+            .await
+            .map_err(error)?;
+        }
         match simple {
             Some(moved) => moved,
             None => account_transfer_driver::request(
