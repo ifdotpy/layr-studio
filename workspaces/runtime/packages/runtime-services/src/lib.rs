@@ -277,7 +277,10 @@ mod registration_tests {
 
     #[test]
     fn service_modules_match_the_source_directory_in_alphabetical_order() {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let directory = Path::new(
+            &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("src");
         let path_included_children = fs::read_dir(&directory)
             .expect("services source directory is readable")
             .filter_map(|entry| {

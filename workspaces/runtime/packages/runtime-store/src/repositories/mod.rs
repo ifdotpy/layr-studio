@@ -141,7 +141,10 @@ mod tests {
 
     #[test]
     fn repository_modules_match_the_source_directory_in_alphabetical_order() {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/repositories");
+        let directory = Path::new(
+            &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("src/repositories");
         let mut source_modules = fs::read_dir(&directory)
             .expect("repositories directory is readable")
             .map(|entry| {

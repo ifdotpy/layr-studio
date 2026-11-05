@@ -85,9 +85,11 @@ async fn installed_binary_starts_without_python_or_a_source_tree() {
         let target = skills.join(name);
         fs::create_dir_all(target.parent().unwrap()).unwrap();
         fs::copy(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../../.agents/skills")
-                .join(name),
+            PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../../../.agents/skills")
+            .join(name),
             target,
         )
         .unwrap();
@@ -104,10 +106,11 @@ async fn installed_binary_starts_without_python_or_a_source_tree() {
     .unwrap();
     fs::write(bridge.join("bridge.mjs"), "export {};\n").unwrap();
     let binary = binary_dir.join("studio-runtime-server");
-    let source = env!("CARGO_BIN_EXE_studio-runtime-server");
-    if let Err(error) = fs::hard_link(source, &binary) {
+    let source = std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+        .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server");
+    if let Err(error) = fs::hard_link(&source, &binary) {
         assert_eq!(error.kind(), std::io::ErrorKind::CrossesDevices);
-        fs::copy(source, &binary).expect("cross-device binary copy");
+        fs::copy(&source, &binary).expect("cross-device binary copy");
     }
     assert!(
         !workspace
@@ -162,7 +165,10 @@ async fn installed_binary_starts_without_python_or_a_source_tree() {
     assert!(state.join("canvas.sqlite3").exists());
     assert!(Path::new(&home).is_dir());
     assert!(!binary_dir.join("python-invoked").exists());
-    let source_binary = PathBuf::from(env!("CARGO_BIN_EXE_studio-runtime-server"));
+    let source_binary = PathBuf::from(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    );
     let mut source_child = Command::new(source_binary)
         .args(["--port", "0"])
         .current_dir(&prefix)

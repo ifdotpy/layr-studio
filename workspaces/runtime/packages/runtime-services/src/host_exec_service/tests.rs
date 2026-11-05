@@ -44,7 +44,8 @@ async fn slot_lease_preserves_nullable_generation_number() {
 }
 
 fn repository() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+    Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+        .join("../../../..")
 }
 
 struct Fixture {

@@ -12,16 +12,19 @@ async fn startup_serves_health_and_refuses_commands_while_database_is_busy() {
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").expect("port");
     let port = reservation.local_addr().expect("address").port();
     drop(reservation);
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .args(["--port", &port.to_string()])
-        .env("CODEX_AGENTS_STATE_DIR", state.path())
-        .env_remove("CODEX_BACKEND_BUILD")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .expect("server");
+    let mut child = tokio::process::Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .args(["--port", &port.to_string()])
+    .env("CODEX_AGENTS_STATE_DIR", state.path())
+    .env_remove("CODEX_BACKEND_BUILD")
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .kill_on_drop(true)
+    .spawn()
+    .expect("server");
     async fn request(port: u16, request: &str) -> String {
         // Like the sibling startup tests, allow 30 s: the host may scan a freshly linked
         // binary for several seconds at its first launch, before the server runs.
@@ -77,7 +80,10 @@ async fn migration_startup_failure_prevents_listener_and_readiness() {
         br#"{"version":2,"accounts":{"broken":{}},"logins":{}}"#,
     )
     .expect("invalid current registry");
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"));
+    let mut command = tokio::process::Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    );
     command
         .args(["--port", "0"])
         .env("CODEX_AGENTS_STATE_DIR", state.path())
@@ -108,7 +114,10 @@ async fn migration_startup_unfinished_receipts_prevent_all_recovery() {
     drop(RuntimeStore::open(Some(state.path())).await.expect("fresh"));
     let db = rusqlite::Connection::open(state.path().join("canvas.sqlite3")).expect("database");
     db.execute("UPDATE runtime_payload_migrations SET status='pending',complete=0 WHERE name LIKE '%receipts-tools-finish:%'", []).expect("unfinished receipt checkpoint");
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"));
+    let mut command = tokio::process::Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    );
     command
         .args(["--port", "0"])
         .env("CODEX_AGENTS_STATE_DIR", state.path())

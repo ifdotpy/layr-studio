@@ -6453,9 +6453,13 @@ impl crate::linux_vm_guest::GuestRpc for TurnStartGuest {
 async fn cold_vm_lead_prepares_with_fake_guest_and_returns_guest_workspace_token() {
     let directory = tempfile::tempdir().unwrap();
     let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
-    let source =
-        CanonicalPath::existing(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-            .unwrap();
+    let source = CanonicalPath::existing(
+        PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../../.."),
+    )
+    .unwrap();
     let agent_id = "turn-start-vm-lead";
     let attempt_id = "turn-start-attempt";
     let record = AgentRecord::from_value(json!({"compactions":0,

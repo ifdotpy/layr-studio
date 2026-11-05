@@ -24,11 +24,15 @@ const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const HANG_GUARD: Duration = Duration::from_secs(60);
 
 fn binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_studio-runtime-server"))
+    PathBuf::from(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
 }
 
 fn repository() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+    Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+        .join("../../../..")
 }
 
 struct State {

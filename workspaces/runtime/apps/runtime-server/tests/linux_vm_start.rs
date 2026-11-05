@@ -20,13 +20,16 @@ fn the_helper_starts_in_its_own_session_with_its_arguments() {
     std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
     let state = root.path().join("linux-vm");
     std::fs::create_dir(&state).unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .arg("linux-vm-helper")
-        .arg(&helper)
-        .arg("serve")
-        .arg(&state)
-        .status()
-        .unwrap();
+    let status = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .arg("linux-vm-helper")
+    .arg(&helper)
+    .arg("serve")
+    .arg(&state)
+    .status()
+    .unwrap();
     assert!(status.success());
     let output = std::fs::read_to_string(state.join("helper.out")).unwrap();
     let fields: Vec<&str> = output.trim().splitn(3, ' ').collect();
@@ -36,10 +39,13 @@ fn the_helper_starts_in_its_own_session_with_its_arguments() {
     );
     assert_eq!(fields[2], format!("serve {}", state.display()));
     // Other arguments are refused before anything runs.
-    let refused = Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .args(["linux-vm-helper", "/bin/sh", "-c", "true"])
-        .output()
-        .unwrap();
+    let refused = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .args(["linux-vm-helper", "/bin/sh", "-c", "true"])
+    .output()
+    .unwrap();
     assert_eq!(refused.status.code(), Some(2));
 }
 
@@ -47,12 +53,15 @@ fn the_helper_starts_in_its_own_session_with_its_arguments() {
 #[test]
 fn the_status_command_reports_a_stopped_vm() {
     let root = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .args(["linux-vm", "status", "--state"])
-        .arg(root.path())
-        .env_remove("CODEX_LINUX_VM_STATE_DIR")
-        .output()
-        .unwrap();
+    let output = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .args(["linux-vm", "status", "--state"])
+    .arg(root.path())
+    .env_remove("CODEX_LINUX_VM_STATE_DIR")
+    .output()
+    .unwrap();
     assert!(
         output.status.success(),
         "{}",

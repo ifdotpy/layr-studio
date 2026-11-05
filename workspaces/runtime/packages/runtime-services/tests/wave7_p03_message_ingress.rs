@@ -128,9 +128,11 @@ impl Fixture {
     }
     async fn configure(&self, store: &RuntimeStore, case: &str) {
         let source = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/wave7_p03_message_ingress")
-                .join(format!("{case}.sql")),
+            Path::new(
+                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("tests/wave7_p03_message_ingress")
+            .join(format!("{case}.sql")),
         )
         .expect("frozen live case configuration");
         let sql = self.sql(&source).replace(

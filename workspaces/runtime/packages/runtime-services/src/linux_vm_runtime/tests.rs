@@ -953,7 +953,8 @@ fn the_console_tells_a_kernel_death_and_the_provisioning_state() {
 #[test]
 fn the_maintenance_lock_name_matches_its_desktop_owner() {
     let owner = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../client/apps/desktop/desktop_vm.py"),
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("../../../client/apps/desktop/desktop_vm.py"),
     )
     .unwrap();
     assert!(

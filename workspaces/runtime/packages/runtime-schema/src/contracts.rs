@@ -2040,9 +2040,16 @@ pub fn stale(root: &Path, rendered: &[Rendered]) -> Vec<String> {
         .collect()
 }
 
-/// The repository root of this source tree.
+/// The repository root of this source tree. Cargo sets `CARGO_MANIFEST_DIR`
+/// for `cargo run` and `cargo test`. It is read at run time: a path baked in at
+/// compile time names one checkout, so a copied build cache must rebuild this
+/// crate and every crate that depends on it. Without cargo, the current
+/// directory is the root.
 pub fn repository_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+    std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(
+        || PathBuf::from("."),
+        |dir| Path::new(&dir).join("../../../.."),
+    )
 }
 
 #[cfg(test)]

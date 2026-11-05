@@ -1410,18 +1410,9 @@ mod tests {
     #[test]
     fn desk_partial_views_track_producer_fields_and_legacy_json() {
         use studio_runtime_schema::json_object::JsonObject;
-        let main = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../apps/layr-desk/crates/layr-desk/src/main.rs"
-        ));
-        let service = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../apps/layr-desk/crates/layr-desk/src/service.rs"
-        ));
-        let setup = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../apps/layr-desk/crates/layr-desk/src/setup.rs"
-        ));
+        let main = include_str!("../../../../apps/layr-desk/crates/layr-desk/src/main.rs");
+        let service = include_str!("../../../../apps/layr-desk/crates/layr-desk/src/service.rs");
+        let setup = include_str!("../../../../apps/layr-desk/crates/layr-desk/src/setup.rs");
         assert!(desk_producer_fields_match(main, service, setup));
         let changed_setup = setup.replace(
             r#"json!({"stack": stack, "site": site, "bucket": bucket_name})"#,

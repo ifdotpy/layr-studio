@@ -160,9 +160,8 @@ impl PreparationResources {
         account_home: String,
         model_catalog: ModelCatalogService,
     ) -> Result<Self, WorkerError> {
-        let root =
-            CanonicalPath::existing(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .map_err(|_| invalid("repository root"))?;
+        let root = CanonicalPath::existing(studio_runtime_schema::contracts::repository_root())
+            .map_err(|_| invalid("repository root"))?;
         Self::bundled_at(account_home, model_catalog, root.to_path_buf())
     }
 

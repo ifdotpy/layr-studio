@@ -736,10 +736,10 @@ fn provider_frames_are_passed_to_dispatch_in_order_without_method_filtering() {
 
 #[test]
 fn all_recorded_replay_fixture_frames_parse_through_the_session() {
-    let root = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/provider-replay"
-    );
+    let root = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("tests/fixtures/provider-replay");
     for entry in std::fs::read_dir(root).expect("fixtures directory") {
         let path = entry.expect("fixture entry").path();
         if !path.extension().is_some_and(|ext| ext == "json") {

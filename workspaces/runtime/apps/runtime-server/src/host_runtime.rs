@@ -136,8 +136,8 @@ fn resolve_install_root_from_executable(
     }
 
     #[cfg(debug_assertions)]
-    {
-        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    if let Some(manifest) = std::env::var_os("CARGO_MANIFEST_DIR") {
+        let source_root = PathBuf::from(manifest).join("../../../..");
         let source_root =
             studio_runtime_store::path_identity::CanonicalPath::existing(&source_root)
                 .map_err(|_| located())?;
@@ -2229,7 +2229,10 @@ mod install_root_tests {
     #[test]
     fn bridge_matches_install_layout_in_both_modes() {
         let source_checkout = studio_runtime_store::path_identity::CanonicalPath::existing(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."),
+            PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../../.."),
         )
         .unwrap();
         let source_layout = InstallRoot(source_checkout.clone().to_path_buf());
@@ -2272,7 +2275,10 @@ mod install_root_tests {
         assert_eq!(
             resolved.unwrap().workspace_root(),
             studio_runtime_store::path_identity::CanonicalPath::existing(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+                PathBuf::from(
+                    std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR")
+                )
+                .join("../../../..")
             )
             .unwrap()
         );
