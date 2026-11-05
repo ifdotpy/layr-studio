@@ -3359,8 +3359,8 @@ export default function App({ active = true }: { active?: boolean }) {
                             }
                           />
                           <small>
-                            Applies to messages and composer. Narrow screens use
-                            the full available width.
+                            Sets the reading width of messages. The composer
+                            keeps its width. Narrow screens use the full width.
                           </small>
                         </div>
                       </SettingsRow>

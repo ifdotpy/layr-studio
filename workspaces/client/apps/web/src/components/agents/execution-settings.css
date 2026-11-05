@@ -102,8 +102,46 @@
   overflow-wrap: anywhere;
 }
 
-/* Lead, Workers and Review switch inside one popover height, so the
-   popover never grows or jumps while the user compares roles. */
+/* The picker keeps one height for every role, in the composer popover and in
+   New chat. Content stacks from the top; free space stays at the bottom, and
+   only the model list shrinks and scrolls when a role needs more room. So
+   switching Lead, Workers and Review changes content, never the size. */
 .mantine-Popover-dropdown.execution-dropdown {
-  min-height: 23rem;
+  display: flex;
+  flex-direction: column;
+  height: min(
+    var(--studio-model-picker-height),
+    calc(100dvh - 2 * var(--mantine-spacing-md))
+  );
+}
+/* New chat has no popover padding and adds a Start row, so it takes 3rem
+   more of the same height. */
+.new-chat-model-settings {
+  height: calc(var(--studio-model-picker-height) + 3rem);
+}
+.mantine-Popover-dropdown.execution-dropdown > div,
+.new-chat-model-settings > .execution-profile-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-height: 0;
+}
+:is(.execution-dropdown, .new-chat-model-settings) .execution-profile {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+:is(.execution-dropdown, .new-chat-model-settings)
+  .execution-profile
+  > .model-field {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+:is(.execution-dropdown, .new-chat-model-settings) .setup-models {
+  flex: 0 1 auto;
+  align-content: start;
+  min-height: 0;
+  max-height: none;
 }

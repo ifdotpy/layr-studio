@@ -726,9 +726,11 @@
   .usage-footer .context-use {
     min-width: max(4.75rem, var(--studio-secondary-touch-target));
   }
+  /* As a flex row the label's trailing space collapses; the gap keeps it. */
   .usage-footer .session-cost-summary {
     display: flex;
     align-items: center;
+    gap: 0.25em;
   }
   .usage-footer {
     gap: var(--mantine-spacing-xs);

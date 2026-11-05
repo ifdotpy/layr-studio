@@ -201,7 +201,9 @@ export default function AgentPhase({
       )}
       {liveWait ? (
         <details className="agent-phase-wait">
-          <summary>{wait.label}</summary>
+          <summary>
+            <span className="agent-phase-wait-label">{wait.label}</span>
+          </summary>
           <div className="agent-phase-wait-details">
             <p>{wait.label}</p>
             <ul>
