@@ -47,6 +47,12 @@ const FEATURE_SCHEMA: &str = r#"
             -- it with the new row to find team, room and liveness changes, and keeps a
             -- lead's team counts so a member change marks the lead only when they
             -- change. The views themselves are built at read time.
+            -- Owner, created time and running state of each task in the client task
+            -- window, so a task write can place it without its document.
+            CREATE TABLE IF NOT EXISTS task_window_state (id TEXT PRIMARY KEY,
+                agent TEXT NOT NULL, created REAL, running INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS task_window_state_history
+                ON task_window_state(created DESC) WHERE NOT running;
             CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
                 root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
                 team_counts TEXT);

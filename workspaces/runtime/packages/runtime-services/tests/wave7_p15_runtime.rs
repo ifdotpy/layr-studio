@@ -1008,7 +1008,7 @@ async fn cancelled_intent_is_committed_before_transport_and_rolls_back_on_each_w
     let root = fixtures::tempdir();
     let cases = fixtures::corpus(root.path());
     let case = running(&cases);
-    for table in ["runtime_monitors", "sync_entities"] {
+    for table in ["runtime_monitors", "durable_rows"] {
         for timing in ["BEFORE", "AFTER"] {
             let store =
                 Arc::new(fixtures::store(root.path(), &format!("cancel-{table}-{timing}")).await);

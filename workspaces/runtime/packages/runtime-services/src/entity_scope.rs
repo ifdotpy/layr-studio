@@ -26,8 +26,8 @@ use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
     AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult,
-    SyncDocumentsRepository, WORK_COLLECTIONS, WorkItemRecord, WorkItemsRepository, WorkStatus,
-    durable_seq, work_history,
+    SyncDocumentsRepository, WINDOW_COLLECTIONS, WORK_COLLECTIONS, WorkItemRecord,
+    WorkItemsRepository, WorkStatus, durable_seq, work_history,
 };
 
 use crate::work_write::{WorkWriteError, current_submission_refusal};
@@ -370,6 +370,16 @@ pub fn continue_page(
             agent,
             fetch,
         )?);
+        units.extend(window_units(
+            transaction,
+            after,
+            through,
+            deletes_after,
+            &wanted,
+            id,
+            agent.map(|agent| (agent, include_team_members)),
+            fetch,
+        )?);
     }
     units.sort_by_key(|unit| unit.seq);
     let truncated = units.len() as i64 > limit;
@@ -396,6 +406,7 @@ fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>>
         .iter()
         .chain(DIRECT_COLLECTIONS)
         .chain(AGENT_VIEW_COLLECTIONS)
+        .chain(WINDOW_COLLECTIONS)
         .copied();
     let Some(raw) = collections_json else {
         return Ok(all.collect());
@@ -697,6 +708,88 @@ pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
             .flat_map(|unit| unit.rows)
             .collect(),
     )
+}
+
+/// Units of the window collections in `(after, through]`, at most `fetch` per window:
+/// one per member change or change of a member's row, at the later number. A member
+/// that left the window is a delete in a delta. `agent` keeps the documents of one
+/// owner (and of its team members when the flag is set); a delete always passes.
+#[allow(clippy::too_many_arguments)]
+fn window_units(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+    deletes_after: i64,
+    wanted: &BTreeSet<&'static str>,
+    id: Option<&str>,
+    agent: Option<(&str, bool)>,
+    fetch: i64,
+) -> StoreResult<Vec<Unit>> {
+    let mut units = Vec::new();
+    let snapshot = deletes_after == i64::MAX;
+    for (collection, window, source) in [
+        ("task", durable_seq::TASK_WINDOW, "runtime_tasks"),
+        ("monitor", durable_seq::MONITOR_WINDOW, "runtime_monitors"),
+    ] {
+        if !wanted.contains(collection) {
+            continue;
+        }
+        let changed: Vec<(String, i64, bool)> = connection
+            .prepare_cached(
+                "SELECT x.id,MAX(x.seq) AS last,w.deleted FROM (
+                   SELECT id,seq FROM durable_rows WHERE tbl=?1 AND seq>?3 AND seq<=?4
+                     AND (deleted=0 OR seq>?5)
+                   UNION ALL
+                   SELECT d.id,d.seq FROM durable_rows d WHERE d.tbl=?2 AND d.deleted=0
+                     AND d.seq>?3 AND d.seq<=?4
+                     AND EXISTS(SELECT 1 FROM durable_rows w WHERE w.tbl=?1 AND w.id=d.id AND w.deleted=0)
+                 ) x JOIN durable_rows w ON w.tbl=?1 AND w.id=x.id
+                 WHERE ?6 IS NULL OR x.id=?6
+                 GROUP BY x.id ORDER BY last LIMIT ?7",
+            )?
+            .query_map(
+                params![window, source, after, through, deletes_after, id, fetch],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
+            )?
+            .collect::<Result<_, _>>()?;
+        for (member, seq, left) in changed {
+            let view = if left {
+                None
+            } else {
+                crate::sync_policy::window_view(connection, collection, &member).or_else(
+                    |error| {
+                        // One member that does not decode must not stop the stream.
+                        eprintln!("{collection} {member} is not streamed: {error}");
+                        Ok::<_, StoreError>(None)
+                    },
+                )?
+            };
+            let rows = match view {
+                Some((owner, value)) => {
+                    if let Some((agent, team)) = agent
+                        && owner != agent
+                        && !(team && team_member(connection, &owner, agent)?)
+                    {
+                        continue;
+                    }
+                    vec![upsert(collection, &member, seq, value)?]
+                }
+                None if snapshot => continue,
+                None => tombstones(&[collection], wanted, &member, seq),
+            };
+            units.push(Unit { seq, rows });
+        }
+    }
+    Ok(units)
+}
+
+/// Whether `agent` is a live member of the team of `root`.
+fn team_member(connection: &Connection, agent: &str, root: &str) -> StoreResult<bool> {
+    Ok(connection
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?1 AND root_id=?2 AND deleted_at IS NULL)",
+        )?
+        .query_row([agent, root], |row| row.get(0))?)
 }
 
 /// The `edge` document of a chat membership edge; None for another kind.

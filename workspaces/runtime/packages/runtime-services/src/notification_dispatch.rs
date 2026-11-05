@@ -944,6 +944,26 @@ pub(crate) fn put_task_record(
     kinds::put_task(tx, task)
 }
 
+/// Test entry to the canonical task writer and its window, for other crates' tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_put_task(
+    tx: &Transaction<'_>,
+    task: &studio_runtime_store::TaskRecord,
+) -> Result<(), NotificationDispatchError> {
+    kinds::put_checked_task(tx, task)?;
+    crate::sync_policy::maintain_task_window(tx, &|_, _, _, _| true)?;
+    Ok(())
+}
+
+/// Test entry: delete a task row and keep its window.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_delete_task(tx: &Transaction<'_>, id: &str) -> Result<(), NotificationDispatchError> {
+    tx.execute("DELETE FROM runtime_tasks WHERE id=?1", [id])
+        .map_err(studio_runtime_store::StoreError::from)?;
+    crate::sync_policy::maintain_task_window(tx, &|_, _, _, _| true)?;
+    Ok(())
+}
+
 pub(crate) fn put_checked_task_record(
     tx: &Transaction<'_>,
     task: &studio_runtime_store::TaskRecord,

@@ -215,7 +215,14 @@ per row of a main table: `plan` (`runtime_plans`), `annotation` (`runtime_annota
 (chat rows of `graph_edges`). A `chat` document reads its group, its member edges and
 its messages; their writers mark the chat (`durable_rows` table `chat_views`), so a
 member change or a new message refreshes it. Migration `2026-11-04-chat-read-time`
-numbered these rows, marked every chat and deleted the copies. They are built
+numbered these rows, marked every chat and deleted the copies. The task and monitor windows
+(`WINDOW_COLLECTIONS`) keep only their members in `durable_rows` (`task_window`,
+`monitor_window`); the writer that owns the window rule joins and leaves members, and a
+member's document is built from `runtime_tasks` or `runtime_monitors` at read time. A
+change of a member row or of its membership is sent at the later number; a member that
+left is a delete. `task_window_state` keeps the owner, created time and running state the
+task window compares. A task that moves to another agent resets the scoped readers of
+both owners. Migration `2026-11-04-window-read-time` moved the members of the copies. They are built
 at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
 their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
 agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that
