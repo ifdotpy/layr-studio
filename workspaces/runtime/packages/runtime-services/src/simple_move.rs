@@ -1,7 +1,8 @@
 //! A Claude chat moves to another Claude account of this server by copying its
 //! session files and switching the account in one transaction. Both accounts
 //! run on this host, so the target process opens the same session on its next
-//! turn. Chats that are busy, or that change provider, use the transfer flow.
+//! turn. A chat that changes provider starts a new session that reads a
+//! transcript of its Studio items. Busy chats use the transfer flow.
 
 use crate::account_transfer::TransferError;
 use std::path::{Path, PathBuf};
@@ -308,5 +309,183 @@ mod tests {
         assert!(Movable::read(&busy, "claude-b").is_none());
         assert!(Movable::read(&idle, "login-codex").is_none());
         assert!(Movable::read(&idle, "claude-a").is_none());
+    }
+}
+
+/// The readable transcript of a chat from its Studio items, oldest first.
+fn transcript(items: &[Value]) -> String {
+    let mut text = String::new();
+    for item in items {
+        let role = match item["role"].as_str() {
+            Some("user") => "User",
+            Some("assistant") => "Assistant",
+            _ => continue,
+        };
+        let body = item["text"].as_str().unwrap_or_default();
+        if !body.is_empty() {
+            text.push_str(&format!("{role}: {body}\n\n"));
+        }
+    }
+    text
+}
+
+/// The note that tells the next session where the earlier conversation is.
+fn history_note(path: &Path, provider: &str) -> String {
+    format!(
+        "\n\nThis chat moved from another provider ({provider}). The earlier conversation is in {}. Read it before you continue; do not repeat finished work.",
+        path.display()
+    )
+}
+
+/// Move an idle chat to an account of another provider. The new provider has
+/// no copy of the native history, so the chat starts a new session that reads
+/// a transcript of its Studio items. Returns `None` when the chat is busy or
+/// has no role guidance to carry the note, so the caller uses the transfer flow.
+#[allow(clippy::too_many_arguments)]
+pub async fn move_across_providers(
+    store: &RuntimeStore,
+    lead: &str,
+    target: &str,
+    target_provider: studio_runtime_providers::ProviderKind,
+    request_id: &str,
+    scope: &str,
+    now: f64,
+) -> Result<Option<Value>, TransferError> {
+    let id = lead.to_owned();
+    let read = store
+        .read_async("runtime-services/simple_move_cross", move |tx| {
+            let Some(agent) = AgentRepository::get(tx, &AgentId::from(id.as_str()))? else {
+                return Ok::<_, StoreError>(None);
+            };
+            let mut rows = tx.prepare(
+                "SELECT record FROM runtime_items WHERE agent=?1 ORDER BY created, rowid",
+            )?;
+            let items = rows
+                .query_map([id.as_str()], |row| row.get::<_, String>(0))?
+                .filter_map(|row| row.ok())
+                .filter_map(|raw| studio_json::from_str::<Value>(&raw).ok())
+                .collect::<Vec<_>>();
+            Ok(Some((agent.value(), items)))
+        })
+        .await?;
+    let Some((agent, items)) = read else {
+        return Ok(None);
+    };
+    let source_provider = agent["provider"].as_str().unwrap_or("codex").to_owned();
+    let busy = agent["inFlight"].as_bool() == Some(true)
+        || matches!(agent["status"].as_str(), Some("running" | "starting"));
+    let guidance = agent["nativeRoleGuidance"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let cwd = agent["cwd"].as_str().unwrap_or_default().to_owned();
+    if busy
+        || source_provider == target_provider.key()
+        || guidance.is_empty()
+        || cwd.is_empty()
+        || agent
+            .get("environment")
+            .is_some_and(|value| value != "host")
+    {
+        return Ok(None);
+    }
+    let text = transcript(&items);
+    let directory = PathBuf::from(&cwd).join(".studio-history");
+    let path = directory.join(format!("{lead}-{}.md", now as u64));
+    let (file_path, body) = (path.clone(), text);
+    studio_runtime_process::blocking_pool::spawn_blocking(
+        "runtime-services/simple_move_cross",
+        move || {
+            std::fs::create_dir_all(&directory)?;
+            std::fs::write(&file_path, body)
+        },
+    )
+    .await
+    .map_err(|_| TransferError::Refused("The transcript write stopped"))?
+    .map_err(|_| TransferError::Refused("The transcript could not be written"))?;
+    let (id, target_key) = (lead.to_owned(), target.to_owned());
+    let note = history_note(&path, &source_provider);
+    let source_epoch = agent["epoch"].clone();
+    store
+        .transaction_with_error(move |tx| {
+            let mut value = AgentRepository::get(tx, &AgentId::from(id.as_str()))?
+                .ok_or(TransferError::Refused("Unknown managed agent"))?
+                .value();
+            if value["epoch"] != source_epoch
+                || value["inFlight"].as_bool() == Some(true)
+                || value["provider"].as_str() != Some(source_provider.as_str())
+            {
+                return Err(TransferError::Refused(
+                    "The chat changed during the account move",
+                ));
+            }
+            value["accountKey"] = json!(target_key);
+            value["executionSettingsAccountKey"] = json!(target_key);
+            value["provider"] = json!(target_provider.key());
+            value["model"] = json!(crate::provider_adapter::default_model(target_provider));
+            value["effort"] = json!("medium");
+            value["nativeEffort"] = json!("medium");
+            value["fastMode"] = json!(false);
+            value["nativeRoleGuidance"] = json!(format!("{guidance}{note}"));
+            if let Some(object) = value.as_object_mut() {
+                for key in [
+                    "threadId",
+                    "frozenNativeParams",
+                    "claudeOptions",
+                    "pendingSettings",
+                    "pendingSettingsAccountKey",
+                    "accountTransfer",
+                    "accountTransferId",
+                    "lazyAccountTransfer",
+                ] {
+                    object.remove(key);
+                }
+            }
+            AgentRepository::put(
+                tx,
+                &serde::Deserialize::deserialize(value.clone()).map_err(StoreError::from)?,
+            )?;
+            crate::agents_create::publish_agent(tx, &value)?;
+            Ok::<_, TransferError>(())
+        })
+        .await?;
+    Ok(Some(json!({
+        "id": request_id,
+        "leadId": lead,
+        "targetAccountKey": target,
+        "targetProvider": target_provider.key(),
+        "status": "completed",
+        "scope": scope,
+        "created": now,
+        "updated": now,
+        "members": {},
+        "total": 1,
+        "completed": 1,
+        "moved": 1,
+    })))
+}
+
+#[cfg(test)]
+mod cross_tests {
+    use super::*;
+
+    #[test]
+    fn the_transcript_keeps_user_and_assistant_text_in_order() {
+        let items = vec![
+            json!({"role":"user","text":"Build the drawing"}),
+            json!({"role":"output","text":"tool noise"}),
+            json!({"role":"assistant","text":"Done"}),
+        ];
+        assert_eq!(
+            transcript(&items),
+            "User: Build the drawing\n\nAssistant: Done\n\n"
+        );
+    }
+
+    #[test]
+    fn the_note_names_the_transcript_file() {
+        let note = history_note(Path::new("/p/.studio-history/a.md"), "claude");
+        assert!(note.contains("/p/.studio-history/a.md"));
+        assert!(note.contains("claude"));
     }
 }
