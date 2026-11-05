@@ -851,6 +851,13 @@ async fn dispatch_request(
                 ReceiptOutcome::NotHandedOff(cause),
             ));
         }
+        // The worker refuses an invalid or over-capacity request before any send.
+        Err(studio_runtime_services::account_worker::retained::PortError::Invalid) => {
+            return Ok(not_sent_receipt(
+                fallback_request,
+                ReceiptOutcome::NotHandedOff("invalid-request".into()),
+            ));
+        }
         Err(studio_runtime_services::account_worker::retained::PortError::Deadline) => {
             return Ok(not_sent_receipt(
                 fallback_request,

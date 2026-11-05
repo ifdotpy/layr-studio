@@ -80,7 +80,7 @@
         "nativeMethod": {
           "anyOf": [
             {
-              "enum": ["thread/start", "thread/fork"],
+              "enum": ["thread/start", "thread/fork", "claude/moveImport"],
               "type": "string"
             },
             {
