@@ -860,10 +860,12 @@ mod tests {
         let (_directory, state) = fixture().await;
         // The store names its folder by the canonical path: on macOS the temporary
         // folder /var/folders is /private/var/folders.
-        let state_dir = std::fs::canonicalize(_directory.path())
-            .expect("canonical state folder")
-            .display()
-            .to_string();
+        let state_dir =
+            studio_runtime_store::path_identity::CanonicalPath::existing(_directory.path())
+                .expect("canonical state folder")
+                .to_path_buf()
+                .display()
+                .to_string();
         let store = state.store.as_ref().expect("store");
         studio_runtime_services::entity_publication::install(store)
             .await
