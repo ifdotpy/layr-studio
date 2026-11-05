@@ -1,4 +1,4 @@
-import { useSheetSwipe } from "../ui/useSheetSwipe";
+import BottomSheet from "../ui/BottomSheet";
 import { appendAppLog } from "../../appLog";
 import { AgentStatus } from "../../generated/api";
 import { randomUUID } from "../../uuid";
@@ -15,7 +15,6 @@ import {
   Button,
   Modal,
   Popover,
-  Drawer,
   Switch,
   SegmentedControl,
   NativeSelect,
@@ -2035,33 +2034,24 @@ function ExecutionMenu({
 }) {
   const mobile = useMediaQuery("(max-width: 760px)");
   const popoverLabelId = useId();
-  const swipe = useSheetSwipe(() => setOpened(false));
   if (mobile)
     return (
       <>
         {trigger}
-        <Drawer
+        <BottomSheet
           opened={opened}
           onClose={() => setOpened(false)}
           closeOnEscape={false}
           closeOnClickOutside={!accountModalOpen}
           trapFocus={!accountModalOpen}
           returnFocus
-          position="bottom"
-          size="auto"
-          title={
-            // The title row is the grip: drag it down to close the sheet.
-            <span className="sheet-grip" {...swipe}>
-              {label}
-            </span>
-          }
+          title={label}
           className="setup-sheet"
-          withinPortal
         >
           <div className="execution-dropdown" role="region" aria-label={label}>
             {children}
           </div>
-        </Drawer>
+        </BottomSheet>
         {statusModal}
       </>
     );

@@ -422,9 +422,10 @@ export const layoutTokens = {
       "Minimum side safe-area strip for the Duo rail, excluding ordinary phone notch insets",
   },
   "edgeRail.statusReserve": {
-    value: 112,
+    value: 168,
     unit: "px",
-    purpose: "Clearance below the side strip system status cluster",
+    purpose:
+      "Clearance below the side strip system status cluster: clock, battery ring and cellular signal end 157px from the top on the iPhone Duo (device screenshot, 2026-11-05), plus a gap",
   },
   "legacy_style.dimension120": {
     value: 44,
@@ -757,6 +758,18 @@ export const layoutTokens = {
     purpose:
       "Main src/components/conversation/empty-chat-settings.css query: @container composer (max-width: 20em) {",
   },
+  "composer.summaryOneLineMax": {
+    value: 50,
+    unit: "em",
+    purpose:
+      "Composer width below which the execution summary stays on one line and non-lead roles shrink with an ellipsis (composer font 14px)",
+  },
+  "composer.summaryLeadOnlyMax": {
+    value: 30,
+    unit: "em",
+    purpose:
+      "Composer width below which the execution summary shows the Lead model only (composer font 14px, so 420px)",
+  },
   "edgeRail.statusColumnCenter": {
     value: 48,
     unit: "px",
@@ -1015,7 +1028,7 @@ export const layoutValues = {
   },
   edgeRail: {
     minInset: 64,
-    statusReserve: 112,
+    statusReserve: 168,
     statusColumnCenter: 48,
     menuGap: 8,
     buttonSize: 48,
@@ -1129,6 +1142,10 @@ export const layoutValues = {
     query7a8a99ac: 35,
     query62cf757f: 25,
     query7269dc35: 20,
+  },
+  composer: {
+    summaryOneLineMax: 50,
+    summaryLeadOnlyMax: 30,
   },
   legacy_main_workspace: {
     diffLineNumberWidth: 48,

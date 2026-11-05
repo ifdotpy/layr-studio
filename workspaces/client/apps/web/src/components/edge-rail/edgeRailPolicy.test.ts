@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { layoutValues } from "../../layout/layout-contract.generated";
 import { edgeRailGeometry } from "./edgeRailPolicy";
 
 const metrics = { minimumInset: 44, statusReserve: 112, targetSize: 44 };
@@ -19,6 +20,19 @@ describe("edge rail geometry", () => {
       targetSize: 44,
       center: 42,
     });
+  });
+
+  test("starts the first contract button below the tallest Duo status cluster", () => {
+    // Device screenshot, 2026-11-05: clock, battery ring and cellular signal
+    // end 157px below the top of the strip; a button there hides under them.
+    const statusClusterBottom = 157;
+    const { minInset, statusReserve, buttonSize } = layoutValues.edgeRail;
+    const geometry = edgeRailGeometry(duo, {
+      minimumInset: minInset,
+      statusReserve,
+      targetSize: buttonSize,
+    });
+    expect(geometry?.top).toBeGreaterThanOrEqual(statusClusterBottom + 8);
   });
 
   test("centers buttons on the system status column, inside the strip", () => {

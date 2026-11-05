@@ -1,5 +1,6 @@
 import { fixtureOrigin } from "../../../tests/misc-fixture.ts";
 import { fileURLToPath } from "node:url";
+import { layoutValues } from "../../layout/layout-contract.generated";
 import {
   test,
   expect,
@@ -76,9 +77,9 @@ for (const capability of [
       await expect(rail).toBeVisible();
       expect((await rail.boundingBox())!).toEqual({
         x: 867,
-        y: 112,
+        y: layoutValues.edgeRail.statusReserve,
         width: 84,
-        height: 523,
+        height: 635 - layoutValues.edgeRail.statusReserve,
       });
       await page.screenshot({
         path: test.info().outputPath("edge-rail-right.png"),
@@ -153,7 +154,7 @@ for (const capability of [
       });
       await expect
         .poll(async () => (await rail.boundingBox())!.height)
-        .toBe(128);
+        .toBe(240 - layoutValues.edgeRail.statusReserve);
       await rail
         .getByRole("button", { name: "Chat actions", exact: true })
         .focus();

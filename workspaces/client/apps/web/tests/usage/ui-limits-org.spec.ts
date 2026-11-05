@@ -135,6 +135,13 @@ test("Rust model decisions and safe Claude organizations at 320 and 1200 pixels"
       }
       await page.clock.fastForward(61_000);
       await assertNoModelDetails();
+      // On a phone the limits open as a modal sheet over the page; close it
+      // before the notice behind it takes a click.
+      if (width < 760) {
+        await page.keyboard.press("Escape");
+        await page.clock.fastForward(1000);
+        await expect(page.locator(".account-limits-panel")).toBeHidden();
+      }
       await page
         .getByRole("button", { name: "Show accounts", exact: true })
         .click();
