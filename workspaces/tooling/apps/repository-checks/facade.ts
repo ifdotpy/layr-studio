@@ -1191,6 +1191,14 @@ export function gateSteps(root: string, name: string): GateStep[] {
         options: { allowZeroTests: true },
       },
       {
+        // Every CSS and TS layout consumer must name its layout contract owner.
+        id: "layout-contract",
+        label: "layout contract consumers",
+        lane: "js",
+        item: tooling,
+        options: { script: "layout:check", allowZeroTests: true },
+      },
+      {
         id: "tooling",
         label: "tooling tests",
         lane: "js",

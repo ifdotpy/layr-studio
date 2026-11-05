@@ -397,6 +397,7 @@ export function useSnapshot(
   return {
     data: visibleData,
     error: snapshotProjectionError(projectionStatus),
+    transportError: projectionStatus.transportError,
     refresh,
     workspaceId,
     rememberCreated,
