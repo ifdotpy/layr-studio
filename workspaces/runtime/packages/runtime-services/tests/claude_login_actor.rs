@@ -127,7 +127,10 @@ async fn auth_repair_regression_post_login_allows_only_fresh_safe_continuation()
         f.accounts.clone(),
         f.launcher.clone(),
         f.receipts.clone(),
-        Arc::new(StoredChats(store.clone())),
+        Arc::new(StoredChats::new(
+            store.clone(),
+            Arc::new(tokio::sync::Notify::new()),
+        )),
         Arc::new(move |_| changed.notify_one()),
     )
     .await

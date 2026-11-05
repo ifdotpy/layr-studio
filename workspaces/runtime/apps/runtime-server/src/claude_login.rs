@@ -35,7 +35,7 @@ pub async fn attach(
             accounts,
             Arc::new(StreamLauncher),
             receipts,
-            Arc::new(StoredChats(store)),
+            Arc::new(StoredChats::new(store, state.continuation_wake_handle())),
             on_change,
         )
         .await?,
