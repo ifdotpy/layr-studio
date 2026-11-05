@@ -658,9 +658,10 @@ async function setupMobile320Composer(testBrowser: Browser) {
       await expect(usage.locator(".session-cost-summary")).toContainText(
         "$2.00",
       );
-      await usage
-        .getByRole("button", { name: "Account limits", exact: true })
-        .click();
+      // On a phone the limits open as a sheet over the footer; it closes from
+      // the sheet, not from the covered footer button.
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".account-limits-panel")).toBeHidden();
       await expect(usage.locator(".session-cost-summary")).toHaveAttribute(
         "aria-busy",
         "false",

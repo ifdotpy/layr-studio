@@ -396,9 +396,9 @@
       "purpose": "Minimum side safe-area strip for the Duo rail, excluding ordinary phone notch insets"
     },
     "edgeRail.statusReserve": {
-      "value": 112,
+      "value": 168,
       "unit": "px",
-      "purpose": "Clearance below the side strip system status cluster"
+      "purpose": "Clearance below the side strip system status cluster: clock, battery ring and cellular signal end 157px from the top on the iPhone Duo (device screenshot, 2026-11-05), plus a gap"
     },
     "legacy_style.dimension120": {
       "value": 44,
@@ -689,6 +689,16 @@
       "value": 20,
       "unit": "em",
       "purpose": "Main src/components/conversation/empty-chat-settings.css query: @container composer (max-width: 20em) {"
+    },
+    "composer.summaryOneLineMax": {
+      "value": 50,
+      "unit": "em",
+      "purpose": "Composer width below which the execution summary stays on one line and non-lead roles shrink with an ellipsis (composer font 14px)"
+    },
+    "composer.summaryLeadOnlyMax": {
+      "value": 30,
+      "unit": "em",
+      "purpose": "Composer width below which the execution summary shows the Lead model only (composer font 14px, so 420px)"
     },
     "edgeRail.statusColumnCenter": {
       "value": 48,
@@ -2013,6 +2023,24 @@
       "key": "legacy_main_components_conversation_empty_chat_settings.query62cf757f",
       "plannedOwner": "main visual component",
       "purpose": "Retain the main component's exact query contract during responsive integration"
+    },
+    {
+      "path": "src/components/conversation/empty-chat-settings.css",
+      "kind": "query",
+      "signature": "@container composer (max-width: 50em) {",
+      "count": 1,
+      "key": "composer.summaryOneLineMax",
+      "plannedOwner": "main visual component",
+      "purpose": "Keep the execution summary on one line in a narrow composer"
+    },
+    {
+      "path": "src/components/conversation/empty-chat-settings.css",
+      "kind": "query",
+      "signature": "@container composer (max-width: 30em) {",
+      "count": 1,
+      "key": "composer.summaryLeadOnlyMax",
+      "plannedOwner": "main visual component",
+      "purpose": "Show only the Lead model in a phone composer"
     },
     {
       "path": "src/components/conversation/empty-chat-settings.css",

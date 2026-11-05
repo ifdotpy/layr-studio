@@ -139,6 +139,11 @@ vi.mock("../sync/localDraft", async (importOriginal) => ({
   },
 }));
 vi.mock("../sync/send", () => ({ reconcileOutboxReceipts: reconcile }));
+// Mantine hooks use the real React dispatcher, which this harness replaces.
+vi.mock("@mantine/hooks", async (original) => ({
+  ...(await original<typeof import("@mantine/hooks")>()),
+  useMediaQuery: () => false,
+}));
 vi.mock("../sync/resume", () => ({ onResume: () => () => {} }));
 vi.mock("../usePendingCommands", () => ({ usePendingCommands: () => [] }));
 vi.mock("../sync/subscriptions", () => ({

@@ -739,3 +739,17 @@
     gap: var(--mantine-spacing-xs);
   }
 }
+
+/* In a phone sheet the sheet title names the panel, and the sheet scrolls. */
+.context-sheet .mantine-Drawer-body > strong:first-child,
+.account-limits-sheet .account-limits-heading h3 {
+  display: none;
+}
+.account-limits-sheet .account-limits-heading {
+  justify-content: flex-end;
+}
+.account-limits-sheet .account-limits-panel {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}

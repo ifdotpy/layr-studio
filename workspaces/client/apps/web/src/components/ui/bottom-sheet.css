@@ -1,0 +1,77 @@
+/* Owner of the phone bottom sheet (BottomSheet.tsx): up to three quarters of
+   the screen, so the backdrop above it always takes a tap to close; the title
+   row is the grip for a downward swipe; content scrolls inside. */
+.bottom-sheet .mantine-Drawer-content {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: 75dvh;
+  border-radius: var(--studio-radius-dialog) var(--studio-radius-dialog) 0 0;
+}
+.bottom-sheet .mantine-Drawer-header {
+  position: relative;
+  padding-block-start: var(--mantine-spacing-lg);
+}
+.bottom-sheet .mantine-Drawer-header::before {
+  content: "";
+  position: absolute;
+  inset-block-start: var(--mantine-spacing-xs);
+  inset-inline-start: 50%;
+  width: 2.25rem;
+  height: 0.25rem;
+  border-radius: var(--studio-radius-pill);
+  background: var(--line-strong);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.bottom-sheet .mantine-Drawer-title {
+  flex: 1;
+  min-width: 0;
+}
+.sheet-grip {
+  display: block;
+  margin-block: calc(-1 * var(--mantine-spacing-lg))
+    calc(-1 * var(--mantine-spacing-sm));
+  padding-block: var(--mantine-spacing-lg) var(--mantine-spacing-sm);
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.bottom-sheet .mantine-Drawer-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* On phones the chat actions menu opens as an action sheet at the thumb:
+   anchored to the bottom edge, up to three quarters of the screen, over a
+   dimmed page. A tap on the page still closes it, as for any menu. */
+/* layout-query: navigation.inlineMin < */
+@media (width < 761px) {
+  .chat-actions-menu.mantine-Menu-dropdown {
+    position: fixed !important;
+    inset: auto 0 0 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 75dvh;
+    border-top: var(--studio-border-width) solid var(--line);
+    overflow-y: auto;
+    padding: var(--mantine-spacing-lg) var(--mantine-spacing-sm)
+      calc(var(--mantine-spacing-sm) + var(--viewport-safe-bottom, 0px));
+    border-radius: var(--studio-radius-dialog) var(--studio-radius-dialog) 0 0;
+    box-shadow: 0 0 0 100vmax var(--studio-backdrop);
+  }
+  .chat-actions-menu.mantine-Menu-dropdown::before {
+    content: "";
+    position: absolute;
+    inset-block-start: var(--mantine-spacing-xs);
+    inset-inline-start: 50%;
+    width: 2.25rem;
+    height: 0.25rem;
+    border-radius: var(--studio-radius-pill);
+    background: var(--line-strong);
+    transform: translateX(-50%);
+  }
+}

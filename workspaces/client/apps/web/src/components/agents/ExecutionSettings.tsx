@@ -1,3 +1,4 @@
+import BottomSheet from "../ui/BottomSheet";
 import { appendAppLog } from "../../appLog";
 import { AgentStatus } from "../../generated/api";
 import { randomUUID } from "../../uuid";
@@ -14,7 +15,6 @@ import {
   Button,
   Modal,
   Popover,
-  Drawer,
   Switch,
   SegmentedControl,
   NativeSelect,
@@ -2038,23 +2038,20 @@ function ExecutionMenu({
     return (
       <>
         {trigger}
-        <Drawer
+        <BottomSheet
           opened={opened}
           onClose={() => setOpened(false)}
           closeOnEscape={false}
           closeOnClickOutside={!accountModalOpen}
           trapFocus={!accountModalOpen}
           returnFocus
-          position="bottom"
-          size="auto"
           title={label}
           className="setup-sheet"
-          withinPortal
         >
           <div className="execution-dropdown" role="region" aria-label={label}>
             {children}
           </div>
-        </Drawer>
+        </BottomSheet>
         {statusModal}
       </>
     );

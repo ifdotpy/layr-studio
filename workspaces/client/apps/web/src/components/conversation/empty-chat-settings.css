@@ -47,6 +47,31 @@
   font-size: var(--studio-text-meta);
   color: var(--mantine-color-dimmed);
 }
+/* Below the inline width the summary keeps one line: the lead stays whole and
+   the other roles shrink with an ellipsis, so the composer never grows a row.
+   The trigger's accessible name and the picker keep every role. */
+@container composer (max-width: 50em) {
+  .execution-summary-segments {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .execution-summary-segment {
+    flex-wrap: nowrap;
+  }
+  .execution-summary-segment[data-role="lead"] {
+    flex: none;
+  }
+  .execution-summary-segment:not([data-role="lead"]) {
+    flex: 0 1 auto;
+    overflow: hidden;
+  }
+  .execution-summary-segment .execution-model,
+  .execution-inherited-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
 /* Separate roles when the composer has room for an inline summary. */
 @container composer (min-width: 50em) {
   .execution-summary-segment:not([data-role="lead"]) {
@@ -76,11 +101,16 @@
     display: none;
   }
 }
-/* Queue remains available through the existing tools disclosure on phones. */
-@container composer (max-width: 25em) {
+/* Every phone composer shows the Lead model only; Workers and Review would
+   wrap the summary onto several lines. The composer font is 14px, so 30em is
+   420px. */
+@container composer (max-width: 30em) {
   .execution-summary-segment:not([data-role="lead"]) {
     display: none;
   }
+}
+/* Queue remains available through the existing tools disclosure on phones. */
+@container composer (max-width: 25em) {
   #composer .composer-queue-primary {
     display: none;
   }

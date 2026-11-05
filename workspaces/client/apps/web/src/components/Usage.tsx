@@ -19,6 +19,9 @@ import {
   useState,
 } from "react";
 import { Button, Popover, Progress, Tabs, Tooltip } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
+import { layoutQueries } from "../layout/layout-contract.generated";
+import BottomSheet from "./ui/BottomSheet";
 import {
   ChevronUp,
   ExternalLink,
@@ -154,6 +157,8 @@ export default function Usage({
     (activeAccount?.loading ?? limitsLoading ?? !reportedLimits);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  // Phones get bottom sheets; the layout contract owns the breakpoint.
+  const phone = useMediaQuery(layoutQueries.navigationCompact);
   const [refreshing, setRefreshing] = useState(false);
   const refreshLimits = async () => {
     if (refreshing) return;
@@ -360,6 +365,517 @@ export default function Usage({
     ? Math.round((contextTokens / contextWindow) * 100)
     : null;
   const lowAccount = usageAccounts.find((item) => item.buckets?.current.low);
+  const contextPanel = (
+    <>
+      <strong>Chat context</strong>
+      <p>
+        {known
+          ? `${contextTokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens used (${percent}%).`
+          : "No context data yet."}
+      </p>
+      {agent.compactions !== undefined && (
+        <small>Compacted {agent.compactions} times.</small>
+      )}
+      <Button
+        variant="subtle"
+        onClick={() => {
+          setContextOpen(false);
+          setAnalyticsOpen(true);
+        }}
+      >
+        Advanced analytics
+      </Button>
+    </>
+  );
+  const limitsPanel = (
+    <section
+      className="account-limits-panel"
+      aria-label="Account limits details"
+    >
+      <header className="account-limits-heading">
+        <div>
+          <h3>Account limits</h3>
+        </div>
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          loading={!limits?.data && (refreshing || loadingLimits)}
+          onClick={() =>
+            void (activeAccount ? activeAccount.reload(true) : refreshLimits())
+          }
+          leftSection={<RefreshCw size={13} />}
+        >
+          Refresh
+        </Button>
+      </header>
+      <AccountTilesLayout
+        label="Accounts with limits"
+        provider={accountProvider(activeAccount)}
+        providers={[...new Set(usageAccounts.map(accountProvider))]}
+        onProvider={(provider) => {
+          const account = usageAccounts.find(
+            (item) => accountProvider(item) === provider,
+          );
+          if (account) setActiveAccountKey(account.key);
+        }}
+      >
+        <div className="account-limits-tiles">
+          {[...new Set(usageAccounts.map(accountProvider))].map((provider) => (
+            <Tabs
+              key={provider}
+              value={
+                accountProvider(activeAccount) === provider
+                  ? selectedAccountKey
+                  : (usageAccounts.find(
+                      (item) => accountProvider(item) === provider,
+                    )?.key ?? null)
+              }
+              onChange={(value) => {
+                if (value) setActiveAccountKey(value);
+              }}
+              variant="pills"
+              className="account-limits-provider-panel"
+              data-active={
+                accountProvider(activeAccount) === provider || undefined
+              }
+              aria-hidden={accountProvider(activeAccount) !== provider}
+              inert={accountProvider(activeAccount) !== provider}
+            >
+              <Tabs.List aria-label="Accounts with limits">
+                {usageAccounts.map((item, index) => {
+                  if (accountProvider(item) !== provider) return null;
+                  const bucketState = item.buckets?.current;
+                  const remaining = bucketState?.remaining ?? null;
+                  return (
+                    <Tabs.Tab
+                      key={item.key}
+                      value={item.key}
+                      className="setup-account"
+                      data-account-key={item.key}
+                      data-selected={
+                        item.key === selectedAccountKey || undefined
+                      }
+                      aria-current={
+                        item.key === fallbackKey ? "true" : undefined
+                      }
+                      id={`usage-account-tab-${index}`}
+                      aria-controls="usage-account-panel"
+                      title={humanAccountLabel(item)}
+                      aria-label={`${humanAccountLabel(item)}${item.provider ? `, ${item.provider}` : ""} account limits`}
+                    >
+                      <AccountTileLabel
+                        name={displayAccountName(item)}
+                        nameClassName="account-limits-tile-name"
+                        remaining={remaining}
+                      />
+                      {remaining === null && (
+                        <small className="account-remaining">Unavailable</small>
+                      )}
+                      {item.key === fallbackKey && (
+                        <small className="account-limits-current">
+                          Current chat
+                        </small>
+                      )}
+                      <AccountRemainingBar
+                        remaining={remaining}
+                        color={bucketState?.color ?? LimitColor.paused}
+                        label={`${humanAccountLabel(item)} remaining limit`}
+                      />
+                    </Tabs.Tab>
+                  );
+                })}
+              </Tabs.List>
+            </Tabs>
+          ))}
+        </div>
+      </AccountTilesLayout>
+      <div className="account-limits-detail-stack">
+        {usageAccounts.map((activeAccount, panelIndex) => {
+          const isSelected = activeAccount.key === selectedAccountKey;
+          const name = displayAccountName(activeAccount);
+          const selectedAccountName =
+            name.toLowerCase() === accountProvider(activeAccount) &&
+            activeAccount.email
+              ? activeAccount.email
+              : name;
+          const limits = accountLimits(
+            activeAccount.limits,
+            activeAccount.key,
+            activeAccount.accountId,
+          );
+          const loadingLimits = !limits?.data && activeAccount.loading;
+          const buckets = activeAccount.buckets?.current.buckets ?? [];
+          const recovery = activeAccount.agents?.[agent.id]?.recovery;
+          const resetCredits = activeAccount.reset;
+          const availableResets = resetCredits?.credits ?? [];
+          return (
+            <div
+              key={activeAccount.key}
+              className="account-limits-detail-panel"
+              data-active={isSelected || undefined}
+              aria-hidden={!isSelected}
+              inert={!isSelected}
+            >
+              <div className="account-limits-selected-name">
+                <strong title={selectedAccountName}>
+                  {selectedAccountName}
+                </strong>
+                {activeAccount.plan && (
+                  <small className="account-plan">{activeAccount.plan}</small>
+                )}
+                {!activeAccount?.email &&
+                  (!activeAccount?.label ||
+                    activeAccount.label === activeAccount.key) && (
+                    <small>{activeAccount?.key || fallbackKey}</small>
+                  )}
+              </div>
+              {(activeAccount.status?.kind === "checking" ||
+                activeAccount.status?.kind === "pending") && (
+                <p role="status">Checking account limits…</p>
+              )}
+              {recovery && (
+                <LimitRecoveryNotice
+                  key={JSON.stringify(recovery)}
+                  recovery={recovery}
+                  tabIndex={isSelected ? undefined : -1}
+                  onRefresh={() => activeAccount.reload(true)}
+                />
+              )}
+              <div
+                className="account-limits-groups"
+                role="tabpanel"
+                id={
+                  isSelected
+                    ? "usage-account-panel"
+                    : `usage-account-panel-${panelIndex}`
+                }
+                aria-labelledby={`usage-account-tab-${panelIndex}`}
+                aria-label={`${humanAccountLabel(activeAccount)} limits`}
+              >
+                {buckets.map((bucket) => (
+                  <section
+                    className="account-limit-group"
+                    key={bucket.id}
+                    aria-label={`${bucket.name} limits`}
+                  >
+                    <header>
+                      <strong>{bucket.name}</strong>
+                      {bucket.planType !== null && (
+                        <span>{bucket.planType}</span>
+                      )}
+                    </header>
+                    <div className="account-limit-windows">
+                      {bucket.windows.map((window, index) => (
+                        <div
+                          className="account-limit-window"
+                          key={`${window.label}-${index}`}
+                        >
+                          <div className="account-limit-value">
+                            <span>{window.label}</span>
+                            <strong
+                              className={
+                                window.warning ? "account-limits-warning" : ""
+                              }
+                            >
+                              {window.expired ? (
+                                "Awaiting update"
+                              ) : window.remaining === null ? (
+                                "Unavailable"
+                              ) : (
+                                <>
+                                  {formatPercent(window.remaining)}
+                                  <small> left</small>
+                                </>
+                              )}
+                            </strong>
+                          </div>
+                          {window.remaining !== null && !window.expired && (
+                            <Progress
+                              value={window.remaining}
+                              size="xs"
+                              color={remainingLimitColor(window.color)}
+                              aria-label={`${bucket.name} ${window.label} remaining`}
+                            />
+                          )}
+                          <div className="account-limit-reset">
+                            {window.reset ? (
+                              <>
+                                <span>
+                                  {window.expired ? "Reset passed" : "Resets"}
+                                </span>
+                                <time
+                                  dateTime={new Date(
+                                    window.reset * 1000,
+                                  ).toISOString()}
+                                  title={new Date(
+                                    window.reset * 1000,
+                                  ).toString()}
+                                >
+                                  {localDateTime(
+                                    new Date(window.reset * 1000),
+                                    {
+                                      month: "short",
+                                      day: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )}
+                                </time>
+                              </>
+                            ) : (
+                              <span>Reset time unavailable</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {!bucket.windows.length && (
+                      <p className="account-limits-empty">
+                        No limit windows reported.
+                      </p>
+                    )}
+                    {bucket.creditsLabel !== null && (
+                      <div className="account-limit-credits">
+                        <span>Credits</span>
+                        <strong>{bucket.creditsLabel}</strong>
+                      </div>
+                    )}
+                  </section>
+                ))}
+                {!buckets.length && (
+                  <p className="account-limits-empty">
+                    {loadingLimits
+                      ? "Loading account limits…"
+                      : "Codex has not supplied account limits."}
+                  </p>
+                )}
+              </div>
+              {activeAccount?.provider === ProviderKind.Claude && (
+                <section
+                  className="account-reset-credits"
+                  aria-label="Claude free limit resets"
+                >
+                  <header>
+                    <strong>Free limit resets</strong>
+                    <span>Check on Claude</span>
+                  </header>
+                  <p>
+                    Opens Claude. Use the same account, then confirm “Reset for
+                    free”.
+                  </p>
+                  <div className="account-reset-credit-row">
+                    <Button
+                      tabIndex={isSelected ? undefined : -1}
+                      component="a"
+                      href="https://claude.ai/settings/usage"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="compact-xs"
+                      variant="default"
+                      rightSection={<ExternalLink size={13} />}
+                    >
+                      Open free resets
+                    </Button>
+                    <Button
+                      tabIndex={isSelected ? undefined : -1}
+                      size="compact-xs"
+                      variant="subtle"
+                      loading={!limits?.data && (refreshing || loadingLimits)}
+                      onClick={() => void refreshLimits()}
+                    >
+                      Refresh after reset
+                    </Button>
+                  </div>
+                </section>
+              )}
+              {resetCredits?.present && (
+                <section
+                  className="account-reset-credits"
+                  aria-label="Limit reset credits"
+                >
+                  <header>
+                    <strong>Limit resets</strong>
+                    <span>{resetCredits.countLabel}</span>
+                  </header>
+                  {availableResets.map((credit) => (
+                    <div className="account-reset-credit" key={credit.id}>
+                      <div className="account-reset-credit-row">
+                        <div>
+                          <strong title={credit.description ?? undefined}>
+                            {credit.title}
+                          </strong>
+                          <span>
+                            {credit.expiresAt !== null ? (
+                              <>
+                                Expires{" "}
+                                <time
+                                  dateTime={new Date(
+                                    credit.expiresAt * 1000,
+                                  ).toISOString()}
+                                >
+                                  {localDateTime(
+                                    new Date(credit.expiresAt * 1000),
+                                    {
+                                      month: "short",
+                                      day: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )}
+                                </time>
+                              </>
+                            ) : (
+                              "Expiration unavailable"
+                            )}
+                          </span>
+                        </div>
+                        <Button
+                          tabIndex={isSelected ? undefined : -1}
+                          size="compact-xs"
+                          variant="light"
+                          disabled={
+                            resetPending ||
+                            resetApplied.includes(
+                              resetAppliedKey(credit.id, activeAccount.key),
+                            ) ||
+                            !credit.enabled
+                          }
+                          onClick={() => {
+                            setConfirmReset(credit.id);
+                            setResetError("");
+                          }}
+                        >
+                          {resetApplied.includes(
+                            resetAppliedKey(credit.id, activeAccount.key),
+                          )
+                            ? "Applied"
+                            : "Apply reset"}
+                        </Button>
+                      </div>
+                      {isSelected && confirmReset === credit.id && (
+                        <div
+                          className="account-reset-confirm"
+                          role="group"
+                          aria-label={credit.confirmLabel}
+                        >
+                          <p>
+                            Use this reset credit now? This spends one credit.
+                          </p>
+                          <div>
+                            <Button
+                              tabIndex={isSelected ? undefined : -1}
+                              size="compact-xs"
+                              variant="default"
+                              disabled={resetPending}
+                              onClick={() => {
+                                setConfirmReset(null);
+                                setResetError("");
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              tabIndex={isSelected ? undefined : -1}
+                              size="compact-xs"
+                              loading={resetPending}
+                              disabled={resetPending || !credit.enabled}
+                              onClick={() => void applyReset(credit.id)}
+                            >
+                              Use one reset credit
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {resetCredits.emptyMessage && (
+                    <p>{resetCredits.emptyMessage}</p>
+                  )}
+                  {isSelected && resetError && (
+                    <p className="account-limits-warning" role="alert">
+                      {resetError}
+                    </p>
+                  )}
+                  {isSelected && resetNotice && (
+                    <p role="status">{resetNotice}</p>
+                  )}
+                </section>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <section className="account-costs" aria-label="Local cost estimates">
+        <header>
+          <strong>Estimated API cost</strong>
+          <span>USD</span>
+        </header>
+        <div className="account-cost-values">
+          {(
+            [
+              ["Today", costs?.data?.todayUSD],
+              ["Last 30 days", costs?.data?.last30DaysUSD],
+            ] as const
+          ).map(([label, value]) => (
+            <div key={label}>
+              <span>{label}</span>
+              <strong
+                className={number(value) ? undefined : "account-cost-missing"}
+              >
+                {dollars(value)}
+              </strong>
+            </div>
+          ))}
+        </div>
+        <p className="account-cost-caption" role="status">
+          {costs?.refreshing
+            ? "Refreshing estimate…"
+            : costInterestError || costs?.error
+              ? "Refresh failed · stale estimate"
+              : costs?.stale
+                ? "Stale estimate"
+                : "Saved estimate"}
+        </p>
+        {number(costs?.at) && (
+          <p className="account-cost-caption">
+            {`Updated ${Math.max(0, Math.round(Date.now() / 1000 - costs.at))} seconds ago`}
+          </p>
+        )}
+        {(costs?.data?.coverage === "partial" ||
+          costs?.stale ||
+          costs?.error) && (
+          <p className="account-cost-caption">
+            {costs?.error || costs?.stale
+              ? number(costs?.data?.todayUSD) ||
+                number(costs?.data?.last30DaysUSD)
+                ? "Saved estimate"
+                : "Estimate unavailable"
+              : "Partial estimate"}
+          </p>
+        )}
+        {typeof costs?.data?.note === "string" && (
+          <p className="account-cost-caption">{costs.data.note}</p>
+        )}
+      </section>
+      <footer className="account-limits-updated" role="status">
+        {limits?.error
+          ? limits?.data
+            ? "Saved limits"
+            : "Limits temporarily unavailable"
+          : number(limits?.at)
+            ? "Updated"
+            : ""}
+        {number(limits?.at) && (
+          <span>
+            {localTime(new Date(limits!.at * 1000), {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        )}
+      </footer>{" "}
+    </section>
+  );
   return (
     <div
       className="usage-footer"
@@ -419,15 +935,8 @@ export default function Usage({
         </div>
         <TokenRate agent={agent} />
       </PassiveUsage>
-      <Popover
-        opened={contextOpen}
-        onChange={setContextOpen}
-        position="top-start"
-        width="min(340px, calc(100vw - 24px))"
-        trapFocus
-        returnFocus
-      >
-        <Popover.Target>
+      {phone ? (
+        <>
           <button
             type="button"
             className="context-use"
@@ -437,28 +946,38 @@ export default function Usage({
           >
             {percent === null ? "Context" : `Context ${percent}%`}
           </button>
-        </Popover.Target>
-        <Popover.Dropdown>
-          <strong>Chat context</strong>
-          <p>
-            {known
-              ? `${contextTokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens used (${percent}%).`
-              : "No context data yet."}
-          </p>
-          {agent.compactions !== undefined && (
-            <small>Compacted {agent.compactions} times.</small>
-          )}
-          <Button
-            variant="subtle"
-            onClick={() => {
-              setContextOpen(false);
-              setAnalyticsOpen(true);
-            }}
+          <BottomSheet
+            opened={contextOpen}
+            onClose={() => setContextOpen(false)}
+            title="Chat context"
+            className="context-sheet"
           >
-            Advanced analytics
-          </Button>
-        </Popover.Dropdown>
-      </Popover>
+            {contextPanel}
+          </BottomSheet>
+        </>
+      ) : (
+        <Popover
+          opened={contextOpen}
+          onChange={setContextOpen}
+          position="top-start"
+          width="min(340px, calc(100vw - 24px))"
+          trapFocus
+          returnFocus
+        >
+          <Popover.Target>
+            <button
+              type="button"
+              className="context-use"
+              aria-label="Chat context"
+              aria-expanded={contextOpen}
+              onClick={() => setContextOpen(!contextOpen)}
+            >
+              {percent === null ? "Context" : `Context ${percent}%`}
+            </button>
+          </Popover.Target>
+          <Popover.Dropdown>{contextPanel}</Popover.Dropdown>
+        </Popover>
+      )}
       {analyticsOpen && (
         <Suspense fallback={null}>
           <Analytics
@@ -538,17 +1057,8 @@ export default function Usage({
             );
           })}
         </div>
-        <Popover
-          opened={limitsOpened}
-          onChange={changeOpened}
-          position="top-end"
-          width="min(370px, calc(100vw - 24px))"
-          withArrow
-          shadow="lg"
-          trapFocus
-          returnFocus
-        >
-          <Popover.Target>
+        {phone ? (
+          <>
             <Button
               className="limits-toggle account-limits-toggle"
               variant="subtle"
@@ -572,536 +1082,60 @@ export default function Usage({
                 )}
               </span>
             </Button>
-          </Popover.Target>
-          <Popover.Dropdown className="account-limits-popover">
-            <section
-              className="account-limits-panel"
-              aria-label="Account limits details"
+            <BottomSheet
+              opened={limitsOpened}
+              onClose={() => changeOpened(false)}
+              title="Account limits"
+              className="account-limits-sheet"
+              // The panel keeps one class in a popover and in a phone sheet.
+              classNames={{ content: "account-limits-popover" }}
             >
-              <header className="account-limits-heading">
-                <div>
-                  <h3>Account limits</h3>
-                </div>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  loading={!limits?.data && (refreshing || loadingLimits)}
-                  onClick={() =>
-                    void (activeAccount
-                      ? activeAccount.reload(true)
-                      : refreshLimits())
-                  }
-                  leftSection={<RefreshCw size={13} />}
-                >
-                  Refresh
-                </Button>
-              </header>
-              <AccountTilesLayout
-                label="Accounts with limits"
-                provider={accountProvider(activeAccount)}
-                providers={[...new Set(usageAccounts.map(accountProvider))]}
-                onProvider={(provider) => {
-                  const account = usageAccounts.find(
-                    (item) => accountProvider(item) === provider,
-                  );
-                  if (account) setActiveAccountKey(account.key);
-                }}
+              {limitsPanel}
+            </BottomSheet>
+          </>
+        ) : (
+          <Popover
+            opened={limitsOpened}
+            onChange={changeOpened}
+            position="top-end"
+            width="min(370px, calc(100vw - 24px))"
+            withArrow
+            shadow="lg"
+            trapFocus
+            returnFocus
+          >
+            <Popover.Target>
+              <Button
+                className="limits-toggle account-limits-toggle"
+                variant="subtle"
+                size="compact-xs"
+                aria-label="Account limits"
+                title={
+                  lowAccount
+                    ? `Low allowance: ${lowAccount.email || lowAccount.label}`
+                    : sessionCost
+                      ? `Session estimate: ${dollars(sessionCost.totalUSD)}`
+                      : undefined
+                }
+                onClick={() => changeOpened(!limitsOpened)}
+                leftSection={<Gauge size={13} />}
+                rightSection={<ChevronUp size={12} />}
               >
-                <div className="account-limits-tiles">
-                  {[...new Set(usageAccounts.map(accountProvider))].map(
-                    (provider) => (
-                      <Tabs
-                        key={provider}
-                        value={
-                          accountProvider(activeAccount) === provider
-                            ? selectedAccountKey
-                            : (usageAccounts.find(
-                                (item) => accountProvider(item) === provider,
-                              )?.key ?? null)
-                        }
-                        onChange={(value) => {
-                          if (value) setActiveAccountKey(value);
-                        }}
-                        variant="pills"
-                        className="account-limits-provider-panel"
-                        data-active={
-                          accountProvider(activeAccount) === provider ||
-                          undefined
-                        }
-                        aria-hidden={
-                          accountProvider(activeAccount) !== provider
-                        }
-                        inert={accountProvider(activeAccount) !== provider}
-                      >
-                        <Tabs.List aria-label="Accounts with limits">
-                          {usageAccounts.map((item, index) => {
-                            if (accountProvider(item) !== provider) return null;
-                            const bucketState = item.buckets?.current;
-                            const remaining = bucketState?.remaining ?? null;
-                            return (
-                              <Tabs.Tab
-                                key={item.key}
-                                value={item.key}
-                                className="setup-account"
-                                data-account-key={item.key}
-                                data-selected={
-                                  item.key === selectedAccountKey || undefined
-                                }
-                                aria-current={
-                                  item.key === fallbackKey ? "true" : undefined
-                                }
-                                id={`usage-account-tab-${index}`}
-                                aria-controls="usage-account-panel"
-                                title={humanAccountLabel(item)}
-                                aria-label={`${humanAccountLabel(item)}${item.provider ? `, ${item.provider}` : ""} account limits`}
-                              >
-                                <AccountTileLabel
-                                  name={displayAccountName(item)}
-                                  nameClassName="account-limits-tile-name"
-                                  remaining={remaining}
-                                />
-                                {remaining === null && (
-                                  <small className="account-remaining">
-                                    Unavailable
-                                  </small>
-                                )}
-                                {item.key === fallbackKey && (
-                                  <small className="account-limits-current">
-                                    Current chat
-                                  </small>
-                                )}
-                                <AccountRemainingBar
-                                  remaining={remaining}
-                                  color={
-                                    bucketState?.color ?? LimitColor.paused
-                                  }
-                                  label={`${humanAccountLabel(item)} remaining limit`}
-                                />
-                              </Tabs.Tab>
-                            );
-                          })}
-                        </Tabs.List>
-                      </Tabs>
-                    ),
+                <span className="account-limits-summary">
+                  <span className="account-limits-label">Limits</span>
+                  {lowAccount && (
+                    <span className="account-limits-warning">
+                      Low allowance
+                    </span>
                   )}
-                </div>
-              </AccountTilesLayout>
-              <div className="account-limits-detail-stack">
-                {usageAccounts.map((activeAccount, panelIndex) => {
-                  const isSelected = activeAccount.key === selectedAccountKey;
-                  const name = displayAccountName(activeAccount);
-                  const selectedAccountName =
-                    name.toLowerCase() === accountProvider(activeAccount) &&
-                    activeAccount.email
-                      ? activeAccount.email
-                      : name;
-                  const limits = accountLimits(
-                    activeAccount.limits,
-                    activeAccount.key,
-                    activeAccount.accountId,
-                  );
-                  const loadingLimits = !limits?.data && activeAccount.loading;
-                  const buckets = activeAccount.buckets?.current.buckets ?? [];
-                  const recovery = activeAccount.agents?.[agent.id]?.recovery;
-                  const resetCredits = activeAccount.reset;
-                  const availableResets = resetCredits?.credits ?? [];
-                  return (
-                    <div
-                      key={activeAccount.key}
-                      className="account-limits-detail-panel"
-                      data-active={isSelected || undefined}
-                      aria-hidden={!isSelected}
-                      inert={!isSelected}
-                    >
-                      <div className="account-limits-selected-name">
-                        <strong title={selectedAccountName}>
-                          {selectedAccountName}
-                        </strong>
-                        {activeAccount.plan && (
-                          <small className="account-plan">
-                            {activeAccount.plan}
-                          </small>
-                        )}
-                        {!activeAccount?.email &&
-                          (!activeAccount?.label ||
-                            activeAccount.label === activeAccount.key) && (
-                            <small>{activeAccount?.key || fallbackKey}</small>
-                          )}
-                      </div>
-                      {(activeAccount.status?.kind === "checking" ||
-                        activeAccount.status?.kind === "pending") && (
-                        <p role="status">Checking account limits…</p>
-                      )}
-                      {recovery && (
-                        <LimitRecoveryNotice
-                          key={JSON.stringify(recovery)}
-                          recovery={recovery}
-                          tabIndex={isSelected ? undefined : -1}
-                          onRefresh={() => activeAccount.reload(true)}
-                        />
-                      )}
-                      <div
-                        className="account-limits-groups"
-                        role="tabpanel"
-                        id={
-                          isSelected
-                            ? "usage-account-panel"
-                            : `usage-account-panel-${panelIndex}`
-                        }
-                        aria-labelledby={`usage-account-tab-${panelIndex}`}
-                        aria-label={`${humanAccountLabel(activeAccount)} limits`}
-                      >
-                        {buckets.map((bucket) => (
-                          <section
-                            className="account-limit-group"
-                            key={bucket.id}
-                            aria-label={`${bucket.name} limits`}
-                          >
-                            <header>
-                              <strong>{bucket.name}</strong>
-                              {bucket.planType !== null && (
-                                <span>{bucket.planType}</span>
-                              )}
-                            </header>
-                            <div className="account-limit-windows">
-                              {bucket.windows.map((window, index) => (
-                                <div
-                                  className="account-limit-window"
-                                  key={`${window.label}-${index}`}
-                                >
-                                  <div className="account-limit-value">
-                                    <span>{window.label}</span>
-                                    <strong
-                                      className={
-                                        window.warning
-                                          ? "account-limits-warning"
-                                          : ""
-                                      }
-                                    >
-                                      {window.expired ? (
-                                        "Awaiting update"
-                                      ) : window.remaining === null ? (
-                                        "Unavailable"
-                                      ) : (
-                                        <>
-                                          {formatPercent(window.remaining)}
-                                          <small> left</small>
-                                        </>
-                                      )}
-                                    </strong>
-                                  </div>
-                                  {window.remaining !== null &&
-                                    !window.expired && (
-                                      <Progress
-                                        value={window.remaining}
-                                        size="xs"
-                                        color={remainingLimitColor(
-                                          window.color,
-                                        )}
-                                        aria-label={`${bucket.name} ${window.label} remaining`}
-                                      />
-                                    )}
-                                  <div className="account-limit-reset">
-                                    {window.reset ? (
-                                      <>
-                                        <span>
-                                          {window.expired
-                                            ? "Reset passed"
-                                            : "Resets"}
-                                        </span>
-                                        <time
-                                          dateTime={new Date(
-                                            window.reset * 1000,
-                                          ).toISOString()}
-                                          title={new Date(
-                                            window.reset * 1000,
-                                          ).toString()}
-                                        >
-                                          {localDateTime(
-                                            new Date(window.reset * 1000),
-                                            {
-                                              month: "short",
-                                              day: "numeric",
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            },
-                                          )}
-                                        </time>
-                                      </>
-                                    ) : (
-                                      <span>Reset time unavailable</span>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                            {!bucket.windows.length && (
-                              <p className="account-limits-empty">
-                                No limit windows reported.
-                              </p>
-                            )}
-                            {bucket.creditsLabel !== null && (
-                              <div className="account-limit-credits">
-                                <span>Credits</span>
-                                <strong>{bucket.creditsLabel}</strong>
-                              </div>
-                            )}
-                          </section>
-                        ))}
-                        {!buckets.length && (
-                          <p className="account-limits-empty">
-                            {loadingLimits
-                              ? "Loading account limits…"
-                              : "Codex has not supplied account limits."}
-                          </p>
-                        )}
-                      </div>
-                      {activeAccount?.provider === ProviderKind.Claude && (
-                        <section
-                          className="account-reset-credits"
-                          aria-label="Claude free limit resets"
-                        >
-                          <header>
-                            <strong>Free limit resets</strong>
-                            <span>Check on Claude</span>
-                          </header>
-                          <p>
-                            Opens Claude. Use the same account, then confirm
-                            “Reset for free”.
-                          </p>
-                          <div className="account-reset-credit-row">
-                            <Button
-                              tabIndex={isSelected ? undefined : -1}
-                              component="a"
-                              href="https://claude.ai/settings/usage"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              size="compact-xs"
-                              variant="default"
-                              rightSection={<ExternalLink size={13} />}
-                            >
-                              Open free resets
-                            </Button>
-                            <Button
-                              tabIndex={isSelected ? undefined : -1}
-                              size="compact-xs"
-                              variant="subtle"
-                              loading={
-                                !limits?.data && (refreshing || loadingLimits)
-                              }
-                              onClick={() => void refreshLimits()}
-                            >
-                              Refresh after reset
-                            </Button>
-                          </div>
-                        </section>
-                      )}
-                      {resetCredits?.present && (
-                        <section
-                          className="account-reset-credits"
-                          aria-label="Limit reset credits"
-                        >
-                          <header>
-                            <strong>Limit resets</strong>
-                            <span>{resetCredits.countLabel}</span>
-                          </header>
-                          {availableResets.map((credit) => (
-                            <div
-                              className="account-reset-credit"
-                              key={credit.id}
-                            >
-                              <div className="account-reset-credit-row">
-                                <div>
-                                  <strong
-                                    title={credit.description ?? undefined}
-                                  >
-                                    {credit.title}
-                                  </strong>
-                                  <span>
-                                    {credit.expiresAt !== null ? (
-                                      <>
-                                        Expires{" "}
-                                        <time
-                                          dateTime={new Date(
-                                            credit.expiresAt * 1000,
-                                          ).toISOString()}
-                                        >
-                                          {localDateTime(
-                                            new Date(credit.expiresAt * 1000),
-                                            {
-                                              month: "short",
-                                              day: "numeric",
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            },
-                                          )}
-                                        </time>
-                                      </>
-                                    ) : (
-                                      "Expiration unavailable"
-                                    )}
-                                  </span>
-                                </div>
-                                <Button
-                                  tabIndex={isSelected ? undefined : -1}
-                                  size="compact-xs"
-                                  variant="light"
-                                  disabled={
-                                    resetPending ||
-                                    resetApplied.includes(
-                                      resetAppliedKey(
-                                        credit.id,
-                                        activeAccount.key,
-                                      ),
-                                    ) ||
-                                    !credit.enabled
-                                  }
-                                  onClick={() => {
-                                    setConfirmReset(credit.id);
-                                    setResetError("");
-                                  }}
-                                >
-                                  {resetApplied.includes(
-                                    resetAppliedKey(
-                                      credit.id,
-                                      activeAccount.key,
-                                    ),
-                                  )
-                                    ? "Applied"
-                                    : "Apply reset"}
-                                </Button>
-                              </div>
-                              {isSelected && confirmReset === credit.id && (
-                                <div
-                                  className="account-reset-confirm"
-                                  role="group"
-                                  aria-label={credit.confirmLabel}
-                                >
-                                  <p>
-                                    Use this reset credit now? This spends one
-                                    credit.
-                                  </p>
-                                  <div>
-                                    <Button
-                                      tabIndex={isSelected ? undefined : -1}
-                                      size="compact-xs"
-                                      variant="default"
-                                      disabled={resetPending}
-                                      onClick={() => {
-                                        setConfirmReset(null);
-                                        setResetError("");
-                                      }}
-                                    >
-                                      Cancel
-                                    </Button>
-                                    <Button
-                                      tabIndex={isSelected ? undefined : -1}
-                                      size="compact-xs"
-                                      loading={resetPending}
-                                      disabled={resetPending || !credit.enabled}
-                                      onClick={() => void applyReset(credit.id)}
-                                    >
-                                      Use one reset credit
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                          {resetCredits.emptyMessage && (
-                            <p>{resetCredits.emptyMessage}</p>
-                          )}
-                          {isSelected && resetError && (
-                            <p className="account-limits-warning" role="alert">
-                              {resetError}
-                            </p>
-                          )}
-                          {isSelected && resetNotice && (
-                            <p role="status">{resetNotice}</p>
-                          )}
-                        </section>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <section
-                className="account-costs"
-                aria-label="Local cost estimates"
-              >
-                <header>
-                  <strong>Estimated API cost</strong>
-                  <span>USD</span>
-                </header>
-                <div className="account-cost-values">
-                  {(
-                    [
-                      ["Today", costs?.data?.todayUSD],
-                      ["Last 30 days", costs?.data?.last30DaysUSD],
-                    ] as const
-                  ).map(([label, value]) => (
-                    <div key={label}>
-                      <span>{label}</span>
-                      <strong
-                        className={
-                          number(value) ? undefined : "account-cost-missing"
-                        }
-                      >
-                        {dollars(value)}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-                <p className="account-cost-caption" role="status">
-                  {costs?.refreshing
-                    ? "Refreshing estimate…"
-                    : costInterestError || costs?.error
-                      ? "Refresh failed · stale estimate"
-                      : costs?.stale
-                        ? "Stale estimate"
-                        : "Saved estimate"}
-                </p>
-                {number(costs?.at) && (
-                  <p className="account-cost-caption">
-                    {`Updated ${Math.max(0, Math.round(Date.now() / 1000 - costs.at))} seconds ago`}
-                  </p>
-                )}
-                {(costs?.data?.coverage === "partial" ||
-                  costs?.stale ||
-                  costs?.error) && (
-                  <p className="account-cost-caption">
-                    {costs?.error || costs?.stale
-                      ? number(costs?.data?.todayUSD) ||
-                        number(costs?.data?.last30DaysUSD)
-                        ? "Saved estimate"
-                        : "Estimate unavailable"
-                      : "Partial estimate"}
-                  </p>
-                )}
-                {typeof costs?.data?.note === "string" && (
-                  <p className="account-cost-caption">{costs.data.note}</p>
-                )}
-              </section>
-              <footer className="account-limits-updated" role="status">
-                {limits?.error
-                  ? limits?.data
-                    ? "Saved limits"
-                    : "Limits temporarily unavailable"
-                  : number(limits?.at)
-                    ? "Updated"
-                    : ""}
-                {number(limits?.at) && (
-                  <span>
-                    {localTime(new Date(limits!.at * 1000), {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                )}
-              </footer>{" "}
-            </section>
-          </Popover.Dropdown>
-        </Popover>
+                </span>
+              </Button>
+            </Popover.Target>
+            <Popover.Dropdown className="account-limits-popover">
+              {limitsPanel}
+            </Popover.Dropdown>
+          </Popover>
+        )}
       </div>
     </div>
   );

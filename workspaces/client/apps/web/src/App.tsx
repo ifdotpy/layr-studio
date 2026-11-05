@@ -2594,7 +2594,9 @@ export default function App({ active = true }: { active?: boolean }) {
                       <MoreHorizontal size={18} />
                     </ActionIcon>
                   </Menu.Target>
-                  <Menu.Dropdown>{chatActionsMenu}</Menu.Dropdown>
+                  <Menu.Dropdown className="chat-actions-menu">
+                    {chatActionsMenu}
+                  </Menu.Dropdown>
                 </Menu>
               )}
             </header>

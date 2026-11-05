@@ -78,15 +78,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The model picker sheet keeps one height for every role, like its popover. */
 .setup-sheet .mantine-Drawer-content {
-  max-height: 92dvh;
-  border-radius: var(--mantine-radius-lg) var(--mantine-radius-lg) 0 0;
+  height: 75dvh;
+}
+.setup-sheet .execution-dropdown > div {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-height: 0;
 }
 .setup-sheet .execution-dropdown {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-height: 0;
   inline-size: auto;
   max-width: none;
   padding: 0;
-  max-height: none;
   overflow: visible;
 }
 .execution-profile {
