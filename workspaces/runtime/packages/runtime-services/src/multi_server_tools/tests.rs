@@ -1199,6 +1199,29 @@ async fn peer_store(home: &str) -> (tempfile::TempDir, Arc<RuntimeStore>) {
 }
 
 #[tokio::test]
+async fn fetch_future_stays_below_clippy_limit() {
+    let (_directory, home, seed) = seeded_store().await;
+    let transport = Arc::new(LostExportReply::default());
+    let driver = Arc::new(OrchestrationDriver::new(
+        home.clone(),
+        transport,
+        Arc::new(RuntimeOrchestrationEffects::new(home.clone())),
+    ));
+    let tools = ServerTools::new(home, driver, false);
+    let actor = Actor::from_record(&seed["lead"], LEAD, 3).unwrap();
+    let args = json!({});
+    let future = tools.fetch(&actor, &args, "request", PEER);
+    let limit: usize = include_str!("../../../../clippy.toml")
+        .lines()
+        .find_map(|line| line.strip_prefix("future-size-threshold = "))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let size = std::mem::size_of_val(&future);
+    assert!(size <= limit, "fetch future is {size} bytes");
+}
+
+#[tokio::test]
 #[allow(clippy::disallowed_methods)]
 async fn fetching_reuses_original_export_inputs_and_missing_inputs_never_send() {
     let (_directory, home, seed) = seeded_store().await;

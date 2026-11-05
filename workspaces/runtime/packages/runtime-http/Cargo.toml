@@ -35,11 +35,6 @@ tower-http = { workspace = true, features = ["compression-br"] }
 tracing = "=0.1.44"
 uuid = { workspace = true, features = ["serde", "v4"] }
 
-[build-dependencies]
-openapi-to-rust = { version = "=0.22.0", default-features = false }
-studio-json = { path = "../json" }
-studio-runtime-schema = { path = "../runtime-schema" }
-
 [dev-dependencies]
 gungraun = "=0.17.2"
 studio-test-deps = { path = "../test-deps" }

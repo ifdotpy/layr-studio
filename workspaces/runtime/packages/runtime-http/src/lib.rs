@@ -8,7 +8,8 @@ pub mod error;
 mod http_body_limits;
 #[cfg(test)]
 mod ingress_parity_tests;
-mod ingress_pattern;
+#[cfg(test)]
+use studio_runtime_schema::ingress_pattern;
 mod json_body;
 pub mod middleware;
 mod model_entities;
@@ -24,10 +25,7 @@ pub use routes::{NativeContextRepairPort, backend_build_identity, initialize_bac
 pub use schema::{API_SCHEMA_HASH_HEADER, API_SCHEMA_MISMATCH_HEADER, api_schema_hash, operations};
 
 // Generated HTTP types follow the schema, including nested optional fields.
-#[allow(clippy::all, clippy::option_option, clippy::struct_excessive_bools)]
-pub mod generated {
-    include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
-}
+pub use studio_runtime_schema::generated;
 
 #[cfg(test)]
 mod tests;

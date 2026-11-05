@@ -55,10 +55,10 @@ pub fn set_default(
     } else {
         None
     };
-    actor.extra.insert(
-        "taskDefaultGate".into(),
-        studio_runtime_store::projection_value(&gate),
-    );
+    actor.task_default_gate = match &gate {
+        Some(gate) => studio_runtime_schema::queue_command::Field::Value(gate.clone()),
+        None => studio_runtime_schema::queue_command::Field::Null,
+    };
     AgentRepository::put(tx, &actor)?;
     let reply = DefaultGateReply {
         id: actor_id.to_owned(),

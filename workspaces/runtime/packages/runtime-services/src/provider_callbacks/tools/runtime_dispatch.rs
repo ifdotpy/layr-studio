@@ -429,7 +429,7 @@ pub(super) async fn dispatch(
     // home server answers as the `message` worker call.
     let remote_send = if tool == "orchestration_send"
         && studio_runtime_store::truthy(actor.record().extra.get("remoteOrigin"))
-        && !studio_runtime_store::truthy(actor.record().extra.get("movedFrom"))
+        && !actor.record().moved_from_active()
         && let Some(target) = args.get("agent_id").and_then(Value::as_str)
         && !(target == "user" || target.starts_with("remote:") || target.starts_with("federated:"))
     {
