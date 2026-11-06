@@ -22362,6 +22362,7 @@
             "lead_message": "#/components/schemas/CommandRequestLeadMessage",
             "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
+            "restore_deleted_root": "#/components/schemas/CommandRequestRestoreDeletedRoot",
             "send": "#/components/schemas/CommandRequestSend",
             "stop": "#/components/schemas/CommandRequestStop",
             "withdraw": "#/components/schemas/CommandRequestWithdraw"
@@ -22392,6 +22393,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestLeadMessage"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestRestoreDeletedRoot"
           }
         ],
         "title": "CommandRequest"
@@ -22597,6 +22601,47 @@
         ],
         "type": "object"
       },
+      "CommandRequestRestoreDeletedRoot": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "restore_deleted_root",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
       "CommandRequestSend": {
         "additionalProperties": false,
         "properties": {
@@ -22743,6 +22788,7 @@
             "lead_message": "#/components/schemas/CommandResponseLeadMessage",
             "pause": "#/components/schemas/CommandResponseApplied",
             "resolve": "#/components/schemas/CommandResponseApplied",
+            "restore_deleted_root": "#/components/schemas/CommandResponseApplied",
             "send": "#/components/schemas/CommandResponseApplied",
             "stop": "#/components/schemas/CommandResponseApplied",
             "withdraw": "#/components/schemas/CommandResponseApplied"
@@ -22820,7 +22866,8 @@
               "withdraw",
               "stop",
               "resolve",
-              "pause"
+              "pause",
+              "restore_deleted_root"
             ],
             "type": "string"
           },
