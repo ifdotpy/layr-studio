@@ -1881,6 +1881,8 @@ async fn next_frame(
         // Match Python's token-first behavior when both lanes are pending,
         // while bounding token bursts so resource invalidations still progress.
         let prefer_resource = state.consecutive_token_frames >= 8;
+        #[cfg(feature = "perf-reporting")]
+        let mut changed_at = None;
         let heartbeat = if prefer_resource {
             tokio::select! {
                 biased;
@@ -1894,6 +1896,9 @@ async fn next_frame(
                 },
                 changed = changed_not_before(Some(&mut state.changes), state.next_resources_frame_at) => {
                     if changed.is_err() { return None; }
+                    #[cfg(feature = "perf-reporting")]
+                    { changed_at = Some(state.changes.borrow_and_update().changed_at); }
+                    #[cfg(not(feature = "perf-reporting"))]
                     state.changes.borrow_and_update();
                     false
                 },
@@ -1926,6 +1931,9 @@ async fn next_frame(
                 },
                 changed = changed_not_before(Some(&mut state.changes), state.next_resources_frame_at) => {
                     if changed.is_err() { return None; }
+                    #[cfg(feature = "perf-reporting")]
+                    { changed_at = Some(state.changes.borrow_and_update().changed_at); }
+                    #[cfg(not(feature = "perf-reporting"))]
                     state.changes.borrow_and_update();
                     false
                 },
@@ -2043,6 +2051,13 @@ async fn next_frame(
                 .initial
                 .extend(initial_resource_sse_events(view.cursor.revision, event));
             if let Some(event) = state.initial.pop_front() {
+                #[cfg(feature = "perf-reporting")]
+                if let Some(changed_at) = changed_at {
+                    studio_runtime_store::perf_reporting::record_wait(
+                        "sse change to frame",
+                        changed_at.elapsed(),
+                    );
+                }
                 return Some((Ok(event), state));
             }
         }
@@ -2233,6 +2248,8 @@ fn resource_event(
                     revision,
                     resource_revision: revision,
                     closed: false,
+                    #[cfg(feature = "perf-reporting")]
+                    changed_at: std::time::Instant::now(),
                 },
                 resources: fixture_resources(resources),
                 versions: vec![revision; resources.len()],
@@ -2480,7 +2497,19 @@ fn event_response<S>(stream: S) -> Response
 where
     S: Stream<Item = Result<Event, Infallible>> + Send + 'static,
 {
-    let mut response = Sse::new(stream).into_response();
+    let response = Sse::new(stream).into_response();
+    #[cfg(feature = "perf-reporting")]
+    let response = {
+        let (parts, body) = response.into_parts();
+        let stream = body.into_data_stream().map(|chunk| {
+            if let Ok(bytes) = &chunk {
+                studio_runtime_store::perf_reporting::record_sse(bytes.len());
+            }
+            chunk
+        });
+        Response::from_parts(parts, Body::from_stream(stream))
+    };
+    let mut response = response;
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("no-cache, no-transform"),
@@ -3204,6 +3233,8 @@ mod tests {
                 revision: 2,
                 resource_revision: 2,
                 closed: false,
+                #[cfg(feature = "perf-reporting")]
+                changed_at: std::time::Instant::now(),
             },
             resources: fixture_resources(&[json!({"kind":"state"}), json!({"kind":"drafts"})]),
             versions: vec![2, 2],
@@ -6374,6 +6405,8 @@ mod tests {
                     revision: 0,
                     resource_revision: 0,
                     closed: false,
+                    #[cfg(feature = "perf-reporting")]
+                    changed_at: std::time::Instant::now(),
                 },
                 &TokenRates::from_value(case["rates"].clone()).expect("rates"),
             );

@@ -61,6 +61,8 @@ pub mod multi_server_protocol;
 pub mod native_layr;
 pub mod notification_text;
 pub mod peer_team_ingress;
+#[cfg(feature = "perf-reporting")]
+pub mod perf_reporting;
 pub mod persistence;
 pub mod plan_record;
 pub mod pricing;

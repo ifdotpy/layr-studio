@@ -149,6 +149,10 @@ const SOURCE_SKIP = new Set([
 ]);
 const UNSAFE_RUST_ALLOWLIST: [string, string][] = [
   [
+    "workspaces/runtime/packages/runtime-store/src/perf_reporting.rs",
+    "Opt-in SQLite prepared-statement counter enumeration on the owning connection.",
+  ],
+  [
     "workspaces/runtime/packages/runtime-priority-sys/src/lib.rs",
     "OS priority syscall.",
   ],

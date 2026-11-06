@@ -1153,6 +1153,26 @@ fn supervisor_handshake_schema() -> Value {
         .to_value()
 }
 
+// Generated opt-in HTTP fragment; the matching Rust DTO is checked in feature tests.
+fn perf_reporting_document() -> Value {
+    let integer =
+        studio_json::json!({"type":"integer", "minimum":0, "maximum":values::MAX_SAFE_INTEGER});
+    let number = studio_json::json!({"type":"number"});
+    studio_json::json!({
+        "openapi":"3.1.0", "info":{"title":"Performance reporting", "version":"1"},
+        "paths": {
+            "/api/perf-reporting": {"get":{"operationId":"get_perf_reporting","summary":"Performance diagnostics","responses":{"200":{"description":"Performance aggregates","content":{"application/json":{"schema":{"type":"object","additionalProperties":true}}}}}}},
+            "/api/perf-reporting/client": {"post":{"operationId":"post_perf_client_report","summary":"Client performance report","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/PerfClientReport"}}}},"responses":{"204":{"description":"Report accepted"}}}}
+        },
+        "components":{"schemas":{
+            "PerfClientReport":{"type":"object","additionalProperties":false,"required":["windowMs","longTasks","interactions","renders"],"properties":{"windowMs":integer,"longTasks":{"$ref":"#/components/schemas/PerfLongTasks"},"interactions":{"type":"array","items":{"$ref":"#/components/schemas/PerfInteraction"}},"renders":{"type":"array","items":{"$ref":"#/components/schemas/PerfRender"}}}},
+            "PerfLongTasks":{"type":"object","additionalProperties":false,"required":["count","totalMs","maxMs"],"properties":{"count":integer,"totalMs":number,"maxMs":number}},
+            "PerfInteraction":{"type":"object","additionalProperties":false,"required":["type","count","maxDurationMs","maxInputDelayMs"],"properties":{"type":{"type":"string"},"count":integer,"maxDurationMs":number,"maxInputDelayMs":number}},
+            "PerfRender":{"type":"object","additionalProperties":false,"required":["component","count","totalMs","maxMs"],"properties":{"component":{"type":"string"},"count":integer,"totalMs":number,"maxMs":number}}
+        }}
+    })
+}
+
 // Committed storage schemas annotate safe integers; HTTP schemas spell out the
 // same shared bound for validators and generated Rust consumers.
 fn materialize_safe_integers(schema: &mut Value) {
@@ -1252,6 +1272,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     check_backend_kind_parity(root)?;
     check_provider_sql_parity(root)?;
     let mut openapi = read_json(root, OPENAPI_PATH)?;
+    let perf_document = perf_reporting_document();
     openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["data"]["maxLength"] =
         values::SYNC_STREAM_EVENT_MAX_BYTES.into();
     *openapi
@@ -1769,6 +1790,17 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             ),
         },
     ];
+    rendered.push(Rendered {
+        path: "workspaces/runtime/packages/runtime-http/openapi.perf-reporting.json".into(),
+        text: studio_json::to_string_pretty(&perf_document).map_err(|error| error.to_string())?
+            + "\n",
+    });
+    if with_api_types {
+        rendered.push(Rendered {
+            path: web("perfReporting.ts"),
+            text: api_types(root, &perf_document, "--rust-owned")?,
+        });
+    }
     // The workspace envelope remains a legacy input; its eligibility leaf is
     // generated from the same Rust owner as the HTTP and SSE contracts.
     let usage_limits_path =

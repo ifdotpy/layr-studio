@@ -992,6 +992,65 @@ mod tests {
         (state, store, directory)
     }
 
+    #[cfg(feature = "perf-reporting")]
+    #[tokio::test]
+    async fn perf_endpoint_reports_a_profiled_store_query() {
+        let (state, store, _directory) = state_with_store().await;
+        store
+            .read_async("perf-test", |tx| {
+                tx.query_row("SELECT 'perf-private-literal'", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(studio_runtime_store::StoreError::from)
+            })
+            .await
+            .expect("query executes");
+        let app = router(state).expect("router");
+        let request = Request::builder()
+            .uri("/api/perf-reporting")
+            .header("host", "127.0.0.1:4620")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::empty())
+            .expect("request");
+        let response = app.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 2 * 1024 * 1024)
+            .await
+            .expect("body");
+        let value: Value = studio_json::from_slice(&bytes).expect("JSON");
+        assert!(value["sql"]["SELECT ?"]["count"].as_u64().unwrap_or(0) >= 1);
+        assert!(!String::from_utf8_lossy(&bytes).contains("perf-private-literal"));
+        let unauthorized = Request::builder()
+            .method("POST")
+            .uri("/api/perf-reporting/client")
+            .header("host", "127.0.0.1:4620")
+            .header("content-type", "application/json")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::from(r#"{"windowMs":60000,"longTasks":{"count":0,"totalMs":0,"maxMs":0},"interactions":[],"renders":[]}"#))
+            .expect("request");
+        assert_eq!(
+            app.clone()
+                .oneshot(unauthorized)
+                .await
+                .expect("response")
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let post = Request::builder()
+            .method("POST")
+            .uri("/api/perf-reporting/client")
+            .header("host", "127.0.0.1:4620")
+            .header("x-canvas-token", "token")
+            .header("content-type", "application/json")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::from(r#"{"windowMs":60000,"longTasks":{"count":0,"totalMs":0,"maxMs":0},"interactions":[],"renders":[]}"#))
+            .expect("request");
+        assert_eq!(
+            app.oneshot(post).await.expect("response").status(),
+            StatusCode::NO_CONTENT
+        );
+    }
+
     async fn compression_response(
         app: &Router,
         path: &str,

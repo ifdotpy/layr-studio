@@ -100,6 +100,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::trace::{TraceEvent, TraceEventCodes};
+#[cfg(feature = "perf-reporting")]
+pub mod perf_reporting;
 pub use rusqlite::{Connection, Error as SqliteError, ErrorCode, Transaction};
 use rusqlite::{OpenFlags, TransactionBehavior};
 use thiserror::Error;
@@ -773,8 +775,17 @@ fn verify_observed_tables_are_rowid(connection: &Connection) -> StoreResult<()> 
 }
 
 fn profile_statement(database: StoreDatabaseKind, event: TraceEvent<'_>) {
-    if let TraceEvent::Profile(_statement, elapsed) = event {
-        emit_diagnostic(StoreDiagnosticsEvent::SqlProfile { database, elapsed });
+    match event {
+        TraceEvent::Profile(statement, elapsed) => {
+            #[cfg(feature = "perf-reporting")]
+            perf_reporting::record_sql(&statement.sql(), elapsed);
+            #[cfg(not(feature = "perf-reporting"))]
+            let _ = statement;
+            emit_diagnostic(StoreDiagnosticsEvent::SqlProfile { database, elapsed });
+        }
+        #[cfg(feature = "perf-reporting")]
+        TraceEvent::Row(statement) => perf_reporting::record_sql_row(&statement.sql()),
+        _ => {}
     }
 }
 
@@ -790,14 +801,21 @@ fn profile_other(event: TraceEvent<'_>) {
     profile_statement(StoreDatabaseKind::Other, event);
 }
 
-fn install_profile(connection: &mut Connection, database: StoreDatabaseKind) {
+fn install_profile(connection: &Connection, database: StoreDatabaseKind) {
+    #[cfg(feature = "perf-reporting")]
+    let enabled = true;
+    #[cfg(not(feature = "perf-reporting"))]
     let enabled = diagnostics_callback()
         .try_lock()
         .map(|callback| callback.is_some())
         .unwrap_or(false);
+    #[cfg(feature = "perf-reporting")]
+    let mask = TraceEventCodes::SQLITE_TRACE_PROFILE | TraceEventCodes::SQLITE_TRACE_ROW;
+    #[cfg(not(feature = "perf-reporting"))]
+    let mask = TraceEventCodes::SQLITE_TRACE_PROFILE;
     connection.trace_v2(
         if enabled {
-            TraceEventCodes::SQLITE_TRACE_PROFILE
+            mask
         } else {
             TraceEventCodes::empty()
         },
@@ -1142,7 +1160,9 @@ impl ReadConnectionPool {
 
     /// Wait as a future for one of the [`READ_CONNECTION_POOL_CAPACITY`] permits.
     async fn admit(&self) -> StoreResult<(tokio::sync::OwnedSemaphorePermit, bool)> {
-        match Arc::clone(&self.admission).try_acquire_owned() {
+        #[cfg(feature = "perf-reporting")]
+        let started = Instant::now();
+        let result = match Arc::clone(&self.admission).try_acquire_owned() {
             Ok(permit) => Ok((permit, false)),
             Err(_) => {
                 let _waiting = ReadWaiterRegistration::begin(self);
@@ -1152,7 +1172,10 @@ impl ReadConnectionPool {
                     .map_err(|_| StoreError::ReadTaskFailed)?;
                 Ok((permit, true))
             }
-        }
+        };
+        #[cfg(feature = "perf-reporting")]
+        perf_reporting::record_wait("sqlite read pool admission", started.elapsed());
+        result
     }
 
     /// Check out a reader for a held permit; with the permit one is idle or may be opened.
@@ -1162,12 +1185,13 @@ impl ReadConnectionPool {
         started: Instant,
         waited: bool,
     ) -> StoreResult<ReadConnection> {
-        let idle = self
-            .state
-            .lock()
-            .map_err(|_| StoreError::WriterPoisoned)?
-            .idle
-            .pop();
+        #[cfg(feature = "perf-reporting")]
+        let lock_started = Instant::now();
+        let mut pool_state = self.state.lock().map_err(|_| StoreError::WriterPoisoned)?;
+        #[cfg(feature = "perf-reporting")]
+        perf_reporting::record_wait("sqlite read pool mutex", lock_started.elapsed());
+        let idle = pool_state.idle.pop();
+        drop(pool_state);
         let connection = match idle {
             Some(connection) => connection,
             None => {
@@ -1287,13 +1311,20 @@ where
         .connection
         .as_mut()
         .expect("checked-out read connection");
-    let transaction = connection.transaction().map_err(StoreError::from)?;
-    let value = sql_callback(|| operation(&transaction))?;
-    transaction
-        .commit()
-        .map_err(StoreError::from)
-        .map_err(E::from)?;
-    Ok(value)
+    #[cfg(feature = "perf-reporting")]
+    perf_reporting::sweep_sql(connection, false);
+    let result = (|| {
+        let transaction = connection.transaction().map_err(StoreError::from)?;
+        let value = sql_callback(|| operation(&transaction))?;
+        transaction
+            .commit()
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        Ok(value)
+    })();
+    #[cfg(feature = "perf-reporting")]
+    perf_reporting::sweep_sql(connection, true);
+    result
 }
 
 #[derive(Default)]
@@ -1711,22 +1742,22 @@ impl RuntimeStore {
             })
             .await
             .map_err(StoreError::writer_actor_control)?;
-        let mut analytics = self
+        let analytics = self
             .analytics
             .lock()
             .map_err(|_| StoreError::WriterPoisoned)?;
-        install_profile(&mut analytics, StoreDatabaseKind::Analytics);
-        let mut reader = self
+        install_profile(&analytics, StoreDatabaseKind::Analytics);
+        let reader = self
             .version_reader
             .lock()
             .map_err(|_| StoreError::WriterPoisoned)?;
-        install_profile(&mut reader, StoreDatabaseKind::Canvas);
-        let mut pool = self
+        install_profile(&reader, StoreDatabaseKind::Canvas);
+        let pool = self
             .read_pool
             .state
             .lock()
             .map_err(|_| StoreError::WriterPoisoned)?;
-        for connection in &mut pool.idle {
+        for connection in &pool.idle {
             install_profile(connection, StoreDatabaseKind::Canvas);
         }
         Ok(())
@@ -1813,7 +1844,11 @@ impl RuntimeStore {
         let analytics = Arc::clone(&self.analytics);
         let wal_path = self.root.join("analytics.sqlite3-wal");
         blocking_pool::spawn_blocking("analytics/checkpoint", move || {
+            #[cfg(feature = "perf-reporting")]
+            let started = Instant::now();
             let analytics = analytics.lock().map_err(|_| StoreError::WriterPoisoned)?;
+            #[cfg(feature = "perf-reporting")]
+            perf_reporting::record_wait("analytics mutex", started.elapsed());
             Ok(Self::checkpoint_connection(
                 &analytics,
                 StoreDatabaseKind::Analytics,
@@ -2167,9 +2202,27 @@ impl RuntimeStore {
         let write_alert = Arc::clone(&self.write_alert);
         let operation = move |writer: &mut Connection| {
             let started = Instant::now();
+            #[cfg(feature = "perf-reporting")]
+            let outcome = perf_reporting::with_sql_job(
+                format!("write {}:{}", origin.file(), origin.line()),
+                || {
+                    perf_reporting::sweep_sql(writer, false);
+                    let outcome = timed_writer_job(submitted, &job_timing, Instant::now, || {
+                        transaction_job(writer)
+                    });
+                    perf_reporting::sweep_sql(writer, true);
+                    outcome
+                },
+            );
+            #[cfg(not(feature = "perf-reporting"))]
             let outcome = timed_writer_job(submitted, &job_timing, Instant::now, || {
                 transaction_job(writer)
             });
+            #[cfg(feature = "perf-reporting")]
+            perf_reporting::record_wait(
+                &format!("sqlite write {}:{}", origin.file(), origin.line()),
+                started.elapsed(),
+            );
             write_alert.observe(origin, started.elapsed());
             outcome
         };
@@ -2342,7 +2395,17 @@ impl RuntimeStore {
         let pool = Arc::clone(&self.read_pool);
         let (permit, waited) = pool.admit().await?;
         blocking_pool::spawn_blocking(label, move || {
-            snapshot_on(pool.checkout_admitted(permit, started, waited)?, operation)
+            #[cfg(feature = "perf-reporting")]
+            let run_started = Instant::now();
+            #[cfg(feature = "perf-reporting")]
+            let result = perf_reporting::with_sql_job(format!("read {label}"), || {
+                snapshot_on(pool.checkout_admitted(permit, started, waited)?, operation)
+            });
+            #[cfg(not(feature = "perf-reporting"))]
+            let result = snapshot_on(pool.checkout_admitted(permit, started, waited)?, operation);
+            #[cfg(feature = "perf-reporting")]
+            perf_reporting::record_wait(&format!("sqlite read {label}"), run_started.elapsed());
+            result
         })
         .await
         .map_err(|_| StoreError::ReadTaskFailed)?
@@ -2351,10 +2414,14 @@ impl RuntimeStore {
     /// Return SQLite's connection-local generation, advanced by commits made
     /// through the serialized writer or another connection.
     pub fn generation(&self) -> StoreResult<i64> {
+        #[cfg(feature = "perf-reporting")]
+        let started = Instant::now();
         let reader = self
             .version_reader
             .lock()
             .map_err(|_| StoreError::WriterPoisoned)?;
+        #[cfg(feature = "perf-reporting")]
+        perf_reporting::record_wait("sqlite version reader mutex", started.elapsed());
         Ok(reader.query_row("PRAGMA data_version", [], |row| row.get(0))?)
     }
 
@@ -2393,7 +2460,12 @@ impl RuntimeStore {
     pub async fn lock_entity_projection_maintenance(
         &self,
     ) -> StoreResult<tokio::sync::MutexGuard<'_, ()>> {
-        Ok(self.entity_projection_maintenance_lock.lock().await)
+        #[cfg(feature = "perf-reporting")]
+        let started = Instant::now();
+        let guard = self.entity_projection_maintenance_lock.lock().await;
+        #[cfg(feature = "perf-reporting")]
+        perf_reporting::record_wait("entity projection maintenance mutex", started.elapsed());
+        Ok(guard)
     }
 
     /// Record the committed store generation and vault input signature after maintenance commits.
@@ -2523,14 +2595,14 @@ fn invalid_local_identity(reason: &str) -> StoreError {
 }
 
 fn open_database(path: &Path, flags: OpenFlags) -> StoreResult<Connection> {
-    let mut connection = Connection::open_with_flags(path, flags)?;
+    let connection = Connection::open_with_flags(path, flags)?;
     let database = match path.file_name().and_then(|name| name.to_str()) {
         Some("analytics.sqlite3") => StoreDatabaseKind::Analytics,
         Some("canvas.sqlite3") => StoreDatabaseKind::Canvas,
         _ => StoreDatabaseKind::Other,
     };
     configure_read_pages(&connection, "main")?;
-    install_profile(&mut connection, database);
+    install_profile(&connection, database);
     connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
     connection.busy_timeout(std::time::Duration::from_millis(u64::from(
         DATABASE_BUSY_TIMEOUT_MS,
@@ -2544,6 +2616,52 @@ mod read_pool_tests {
     use std::sync::mpsc;
 
     const READ_POOL_TEST_WATCHDOG: Duration = Duration::from_secs(5);
+
+    #[cfg(feature = "perf-reporting")]
+    #[tokio::test]
+    async fn cached_direct_query_scan_is_attributed_to_writer_origin() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE perf_job_scan (value INTEGER); INSERT INTO perf_job_scan VALUES (1), (2), (3)")?;
+            Ok(())
+        }).await.unwrap();
+        store
+            .transaction(|tx| {
+                let mut statement =
+                    tx.prepare_cached("SELECT count(*) FROM perf_job_scan WHERE value = ?1")?;
+                let count: i64 = statement.query_row([2], |row| row.get(0))?;
+                assert_eq!(count, 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let report = perf_reporting::snapshot();
+        let (sql, stats) = report
+            .sql_by_job
+            .iter()
+            .find(|(key, _)| key.contains("SELECT count(*) FROM perf_job_scan WHERE value = ?1"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing statement: {:?}",
+                    report.sql_by_job.keys().collect::<Vec<_>>()
+                )
+            });
+        assert!(sql.starts_with(&format!("write {}:", file!())));
+        let label = sql.split(" | ").next().unwrap();
+        assert!(stats.fullscan_steps > 0);
+        assert!(stats.vm_steps > 0);
+        assert!(report.sql_sweeps[label].rows > 0);
+        assert!(report.sql_top_fullscan.iter().any(|(key, _)| key == sql));
+        println!(
+            "fixture report: {}",
+            studio_json::to_string(&studio_json::json!({
+                "label": label, "fullscan_steps": stats.fullscan_steps,
+                "vm_steps": stats.vm_steps, "statements_swept": report.sql_sweeps[label].rows
+            }))
+            .unwrap()
+        );
+    }
 
     #[tokio::test]
     async fn serving_connections_set_read_page_policy() {

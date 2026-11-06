@@ -104,10 +104,15 @@ impl SqliteActor {
     pub(crate) async fn acquire(
         &self,
     ) -> Result<OwnedSemaphorePermit, tokio_rusqlite::Error<rusqlite::Error>> {
-        Arc::clone(&self.admission)
+        #[cfg(feature = "perf-reporting")]
+        let started = std::time::Instant::now();
+        let permit = Arc::clone(&self.admission)
             .acquire_owned()
             .await
-            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)
+            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed);
+        #[cfg(feature = "perf-reporting")]
+        crate::perf_reporting::record_wait("sqlite writer admission", started.elapsed());
+        permit
     }
 
     pub(crate) async fn call_admitted<R, E>(
@@ -141,13 +146,22 @@ impl SqliteActor {
         R: Send + 'static,
         E: Send + 'static,
     {
+        #[cfg(feature = "perf-reporting")]
+        let queued_at = std::time::Instant::now();
         let runtime_lock = Arc::clone(&self._runtime_lock);
         self.connection
             .call_raw(move |connection| {
+                #[cfg(feature = "perf-reporting")]
+                crate::perf_reporting::record_wait("sqlite actor queue", queued_at.elapsed());
                 let _permit = permit;
                 let _runtime_lock = runtime_lock;
+                #[cfg(feature = "perf-reporting")]
+                let started = std::time::Instant::now();
+                let result = operation(connection);
+                #[cfg(feature = "perf-reporting")]
+                crate::perf_reporting::record_wait("sqlite writer run", started.elapsed());
                 ActorResponse {
-                    result: Some(operation(connection)),
+                    result: Some(result),
                     completion: Some(Box::new(completion)),
                 }
             })
