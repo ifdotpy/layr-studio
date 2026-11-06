@@ -21,7 +21,6 @@ members = [
     "workspaces/runtime/packages/request-signing",
     "workspaces/runtime/packages/runtime-schema",
     "workspaces/runtime/packages/runtime-store",
-    "workspaces/runtime/packages/test-deps",
 ]
 # The vendored layr source is maintained separately from this workspace.
 exclude = ["workspaces/runtime/apps/layr"]
