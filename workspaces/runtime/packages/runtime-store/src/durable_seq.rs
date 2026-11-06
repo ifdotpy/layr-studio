@@ -118,6 +118,15 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_monitors"),
     // The newest events form the event window, built at read time.
     DurableTable::new("runtime_events", "status"),
+    // Domain rows of a chat: the chat, its turns and its provider sessions.
+    DurableTable::new("chats", "status"),
+    DurableTable::new("turns", "state"),
+    DurableTable::new("sessions", "state"),
+    // Chat messages between agents and people.
+    DurableTable::new("messages", "deliveries"),
+    // Rows that never change after they are written: checkpoints and attachments.
+    DurableTable::record("runtime_checkpoints"),
+    DurableTable::record("runtime_assets"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -541,6 +550,46 @@ mod tests {
                 seq,
             ),
             DurableChanges::Snapshot { .. } => panic!("expected a delta"),
+        }
+    }
+
+    #[tokio::test]
+    async fn domain_rows_messages_checkpoints_and_attachments_take_numbers() {
+        let root = tempfile::tempdir().expect("state");
+        let store = crate::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("store");
+        store
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO chats(id,state,status) VALUES('c','active','idle');
+                     INSERT INTO turns(id,chat,state) VALUES('t','c','completed');
+                     INSERT INTO sessions(id,chat,thread_id,account_key,state) VALUES('s','c','thread','default','ready');
+                     INSERT INTO messages(id,room,author,text,at,deliveries) VALUES('m','room','c','hi',1,'{}');
+                     INSERT INTO runtime_checkpoints(id,record) VALUES('k','{\"id\":\"k\"}');
+                     INSERT INTO runtime_assets(id,record) VALUES('a','{\"id\":\"a\"}');",
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("rows");
+        let db = store.test_reader().expect("reader");
+        for (table, id) in [
+            ("chats", "c"),
+            ("turns", "t"),
+            ("sessions", "s"),
+            ("messages", "m"),
+            ("runtime_checkpoints", "k"),
+            ("runtime_assets", "a"),
+        ] {
+            let seq: i64 = db
+                .query_row(
+                    "SELECT seq FROM durable_rows WHERE tbl=?1 AND id=?2 AND deleted=0",
+                    [table, id],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|error| panic!("{table}: {error}"));
+            assert!(seq > 0, "{table}");
         }
     }
 
