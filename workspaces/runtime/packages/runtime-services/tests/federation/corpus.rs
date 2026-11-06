@@ -36,6 +36,9 @@ struct Corpus {
     root: tempfile::TempDir,
     data: Value,
 }
+/// The request id of the corpus requests signed in these tests.
+const CORPUS_REQUEST: &str = "corpus-request-1";
+
 impl Corpus {
     fn new() -> Self {
         let root = match std::env::var_os("STUDIO_RUNTIME_CORPUS_SCRATCH") {
@@ -186,6 +189,12 @@ impl Corpus {
             .await
             .expect("fixture operation");
         (root, store)
+    }
+    /// The recipient state id of every corpus store.
+    fn local(&self) -> &str {
+        self.data["seed"]["local"]["stateId"]
+            .as_str()
+            .expect("fixture operation")
     }
     fn peer(&self) -> &str {
         self.data["seed"]["peer"]["stateId"]
@@ -473,14 +482,19 @@ async fn authenticated_consumer() {
     let body =
         studio_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
             .expect("fixture operation");
-    let nonce = "outer-authenticated-nonce-123";
+    let nonce = "outer-authenticated-nonce-123-00";
     let action = effects::FederationAction::Message;
-    let signature = identity.sign(&transport::federation_signing_bytes(
-        "POST",
-        action.path(),
-        corpus.now() as i64,
-        nonce,
-        &body,
+    let signature = identity.sign(&transport::multi_server_signing_bytes(
+        transport::MultiServerSigningInput {
+            method: "POST",
+            target: action.path(),
+            server_id: corpus.local(),
+            client_id: corpus.peer(),
+            timestamp: &(corpus.now() as i64).to_string(),
+            nonce: nonce,
+            request_id: CORPUS_REQUEST,
+            body: &body,
+        },
     ));
     let request = || effects::SignedRequest {
         action,
@@ -489,7 +503,8 @@ async fn authenticated_consumer() {
         nonce,
         signature: &signature,
         raw: &body,
-        unified: None,
+        server_id: corpus.local(),
+        request_id: CORPUS_REQUEST,
     };
     let before = counts(&store);
     assert!(
@@ -583,10 +598,8 @@ async fn unified_signature_verifies_and_its_nonce_replay_is_refused_from_the_one
             nonce,
             signature,
             raw: body,
-            unified: Some(effects::UnifiedFields {
-                server_id,
-                request_id: "unified-request-1",
-            }),
+            server_id,
+            request_id: "unified-request-1",
         }
     }
     let wrong_server = sign("99999999-9999-4999-8999-999999999999", nonce);
@@ -643,34 +656,6 @@ async fn unified_signature_verifies_and_its_nonce_replay_is_refused_from_the_one
         "a replayed nonce is refused"
     );
     assert_eq!(counts(&store), consumed, "replay writes nothing");
-
-    // The same nonce under the old scheme is a replay too: both schemes share the table.
-    let legacy = identity.sign(&transport::federation_signing_bytes(
-        "POST",
-        action.path(),
-        timestamp,
-        nonce,
-        &body,
-    ));
-    assert!(
-        effects::handle(
-            std::sync::Arc::clone(&store),
-            effects::SignedRequest {
-                action,
-                peer_id: corpus.peer(),
-                timestamp,
-                nonce,
-                signature: &legacy,
-                raw: &body,
-                unified: None,
-            },
-            effects::OriginObservation::observed(None),
-            corpus.now(),
-        )
-        .await
-        .is_err(),
-        "a nonce used under the unified scheme is a replay under the old scheme"
-    );
 }
 
 #[tokio::test]
@@ -684,18 +669,23 @@ async fn federation_inbound_authentication_refusals() {
             .expect("fixture operation");
     let action = effects::FederationAction::Message;
     let sign = |timestamp: i64, nonce: &str| {
-        identity.sign(&transport::federation_signing_bytes(
-            "POST",
-            action.path(),
-            timestamp,
-            nonce,
-            &body,
+        identity.sign(&transport::multi_server_signing_bytes(
+            transport::MultiServerSigningInput {
+                method: "POST",
+                target: action.path(),
+                server_id: corpus.local(),
+                client_id: corpus.peer(),
+                timestamp: &(timestamp).to_string(),
+                nonce: nonce,
+                request_id: CORPUS_REQUEST,
+                body: &body,
+            },
         ))
     };
 
     let (_, store) = corpus.store("bad-request-signature", false).await;
     let before = counts(&store);
-    let mut bad_signature = sign(corpus.now() as i64, "bad-authenticated-nonce-12345");
+    let mut bad_signature = sign(corpus.now() as i64, "bad-authenticated-nonce-12345-00");
     bad_signature.push('x');
     assert!(
         effects::handle(
@@ -704,10 +694,11 @@ async fn federation_inbound_authentication_refusals() {
                 action,
                 peer_id: corpus.peer(),
                 timestamp: corpus.now() as i64,
-                nonce: "bad-authenticated-nonce-12345",
+                nonce: "bad-authenticated-nonce-12345-00",
                 signature: &bad_signature,
                 raw: &body,
-                unified: None,
+                server_id: corpus.local(),
+                request_id: CORPUS_REQUEST,
             },
             effects::OriginObservation::observed(None),
             corpus.now(),
@@ -721,7 +712,7 @@ async fn federation_inbound_authentication_refusals() {
     let (_, store) = corpus.store("stale-request-timestamp", false).await;
     let before = counts(&store);
     let stale = corpus.now() as i64 - 301;
-    let stale_nonce = "stale-authenticated-nonce-12345";
+    let stale_nonce = "stale-authenticated-nonce-12345-";
     let stale_signature = sign(stale, stale_nonce);
     assert!(
         effects::handle(
@@ -733,7 +724,8 @@ async fn federation_inbound_authentication_refusals() {
                 nonce: stale_nonce,
                 signature: &stale_signature,
                 raw: &body,
-                unified: None,
+                server_id: corpus.local(),
+                request_id: CORPUS_REQUEST,
             },
             effects::OriginObservation::observed(None),
             corpus.now(),
@@ -747,7 +739,7 @@ async fn federation_inbound_authentication_refusals() {
     let (_, store) = corpus.store("wrong-request-peer", false).await;
     let before = counts(&store);
     let unknown_peer = "99999999-9999-4999-8999-999999999999";
-    let wrong_peer_nonce = "wrong-peer-authenticated-nonce-123";
+    let wrong_peer_nonce = "wrong-peer-authenticated-nonce-1";
     let wrong_peer_signature = sign(corpus.now() as i64, wrong_peer_nonce);
     assert!(
         effects::handle(
@@ -759,7 +751,8 @@ async fn federation_inbound_authentication_refusals() {
                 nonce: wrong_peer_nonce,
                 signature: &wrong_peer_signature,
                 raw: &body,
-                unified: None,
+                server_id: corpus.local(),
+                request_id: CORPUS_REQUEST,
             },
             effects::OriginObservation::observed(None),
             corpus.now(),
@@ -782,7 +775,7 @@ async fn federation_inbound_authentication_refusals() {
         .await
         .expect("set trusted whois owner");
     let before = counts(&store);
-    let whois_nonce = "wrong-whois-authenticated-nonce-123";
+    let whois_nonce = "wrong-whois-authenticated-nonce-";
     let whois_signature = sign(corpus.now() as i64, whois_nonce);
     assert!(
         effects::handle(
@@ -794,7 +787,8 @@ async fn federation_inbound_authentication_refusals() {
                 nonce: whois_nonce,
                 signature: &whois_signature,
                 raw: &body,
-                unified: None,
+                server_id: corpus.local(),
+                request_id: CORPUS_REQUEST,
             },
             effects::OriginObservation::observed(Some("other@example.test".into())),
             corpus.now(),
@@ -843,12 +837,17 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
     macro_rules! request {
         ($nonce:expr) => {{
             let nonce = $nonce;
-            let signature = identity.sign(&transport::federation_signing_bytes(
-                "POST",
-                "/api/federation/v1/pair",
-                corpus.now() as i64,
-                nonce,
-                &raw,
+            let signature = identity.sign(&transport::multi_server_signing_bytes(
+                transport::MultiServerSigningInput {
+                    method: "POST",
+                    target: "/api/federation/v1/pair",
+                    server_id: corpus.local(),
+                    client_id: corpus.peer(),
+                    timestamp: &(corpus.now() as i64).to_string(),
+                    nonce: nonce,
+                    request_id: CORPUS_REQUEST,
+                    body: &raw,
+                },
             ));
             effects::handle(
                 std::sync::Arc::clone(&receiver),
@@ -859,7 +858,8 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
                     nonce,
                     signature: &signature,
                     raw: &raw,
-                    unified: None,
+                    server_id: corpus.local(),
+                    request_id: CORPUS_REQUEST,
                 },
                 effects::OriginObservation::observed(Some("peer@example.test".into())),
                 corpus.now(),
@@ -867,7 +867,7 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
             .await
         }};
     }
-    let first = request!("pair-nonce-initial-12345").expect("pair request");
+    let first = request!("pair-nonce-initial-12345-0000000").expect("pair request");
     let local = transport::load_federation_identity(&receiver)
         .await
         .expect("local signing identity");
@@ -890,12 +890,12 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
     );
     let consumed_invite = rows(&receiver, "runtime_federation_invites")[0].clone();
     assert_eq!(consumed_invite["usedBy"], peer_id);
-    request!("pair-nonce-retry-67890").expect("same invitation and peer are replay safe");
+    request!("pair-nonce-retry-67890-000000000").expect("same invitation and peer are replay safe");
     assert_eq!(
         rows(&receiver, "runtime_federation_invites")[0],
         consumed_invite
     );
-    assert!(request!("pair-nonce-initial-12345").is_err());
+    assert!(request!("pair-nonce-initial-12345-0000000").is_err());
 
     let mut other_body = body.clone();
     let other_peer = "55555555-5555-4555-8555-555555555555";
@@ -903,13 +903,18 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
     let other_raw = transport::canonical_json(&other_body)
         .expect("canonical alternate pair body")
         .into_bytes();
-    let other_nonce = "used-invite-other-peer-nonce";
-    let other_signature = identity.sign(&transport::federation_signing_bytes(
-        "POST",
-        effects::FederationAction::Pair.path(),
-        corpus.now() as i64,
-        other_nonce,
-        &other_raw,
+    let other_nonce = "used-invite-other-peer-nonce-000";
+    let other_signature = identity.sign(&transport::multi_server_signing_bytes(
+        transport::MultiServerSigningInput {
+            method: "POST",
+            target: effects::FederationAction::Pair.path(),
+            server_id: corpus.local(),
+            client_id: corpus.peer(),
+            timestamp: &(corpus.now() as i64).to_string(),
+            nonce: other_nonce,
+            request_id: CORPUS_REQUEST,
+            body: &other_raw,
+        },
     ));
     let before_used_invite = counts(&receiver);
     let peers_before = rows(&receiver, "runtime_federation_peers");
@@ -924,7 +929,8 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
                 nonce: other_nonce,
                 signature: &other_signature,
                 raw: &other_raw,
-                unified: None,
+                server_id: corpus.local(),
+                request_id: CORPUS_REQUEST,
             },
             effects::OriginObservation::observed(Some("peer@example.test".into())),
             corpus.now(),
@@ -971,13 +977,18 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
     let expired_raw = transport::canonical_json(&expired_body)
         .expect("canonical expired pair body")
         .into_bytes();
-    let expired_nonce = "expired-invite-authenticated-nonce";
-    let expired_signature = identity.sign(&transport::federation_signing_bytes(
-        "POST",
-        effects::FederationAction::Pair.path(),
-        corpus.now() as i64,
-        expired_nonce,
-        &expired_raw,
+    let expired_nonce = "expired-invite-authenticated-non";
+    let expired_signature = identity.sign(&transport::multi_server_signing_bytes(
+        transport::MultiServerSigningInput {
+            method: "POST",
+            target: effects::FederationAction::Pair.path(),
+            server_id: corpus.local(),
+            client_id: corpus.peer(),
+            timestamp: &(corpus.now() as i64).to_string(),
+            nonce: expired_nonce,
+            request_id: CORPUS_REQUEST,
+            body: &expired_raw,
+        },
     ));
     let before_expired = counts(&receiver);
     let peers_before = rows(&receiver, "runtime_federation_peers");
@@ -992,7 +1003,8 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
                 nonce: expired_nonce,
                 signature: &expired_signature,
                 raw: &expired_raw,
-                unified: None,
+                server_id: corpus.local(),
+                request_id: CORPUS_REQUEST,
             },
             effects::OriginObservation::observed(Some("peer@example.test".into())),
             corpus.now(),
@@ -1346,10 +1358,8 @@ impl delivery::FederationTransport for PeerTransport {
                     nonce: header("X-Studio-Nonce"),
                     signature: header("X-Studio-Signature"),
                     raw: &body,
-                    unified: Some(effects::UnifiedFields {
-                        server_id: header("X-Studio-Server"),
-                        request_id: header("X-Studio-Request-Id"),
-                    }),
+                    server_id: header("X-Studio-Server"),
+                    request_id: header("X-Studio-Request-Id"),
                 },
                 effects::OriginObservation::observed(None),
                 self.now,
@@ -1711,10 +1721,11 @@ async fn spoofed_origin() {
         action: effects::FederationAction::Status,
         peer_id: corpus.peer(),
         timestamp: corpus.now() as i64,
-        nonce: "spoofed-origin-nonce-12345",
+        nonce: "spoofed-origin-nonce-12345-00000",
         signature: "",
         raw: &raw,
-        unified: None,
+        server_id: corpus.local(),
+        request_id: CORPUS_REQUEST,
     };
     assert!(
         effects::handle(

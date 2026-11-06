@@ -26,7 +26,6 @@ use studio_runtime_store::{RemoteTransportRepository, RuntimeStore, StoreError, 
 pub const CLOCK_SKEW_SECONDS: i64 = 300;
 pub const MAX_IDENTITY_BYTES: usize = 16 * 1024;
 
-const FEDERATION_DOMAIN: &str = "studio-federation-v1";
 const FEDERATION_MESSAGE_DOMAIN: &str = "studio-federation-message-v1\n";
 const FEDERATION_RESPONSE_DOMAIN: &str = "studio-federation-response-v1\n";
 const ED25519_OID: &str = "1.3.101.112";
@@ -344,26 +343,6 @@ fn multi_server_request_fingerprint_normalized(
     Ok(sha256_hex(&input))
 }
 
-/// Retired federation signature bytes: raw JSON bytes are signed with the exact method and path.
-///
-/// Receivers accept this scheme for one release so that peers on the previous
-/// build keep working during a rolling update. Senders still emit it next to the
-/// unified `studio-multi-server-v1` signature. Remove both in the release after
-/// the unified scheme ships (see docs/multi-server.md, "One signature scheme").
-pub fn federation_signing_bytes(
-    method: &str,
-    path: &str,
-    timestamp: i64,
-    nonce: &str,
-    body: &[u8],
-) -> Vec<u8> {
-    format!(
-        "{FEDERATION_DOMAIN}\n{method}\n{path}\n{timestamp}\n{nonce}\n{}",
-        sha256_hex(body)
-    )
-    .into_bytes()
-}
-
 /// Build the multi-server signature headers for one HTTPS request.
 pub fn multi_server_signed_headers(
     identity: &RemoteIdentity,
@@ -409,12 +388,9 @@ fn multi_server_signed_headers_normalized(
     ])
 }
 
-/// Build the headers for one signed federation request to the peer `server_id`.
-///
-/// The request carries the unified `studio-multi-server-v1` signature (client is
-/// the sender state, server is the recipient state). It also carries the retired
-/// federation signature for one release, so a peer on the previous build still
-/// accepts it. A receiver that knows the unified headers ignores the retired ones.
+/// Build the headers for one signed federation request to the peer `server_id`:
+/// the `studio-multi-server-v1` signature (client is the sender state, server is the
+/// recipient state).
 #[allow(clippy::too_many_arguments)]
 pub fn federation_signed_headers(
     identity: &RemoteIdentity,
@@ -426,13 +402,9 @@ pub fn federation_signed_headers(
     body: &[u8],
 ) -> RemoteTransportResult<Vec<(String, String)>> {
     validate_federation_nonce(nonce, timestamp, timestamp)?;
-    let path = canonical_request_target(url)?;
-    let signature = identity.sign(&federation_signing_bytes(
-        method, &path, timestamp, nonce, body,
-    ));
     // A request id must start with a letter or digit; a random nonce can start with `-` or `_`.
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    let mut headers = multi_server_signed_headers(
+    multi_server_signed_headers(
         identity,
         &MultiServerRequest {
             server_id,
@@ -444,14 +416,7 @@ pub fn federation_signed_headers(
             body,
         },
         timestamp,
-    )?;
-    headers.extend([
-        ("X-Studio-Federation-State".to_owned(), identity.id.clone()),
-        ("X-Studio-Federation-Time".to_owned(), timestamp.to_string()),
-        ("X-Studio-Federation-Nonce".to_owned(), nonce.to_owned()),
-        ("X-Studio-Federation-Signature".to_owned(), signature),
-    ]);
-    Ok(headers)
+    )
 }
 
 pub fn federation_message_signing_bytes(envelope: &Value) -> RemoteTransportResult<Vec<u8>> {
@@ -1743,10 +1708,10 @@ pub(crate) mod tests {
         HttpResponse, MultiServerExchangeInput, MultiServerRequest, MultiServerSigningInput,
         PeerLinkClient, RemoteIdentity, RemoteTransportError, canonical_json, ed25519_public_key,
         exchange_paired_request_with, federation_message_signing_bytes, federation_signed_headers,
-        federation_signing_bytes, load_multi_server_identity, multi_server_request_fingerprint,
-        multi_server_signed_headers, multi_server_signing_bytes, new_nonce,
-        validate_federation_nonce, validate_https_url, validate_multi_server_nonce,
-        verify_federation_response, verify_multi_server_response, verify_signature,
+        load_multi_server_identity, multi_server_request_fingerprint, multi_server_signed_headers,
+        multi_server_signing_bytes, new_nonce, validate_federation_nonce, validate_https_url,
+        validate_multi_server_nonce, verify_federation_response, verify_multi_server_response,
+        verify_signature,
     };
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
@@ -1885,10 +1850,6 @@ pub(crate) mod tests {
                 body: b"{}",
             }),
             b"studio-multi-server-v1\nPOST\n/api/x\ns\nc\n1\nn\nr\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
-        );
-        assert_eq!(
-            federation_signing_bytes("POST", "/api/f", 1, "n", b"{}"),
-            b"studio-federation-v1\nPOST\n/api/f\n1\nn\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
         );
         assert_eq!(
             multi_server_request_fingerprint("post", "https://peer.example/api/test", b"{}")
@@ -2089,10 +2050,6 @@ pub(crate) mod tests {
                 "X-Studio-Nonce",
                 "X-Studio-Request-Id",
                 "X-Studio-Signature",
-                "X-Studio-Federation-State",
-                "X-Studio-Federation-Time",
-                "X-Studio-Federation-Nonce",
-                "X-Studio-Federation-Signature",
             ]
         );
     }

@@ -20,7 +20,6 @@ pub mod server_transport;
 mod sign_in;
 pub mod speech;
 pub mod startup;
-pub mod store_move;
 pub mod stream_log;
 mod tls;
 pub mod views;

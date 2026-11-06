@@ -36,10 +36,12 @@ impl FederationTransport for Loopback {
                     .map(|(_, value)| value.clone())
                     .expect("signed header")
             };
-            let peer_id = header("x-studio-federation-state");
-            let timestamp: i64 = header("x-studio-federation-time").parse().expect("time");
-            let nonce = header("x-studio-federation-nonce");
-            let signature = header("x-studio-federation-signature");
+            let peer_id = header("x-studio-client");
+            let timestamp: i64 = header("x-studio-timestamp").parse().expect("time");
+            let nonce = header("x-studio-nonce");
+            let signature = header("x-studio-signature");
+            let server_id = header("x-studio-server");
+            let request_id = header("x-studio-request-id");
             let answer = federation_effects::handle(
                 Arc::clone(&self.remote),
                 SignedRequest {
@@ -49,7 +51,8 @@ impl FederationTransport for Loopback {
                     nonce: &nonce,
                     signature: &signature,
                     raw: &exchange.body,
-                    unified: None,
+                    server_id: &server_id,
+                    request_id: &request_id,
                 },
                 OriginObservation::from_trusted_serve(None),
                 timestamp as f64,

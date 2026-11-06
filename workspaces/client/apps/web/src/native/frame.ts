@@ -131,8 +131,6 @@ export function bindNativeFrames(
       !signInMethod &&
       method !== "browser.profile" &&
       method !== "browser.profileChunk" &&
-      method !== "browser.legacyPreferences" &&
-      method !== "browser.legacyPreferencesClear" &&
       !localService
     )
       return reply({
@@ -168,19 +166,7 @@ export function bindNativeFrames(
             )
           : method === "browser.profile"
             ? await invoke("profile.snapshot", { owner: `server:${owner}` }, id)
-            : method === "browser.legacyPreferences"
-              ? await invoke(
-                  "preferences.legacy",
-                  { scope: `server:${owner}` },
-                  id,
-                )
-              : method === "browser.legacyPreferencesClear"
-                ? await invoke(
-                    "preferences.legacy_clear",
-                    { scope: `server:${owner}`, keys: params?.keys },
-                    id,
-                  )
-                : await invoke(
+            : await invoke(
                     method,
                     signInMethod
                       ? { value: params?.value, signInOwner: owner }

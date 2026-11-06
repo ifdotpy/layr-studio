@@ -149,15 +149,10 @@ paired clients. A federated peer is one more kind of principal:
 Response proofs (`studio-federation-response-v1`) and message envelope signatures
 (`studio-federation-message-v1`) sign data, not requests. They do not change.
 
-Rolling update window, one release:
-
-- A sender adds the `X-Studio-Federation-*` headers (retired `studio-federation-v1`
-  signature) next to the unified headers. A peer on the previous build reads only
-  the retired headers.
-- A receiver uses the unified headers when `X-Studio-Signature` is present. Without
-  it, the receiver accepts the retired signature. Both schemes use the same nonce table.
-- Remove the retired headers, `federation_signing_bytes` and the fallback in
-  the release after this one.
+The retired `studio-federation-v1` request signature and its `X-Studio-Federation-*`
+headers are gone: a sender sends only the unified headers, and a receiver refuses a
+request without them. A peer on a build from before the unified scheme cannot reach
+this server until it updates.
 
 ### Authenticate the sync stream
 

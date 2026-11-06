@@ -15,8 +15,6 @@ updates still use:
 - `package.ts`, `signing*.ts`, `release-binaries.ts`, `runtime-binaries.ts`, `python-resources.ts`,
   `bundle-name.ts`, `native/`: the resources and signing that `../native/package.ts` bundles.
 - `speech.ts`, `frame-owner.ts`: shared with web tests.
-- `export-profile.ts`, `export-browser-profile.ts`, `export-server-credentials.ts`: the export of an old Electron
-  profile. This is the only code that still needs the `electron` dev dependency.
 
 Do not access SQLite or provider credentials from the renderer, and do not stop a backend to update desktop source.
 Preserve state-directory and bundle identity. Package commands are owned by [`package.json`](package.json). Focused check:

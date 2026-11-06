@@ -119,37 +119,6 @@ test("native archive views track the browser profile contract and callers", () =
   assert.match(rust, /\.take\(MAX_CHUNK_BYTES \+ 1\)/);
   const parse = (path: string) =>
     ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true);
-  for (const [path, names] of [
-    [
-      "workspaces/client/apps/desktop/export-profile.ts",
-      ["BrowserProfileArchive", "BrowserProfileSnapshot"],
-    ],
-    [
-      "workspaces/client/apps/desktop/export-browser-profile.ts",
-      [
-        "BrowserProfileSnapshot",
-        "BrowserProfileDatabase",
-        "BrowserProfileStore",
-        "BrowserProfileChunk",
-      ],
-    ],
-  ] as const) {
-    const source = parse(path);
-    const declaration = source.statements.find(
-      (node) =>
-        ts.isImportDeclaration(node) &&
-        ts.isStringLiteral(node.moduleSpecifier) &&
-        node.moduleSpecifier.text === "../web/src/native/browserProfile.ts",
-    );
-    assert.ok(declaration && ts.isImportDeclaration(declaration));
-    const bindings = declaration.importClause?.namedBindings;
-    assert.ok(bindings && ts.isNamedImports(bindings));
-    for (const name of names)
-      assert.ok(
-        bindings.elements.some((element) => element.name.text === name),
-        `${path}: ${name}`,
-      );
-  }
   for (const [path, calls] of [
     [
       "workspaces/client/apps/web/src/native/frame.ts",

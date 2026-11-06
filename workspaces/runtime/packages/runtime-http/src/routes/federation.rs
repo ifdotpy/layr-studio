@@ -89,28 +89,15 @@ async fn signed_post(
         .await
         .map_err(map_signed_error)?;
 
-    // The unified studio-multi-server-v1 headers win. The retired federation
-    // headers are accepted for one release (docs/multi-server.md, "One signature scheme").
-    let unified = parts.headers.contains_key("x-studio-signature");
-    let (peer_id, timestamp, nonce, signature, server_id, request_id) = if unified {
-        (
-            single_header(&parts.headers, "x-studio-client")?,
-            single_header(&parts.headers, "x-studio-timestamp")?,
-            single_header(&parts.headers, "x-studio-nonce")?,
-            single_header(&parts.headers, "x-studio-signature")?,
-            single_header(&parts.headers, "x-studio-server")?,
-            single_header(&parts.headers, "x-studio-request-id")?,
-        )
-    } else {
-        (
-            single_header(&parts.headers, "x-studio-federation-state")?,
-            single_header(&parts.headers, "x-studio-federation-time")?,
-            single_header(&parts.headers, "x-studio-federation-nonce")?,
-            single_header(&parts.headers, "x-studio-federation-signature")?,
-            String::new(),
-            String::new(),
-        )
-    };
+    // Federation requests carry the studio-multi-server-v1 signature only.
+    let (peer_id, timestamp, nonce, signature, server_id, request_id) = (
+        single_header(&parts.headers, "x-studio-client")?,
+        single_header(&parts.headers, "x-studio-timestamp")?,
+        single_header(&parts.headers, "x-studio-nonce")?,
+        single_header(&parts.headers, "x-studio-signature")?,
+        single_header(&parts.headers, "x-studio-server")?,
+        single_header(&parts.headers, "x-studio-request-id")?,
+    );
     let timestamp = timestamp
         .parse::<i64>()
         .map_err(|_| ApiError::new(StatusCode::FORBIDDEN, "Invalid federation timestamp"))?;
@@ -135,10 +122,8 @@ async fn signed_post(
             nonce: &nonce,
             signature: &signature,
             raw: &raw,
-            unified: unified.then_some(federation_effects::UnifiedFields {
-                server_id: &server_id,
-                request_id: &request_id,
-            }),
+            server_id: &server_id,
+            request_id: &request_id,
         },
         origin,
         now,

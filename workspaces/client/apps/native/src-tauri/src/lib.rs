@@ -177,7 +177,7 @@ mod tests {
     }
 
     /// Parity check: every core method the page sends by name reaches the core.
-    /// `client_request` handles `servers.*`, `profile.*`, `preferences.legacy*` and `desktop.notify`
+    /// `client_request` handles `servers.*`, `profile.*` and `desktop.notify`
     /// before the connected boundary; `native/frame.ts` turns `browser.*` into
     /// shell commands.
     #[test]
@@ -188,7 +188,6 @@ mod tests {
                 || method.starts_with("servers.")
                 || method.starts_with("profile.")
                 || method.starts_with("browser.")
-                || method.starts_with("preferences.legacy")
                 || method == "desktop.notify"
         }
         fn sources(folder: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
@@ -371,49 +370,6 @@ fn connected_view_method(method: &str) -> bool {
     )
 }
 
-/// The old client store: what it still holds moves to the server (see `store_move`).
-fn client_store(window: &WebviewWindow) -> Result<std::path::PathBuf, String> {
-    let directory = match std::env::var_os("CODEX_DESKTOP_PROFILE").filter(|v| !v.is_empty()) {
-        Some(path) => std::path::PathBuf::from(path),
-        None => window
-            .app_handle()
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?,
-    };
-    #[cfg(feature = "native-check")]
-    let directory = native_check::directory().unwrap_or(directory);
-    Ok(directory
-        .join("client/local")
-        .join(studio_client_core::store_move::STORE_FILE))
-}
-
-/// Starts the one move per application start. A failed move keeps every local row.
-fn move_client_store(origin: &str, store: std::path::PathBuf) {
-    let origin = origin.to_owned();
-    let spawned = std::thread::Builder::new()
-        .name("studio-store-move".into())
-        .spawn(move || {
-            let result = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| error.to_string())
-                .and_then(|runtime| {
-                    let backend = studio_client_core::backend::Backend::new(&origin)?;
-                    runtime.block_on(studio_client_core::store_move::move_to_server(
-                        &backend, &store,
-                    ))
-                });
-            match result {
-                Ok(report) => eprintln!("Client store move: {report:?}"),
-                Err(error) => eprintln!("The client store could not be moved: {error}"),
-            }
-        });
-    if let Err(error) = spawned {
-        eprintln!("The client store move did not start: {error}");
-    }
-}
-
 /// The one server client of this profile, shared by the window and the operator socket.
 #[cfg(target_os = "macos")]
 async fn remote_client(
@@ -536,26 +492,6 @@ async fn client_request(
             error: None,
         });
     }
-    if matches!(
-        request.method.as_str(),
-        "preferences.legacy" | "preferences.legacy_clear"
-    ) {
-        let store = client_store(&window)?;
-        let scope = request.params["scope"].as_str().ok_or("Missing scope.")?;
-        let result = if request.method == "preferences.legacy" {
-            studio_client_core::store_move::legacy_preferences(&store, scope)
-                .map(|rows| studio_json::json!(rows))
-        } else {
-            let keys: Vec<String> = studio_json::from_value(request.params["keys"].clone())
-                .map_err(|_| "Invalid preference keys.")?;
-            studio_client_core::store_move::clear_legacy_preferences(&store, scope, &keys)
-                .map(|()| studio_json::Value::Null)
-        };
-        return Ok(match result {
-            Ok(value) => Response::success(request.id, value),
-            Err(error) => Response::failure(request.id, "preferences", error),
-        });
-    }
     if !connected_method(&request.method) && !connected_view_method(&request.method) {
         return Err("This client service is not connected yet.".into());
     }
@@ -643,7 +579,6 @@ async fn client_request(
             let allow_start = allow_start && native_check::directory().is_none();
             local_backend::verify(&origin, &resources.workspace, allow_start).await?;
             *verified = true;
-            move_client_store(&origin, client_store(&window)?);
         }
     }
     let client = {

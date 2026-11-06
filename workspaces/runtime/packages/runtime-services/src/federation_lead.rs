@@ -310,7 +310,7 @@ fn root_lead(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::federation_effects::{FederationAction, UnifiedFields};
+    use crate::federation_effects::FederationAction;
     use crate::remote_transport::StoredMultiServerIdentity;
     use studio_runtime_store::project_grants::GrantRow;
 
@@ -405,10 +405,8 @@ mod tests {
             nonce: &nonce,
             signature: "",
             raw: &raw,
-            unified: Some(UnifiedFields {
-                server_id: LOCAL,
-                request_id: "request-1",
-            }),
+            server_id: LOCAL,
+            request_id: "request-1",
         };
         let signature = identity.sign(&unsigned.signing_bytes(LOCAL).unwrap());
         (body, raw, nonce, signature)
@@ -423,10 +421,8 @@ mod tests {
             nonce: &nonce,
             signature: &signature,
             raw: &raw,
-            unified: Some(UnifiedFields {
-                server_id: LOCAL,
-                request_id: "request-1",
-            }),
+            server_id: LOCAL,
+            request_id: "request-1",
         };
         receive(Arc::clone(store), &request, body, NOW).await
     }

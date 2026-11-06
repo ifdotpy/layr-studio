@@ -52,62 +52,44 @@ impl OriginObservation {
     }
 }
 
-/// Fields only the unified `studio-multi-server-v1` scheme signs. `None` on a
-/// request signed with the retired federation scheme.
-#[derive(Clone, Copy)]
-pub struct UnifiedFields<'a> {
-    pub server_id: &'a str,
-    pub request_id: &'a str,
-}
-
+/// A federation request signed with the `studio-multi-server-v1` scheme.
 pub struct SignedRequest<'a> {
     pub action: FederationAction,
-    /// The sender state id: `X-Studio-Client` (unified) or `X-Studio-Federation-State` (retired).
+    /// The sender state id (`X-Studio-Client`).
     pub peer_id: &'a str,
     pub timestamp: i64,
     pub nonce: &'a str,
     pub signature: &'a str,
     pub raw: &'a [u8],
-    pub unified: Option<UnifiedFields<'a>>,
+    /// The recipient state id (`X-Studio-Server`).
+    pub server_id: &'a str,
+    pub request_id: &'a str,
 }
 
 impl SignedRequest<'_> {
-    /// The bytes the sender signed. The unified scheme binds the recipient (`local_id`),
-    /// the sender and the request id. The retired scheme is accepted for one release.
+    /// The bytes the sender signed: they bind the recipient (`local_id`), the sender
+    /// and the request id.
     pub(crate) fn signing_bytes(&self, local_id: &str) -> Result<Vec<u8>> {
-        let Some(unified) = self.unified else {
-            return Ok(transport::federation_signing_bytes(
-                "POST",
-                self.action.path(),
-                self.timestamp,
-                self.nonce,
-                self.raw,
-            ));
-        };
-        if unified.server_id != local_id {
+        if self.server_id != local_id {
             return Err(Error::Forbidden("request is addressed to another server"));
         }
         Ok(transport::multi_server_signing_bytes(
             transport::MultiServerSigningInput {
                 method: "POST",
                 target: self.action.path(),
-                server_id: unified.server_id,
+                server_id: self.server_id,
                 client_id: self.peer_id,
                 timestamp: &self.timestamp.to_string(),
                 nonce: self.nonce,
-                request_id: unified.request_id,
+                request_id: self.request_id,
                 body: self.raw,
             },
         ))
     }
 
     pub(crate) fn validate_nonce(&self, now: i64) -> Result<()> {
-        if let Some(unified) = self.unified {
-            transport::validate_multi_server_nonce(self.nonce, self.timestamp, now)?;
-            transport::validate_identifier(unified.request_id)?;
-        } else {
-            transport::validate_federation_nonce(self.nonce, self.timestamp, now)?;
-        }
+        transport::validate_multi_server_nonce(self.nonce, self.timestamp, now)?;
+        transport::validate_identifier(self.request_id)?;
         Ok(())
     }
 }

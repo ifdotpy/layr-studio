@@ -6713,7 +6713,6 @@ dependencies = [
  "reqwest",
  "ring",
  "rtc",
- "rusqlite",
  "rustls",
  "security-framework",
  "serde",
