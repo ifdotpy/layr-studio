@@ -1,3 +1,4 @@
+import { StopOutcome } from "./generated/api.ts";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
 import { ProjectDeleteIntent, projectReaderScope } from "./projectDelete";
@@ -15,6 +16,7 @@ const reply = {
   id: target.id,
   request_id: body.request_id,
   outcome: "deleted",
+  stopped: StopOutcome.confirmed,
   deletedAgentIds: ["lead", "worker"],
   deletedRoomIds: ["room"],
 };

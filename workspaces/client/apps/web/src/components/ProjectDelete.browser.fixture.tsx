@@ -1,3 +1,4 @@
+import { StopOutcome } from "../generated/api.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -110,6 +111,7 @@ const backend: SidebarBackend = {
       id: request.id,
       request_id: request.request_id,
       outcome: "deleted",
+      stopped: StopOutcome.confirmed,
       deletedAgentIds: ["lead"],
       deletedRoomIds: [],
     } satisfies PostResult<"/api/projects/delete">;

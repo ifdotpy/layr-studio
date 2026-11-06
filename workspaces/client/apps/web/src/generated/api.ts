@@ -10972,6 +10972,7 @@ export interface components {
       ref_kind: string;
       result: {
         deleted: string[];
+        stopped: components["schemas"]["StopOutcome"];
       };
       rev: number;
       rows: components["schemas"]["CommandRow"][];
@@ -17773,6 +17774,7 @@ export interface components {
       /** @constant */
       outcome: "deleted";
       request_id: string;
+      stopped: components["schemas"]["StopOutcome"];
     };
     /** ProjectEntityDto */
     ProjectEntityDto: {
@@ -18894,6 +18896,11 @@ export interface components {
       role?: null | string | undefined;
       /** Status */
       status?: null | string | undefined;
+    };
+    /** @description Remote stop receipt; the outcome is recomputed when a request is replayed. */
+    RemoteStopResult: {
+      stopOutcome: components["schemas"]["StopOutcome"];
+      stopped: string[];
     };
     /** RemoteWorkerLinkDto */
     RemoteWorkerLinkDto: {
@@ -22211,6 +22218,11 @@ export interface components {
        */
       protocol: 1;
     };
+    /**
+     * @description Whether all provider work selected by a deletion is confirmed stopped.
+     * @enum {string}
+     */
+    StopOutcome: "confirmed" | "unconfirmed";
     /** StopRequest */
     StopRequest: {
       /**
@@ -37990,6 +38002,11 @@ export const StartWaitReason = {
   workspace_copy: "workspace_copy",
 } as const;
 export type StartWaitReason = components["schemas"]["StartWaitReason"];
+export const StopOutcome = {
+  confirmed: "confirmed",
+  unconfirmed: "unconfirmed",
+} as const;
+export type StopOutcome = components["schemas"]["StopOutcome"];
 export const studio_api__agents__models__AgentRole = {
   orchestrator: "orchestrator",
   implementer: "implementer",

@@ -9,7 +9,7 @@ import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
 import type { TestRuntimeView } from "../playwright.ts";
 import type { FixtureRequestFields } from "../servers/browser-fixture.ts";
 import type { BrowserContext, Page } from "playwright";
-import type { components } from "../../src/generated/api.ts";
+import { StopOutcome, type components } from "../../src/generated/api.ts";
 import type { TestAgent } from "../playwright.ts";
 import type { PreferenceFields } from "../../src/sync/uiPreferenceMerge.ts";
 import type { MultiServerFixtureOptions } from "../servers/multi-server-fixture.ts";
@@ -503,7 +503,7 @@ export async function sidebarParityFixture(
             seq: 0,
             rows: [],
             kind: "delete",
-            result: { deleted: [body.target] },
+            result: { deleted: [body.target], stopped: StopOutcome.confirmed },
           } satisfies PostResult<"/api/commands">);
         }
       }

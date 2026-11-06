@@ -104,7 +104,14 @@ fn replay_delivery(
                     "The receipt belongs to another server",
                 ));
             }
-            ExchangeOutcome::from_reply(saved.reply.response, &envelope.root, now)
+            let result = ExchangeOutcome::from_reply(saved.reply.response, &envelope.root, now)?;
+            match (&envelope.command, direction) {
+                (
+                    crate::orchestration_wire::OrchestrationCommand::Stop(stop),
+                    Direction::Incoming,
+                ) => refresh_remote_stop(db, &stop.worker, result),
+                _ => Ok(result),
+            }
         })
         .transpose()
 }
@@ -457,6 +464,29 @@ fn applied(value: &impl serde::Serialize) -> Result<ExchangeOutcome, AccessError
         .map(AppliedReply::new)
         .map(ExchangeOutcome::Applied)
         .map_err(|_| invalid_receipt())
+}
+
+fn refresh_remote_stop(
+    db: &rusqlite::Connection,
+    target: &str,
+    result: ExchangeOutcome,
+) -> Result<ExchangeOutcome, AccessError> {
+    let ExchangeOutcome::Applied(reply) = result else {
+        return Ok(result);
+    };
+    #[derive(serde::Deserialize)]
+    struct Stopped {
+        stopped: Vec<String>,
+    }
+    let stopped: Stopped =
+        studio_json::from_str(reply.value.as_str()).map_err(|_| invalid_receipt())?;
+    // The current target tree conservatively includes every still-owned descendant on first delivery and replay.
+    let selection = crate::commands::chat_tree(db, target).map_err(|_| invalid_receipt())?;
+    let stop_outcome = crate::commands::deletion_stop_outcome(db, &selection)?;
+    applied(&studio_runtime_schema::command::RemoteStopResult {
+        stopped: stopped.stopped,
+        stop_outcome,
+    })
 }
 /// The transport must use the persisted envelope's requestId and return only a
 /// response verified against that server's saved credential. It must complete
@@ -864,7 +894,7 @@ impl RuntimeOrchestrationEffects {
             control_epoch,
             reason,
         };
-        crate::agent_lifecycle_runtime::execute(
+        let value = crate::agent_lifecycle_runtime::execute(
             Arc::clone(&self.store),
             &action,
             now,
@@ -887,8 +917,14 @@ impl RuntimeOrchestrationEffects {
                 "stop_unavailable",
                 "The remote stop could not be committed",
             ),
-        })
-        .and_then(|value| applied(&value))
+        })?;
+        let result = applied(&value)?;
+        let target = worker.to_owned();
+        self.store
+            .read_async("runtime-services/remote-stop-outcome", move |db| {
+                refresh_remote_stop(db, &target, result)
+            })
+            .await
     }
 
     async fn project_location(
@@ -3896,10 +3932,33 @@ impl OrchestrationDriver {
         result: &ExchangeOutcome,
         now: i64,
     ) -> Result<(), AccessError> {
-        if matches!(
-            result,
-            ExchangeOutcome::Unknown | ExchangeOutcome::PreEffectWaiting
-        ) {
+        let unconfirmed_remote_stop = if direction == Direction::Outgoing
+            && action == ServerOperationKind::Stop
+        {
+            match result {
+                ExchangeOutcome::Applied(reply) => {
+                    match studio_json::from_str::<studio_runtime_schema::command::RemoteStopResult>(
+                        reply.value.as_str(),
+                    ) {
+                        Ok(value) => match value.stop_outcome {
+                            studio_runtime_schema::command::StopOutcome::Confirmed => false,
+                            studio_runtime_schema::command::StopOutcome::Unconfirmed => true,
+                        },
+                        Err(_) => true,
+                    }
+                }
+                ExchangeOutcome::NotApplied(_) => true,
+                ExchangeOutcome::Unknown | ExchangeOutcome::PreEffectWaiting => false,
+            }
+        } else {
+            false
+        };
+        if unconfirmed_remote_stop
+            || matches!(
+                result,
+                ExchangeOutcome::Unknown | ExchangeOutcome::PreEffectWaiting
+            )
+        {
             if outgoing_retry(action) && direction == Direction::Outgoing {
                 let key_for_update = key.to_owned();
                 self.store

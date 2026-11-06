@@ -22881,10 +22881,14 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "stopped": {
+                "$ref": "#/components/schemas/StopOutcome"
               }
             },
             "required": [
-              "deleted"
+              "deleted",
+              "stopped"
             ],
             "type": "object"
           },
@@ -38958,6 +38962,9 @@
           },
           "request_id": {
             "type": "string"
+          },
+          "stopped": {
+            "$ref": "#/components/schemas/StopOutcome"
           }
         },
         "required": [
@@ -38965,7 +38972,8 @@
           "request_id",
           "outcome",
           "deletedAgentIds",
-          "deletedRoomIds"
+          "deletedRoomIds",
+          "stopped"
         ],
         "title": "ProjectDeleteResponse",
         "type": "object"
@@ -42225,6 +42233,25 @@
           "id"
         ],
         "title": "RemoteRoomMemberDto",
+        "type": "object"
+      },
+      "RemoteStopResult": {
+        "description": "Remote stop receipt; the outcome is recomputed when a request is replayed.",
+        "properties": {
+          "stopOutcome": {
+            "$ref": "#/components/schemas/StopOutcome"
+          },
+          "stopped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "stopOutcome",
+          "stopped"
+        ],
         "type": "object"
       },
       "RemoteWorkerLinkDto": {
@@ -50689,6 +50716,14 @@
         ],
         "title": "StatusRequest",
         "type": "object"
+      },
+      "StopOutcome": {
+        "description": "Whether all provider work selected by a deletion is confirmed stopped.",
+        "enum": [
+          "confirmed",
+          "unconfirmed"
+        ],
+        "type": "string"
       },
       "StopRequest": {
         "additionalProperties": false,

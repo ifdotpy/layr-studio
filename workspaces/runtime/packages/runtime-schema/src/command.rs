@@ -329,11 +329,31 @@ pub enum CommandOutcome {
     },
 }
 
+/// Whether all provider work selected by a deletion is confirmed stopped.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum StopOutcome {
+    Confirmed,
+    Unconfirmed,
+}
+
+/// Remote stop receipt; the outcome is recomputed when a request is replayed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteStopResult {
+    pub stop_outcome: StopOutcome,
+    pub stopped: Vec<String>,
+}
+
 /// The result of a delete: the ids of the chat and of its descendants, read when the
 /// response is built, so a replay gives the same list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteResult {
     pub deleted: Vec<String>,
+    pub stopped: StopOutcome,
 }
 
 /// The result of a lead message: the outbox id of the queued message.

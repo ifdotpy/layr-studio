@@ -82,6 +82,7 @@ pub enum Action {
     },
     Delete {
         target: String,
+        request_id: String,
     },
     Archive {
         actor: String,
@@ -120,7 +121,7 @@ impl Action {
             Self::Stop { target, .. }
             | Self::Pause { target, .. }
             | Self::RemoteStop { target, .. }
-            | Self::Delete { target }
+            | Self::Delete { target, .. }
             | Self::Archive { target, .. }
             | Self::Restore { target, .. }
             | Self::Inspect { target, .. } => target,
@@ -1038,7 +1039,7 @@ fn decide_inner(
                 },
             )
         }
-        Action::Delete { target } => stop(
+        Action::Delete { target, .. } => stop(
             snapshot,
             target,
             StopOptions {
@@ -1620,6 +1621,7 @@ mod lifecycle_scope_parity_tests {
             &snapshot,
             &Action::Delete {
                 target: "lead".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             10.0,
         )
@@ -1799,6 +1801,7 @@ mod lifecycle_scope_parity_tests {
         let scoped_snapshot = ManagementSnapshot::from_records(scoped).expect("scoped snapshot");
         let action = Action::Delete {
             target: "lead".to_owned(),
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
         };
         assert_same_decision(&full_snapshot, &scoped_snapshot, &action);
 

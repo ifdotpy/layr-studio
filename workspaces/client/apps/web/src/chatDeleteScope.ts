@@ -8,9 +8,10 @@ export async function deleteConversation(
   id: string,
   finish: (deleted: string[]) => void,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<CommandResponse> {
   const result = await remove(id, signal);
   finish(result.kind === "delete" ? result.result.deleted : [id]);
+  return result;
 }
 
 export function definiteDeleteRejection(error: unknown): boolean {

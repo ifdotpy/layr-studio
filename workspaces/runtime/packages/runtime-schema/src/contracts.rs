@@ -731,11 +731,25 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
             ));
         }
     }
+    if openapi
+        .pointer("/components/schemas/ProjectDeleteResponse/properties/stopped/$ref")
+        .and_then(Value::as_str)
+        != Some("#/components/schemas/StopOutcome")
+    {
+        return Err("project deletion stop outcome must reference command::StopOutcome".into());
+    }
     crate::task_results::check_schema_parity(openapi)?;
     check_account_group_parity(openapi)?;
     crate::agent_progress::check_schema_parity(openapi)?;
     crate::studio_errors::check_schema_parity(openapi)?;
     crate::queue_command::check_schema_parity(openapi)?;
+    if openapi.pointer("/components/schemas/StopOutcome/enum")
+        != Some(&studio_json::json!(<crate::command::StopOutcome as strum::VariantNames>::VARIANTS))
+        || openapi.pointer("/components/schemas/CommandResponseDelete/properties/result/properties/stopped/$ref")
+            .and_then(Value::as_str) != Some("#/components/schemas/StopOutcome")
+    {
+        return Err("deletion stop outcome must match command::StopOutcome".into());
+    }
     crate::approvals::check_schema_parity(openapi)?;
     crate::question_answers::check_schema_parity(openapi)?;
     crate::claude_controls::check_schema_parity(openapi)?;
@@ -1251,6 +1265,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .into_generator();
     delivery_generator.subschema_for::<crate::persistence::RecipientDelivery>();
     delivery_generator.subschema_for::<crate::delivery::MessageRecipientDelivery>();
+    delivery_generator.subschema_for::<crate::command::RemoteStopResult>();
     for (name, schema) in delivery_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }
