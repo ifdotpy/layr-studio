@@ -22406,6 +22406,27 @@
         "properties": {},
         "type": "object"
       },
+      "CommandEditBody": {
+        "additionalProperties": false,
+        "description": "The turn to edit from: its checkpoint, and the workspace tree that the preview showed. A restore refuses a workspace that changed after the preview.",
+        "properties": {
+          "checkpoint": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectedTree": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkpoint",
+          "expectedTree"
+        ],
+        "type": "object"
+      },
       "CommandErrorCode": {
         "enum": [
           "receipt_expired",
@@ -22438,6 +22459,7 @@
           "mapping": {
             "answer": "#/components/schemas/CommandRequestAnswer",
             "delete": "#/components/schemas/CommandRequestDelete",
+            "edit": "#/components/schemas/CommandRequestEdit",
             "lead_message": "#/components/schemas/CommandRequestLeadMessage",
             "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
@@ -22471,6 +22493,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestLeadMessage"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestEdit"
           }
         ],
         "title": "CommandRequest"
@@ -22532,6 +22557,46 @@
           },
           "kind": {
             "const": "delete",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CommandRequestEdit": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandEditBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "edit",
             "type": "string"
           },
           "number": {
@@ -22819,6 +22884,7 @@
           "mapping": {
             "answer": "#/components/schemas/CommandResponseAnswer",
             "delete": "#/components/schemas/CommandResponseDelete",
+            "edit": "#/components/schemas/CommandResponseApplied",
             "lead_message": "#/components/schemas/CommandResponseLeadMessage",
             "pause": "#/components/schemas/CommandResponseApplied",
             "resolve": "#/components/schemas/CommandResponseApplied",
@@ -22899,7 +22965,8 @@
               "withdraw",
               "stop",
               "resolve",
-              "pause"
+              "pause",
+              "edit"
             ],
             "type": "string"
           },

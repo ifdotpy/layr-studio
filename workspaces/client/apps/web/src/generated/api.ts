@@ -11082,6 +11082,11 @@ export interface components {
     };
     /** @description A delete has no options: it always deletes the descendants of the chat too. */
     CommandDeleteBody: Record<string, never>;
+    /** @description The turn to edit from: its checkpoint, and the workspace tree that the preview showed. A restore refuses a workspace that changed after the preview. */
+    CommandEditBody: {
+      checkpoint: string;
+      expectedTree: string;
+    };
     /** @enum {string} */
     CommandErrorCode: "receipt_expired" | "native_layr_store";
     /** @description Identity of the outbox command that delivers an answer. */
@@ -11103,7 +11108,8 @@ export interface components {
       | components["schemas"]["CommandRequestPause"]
       | components["schemas"]["CommandRequestAnswer"]
       | components["schemas"]["CommandRequestDelete"]
-      | components["schemas"]["CommandRequestLeadMessage"];
+      | components["schemas"]["CommandRequestLeadMessage"]
+      | components["schemas"]["CommandRequestEdit"];
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
       client: string;
@@ -11125,6 +11131,18 @@ export interface components {
        * @enum {string}
        */
       kind: "delete";
+      number: number;
+      target: string;
+    };
+    CommandRequestEdit: {
+      body: components["schemas"]["CommandEditBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "edit";
       number: number;
       target: string;
     };
@@ -11231,7 +11249,7 @@ export interface components {
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
-      kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
+      kind: "edit" | "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
       rev: number;

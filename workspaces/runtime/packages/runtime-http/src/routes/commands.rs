@@ -148,6 +148,34 @@ async fn command(
             answer = Some(result);
             reference
         }
+        Command::Edit { target, body } => {
+            // The restore has its own operation id (chat, checkpoint and previewed tree), so
+            // a retried command that lost its response restores nothing twice.
+            match begin(&state, &principal, &request, now_ms).await? {
+                Start::Replay(reference) => reference,
+                Start::Fresh(begun) => {
+                    // The changed rows travel by the chat reference, not in this reply.
+                    let Json(_restored) = super::checkpoints::restore_detached(
+                        state.clone(),
+                        crate::generated::CheckpointRestoreRequest {
+                            agent: target.as_str().to_owned(),
+                            checkpoint: None,
+                            checkpoint_id: Some(Some(body.checkpoint.as_str().to_owned())),
+                            expected_tree: body.expected_tree.as_str().to_owned(),
+                        },
+                    )
+                    .await?;
+                    let chat = target.as_str().to_owned();
+                    store
+                        .transaction_with_error(move |tx| {
+                            let reference = commands::agent_reference(tx, &chat)?;
+                            commands::finish(tx, &begun, &reference)
+                        })
+                        .await
+                        .map_err(command_error)?
+                }
+            }
+        }
         Command::Send { target, body } => {
             match begin(&state, &principal, &request, now_ms).await? {
                 Start::Replay(reference) => reference,
@@ -489,6 +517,10 @@ mod tests {
         cases.push(send.clone());
         send["body"] = json!({"text":"hello", "delivery":null});
         cases.push(send);
+        let mut edit = send_base_for_edit();
+        cases.push(edit.clone());
+        edit["body"] = json!({"checkpoint":"c"});
+        cases.push(edit);
         for case in cases {
             let schema = validator.is_valid(&case);
             let typed = studio_json::from_str::<CommandRequest>(&case.to_string()).is_ok();
@@ -567,6 +599,36 @@ mod tests {
         let (status, response) = post(&app, None, wire).await;
         assert_eq!(status, 400, "{response}");
         assert_eq!(outbox_count(&store).await, 0);
+    }
+
+    fn send_base_for_edit() -> Value {
+        edit(
+            "0192f3a0-0000-7000-8000-000000000001",
+            1,
+            "chat",
+            "checkpoint",
+        )
+    }
+
+    fn edit(id: &str, number: u64, chat: &str, checkpoint: &str) -> Value {
+        json!({"id":id,"client":"web-1","number":number,"kind":"edit","target":chat,"body":{"checkpoint":checkpoint,"expectedTree":"tree"}})
+    }
+
+    #[tokio::test]
+    async fn edit_runs_the_restore_path_and_checks_its_body() {
+        let (app, _store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let (status, response) = post(&app, None, edit(&id, 1, "workspace", "missing")).await;
+        // This app has no provider session, so the restore refuses before any change.
+        assert_eq!(status, 501, "{response}");
+        assert_eq!(
+            response["error"],
+            "Not implemented: requires provider-session/thread-fork"
+        );
+        let mut wire = edit(&RequestIdentity::issue_root(), 2, "workspace", "missing");
+        wire["body"] = json!({"checkpoint":"missing"});
+        let (status, response) = post(&app, None, wire).await;
+        assert_eq!(status, 400, "{response}");
     }
 
     #[tokio::test]

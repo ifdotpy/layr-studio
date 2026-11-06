@@ -222,7 +222,7 @@ export function Workspace(props: Props) {
       setPending((n) => n + 1);
       try {
         const result = await post(path, body);
-        if (path === "/api/annotation") {
+        if (path === "/api/annotation" || path === "/api/commands") {
           await sync
             .applyCommandRows((result as PostResult<"/api/annotation">).rows)
             .catch((error: unknown) =>
@@ -742,6 +742,7 @@ function Plan(c: Context) {
 }
 
 function Checkpoints(c: Context) {
+  const { command } = useServerApi();
   const state = useResource("/api/checkpoints", c.revision, {
       query: c.selected ? { agent: c.selected.id } : {},
     }),
@@ -866,11 +867,13 @@ function Checkpoints(c: Context) {
               onClick={async () => {
                 setBusy(true);
                 try {
-                  await c.run("/api/checkpoint/restore", {
-                    agent: c.selected!.id,
-                    checkpoint: preview.checkpoint,
-                    expectedTree: preview.expectedTree,
-                  });
+                  await c.run(
+                    "/api/commands",
+                    command.make("edit", c.selected!.id, {
+                      checkpoint: preview.checkpoint,
+                      expectedTree: preview.expectedTree,
+                    }),
+                  );
                   setPreview(null);
                 } catch {
                 } finally {

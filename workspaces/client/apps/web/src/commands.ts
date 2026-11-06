@@ -174,6 +174,12 @@ export function createCommandClient(
     /** Pause the chat. `descendants` pauses its workers too. */
     pause: (chat: string, descendants: boolean, options?: CommandOptions) =>
       run(make("pause", chat, { descendants }), options),
+    /** Edit from a turn: restore the chat to the turn's previewed checkpoint. */
+    edit: (
+      chat: string,
+      body: Variant<"edit">["body"],
+      options?: CommandOptions,
+    ) => run(make("edit", chat, body), options),
     /** Delete the chat and its descendants. The response lists every deleted id. */
     delete: (chat: string, options?: CommandOptions) =>
       run(make("delete", chat, {}), options),

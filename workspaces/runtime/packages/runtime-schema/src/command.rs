@@ -171,6 +171,12 @@ pub enum Command {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
         body: LeadMessageBody,
     },
+    /// Edit from a turn: restore the chat to the checkpoint of that turn and hide the later
+    /// items. `target` is the chat; `body.checkpoint` names the turn's checkpoint row.
+    Edit {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: EditBody,
+    },
 }
 
 impl Command {
@@ -185,6 +191,7 @@ impl Command {
             Self::Answer { .. } => "answer",
             Self::LeadMessage { .. } => "lead_message",
             Self::Delete { .. } => "delete",
+            Self::Edit { .. } => "edit",
         }
     }
 
@@ -198,7 +205,8 @@ impl Command {
             | Self::Pause { target, .. }
             | Self::Answer { target, .. }
             | Self::LeadMessage { target, .. }
-            | Self::Delete { target, .. } => target.as_str(),
+            | Self::Delete { target, .. }
+            | Self::Edit { target, .. } => target.as_str(),
         }
     }
 }
@@ -228,6 +236,16 @@ pub struct SendBody {
 #[serde(deny_unknown_fields)]
 pub struct LeadMessageBody {
     pub text: BoundedText<1, { studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS }>,
+}
+
+/// The turn to edit from: its checkpoint, and the workspace tree that the preview showed.
+/// A restore refuses a workspace that changed after the preview.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditBody {
+    pub checkpoint: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+    #[serde(rename = "expectedTree")]
+    pub expected_tree: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
 }
 
 /// A delete has no options: it always deletes the descendants of the chat too.
@@ -316,6 +334,7 @@ pub enum CommandOutcome {
     Stop,
     Resolve,
     Pause,
+    Edit,
     /// `deleted` is the chat and every descendant that the delete removed.
     Delete {
         result: DeleteResult,
@@ -352,6 +371,7 @@ impl CommandOutcome {
             Command::Stop { .. } => Self::Stop,
             Command::Resolve { .. } => Self::Resolve,
             Command::Pause { .. } => Self::Pause,
+            Command::Edit { .. } => Self::Edit,
             Command::Answer { .. } | Command::LeadMessage { .. } | Command::Delete { .. } => {
                 return None;
             }

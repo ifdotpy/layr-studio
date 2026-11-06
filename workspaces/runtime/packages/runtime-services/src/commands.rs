@@ -128,7 +128,8 @@ pub fn authorize(
                 | Command::Withdraw { target, .. }
                 | Command::Stop { target, .. }
                 | Command::Pause { target, .. }
-                | Command::Delete { target, .. } => target.as_str().to_owned(),
+                | Command::Delete { target, .. }
+                | Command::Edit { target, .. } => target.as_str().to_owned(),
                 Command::Answer { .. } | Command::LeadMessage { .. } => {
                     return Err(CommandError::Forbidden);
                 }
@@ -600,6 +601,11 @@ pub fn execute_sync(
             "An answer command runs through the answer path",
         ));
     }
+    if matches!(request.command, Command::Edit { .. }) {
+        return Err(CommandError::Invalid(
+            "An edit command runs through the restore path",
+        ));
+    }
     let begun = match begin(tx, principal, request, now_ms)? {
         Start::Replay(reference) => {
             return Ok(Executed {
@@ -675,7 +681,9 @@ pub fn execute_sync(
                 revision: 0,
             }
         }
-        Command::Send { .. } | Command::Answer { .. } => unreachable!("refused above"),
+        Command::Send { .. } | Command::Answer { .. } | Command::Edit { .. } => {
+            unreachable!("refused above")
+        }
     };
     let reference = finish(tx, &begun, &reference)?;
     Ok(Executed {

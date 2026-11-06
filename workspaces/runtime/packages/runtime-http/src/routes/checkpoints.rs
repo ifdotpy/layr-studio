@@ -89,6 +89,14 @@ pub(crate) async fn restore(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::CheckpointRestoreRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    restore_detached(state, body).await
+}
+
+/// The restore workflow, shared by the route and the `edit` command.
+pub(crate) async fn restore_detached(
+    state: HttpState,
+    body: crate::generated::CheckpointRestoreRequest,
+) -> Result<Json<Value>, ApiError> {
     // The owned workflow must outlive a cancelled HTTP caller. A blocking Git
     // child cannot be cancelled by dropping its awaiting future.
     tokio::spawn(async move {
