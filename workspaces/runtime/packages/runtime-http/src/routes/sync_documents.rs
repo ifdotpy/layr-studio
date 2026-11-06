@@ -1870,6 +1870,16 @@ mod vault_maintenance_tests {
             tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.capacity','$.naming'),'$.maxAgents',80,'$.maxAgentsExplicit',json('true'),'$.needsTitle',json('true')) WHERE id='agent-1'", [])?;
             Ok(())
         }).await.unwrap();
+        // Background work of the app may still hold the store; the lock is free only
+        // after the last owner drops it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while Arc::strong_count(&store) > 1 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the app keeps the store open"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         drop(store);
         studio_runtime_store::migrations::test_apply_catalog_before_capacity(
             &directory.path().join("canvas.sqlite3"),
