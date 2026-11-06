@@ -10,6 +10,7 @@ mod cached_sql;
 pub mod domain;
 pub mod durable_seq;
 pub mod entity_publication;
+mod enum_columns;
 pub mod error_incidents;
 pub mod item_seq_backfill;
 pub mod migrations;
@@ -1406,6 +1407,10 @@ impl RuntimeStore {
             }
         }
         migrations::run(&root, progress)?;
+        enum_columns::check(&Connection::open_with_flags(
+            &canvas_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?)?;
         let terminal_output = terminal_output::open(&root, &canvas_path)?;
 
         let table_change_flags = Arc::new(AtomicU32::new(0));

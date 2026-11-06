@@ -838,7 +838,7 @@ mod tests {
         store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_complaints(id,record) VALUES('c',?1)", [r#"{"id":"c","leadId":"a","author":"user","text":"first","status":"open","created":1}"#])?;
             tx.execute("INSERT INTO user_terminals(id,record,output,offset) VALUES('t',?1,'first',0)", [r#"{"id":"t","agent":"a","title":"Shell","cwd":"/","created":1,"status":"running"}"#])?;
-            tx.execute("INSERT INTO voice_sessions(id,agent,created,state,answer) VALUES('v','a',1,'active','first')", [])?;
+            tx.execute("INSERT INTO voice_sessions(id,agent,created,state,answer) VALUES('v','a',1,'ready','first')", [])?;
             Ok::<_, StoreError>(())
         }).await.expect("fixtures");
         let state = HttpState::new(

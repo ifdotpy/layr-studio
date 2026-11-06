@@ -115,6 +115,10 @@ domain!(ContextRepairPhase { Preparing=>"preparing", Submitted=>"submitted", Unk
 domain!(SteerStage { Reserved=>"reserved", Submitted=>"submitted", Unconfirmed=>"unconfirmed" });
 domain!(MonitorInputStatus { Pending=>"Pending", Acknowledged=>"Acknowledged", Rejected=>"Rejected", Unknown=>"Unknown", Expired=>"Expired" });
 domain!(NativeActionAdmissionStatus { Accepted=>"accepted" });
+domain!(VoiceSessionState { Connecting=>"connecting", Ready=>"ready", Stopping=>"stopping", Ended=>"ended", Failed=>"failed", Lost=>"lost", Unknown=>"unknown" });
+domain!(VoiceApprovalStatus { Pending=>"pending", Uncertain=>"uncertain", Accepted=>"accepted", NotSent=>"not_sent", Expired=>"expired", Unknown=>"unknown" });
+domain!(VoiceSpeechState { Pending=>"pending", Submitted=>"submitted", Failed=>"failed", Unknown=>"unknown" });
+domain!(GraphEdgeKind { Chat=>"chat" });
 domain!(VoiceStopOutcome { Submitted=>"submitted", Written=>"written", NotSent=>"not_sent", Unknown=>"unknown", Rejected=>"rejected", Expired=>"expired" });
 domain!(TerminalInputDelivery { Sent=>"sent", Uncertain=>"uncertain" });
 domain!(ServerDeliveryState { Queued=>"queued", Running=>"running", Waiting=>"waiting", Complete=>"complete" });
