@@ -225,12 +225,15 @@ pub(crate) fn sync_projection(
     // typed-boundary: caller still Value-based
     let mut typed = AgentRecord::from_value(record.clone())?;
     mode_fields(&mut typed);
-    let record = typed.value();
     let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
     let context =
-        crate::sync_entity_context::agent_view_context(transaction, &record, server_id.as_deref())?;
-    crate::sync_views::agent_entity_view(&record, &context)
-        .ok_or_else(|| StoreError::SchemaMismatch("agent sync projection has no id".to_owned()))
+        crate::sync_entity_context::agent_view_context(transaction, &typed, server_id.as_deref())?;
+    let view = crate::sync_views::agent_entity_from_record(typed, &context)
+        .ok_or_else(|| StoreError::SchemaMismatch("agent sync projection has no id".to_owned()))?;
+    Ok(serde::Serialize::serialize(
+        &view,
+        studio_json::value::Serializer,
+    )?)
 }
 
 pub fn publish_agent(transaction: &Transaction<'_>, record: &Value) -> Result<Value, StoreError> {

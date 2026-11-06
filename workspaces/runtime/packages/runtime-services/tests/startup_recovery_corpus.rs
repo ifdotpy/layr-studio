@@ -362,8 +362,7 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
             }
         }
     }
-    // bb5f67c67 retired the published token count, not the stored agent field.
-    // Adapt only the frozen Python agent view and require Rust to omit it.
+    // Full agent projections now publish the stored token count and derived project path.
     for projection in python["sync_entities"]
         .as_array_mut()
         .expect("Python sync entities")
@@ -376,18 +375,9 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
             .iter()
             .find(|actual| actual["collection"] == "agent" && actual["id"] == projection["id"])
             .expect("matching Rust agent projection");
-        assert!(
-            actual["payload"]["value"].get("tokensUsed").is_none(),
-            "Rust must not publish the retired tokensUsed field"
-        );
-        assert_eq!(
-            projection["payload"]["value"]
-                .as_object_mut()
-                .expect("Python agent projection")
-                .remove("tokensUsed"),
-            Some(json!(0)),
-            "the frozen Python agent view contains its retired token count"
-        );
+        assert_eq!(actual["payload"]["value"]["tokensUsed"], json!(0));
+        assert_eq!(projection["payload"]["value"]["tokensUsed"], json!(0));
+        crate::agent_view_fixtures::expect_project_path(&mut projection["payload"]["value"]);
     }
     // Adapt the frozen Python result to the accepted permission and token migrations.
     for agent in python["agents"].as_array_mut().unwrap() {

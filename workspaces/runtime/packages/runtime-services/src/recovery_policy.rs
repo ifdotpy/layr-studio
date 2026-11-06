@@ -763,6 +763,38 @@ mod unbounded_batch_tests {
     use super::*;
 
     #[test]
+    fn restart_marker_account_presence_changes_eligibility() {
+        let mut agent = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,
+            "accountKey":"default","threadId":"thread","turnId":"turn",
+            "status":"interrupted","inFlight":false,"autoWake":false,
+            "restartRecovery":{"stage":"pending","autoWake":true,"turnId":"turn",
+                "epoch":1,"threadId":"thread"},
+            "disconnectRecovery":{"source":"restart"}});
+        for (account, expected) in [
+            (None, true),
+            (Some(Value::Null), false),
+            (Some(json!("default")), true),
+        ] {
+            match account {
+                Some(value) => agent["restartRecovery"]["accountKey"] = value,
+                None => {
+                    agent["restartRecovery"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("accountKey");
+                }
+            }
+            assert_eq!(
+                RecoverySnapshot::from_record(agent.clone())
+                    .unwrap()
+                    .eligibility()
+                    .restart_turn,
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn recovery_batch_eligibility_keeps_identity_checks_above_the_former_cap() {
         for count in [1, 1000] {
             let ids: Vec<_> = (0..count).map(|index| format!("event-{index}")).collect();

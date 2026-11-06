@@ -888,6 +888,11 @@ async fn python_written_radio_corpus_and_restart_replay() {
         oracle_agent_views(&mut actual, &expected);
         normalize(&mut actual);
         normalize(&mut expected);
+        if let Some(rows) = expected["sync_entities"].as_array_mut() {
+            for row in rows.iter_mut().filter(|row| row["collection"] == "agent") {
+                crate::agent_view_fixtures::expect_project_path(&mut row["payload"]["value"]);
+            }
+        }
         assert_eq!(actual, expected, "{}", original_case["name"]);
         let mut actual = result.expect("success");
         let mut expected = original_case["result"].clone();

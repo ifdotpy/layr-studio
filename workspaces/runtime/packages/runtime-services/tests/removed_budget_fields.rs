@@ -3,12 +3,7 @@
 //! drop them from both sides.
 use studio_json::Value;
 
-const FIELDS: [&str; 4] = [
-    "tokenBudget",
-    "tokensUsed",
-    "tokenUsageAccounting",
-    "budgetBlocked",
-];
+const FIELDS: [&str; 3] = ["tokenBudget", "tokenUsageAccounting", "budgetBlocked"];
 
 /// Remove the budget fields from every object in `value`.
 pub(crate) fn strip(value: &mut Value) {
