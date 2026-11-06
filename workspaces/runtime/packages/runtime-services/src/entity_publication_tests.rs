@@ -839,7 +839,8 @@ async fn work_detail_refusal_is_derived_on_every_publish() {
                     tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
                         row.get(0)
                     })?;
-                let record: Value = studio_json::from_str(&raw).expect("stored work record");
+                let record: studio_runtime_store::WorkItemRecord =
+                    studio_json::from_str(&raw).expect("stored work record");
                 Ok(crate::work_write::current_submission_refusal(tx, &record)
                     .expect("derived refusal"))
             })

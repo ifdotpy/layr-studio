@@ -1300,12 +1300,13 @@ fn stop(
             object.insert("deletedAt".to_owned(), json!(now));
         }
         if delete && agent.record.get("workspaceCleanupIntent").is_none() {
-            record["workspaceCleanupIntent"] =
-                crate::workspace_cleanup_runtime::queued_cleanup_intent(
+            record["workspaceCleanupIntent"] = studio_runtime_store::projection_value(
+                &crate::workspace_cleanup_runtime::queued_cleanup_intent(
                     agent.id(),
                     epoch,
                     crate::workspace_cleanup_runtime::CleanupAction::Delete,
-                );
+                ),
+            );
         }
         for kind in required.remove(agent.id()).unwrap_or_default() {
             decision.effects.push(LifecycleEffect::new(
@@ -1456,12 +1457,14 @@ fn archive(
     record["status"] = json!("paused");
     record["epoch"] = json!(next_epoch(agent)?);
     record["agentArchive"] = json!({"at":now,"by":actor,"reason":reason,"epoch":record["epoch"],"cleanupPending":true,"unknownToolRequests":snapshot.unknown_tool_requests(agent),"unassignedWork":unassigned});
-    record["workspaceCleanupIntent"] = crate::workspace_cleanup_runtime::queued_cleanup_intent(
-        agent.id(),
-        record["epoch"]
-            .as_i64()
-            .ok_or(ManagementError::Invalid("Invalid archive epoch"))?,
-        crate::workspace_cleanup_runtime::CleanupAction::Archive,
+    record["workspaceCleanupIntent"] = studio_runtime_store::projection_value(
+        &crate::workspace_cleanup_runtime::queued_cleanup_intent(
+            agent.id(),
+            record["epoch"]
+                .as_i64()
+                .ok_or(ManagementError::Invalid("Invalid archive epoch"))?,
+            crate::workspace_cleanup_runtime::CleanupAction::Archive,
+        ),
     );
     decision.result = json!({"status":"archived","agent":brief(&record),"worktree":{"state":"none","bytes":0},"unassignedWork":unassigned});
     if !inputs.is_empty() {

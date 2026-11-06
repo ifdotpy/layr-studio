@@ -4452,7 +4452,7 @@ mod work_parity_tests {
                 let record: Value = studio_json::from_str(&raw)?;
                 let item =
                     WorkItemsRepository::work_record(transaction, "w")?.expect("stored work item");
-                let refusal = crate::work_write::current_submission_refusal(transaction, &record)
+                let refusal = crate::work_write::current_submission_refusal(transaction, &item)
                     .expect("submission refusal");
                 let mut out = BTreeMap::new();
                 for (collection, view) in work_views(&item, &record, refusal, &BTreeMap::new())? {
