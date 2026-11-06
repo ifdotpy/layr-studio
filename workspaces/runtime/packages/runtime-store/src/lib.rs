@@ -175,8 +175,8 @@ pub use repositories::sync_documents::{
 };
 pub use repositories::terminals::{ArchiveAppend, TerminalRow, TerminalsRepository};
 pub use repositories::transcript::{
-    TranscriptItem, TranscriptRepository, TranscriptSearchKind, TranscriptStoreError,
-    TranscriptStoreResult,
+    StoredTranscriptView, TranscriptItem, TranscriptRepository, TranscriptSearchKind,
+    TranscriptStoreError, TranscriptStoreResult,
 };
 pub use repositories::usage::{
     UsageRepositoryError, cancel_capacity_retry, cancel_usage_resume, disable_usage_resume,
