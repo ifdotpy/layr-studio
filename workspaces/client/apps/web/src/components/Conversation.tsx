@@ -60,6 +60,7 @@ import {
   Ellipsis,
 } from "lucide-react";
 import {
+  memo,
   useCallback,
   useLayoutEffect,
   useEffect,
@@ -171,6 +172,31 @@ function LiveTurnHistory({
   );
   return <TurnHistory {...props} items={items} />;
 }
+
+/**
+ * One transcript message. A streamed token or an agent status change renders
+ * the whole history again, so a message skips its render while its item and
+ * the other values it shows (`context`) are unchanged. Its actions are stable
+ * (useMessageAction), so a skipped render keeps no stale handler.
+ */
+const MessageRow = memo(
+  function MessageRow({
+    render,
+    item,
+  }: {
+    render: (item: Message) => ReactNode;
+    item: Message;
+    context: readonly unknown[];
+  }) {
+    return render(item);
+  },
+  (previous, next) =>
+    previous.item === next.item &&
+    previous.context.length === next.context.length &&
+    previous.context.every((value, index) =>
+      Object.is(value, next.context[index]),
+    ),
+);
 
 // Message controls keep stable identities while their actions read the latest
 // committed draft and chat. These callbacks run from events, never during render.
@@ -1385,7 +1411,11 @@ export default function Conversation(p: {
       p.notify(`Could not remove this message: ${errorText(error)}`);
     }
   });
-  const renderMessage = (m: Message) => (
+  const renderMessage = (m: Message) => {
+    reportPromptComposerRender("message", m.id);
+    return renderMessageArticle(m);
+  };
+  const renderMessageArticle = (m: Message) => (
     <article
       key={messageRenderKey(m)}
       data-message={m.id}
@@ -1604,6 +1634,32 @@ export default function Conversation(p: {
       />
     </article>
   );
+  // Every value besides the item that renderMessage shows or passes down.
+  const messageContext = (m: Message): readonly unknown[] => [
+    highlighted === m.id,
+    p.room,
+    first,
+    managed,
+    agent?.id,
+    agent?.rootId,
+    agent?.turnId,
+    agent?.inFlight,
+    controls.fork,
+    removingSending,
+    editLoading === m.id,
+    !!editLoading,
+    branching,
+    !!m.turnId && lastAssistantByTurn.get(m.turnId) === m.id,
+    m.localDelivery
+      ? p.outgoing?.find((entry) => entry.id === m.clientMessageId)
+      : undefined,
+    p.offlineSendPending,
+    p.data.stateDir,
+    p.limitsAccounts,
+    p.room ? p.data.threads : undefined,
+    p.notify,
+    p.onObserved,
+  ];
   const transcript = useMemo(
     () => (
       <>
@@ -1631,7 +1687,12 @@ export default function Conversation(p: {
                 <NativeNotice key={item.id} item={item} planType={planType} />
               )
             ) : (
-              renderMessage(item)
+              <MessageRow
+                key={messageRenderKey(item)}
+                item={item}
+                render={renderMessage}
+                context={messageContext(item)}
+              />
             )
           }
           agentId={managed ? agent?.id : undefined}
