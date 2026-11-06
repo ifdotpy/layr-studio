@@ -1,4 +1,5 @@
 import BottomSheet from "../ui/BottomSheet";
+import { AgentPermissionMode } from "../../generated/api";
 import { appendAppLog } from "../../appLog";
 import { AgentStatus } from "../../generated/api";
 import { randomUUID } from "../../uuid";
@@ -627,8 +628,8 @@ function ScopedExecutionSettings({
     if (
       !saving &&
       pendingYolo &&
-      (pendingYolo.value === (agent.permissionMode === "bypassPermissions") ||
-        pendingYolo.baseline !== (agent.permissionMode === "bypassPermissions"))
+      (pendingYolo.value === (agent.permissionMode === AgentPermissionMode["bypassPermissions"]) ||
+        pendingYolo.baseline !== (agent.permissionMode === AgentPermissionMode["bypassPermissions"]))
     )
       setPendingYolo(null);
   }, [saving, pendingYolo, agent.permissionMode]);
@@ -1383,7 +1384,7 @@ function ScopedExecutionSettings({
       if (!mounted.current) return;
       setPendingYolo({
         value: canonical.permissionMode === "bypassPermissions",
-        baseline: agent.permissionMode === "bypassPermissions",
+        baseline: agent.permissionMode === AgentPermissionMode["bypassPermissions"],
       });
       refreshSavedSettings(generation);
     } catch (failure) {
@@ -1719,7 +1720,7 @@ function ScopedExecutionSettings({
     </>
   );
   const fullAccess =
-    pendingYolo?.value ?? agent.permissionMode === "bypassPermissions";
+    pendingYolo?.value ?? agent.permissionMode === AgentPermissionMode["bypassPermissions"];
   const askingNextTurn =
     (!!agent.inFlight || busy.has(agent.status ?? "")) && !fullAccess;
   const permissions =
