@@ -54106,6 +54106,10 @@
           "checkpoint": {
             "$ref": "#/components/schemas/SyncCheckpoint"
           },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
           "documents": {
             "items": {
               "oneOf": [
@@ -54189,6 +54193,7 @@
         "required": [
           "workspaceId",
           "generation",
+          "complete",
           "documents",
           "checkpoint"
         ],

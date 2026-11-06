@@ -201,6 +201,7 @@ for (const scenario of [
       );
       let page = JSON.stringify({
         generation: 1,
+        complete: true,
         workspaceId: "fixture",
         checkpoint: { seq: documents.at(-1)?.seq ?? after },
         maxSeq: changed ? 6 : 2,
