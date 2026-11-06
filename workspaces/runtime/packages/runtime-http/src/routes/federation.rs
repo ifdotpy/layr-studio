@@ -101,6 +101,20 @@ async fn signed_post(
     let timestamp = timestamp
         .parse::<i64>()
         .map_err(|_| ApiError::new(StatusCode::FORBIDDEN, "Invalid federation timestamp"))?;
+    // The permission table decides: a federated peer acts only in rooms it approved.
+    // `federation_effects::handle` checks the signature and the room (`Scope::ApprovedRoom`).
+    use studio_runtime_services::principal::{self, Access, CommandClass, Principal, Scope};
+    let caller = Principal::Federated {
+        peer: peer_id.clone(),
+    };
+    if principal::access(&caller, CommandClass::Federation) != Access::Scoped(Scope::ApprovedRoom)
+        || !crate::route_class::settles("POST", parts.uri.path(), Scope::ApprovedRoom)
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "Federation is not allowed",
+        ));
+    }
     let observed_user = optional_single_header(&parts.headers, "tailscale-user-login")?;
     let origin = federation_effects::OriginObservation::from_trusted_serve(observed_user);
     if refused_from_outside(&parts.headers, action, &raw) {

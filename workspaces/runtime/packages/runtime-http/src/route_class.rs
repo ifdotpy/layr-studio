@@ -123,6 +123,11 @@ const SETTLES: &[(&str, &str, Scope)] = &[
     // The edge checks the `parent` of the request against the peer's links
     // (`middleware::own_link_refusal`).
     ("POST", "/api/agents", Scope::OwnLink),
+    // `federation_effects::handle` checks the signature and that the room is approved.
+    ("POST", "/api/federation/v1/message", Scope::ApprovedRoom),
+    ("POST", "/api/federation/v1/pair", Scope::ApprovedRoom),
+    ("POST", "/api/federation/v1/pull", Scope::ApprovedRoom),
+    ("POST", "/api/federation/v1/status", Scope::ApprovedRoom),
 ];
 
 /// True when the route `method template` settles `scope` itself.
@@ -147,6 +152,22 @@ pub(crate) fn class_of(method: &str, template: &str) -> Option<CommandClass> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_federation_route_settles_the_approved_room_scope() {
+        let federation: Vec<_> = ROUTES
+            .iter()
+            .filter(|(_, _, class)| *class == Federation)
+            .collect();
+        assert!(!federation.is_empty());
+        for (method, template, _) in federation {
+            assert!(
+                settles(method, template, Scope::ApprovedRoom),
+                "{method} {template} must check the room"
+            );
+        }
+        assert!(!settles("POST", "/api/commands", Scope::ApprovedRoom));
+    }
 
     #[test]
     fn every_registered_route_has_a_class() {
