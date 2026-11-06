@@ -2203,7 +2203,7 @@ impl RuntimeStore {
         let operation = move |writer: &mut Connection| {
             let started = Instant::now();
             #[cfg(feature = "perf-reporting")]
-            let outcome = perf_reporting::with_sql_job(
+            let outcome = studio_json::perf_reporting::with_job(
                 format!("write {}:{}", origin.file(), origin.line()),
                 || {
                     perf_reporting::sweep_sql(writer, false);
@@ -2398,7 +2398,7 @@ impl RuntimeStore {
             #[cfg(feature = "perf-reporting")]
             let run_started = Instant::now();
             #[cfg(feature = "perf-reporting")]
-            let result = perf_reporting::with_sql_job(format!("read {label}"), || {
+            let result = studio_json::perf_reporting::with_job(format!("read {label}"), || {
                 snapshot_on(pool.checkout_admitted(permit, started, waited)?, operation)
             });
             #[cfg(not(feature = "perf-reporting"))]

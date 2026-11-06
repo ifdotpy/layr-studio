@@ -44,6 +44,8 @@ pub struct Snapshot {
     pub polls: BTreeMap<String, Aggregate>,
     pub client: Option<studio_runtime_schema::perf_reporting::PerfClientReport>,
     pub json: BTreeMap<String, studio_json::perf_reporting::Counts>,
+    pub json_decode_top_time: Vec<(String, studio_json::perf_reporting::Decode)>,
+    pub json_decode_by_job_top_time: Vec<(String, studio_json::perf_reporting::Decode)>,
     pub sse_events: u64,
     pub sse_bytes: u64,
 }
@@ -98,8 +100,8 @@ fn update(
 pub fn record_sql(sql: &str, elapsed: Duration) {
     let sql = normalize_sql(sql);
     update(|data| &mut data.sql, &sql, elapsed);
-    JOB.with(|job| {
-        if let Some(label) = job.borrow().as_deref() {
+    studio_json::perf_reporting::with_job_label(|job| {
+        if let Some(label) = job {
             update(
                 |data| &mut data.sql_by_job,
                 &format!("{label} | {sql}"),
@@ -116,21 +118,6 @@ pub fn record_sql_row(sql: &str) {
     let entry = aggregate_entry(&mut data.sql, &normalize_sql(sql));
     entry.rows = entry.rows.saturating_add(1);
 }
-thread_local! { static JOB: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) }; }
-
-/// Scope the SQL trace to the store job running on this thread.
-pub(crate) fn with_sql_job<T>(label: String, operation: impl FnOnce() -> T) -> T {
-    struct Guard(Option<String>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            JOB.with_borrow_mut(|job| *job = self.0.take());
-        }
-    }
-    let previous = JOB.with_borrow_mut(|job| job.replace(label));
-    let _guard = Guard(previous);
-    operation()
-}
-
 /// Read and reset counters of statements still prepared on this connection.
 #[allow(
     unsafe_code,
@@ -180,8 +167,8 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
                 entry.autoindexes = entry.autoindexes.saturating_add(counts[3]);
             };
             apply(aggregate_entry(&mut data.sql, &normalized));
-            JOB.with(|job| {
-                if let Some(label) = job.borrow().as_deref() {
+            studio_json::perf_reporting::with_job_label(|job| {
+                if let Some(label) = job {
                     apply(aggregate_entry(
                         &mut data.sql_by_job,
                         &format!("{label} | {normalized}"),
@@ -190,8 +177,8 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
             });
         }
         if record {
-            JOB.with(|job| {
-                if let Some(label) = job.borrow().as_deref() {
+            studio_json::perf_reporting::with_job_label(|job| {
+                if let Some(label) = job {
                     let mut data = AGGREGATES
                         .get_or_init(|| Mutex::new(Snapshot::default()))
                         .lock()
@@ -235,6 +222,24 @@ pub fn snapshot() -> Snapshot {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
     snapshot.json = studio_json::perf_reporting::snapshot();
+    let mut by_type = BTreeMap::<String, studio_json::perf_reporting::Decode>::new();
+    let mut decodes: Vec<_> = studio_json::perf_reporting::decode_snapshot()
+        .into_iter()
+        .collect();
+    for (label, decode) in &decodes {
+        let ty = label
+            .rsplit_once(" | ")
+            .map_or(label.as_str(), |(_, ty)| ty);
+        let total = by_type.entry(ty.to_owned()).or_default();
+        total.count = total.count.saturating_add(decode.count);
+        total.total_ns = total.total_ns.saturating_add(decode.total_ns);
+        total.bytes = total.bytes.saturating_add(decode.bytes);
+    }
+    decodes.sort_by_key(|(_, decode)| std::cmp::Reverse(decode.total_ns));
+    snapshot.json_decode_by_job_top_time = decodes.into_iter().take(LOG_TABLE_ROWS).collect();
+    let mut types: Vec<_> = by_type.into_iter().collect();
+    types.sort_by_key(|(_, decode)| std::cmp::Reverse(decode.total_ns));
+    snapshot.json_decode_top_time = types.into_iter().take(LOG_TABLE_ROWS).collect();
     let mut entries: Vec<_> = snapshot.sql_by_job.clone().into_iter().collect();
     entries.sort_by_key(|(_, aggregate)| std::cmp::Reverse(aggregate.total_ns));
     snapshot.sql_top_time = entries.iter().take(LOG_TABLE_ROWS).cloned().collect();

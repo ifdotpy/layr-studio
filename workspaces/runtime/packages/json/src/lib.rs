@@ -46,6 +46,37 @@ pub mod perf_reporting {
         pub errors: u64,
     }
     static COUNTS: OnceLock<Mutex<BTreeMap<String, Counts>>> = OnceLock::new();
+    #[derive(Clone, Default, serde::Serialize)]
+    pub struct Decode {
+        pub count: u64,
+        pub total_ns: u64,
+        pub bytes: u64,
+    }
+    static DECODES: OnceLock<Mutex<BTreeMap<String, Decode>>> = OnceLock::new();
+    thread_local! { static JOB: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) }; }
+
+    /// Share the store job origin with SQL profiling and JSON decode reporting.
+    pub fn with_job<T>(label: String, operation: impl FnOnce() -> T) -> T {
+        struct Guard(Option<String>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                JOB.with_borrow_mut(|job| *job = self.0.take());
+            }
+        }
+        let previous = JOB.with_borrow_mut(|job| job.replace(label));
+        let _guard = Guard(previous);
+        operation()
+    }
+    pub fn with_job_label<T>(operation: impl FnOnce(Option<&str>) -> T) -> T {
+        JOB.with(|job| operation(job.borrow().as_deref()))
+    }
+    pub fn decode_snapshot() -> BTreeMap<String, Decode> {
+        DECODES
+            .get_or_init(|| Mutex::new(BTreeMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
     thread_local! { static ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
     struct ActiveGuard;
     impl Drop for ActiveGuard {
@@ -55,13 +86,42 @@ pub mod perf_reporting {
     }
     pub(super) fn measure<T: ?Sized, R>(
         operation: &str,
+        decode_bytes: Option<usize>,
         f: impl FnOnce() -> super::Result<R>,
     ) -> super::Result<R> {
         if ACTIVE.with(|active| active.replace(true)) {
             return f();
         }
         let _guard = ActiveGuard;
+        let started = decode_bytes.map(|_| std::time::Instant::now());
         let result = f();
+        if let (Some(bytes), Some(started)) = (decode_bytes, started) {
+            let nanos = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            with_job_label(|job| {
+                let label = format!(
+                    "{} | {}",
+                    job.unwrap_or("<outside store job>"),
+                    std::any::type_name::<T>()
+                );
+                let mut decodes = DECODES
+                    .get_or_init(|| Mutex::new(BTreeMap::new()))
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let key = if label.len() <= MAX_KEY_BYTES
+                    && (decodes.contains_key(&label) || decodes.len() < MAX_KEYS)
+                {
+                    label.as_str()
+                } else {
+                    "<other>"
+                };
+                let entry = decodes.entry(key.to_owned()).or_default();
+                entry.count = entry.count.saturating_add(1);
+                entry.total_ns = entry.total_ns.saturating_add(nanos);
+                entry.bytes = entry
+                    .bytes
+                    .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+            });
+        }
         let label = format!("{} {}", operation, std::any::type_name::<T>());
         let mut counts = COUNTS
             .get_or_init(|| Mutex::new(BTreeMap::new()))
@@ -92,12 +152,18 @@ pub mod perf_reporting {
 
 #[cfg(feature = "perf-reporting")]
 macro_rules! measure_json {
+    ($ty:ty, $operation:literal, $bytes:expr, $body:block) => {
+        perf_reporting::measure::<$ty, _>($operation, Some($bytes), || $body)
+    };
     ($ty:ty, $operation:literal, $body:block) => {
-        perf_reporting::measure::<$ty, _>($operation, || $body)
+        perf_reporting::measure::<$ty, _>($operation, None, || $body)
     };
 }
 #[cfg(not(feature = "perf-reporting"))]
 macro_rules! measure_json {
+    ($ty:ty, $operation:literal, $bytes:expr, $body:block) => {
+        $body
+    };
     ($ty:ty, $operation:literal, $body:block) => {
         $body
     };
@@ -171,7 +237,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[inline]
 pub fn from_str<'a, T: Deserialize<'a>>(input: &'a str) -> Result<T> {
-    measure_json!(T, "from_str", {
+    measure_json!(T, "from_str", input.len(), {
         #[cfg(feature = "sonic-backend")]
         {
             sonic_rs::from_str(input).map_err(error)
@@ -184,7 +250,7 @@ pub fn from_str<'a, T: Deserialize<'a>>(input: &'a str) -> Result<T> {
 }
 #[inline]
 pub fn from_slice<'a, T: Deserialize<'a>>(input: &'a [u8]) -> Result<T> {
-    measure_json!(T, "from_slice", {
+    measure_json!(T, "from_slice", input.len(), {
         #[cfg(feature = "sonic-backend")]
         {
             sonic_rs::from_slice(input).map_err(error)
@@ -197,11 +263,13 @@ pub fn from_slice<'a, T: Deserialize<'a>>(input: &'a [u8]) -> Result<T> {
 }
 #[inline]
 pub fn from_str_owned<T: DeserializeOwned>(input: &str) -> Result<T> {
-    measure_json!(T, "from_str_owned", { from_slice_owned(input.as_bytes()) })
+    measure_json!(T, "from_str_owned", input.len(), {
+        from_slice_owned(input.as_bytes())
+    })
 }
 #[inline]
 pub fn from_slice_owned<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
-    measure_json!(T, "from_slice_owned", {
+    measure_json!(T, "from_slice_owned", input.len(), {
         #[cfg(feature = "simd-backend")]
         {
             thread_local! { static SCRATCH: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) }; }
@@ -254,7 +322,7 @@ pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
 }
 #[inline]
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
-    measure_json!(T, "from_value", {
+    measure_json!(T, "from_value", 0, {
         serde_json::from_value(value).map_err(error)
     })
 }
@@ -266,7 +334,7 @@ pub fn to_value<T: Serialize>(value: T) -> Result<Value> {
 }
 #[inline]
 pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(reader: R) -> Result<T> {
-    measure_json!(T, "from_reader", {
+    measure_json!(T, "from_reader", 0, {
         #[cfg(feature = "sonic-backend")]
         {
             sonic_rs::from_reader(reader).map_err(error)
@@ -424,5 +492,28 @@ mod perf_tests {
         assert!(!counts.contains_key(&nested));
         let encoded = format!("to_string {}", std::any::type_name::<UniqueType>());
         assert_eq!(counts[&encoded].calls, 1);
+    }
+
+    #[test]
+    fn decode_cost_uses_the_job_scope_and_counts_outer_input_once() {
+        #[derive(serde::Deserialize)]
+        struct DecodeWitness {
+            value: u32,
+        }
+        let input = r#"{"value":7}"#;
+        super::perf_reporting::with_job("read decode-witness".to_owned(), || {
+            let decoded = super::from_str_owned::<DecodeWitness>(input).unwrap();
+            assert_eq!(decoded.value, 7);
+            assert!(super::from_str_owned::<DecodeWitness>("bad").is_err());
+        });
+        let key = format!(
+            "read decode-witness | {}",
+            std::any::type_name::<DecodeWitness>()
+        );
+        let snapshot = super::perf_reporting::decode_snapshot();
+        assert_eq!(snapshot[&key].count, 2);
+        assert_eq!(snapshot[&key].bytes, (input.len() + 3) as u64);
+        assert!(snapshot[&key].total_ns > 0);
+        super::perf_reporting::with_job_label(|label| assert!(label.is_none()));
     }
 }
