@@ -24,7 +24,6 @@ import {
 } from "../gate-config.ts";
 
 const root = fileURLToPath(new URL("../../../../..", import.meta.url));
-<<<<<<< head
 
 // cpSync keeps the times of files, not of folders. A build script that watches a folder
 // (runtime-schema watches src/schemas/codex) would then run again on every copy.
@@ -39,20 +38,18 @@ function keepFolderTimes(source: string, target: string) {
   const { atime, mtime } = statSync(source);
   utimesSync(target, atime, mtime);
 }
-||||||| base
-=======
+
 /** Whole witness budget, in milliseconds. */
 const WITNESS_TIMEOUT_MS = 900_000;
 /** Part of the budget kept for the source copy and cleanup, in milliseconds. */
 const CLEANUP_MARGIN_MS = 60_000;
->>>>>>> https/main
 test(
   "Cargo refuses stale sources and regenerated incompatible vendor types",
   { timeout: WITNESS_TIMEOUT_MS },
   async (context) => {
-    // All commands share one deadline: the first check compiles the copied
-    // crates cold and can take most of it beside a gate build; the later
-    // checks are incremental and take seconds.
+    // All commands share one deadline: without warm units (the `sweep` entry)
+    // the first check compiles the copied crates cold and can take most of it
+    // beside a gate build; the later checks are incremental and take seconds.
     const deadline = Date.now() + WITNESS_TIMEOUT_MS - CLEANUP_MARGIN_MS;
     const copy = mkdtempSync(path.join(tmpdir(), "studio-contract-compile-"));
     try {
