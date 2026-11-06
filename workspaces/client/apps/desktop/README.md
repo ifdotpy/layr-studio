@@ -31,6 +31,10 @@ package flow calls it with the same output. Follow the [native package cycle](..
 To skip the Rust release build when the binaries already exist for the same commit, build them once with
 `just build-release-binaries` and set `CODEX_RELEASE_TARGET_DIR`. The packager checks the commit and SHA-256 manifest.
 
+Cargo names a local crate by its path inside the workspace and judges it fresh by file times, and a layr line keeps the
+file times of its store. So a release build first removes the local crates from its target directory and builds them
+from the checkout; registry crates stay. One release build at a time holds a target directory (`<directory>.lock`).
+
 The package writes `studio-build.json` and includes `install_update.py`. Paired servers install a newer build with it.
 See [Updates from a paired server](../../../../docs/peer-updates.md).
 

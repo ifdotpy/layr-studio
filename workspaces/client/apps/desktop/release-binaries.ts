@@ -50,6 +50,110 @@ export function cargoReleaseArguments() {
   ];
 }
 
+type Run = (
+  command: string,
+  args: string[],
+  options: ExecFileSyncOptions,
+) => unknown;
+
+/** Names of the crates built from this checkout (path sources, not registry). */
+export function localCrateNames(repository: string): string[] {
+  const metadata: { packages: { name: string; source: string | null }[] } =
+    JSON.parse(
+      execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], {
+        cwd: repository,
+        encoding: "utf8",
+        maxBuffer: 256 * 1024 * 1024,
+      }),
+    );
+  return [
+    ...new Set(
+      metadata.packages
+        .filter((entry) => entry.source === null)
+        .map((entry) => entry.name),
+    ),
+  ];
+}
+
+/**
+ * Cargo names a local crate by its path inside the workspace and judges it
+ * fresh by file times, and a layr line keeps the file times of its store. A
+ * reused target directory can then hold another checkout's crate that looks
+ * fresh. Registry crates are fixed by Cargo.lock and stay; this removes the
+ * release artifacts of the local crates, so the next build compiles them from
+ * this checkout. Without `directory`, Cargo uses the checkout's own target.
+ */
+export function cleanLocalCrates({
+  repository,
+  directory,
+  run = (command, args, options) =>
+    execFileSync(command, args, { stdio: "inherit", ...options }),
+  names = () => localCrateNames(repository),
+}: {
+  repository: string;
+  directory?: string | undefined;
+  run?: Run;
+  names?: () => string[];
+}) {
+  run(
+    "cargo",
+    ["clean", "--release", ...names().flatMap((name) => ["-p", name])],
+    {
+      cwd: repository,
+      env: {
+        ...process.env,
+        ...(directory ? { CARGO_TARGET_DIR: directory } : {}),
+      },
+    },
+  );
+}
+
+/** How often a release build waiting for the target lock checks it, in ms. */
+const TARGET_LOCK_POLL_MS = 1000;
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+/**
+ * One release build at a time in a target directory: another checkout's build
+ * between removing the local crates and building would leave its crates fresh
+ * again. A lock whose process has ended is taken over.
+ */
+export async function withTargetLock<T>(
+  directory: string,
+  body: () => Promise<T>,
+): Promise<T> {
+  const lock = `${directory}.lock`;
+  await mkdir(path.dirname(lock), { recursive: true });
+  for (;;) {
+    try {
+      await mkdir(lock);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const owner = Number(
+      await readFile(path.join(lock, "pid"), "utf8").catch(() => "0"),
+    );
+    if (owner && !alive(owner)) {
+      await rm(lock, { recursive: true, force: true });
+      continue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, TARGET_LOCK_POLL_MS));
+  }
+  await writeFile(path.join(lock, "pid"), String(process.pid));
+  try {
+    return await body();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
+}
+
 export function releaseTargetDirectory(env = process.env) {
   if (env[releaseTargetEnvironment])
     return path.resolve(env[releaseTargetEnvironment]);
@@ -181,33 +285,34 @@ export async function buildReleaseBinaries({
   run = (command, args, options) =>
     execFileSync(command, args, { stdio: "inherit", ...options }),
   state = () => checkoutState(repository),
+  localCrates = () => localCrateNames(repository),
 }: {
   repository: string;
   directory: string;
-  run?: (
-    command: string,
-    args: string[],
-    options: ExecFileSyncOptions,
-  ) => unknown;
+  run?: Run;
   state?: () => ReturnType<typeof checkoutState>;
+  localCrates?: () => string[];
 }) {
   const before = state();
   if (before.dirty)
     throw new Error(
       "Tracked files differ from HEAD. Commit or discard them so the binaries match one commit.",
     );
-  await mkdir(path.join(directory, "release"), { recursive: true });
-  await rm(manifestPath(directory), { force: true });
-  run("cargo", cargoReleaseArguments(), {
-    cwd: repository,
-    env: { ...process.env, CARGO_TARGET_DIR: directory },
+  return withTargetLock(directory, async () => {
+    await mkdir(path.join(directory, "release"), { recursive: true });
+    await rm(manifestPath(directory), { force: true });
+    cleanLocalCrates({ repository, directory, run, names: localCrates });
+    run("cargo", cargoReleaseArguments(), {
+      cwd: repository,
+      env: { ...process.env, CARGO_TARGET_DIR: directory },
+    });
+    const after = state();
+    if (after.dirty || after.commit !== before.commit)
+      throw new Error(
+        "The checkout changed during the build; no manifest was written.",
+      );
+    return writeReleaseManifest({ directory, commit: before.commit });
   });
-  const after = state();
-  if (after.dirty || after.commit !== before.commit)
-    throw new Error(
-      "The checkout changed during the build; no manifest was written.",
-    );
-  return writeReleaseManifest({ directory, commit: before.commit });
 }
 
 // For a packager. Returns null when no prebuilt directory is selected, so the

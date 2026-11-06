@@ -1,15 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
   buildReleaseBinaries,
+  cleanLocalCrates,
   manifestPath,
   prebuiltReleaseDirectory,
   releaseArtifacts,
   releaseTargetEnvironment,
   verifyReleaseBinaries,
+  withTargetLock,
   writeReleaseManifest,
 } from "../../../../client/apps/desktop/release-binaries.ts";
 import {
@@ -174,6 +184,7 @@ test("a build removes the old manifest first and records the built commit", asyn
       repository: "/repo",
       directory,
       state: () => ({ commit: commitA, dirty: false }),
+      localCrates: () => ["studio-runtime-server", "studio-json"],
       run: (command, args, options) => {
         calls.push({ command, args, target: options.env!.CARGO_TARGET_DIR });
         return verifyReleaseBinaries({ directory, commit: commitB }).then(
@@ -184,7 +195,20 @@ test("a build removes the old manifest first and records the built commit", asyn
       },
     });
     assert.equal(manifest.commit, commitA);
-    const [call] = calls;
+    // The local crates are removed first, in the same target directory.
+    const [clean, call] = calls;
+    assert.deepEqual(clean, {
+      command: "cargo",
+      args: [
+        "clean",
+        "--release",
+        "-p",
+        "studio-runtime-server",
+        "-p",
+        "studio-json",
+      ],
+      target: directory,
+    });
     assert.ok(call);
     assert.equal(call.command, "cargo");
     assert.ok(call.args.includes("--locked"));
@@ -217,6 +241,7 @@ test("a build refuses a dirty checkout and a commit that moved", async () => {
         repository: "/repo",
         directory,
         state: () => states.shift()!,
+        localCrates: () => [],
         run: () => {},
       }),
       /changed during the build/,
@@ -273,4 +298,76 @@ test("the package flow runs the dev-profile host check unless CI is stated", () 
     /Unknown flag/,
   );
   assert.throws(() => parseFlowArguments([]), /Usage/);
+});
+
+// A layr line keeps the file times of its store, and Cargo names a local crate
+// by its path inside the workspace. A target directory reused by two checkouts
+// then holds the other checkout's crate as fresh, unless a release build removes
+// the local crates first.
+test("a reused target directory rebuilds local crates from this checkout", async () => {
+  const work = await mkdtemp(path.join(os.tmpdir(), "release-local-crates-"));
+  const target = path.join(work, "target");
+  const now = Date.now() / 1000;
+  const checkout = async (name: string, value: string, seconds: number) => {
+    const root = path.join(work, name);
+    await mkdir(path.join(root, "src"), { recursive: true });
+    const files = {
+      "Cargo.toml":
+        '[package]\nname = "witness"\nversion = "0.1.0"\nedition = "2021"\n\n[workspace]\n',
+      "src/main.rs": `fn main() { print!("${value}"); }\n`,
+    };
+    for (const [file, text] of Object.entries(files)) {
+      await writeFile(path.join(root, file), text);
+      await utimes(path.join(root, file), seconds, seconds);
+    }
+    return root;
+  };
+  const build = (root: string) => {
+    execFileSync("cargo", ["build", "--release", "--quiet"], {
+      cwd: root,
+      env: { ...process.env, CARGO_TARGET_DIR: target },
+      stdio: "inherit",
+    });
+    return execFileSync(path.join(target, "release", "witness"), {
+      encoding: "utf8",
+    });
+  };
+  try {
+    assert.equal(build(await checkout("a", "A", now - 1000)), "A");
+    // This checkout's files are older than the other checkout's build.
+    const b = await checkout("b", "B", now - 2000);
+    assert.equal(build(b), "A", "Cargo reuses the other checkout's crate");
+    cleanLocalCrates({ repository: b, directory: target });
+    assert.equal(build(b), "B");
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+});
+
+test("release builds in one target directory run one at a time", async () => {
+  const work = await mkdtemp(path.join(os.tmpdir(), "release-lock-"));
+  const directory = path.join(work, "target");
+  const events: string[] = [];
+  try {
+    let release!: () => void;
+    const first = withTargetLock(directory, async () => {
+      events.push("first start");
+      await new Promise<void>((resolve) => (release = resolve));
+      events.push("first end");
+    });
+    while (!release) await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = withTargetLock(directory, async () => {
+      events.push("second");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(events, ["first start", "first end", "second"]);
+    // A lock left by an ended process is taken over.
+    await mkdir(`${directory}.lock`);
+    await writeFile(path.join(`${directory}.lock`, "pid"), "999999");
+    assert.equal(await withTargetLock(directory, async () => "taken"), "taken");
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 });
