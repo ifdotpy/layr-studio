@@ -9,60 +9,6 @@ use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::Transaction;
 use studio_runtime_store::path_identity::CanonicalPath;
 
-fn thread_snapshot(
-    tx: &Transaction<'_>,
-    resources: &PreparationResources,
-    record: &Value,
-    connection: &str,
-    state_root: &Path,
-    account_transfer_owner: Option<&str>,
-) -> Result<thread::Snapshot, WorkerError> {
-    let mut result = snapshot::thread_snapshot(
-        tx,
-        resources,
-        record,
-        connection,
-        state_root,
-        account_transfer_owner,
-    )?;
-    if record
-        .get("reviewAssignment")
-        .is_some_and(|value| !value.is_null())
-    {
-        let agent = studio_runtime_store::AgentRecord::from_value(record.clone())
-            .map_err(|_| invalid("review assignment"))?;
-        let assignment = agent
-            .review_assignment
-            .as_ref()
-            .ok_or_else(|| invalid("review assignment"))?;
-        let copy = crate::reviewer_workspace::read_only_copy(&agent)
-            .ok_or_else(|| invalid("review workspace"))?;
-        let scratch = crate::reviewer_workspace::scratch_dir(&agent)
-            .ok_or_else(|| invalid("review scratch"))?;
-        result.actor.cwd = scratch.to_owned();
-        result.actor.thread_sandbox = thread::ThreadSandbox::WorkspaceWrite;
-        result
-            .guidance
-            .thread_config
-            .insert("shell_environment_policy.set.TMPDIR".into(), json!(scratch));
-        let instruction = match assignment.target() {
-            studio_runtime_schema::review::ReviewTarget::LayrState { state, .. } => {
-                format!(
-                    "Your read-only copy of {state} is at {copy}; your working directory is a scratch folder."
-                )
-            }
-            studio_runtime_schema::review::ReviewTarget::GitRange { head, .. } => {
-                format!(
-                    "Your read-only copy of {head} is at {copy}; your working directory is a scratch folder."
-                )
-            }
-        };
-        result.guidance.instructions.push('\n');
-        result.guidance.instructions.push_str(&instruction);
-    }
-    Ok(result)
-}
-
 fn thread_refusal(reason: thread::Refusal) -> WorkerError {
     let detail = if let thread::Refusal::Blocked(reason) = reason {
         format!("{reason:?}")
