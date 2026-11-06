@@ -3056,6 +3056,24 @@ fn claim(
     })
 }
 
+fn refuse_legacy_work_participants(
+    tx: &Transaction<'_>,
+    agent: &AgentRecord,
+    actor_id: Option<&str>,
+    owner_id: Option<&str>,
+) -> Result<(), WorkWriteError> {
+    if crate::workspace_ready::legacy_vm_record(agent) {
+        return Err(Error::InvalidRequest("VM agents are no longer supported").into());
+    }
+    for id in [actor_id, owner_id].into_iter().flatten() {
+        let participant = event_write::checked_agent(tx, id)?;
+        if crate::workspace_ready::legacy_vm_record(&participant) {
+            return Err(Error::InvalidRequest("VM agents are no longer supported").into());
+        }
+    }
+    Ok(())
+}
+
 fn submit(
     tx: &Transaction<'_>,
     agent: &AgentRecord,
@@ -3065,6 +3083,7 @@ fn submit(
     signature: &str,
 ) -> Result<WorkWriteResult, WorkWriteError> {
     let work = load_work(tx, &agent.root_id.0, &input.task_id, input.version)?;
+    refuse_legacy_work_participants(tx, agent, actor_id, work.owner())?;
     if actor_id.is_some_and(|actor| work.owner() != Some(actor)) {
         return Err(Error::InvalidRequest("Only the assigned worker can submit its result").into());
     }
@@ -3415,6 +3434,7 @@ fn accept(
         return Err(Error::InvalidRequest("Only the lead can override an acceptance gate").into());
     }
     let work = load_work(tx, &agent.root_id.0, &input.task_id, input.version)?;
+    refuse_legacy_work_participants(tx, agent, actor_id, work.owner())?;
     if let Some(owner_id) = work.owner()
         && owner_id != agent.root_id.0
     {
@@ -5823,6 +5843,76 @@ mod actor_tests {
             .await
             .expect("exact replay needs no filesystem observation");
         assert_eq!(result.record, replay.record);
+    }
+
+    #[test]
+    fn owner_becoming_legacy_after_preflight_refuses_submit_and_accept() {
+        let mut connection = database();
+        insert_work(
+            &connection,
+            &work("race-submit", Some("worker"), "running", json!([])),
+        );
+        insert_work(
+            &connection,
+            &work(
+                "race-accept",
+                Some("worker"),
+                "review",
+                json!([{"id":"result-1","agent":"worker","text":"done","checks":"ok","revision":"abc1234","files":[]}]),
+            ),
+        );
+        // Preflight saw the native worker; both tasks are reassigned before the write.
+        connection.execute("INSERT INTO runtime_agents(id,record) SELECT 'legacy',json_set(record,'$.id','legacy','$.workspaceMode','layr') FROM runtime_agents WHERE id='worker'", []).unwrap();
+        connection.execute("UPDATE runtime_work SET record=json_set(record,'$.owner','legacy') WHERE id IN ('race-submit','race-accept')", []).unwrap();
+        let tx = connection.transaction().unwrap();
+        let submit = super::write(
+            &tx,
+            "lead",
+            None,
+            "race-submit",
+            WorkWrite::Submit(super::SubmitWork {
+                prepared_gate_workspace: None,
+                task_id: "race-submit".into(),
+                version: Some(2),
+                result: "done".into(),
+                checks: "ok".into(),
+                revision: "abc1234".into(),
+                files: vec![],
+                prepared_files: None,
+                state_dir: std::env::temp_dir(),
+                layr_evidence: None,
+                layr_evidence_request_id: None,
+            }),
+        );
+        assert!(matches!(
+            submit,
+            Err(WorkWriteError::Event(
+                crate::event_write::EventWriteError::InvalidRequest(
+                    "VM agents are no longer supported"
+                )
+            ))
+        ));
+        let accept = super::write(
+            &tx,
+            "lead",
+            None,
+            "race-accept",
+            WorkWrite::Accept(AcceptWork {
+                task_id: "race-accept".into(),
+                version: Some(2),
+                reason: "reviewed".into(),
+                override_reason: None,
+                merged_result_id: None,
+            }),
+        );
+        assert!(matches!(
+            accept,
+            Err(WorkWriteError::Event(
+                crate::event_write::EventWriteError::InvalidRequest(
+                    "VM agents are no longer supported"
+                )
+            ))
+        ));
     }
 
     #[test]

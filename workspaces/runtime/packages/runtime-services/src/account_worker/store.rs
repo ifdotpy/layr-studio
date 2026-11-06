@@ -691,6 +691,7 @@ pub(super) async fn recover(
         let rows = account_obligations(tx,&account)?;
         let mut recovered = Vec::new();
         for mut row in rows {
+            if row.stream_id.as_deref() != Some(account.as_str()) { continue; }
             let ProviderCall::Account(call) = &mut row.payload else {continue;};
             let context = call.context.clone();
             let held: bool = tx.query_row_cached("SELECT hold_status!='clear' FROM runtime_agents WHERE id=?1",[&context.intent.agent_id],|r|r.get(0)).optional()?.unwrap_or(false);

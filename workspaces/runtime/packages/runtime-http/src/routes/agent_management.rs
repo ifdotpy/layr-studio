@@ -34,7 +34,7 @@ pub(super) fn native_action_provider(
     >,
 ) -> Result<Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>, ApiError>
 {
-    if agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
+    if studio_runtime_services::workspace_ready::legacy_vm_record(agent) {
         return Err(ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
             "The workspace is unavailable",
@@ -367,7 +367,7 @@ impl NativeActionPreparationRun {
         &self,
         agent: &AgentRecord,
     ) -> native_actions::Result<Option<std::path::PathBuf>> {
-        if agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
+        if studio_runtime_services::workspace_ready::legacy_vm_record(agent) {
             return Ok(None);
         }
         let account = agent.account_key.as_str();
@@ -1000,5 +1000,16 @@ mod native_review_preflight_tests {
         assert_eq!(before_agent["remoteOrigin"], true);
         assert_eq!(after_agent, original.value());
         assert_eq!(after_receipts, before_receipts);
+    }
+
+    #[test]
+    fn legacy_vm_native_action_is_refused() {
+        let agent = AgentRecord::from_value(json!({"id":"vm", "rootId":"vm", "epoch":1, "status":"idle", "workspaceMode":"layr", "accountKey":"default"})).unwrap();
+        let error =
+            native_action_provider(&agent, Some(Arc::new(ProviderSpy(AtomicUsize::new(0)))))
+                .err()
+                .expect("legacy VM refused");
+        assert_eq!(error.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(error.message(), "The workspace is unavailable");
     }
 }

@@ -8,8 +8,10 @@ type FolderProps = {
   onReveal: (path: string) => void;
 };
 
+/** Show the project folder when it is available on the server. */
 export default function ProjectFolderDialog(props: FolderProps) {
   const { agent, canReveal, onReveal } = props;
+  if (agent.legacyVmWorkspace) return <p>This chat’s folder is unavailable.</p>;
   return (
     <>
       <p>{agent.projectPath}</p>

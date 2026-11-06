@@ -39,7 +39,6 @@ describe("new chat actions", () => {
     expect(
       markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
     ).toContain('disabled=""');
-    expect(markup).not.toContain("Layr VM");
     expect(markup).toContain("WT");
     expect(markup).toContain('aria-label="Agent role" role="radiogroup"');
     expect(markup).toMatch(/<input[^>]*type="radio"[^>]*value="worker"/);

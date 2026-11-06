@@ -707,3 +707,37 @@ async fn joined_requests_wait_on_one_card_and_hear_how_it_ended() {
         "joined requests are not refused"
     );
 }
+
+#[tokio::test]
+async fn the_host_bridge_refuses_a_legacy_vm_chat() {
+    let (_dir, store) = store().await;
+    store.transaction_with(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.executionMode','vm') WHERE id=?1", [AGENT])?;
+        Ok::<_, studio_runtime_store::StoreError>(())
+    }).await.expect("legacy VM agent");
+    let bridge = "3".repeat(32);
+    let redirect = json!({"host":"localhost","port":8000,"path":"/"});
+    let guest = Arc::new(WaitGuest {
+        batches: Mutex::new(VecDeque::from([json!({"items":[
+            item(&bridge, AGENT, KUBE, redirect, "pending", 1),
+        ], "next": 1})])),
+        calls: Mutex::new(Vec::new()),
+    });
+    let source = CardSource {
+        guest: guest.clone(),
+        forwarder: None,
+        http_providers: Default::default(),
+    };
+    poll_once(&store, &source, 0, 0, None)
+        .await
+        .expect("test step");
+    assert!(request(&store, &bridge).is_none());
+    assert!(
+        guest
+            .calls
+            .lock()
+            .expect("test step")
+            .iter()
+            .any(|call| call.0 == "browser.close")
+    );
+}
