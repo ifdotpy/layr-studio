@@ -997,44 +997,9 @@ pub(crate) fn agent_view_documents(
         return Ok(None);
     };
     let raw = agent_volatile::merged_text(connection, id, raw)?;
-<<<<<<< head
-    let (record, view, legacy_vm_workspace) =
-        match studio_runtime_store::decode_agent_record(connection, id, &raw) {
-            Ok(record) => {
-                let legacy_vm_workspace = crate::workspace_ready::legacy_vm_record(&record);
-                let record = record.into_value();
-                let context = crate::sync_entity_context::agent_view_context(
-                    connection,
-                    &record,
-                    project_server_id,
-                )?;
-                let view = crate::sync_views::agent_entity_view(&record, &context);
-                (record, view, legacy_vm_workspace)
-            }
-            // A row that does not decode is held for repair; readers see a minimal safe view.
-            Err(error) => {
-                let parsed: Value =
-                    studio_json::from_str(&raw).unwrap_or_else(|_| json!({"id": id}));
-                let diagnostic = incident
-                    .or_else(|| {
-                        parsed
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    })
-                    .unwrap_or_else(|| error.to_string());
-                let public = crate::sync_views::invalid_agent_view(id, &parsed, &diagnostic);
-                let context = crate::sync_views::AgentViewContext {
-                    project_server_id: project_server_id.map(str::to_owned),
-                    ..Default::default()
-                };
-                let view = crate::sync_views::agent_entity_view(&public, &context);
-                (parsed, view, false)
-            }
-        };
-=======
     let (record, view) = match studio_runtime_store::decode_agent_record(connection, id, &raw) {
         Ok(record) => {
+            let legacy_vm_workspace = crate::workspace_ready::legacy_vm_record(&record);
             let context = crate::sync_entity_context::agent_view_context(
                 connection,
                 &record,
@@ -1060,7 +1025,8 @@ pub(crate) fn agent_view_documents(
                     retained_worktree: retained,
                 }));
             };
-            let summary = studio_runtime_schema::generated::AgentSummaryEntityDto::from(&full);
+            let mut summary = studio_runtime_schema::generated::AgentSummaryEntityDto::from(&full);
+            summary.legacy_vm_workspace = Some(legacy_vm_workspace);
             let detail = studio_runtime_schema::generated::AgentDetailEntityDto::from(&full);
             full.team_counts = None;
             full.has_question = None;
@@ -1093,7 +1059,6 @@ pub(crate) fn agent_view_documents(
             (parsed, view)
         }
     };
->>>>>>> origin/main
     let retained_worktree = crate::sync_views::retained_worktree_entity(&record);
     let view = view.filter(|_| !truthy(record.get("deletedAt")));
     let Some(view) = view else {
@@ -1106,10 +1071,7 @@ pub(crate) fn agent_view_documents(
                 .transpose()?,
         }));
     };
-    let mut summary = project_persisted_record("agentSummary", &view);
-    if let Some(summary) = summary.as_mut() {
-        summary["legacyVmWorkspace"] = json!(legacy_vm_workspace);
-    }
+    let summary = project_persisted_record("agentSummary", &view);
     let detail = project_persisted_record("agentDetail", &view);
     let mut agent = view;
     if let Some(fields) = agent.as_object_mut() {

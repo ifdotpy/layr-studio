@@ -1198,6 +1198,7 @@ pub(crate) fn agent_entity_from_record(
             .layr_project_id
             .as_deref()
             .map(|s| Some(bound_sync_text(s, "layrProjectId"))),
+        legacy_vm_workspace: None,
         layr_ready: record.layr_ready.map(Some),
         layr_state_id: extra
             .remove("layrStateId")
