@@ -24,6 +24,7 @@ import {
 } from "../gate-config.ts";
 
 const root = fileURLToPath(new URL("../../../../..", import.meta.url));
+<<<<<<< head
 
 // cpSync keeps the times of files, not of folders. A build script that watches a folder
 // (runtime-schema watches src/schemas/codex) would then run again on every copy.
@@ -38,10 +39,21 @@ function keepFolderTimes(source: string, target: string) {
   const { atime, mtime } = statSync(source);
   utimesSync(target, atime, mtime);
 }
+||||||| base
+=======
+/** Whole witness budget, in milliseconds. */
+const WITNESS_TIMEOUT_MS = 900_000;
+/** Part of the budget kept for the source copy and cleanup, in milliseconds. */
+const CLEANUP_MARGIN_MS = 60_000;
+>>>>>>> https/main
 test(
   "Cargo refuses stale sources and regenerated incompatible vendor types",
-  { timeout: 900000 },
+  { timeout: WITNESS_TIMEOUT_MS },
   async (context) => {
+    // All commands share one deadline: the first check compiles the copied
+    // crates cold and can take most of it beside a gate build; the later
+    // checks are incremental and take seconds.
+    const deadline = Date.now() + WITNESS_TIMEOUT_MS - CLEANUP_MARGIN_MS;
     const copy = mkdtempSync(path.join(tmpdir(), "studio-contract-compile-"));
     try {
       for (const file of [
@@ -97,13 +109,21 @@ test(
           PROVIDER_CONTRACT_TARGET_DIR,
         ),
       };
-      const run = (command: string, args: string[]) =>
-        spawnSync(command, args, {
+      const run = (command: string, args: string[]) => {
+        const result = spawnSync(command, args, {
           cwd: copy,
           env,
           encoding: "utf8",
-          timeout: 300000,
+          timeout: Math.max(1, deadline - Date.now()),
         });
+        // A killed command has no exit code, and "not 0" would wrongly pass
+        // a rejection check: every command must finish on its own.
+        assert.ok(
+          result.error === undefined && result.signal === null,
+          `${command} ${args.join(" ")} did not finish within the witness budget: ${result.error?.message ?? result.signal}`,
+        );
+        return result;
+      };
       const check = () =>
         run("cargo", [...PROVIDER_CONTRACT_CHECK_ARGS, "-j", "4"]);
       const generate = () => {
