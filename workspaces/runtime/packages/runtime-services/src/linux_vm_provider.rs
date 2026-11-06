@@ -2921,6 +2921,7 @@ mod tests {
                     initialize_operation: OperationId("vm-test-initialize".into()),
                     request_id_prefix: None,
                     recovered: vec![],
+                    frames: None,
                 },
             )
             .await

@@ -164,6 +164,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
                 initialize_operation: OperationId("init".into()),
                 request_id_prefix: None,
                 recovered: vec![],
+                frames: None,
             },
         )
         .await
@@ -309,6 +310,7 @@ async fn closure_panic_unknown_batch_does_not_return_unknown_twice() {
                 unknown: false,
                 remote_id: None,
             }],
+            frames: None,
         },
     )
     .await

@@ -154,6 +154,7 @@ fn config() -> SessionTaskConfig {
         initialize_operation: OperationId("init:attachment-1".into()),
         request_id_prefix: Some("attachment-1".into()),
         recovered: vec![],
+        frames: None,
     }
 }
 async fn open() -> (SessionHandle, Peer) {
@@ -2344,4 +2345,48 @@ async fn multiple_recovered_thread_owners_open_without_replay_and_hold_fresh_wor
     written(write(&mut peer).await);
     pending(peer.commands.recv()).await;
     session.checked_shutdown().await;
+}
+
+#[tokio::test]
+async fn frames_in_and_out_go_to_the_frame_log() {
+    let root = tempfile::tempdir().expect("state folder");
+    let log = studio_runtime_process::operational_log::OperationalLog::provider_frames(root.path())
+        .expect("frame log");
+    let (factory, mut peer) = fake();
+    let mut session = SessionHandle::open(
+        factory,
+        ProviderHandle::for_account("test"),
+        options(),
+        SessionTaskConfig {
+            frames: Some(log.clone()),
+            ..config()
+        },
+    )
+    .await
+    .unwrap();
+    ready(&mut session, &mut peer).await;
+    peer.events
+        .send(entry(
+            1,
+            0,
+            JournalPayload::Frame(reply(RequestId::Number(999))),
+        ))
+        .await
+        .unwrap();
+    session.events.recv().await.unwrap();
+    session.checked_shutdown().await;
+    log.flush().expect("flush");
+    let lines: Vec<studio_json::Value> =
+        std::fs::read_to_string(root.path().join("provider-frames.jsonl"))
+            .expect("frame file")
+            .lines()
+            .map(|line| studio_json::from_str(line).expect("json line"))
+            .collect();
+    let out: Vec<_> = lines.iter().filter(|line| line["dir"] == "out").collect();
+    assert_eq!(out[0]["frame"]["method"], "initialize");
+    assert_eq!(out[0]["session"], "account:test");
+    let incoming: Vec<_> = lines.iter().filter(|line| line["dir"] == "in").collect();
+    assert_eq!(incoming.len(), 1);
+    assert_eq!(incoming[0]["cursor"], 1);
+    assert_eq!(incoming[0]["frame"]["id"], 999);
 }

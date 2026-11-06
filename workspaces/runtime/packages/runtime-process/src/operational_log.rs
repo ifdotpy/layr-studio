@@ -36,7 +36,17 @@ pub const ROTATIONS_LOG: LogConfig = LogConfig {
     backups: 3,
     private: false,
 };
+/// Raw provider frames, in and out, for debugging and replay. They are not a source of
+/// state: Studio never reads this file back.
+pub const PROVIDER_FRAMES_LOG: LogConfig = LogConfig {
+    filename: "provider-frames.jsonl",
+    max_bytes: 50 * 1024 * 1024,
+    backups: 4,
+    private: true,
+};
 const DEFAULT_QUEUE_LINES: usize = 128;
+/// A busy session sends many frames at once; the queue absorbs a burst without waiting.
+const PROVIDER_FRAMES_QUEUE_LINES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LogConfig {
@@ -75,6 +85,16 @@ impl OperationalLog {
                 .join("native-runtime")
                 .join(ROTATIONS_LOG.filename),
             ROTATIONS_LOG,
+        )
+    }
+
+    pub fn provider_frames(state_dir: &Path) -> io::Result<Self> {
+        Self::open_with_mode(
+            state_dir.join(PROVIDER_FRAMES_LOG.filename),
+            PROVIDER_FRAMES_LOG.max_bytes,
+            PROVIDER_FRAMES_LOG.backups,
+            PROVIDER_FRAMES_QUEUE_LINES,
+            PROVIDER_FRAMES_LOG.private,
         )
     }
 

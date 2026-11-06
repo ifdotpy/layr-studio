@@ -406,6 +406,7 @@ impl AccountLauncher for Scripted {
                     initialize_operation: OperationId(format!("init:{account}")),
                     request_id_prefix: None,
                     recovered: vec![],
+                    frames: None,
                 },
                 resources,
                 publication_sink: Arc::new(

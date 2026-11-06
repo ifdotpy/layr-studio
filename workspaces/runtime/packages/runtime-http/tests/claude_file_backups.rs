@@ -233,6 +233,7 @@ pub(crate) async fn fixture() -> (
             initialize_operation: OperationId("init".into()),
             request_id_prefix: None,
             recovered: vec![],
+            frames: None,
         },
         resources,
     )

@@ -2192,6 +2192,9 @@ impl AccountLauncher for HostLauncher {
                     )),
                     request_id_prefix: None,
                     recovered: vec![],
+                    frames: studio_runtime_services::provider_frames::for_state_dir(
+                        self.store.state_dir(),
+                    ),
                 },
                 resources,
                 publication_sink: Arc::clone(&self.publication_sink),
@@ -2786,6 +2789,7 @@ mod voice_composition_tests {
                 initialize_operation: OperationId("initialize:voice-account".into()),
                 request_id_prefix: Some("voice-account".into()),
                 recovered: Vec::new(),
+                frames: None,
             },
             resources,
         )

@@ -2987,6 +2987,7 @@ impl Worker {
                         .iter()
                         .map(|(_, request)| request.clone())
                         .collect(),
+                    frames: crate::provider_frames::for_state_dir(self.bridge.store.state_dir()),
                 },
             )
             .await?;

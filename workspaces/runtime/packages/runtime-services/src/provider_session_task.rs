@@ -47,6 +47,8 @@ pub struct SessionTaskConfig {
     pub initialize_operation: OperationId,
     pub request_id_prefix: Option<String>,
     pub recovered: Vec<RecoveredRequest>,
+    /// Raw frames in and out go here (`provider_frames`); None writes no frame log.
+    pub frames: Option<studio_runtime_process::operational_log::OperationalLog>,
 }
 
 /// Deadline uses the supplied SessionClock epoch; preserve it across reattach.
@@ -416,6 +418,7 @@ impl SessionHandle {
             ack_target: None,
             barrier_set: false,
             retained: Retained::default(),
+            frames: config.frames,
         };
         let task = tokio::spawn(actor.run(factory, options));
         Ok(Self {
@@ -740,6 +743,7 @@ struct SessionTask {
     /// Mirrors whether the serve loop holds a journal barrier, for diagnostics.
     barrier_set: bool,
     retained: Retained,
+    frames: Option<studio_runtime_process::operational_log::OperationalLog>,
 }
 
 #[derive(Default)]
@@ -1044,6 +1048,13 @@ impl SessionTask {
                             initialized: write.initialized,
                             callback_reply: write.callback_reply,
                         };
+                        if let Some(log) = &self.frames {
+                            log.write_line(&crate::provider_frames::outgoing(
+                                self.handle.as_str(),
+                                self.clock.now_ms(),
+                                write.write.message(),
+                            ));
+                        }
                         let (command, receipt) = AdapterCommand::write(write.write);
                         *flight = Some(send_once(adapter.commands.clone(), command, receipt, kind));
                     }
@@ -1123,6 +1134,12 @@ impl SessionTask {
             .and_then(|event| event.journal.as_ref())
             .ok_or(SessionTaskError::Invalid)?;
         let (cursor, generation, at) = (entry.cursor, entry.generation, entry.received_at_ms);
+        if let Some(line) = self.frames.as_ref().and_then(|_| {
+            crate::provider_frames::incoming(self.handle.as_str(), at, cursor.0, &entry.payload)
+        }) && let Some(log) = &self.frames
+        {
+            log.write_line(&line);
+        }
         if cursor <= self.acknowledged || self.seen.contains_key(&cursor.0) {
             return Err(SessionTaskError::Invalid);
         }

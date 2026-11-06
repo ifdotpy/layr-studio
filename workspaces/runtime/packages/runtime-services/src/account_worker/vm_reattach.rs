@@ -295,6 +295,7 @@ impl Worker {
                 request_id_prefix: None,
                 // A reader reattach never restores a native write into the send lane.
                 recovered: Vec::new(),
+                frames: crate::provider_frames::for_state_dir(self.bridge.store.state_dir()),
             },
         )
         .await?;
