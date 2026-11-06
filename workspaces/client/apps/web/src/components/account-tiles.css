@@ -51,6 +51,25 @@
   height: 100%;
   border-radius: inherit;
 }
+/* A tile with a limit bar: the name line, then the bar below it, with the
+   same space above the text as below the bar. The bottom padding holds the
+   bar, so the text centers in the space above it and never meets the bar. */
+/* Mantine's button padding would start the name 2px right of the bar and of
+   the model names below; the tile keeps the shared inline inset. */
+.setup-accounts .setup-account:not(.setup-account-status) {
+  padding-inline: var(--mantine-spacing-xs);
+}
+.setup-account:not(.setup-account-status):has(.setup-limit) {
+  --setup-tile-inset: calc(var(--mantine-spacing-xs) * 0.6);
+  padding-top: var(--setup-tile-inset);
+  padding-bottom: calc(
+    var(--setup-tile-inset) + var(--studio-rail-size) +
+      var(--mantine-spacing-xs) * 0.5
+  );
+}
+.setup-account:not(.setup-account-status) .setup-limit {
+  bottom: var(--setup-tile-inset);
+}
 
 /* Phone and tablet controls stack at this content breakpoint. */
 @media (max-width: 47.5rem) {

@@ -105,6 +105,45 @@ for (const device of [
         .first()
         .click();
       await roles(".mantine-Popover-dropdown.execution-dropdown");
+      // A tile with a limit bar keeps its name clear of the bar and starts
+      // the name, the bar and the model names at one inset. The fixture
+      // accounts report no limits, so the tile gets the bar markup that
+      // AccountRemainingBar renders.
+      const tile = await page.evaluate(() => {
+        const tile = document.querySelector<HTMLElement>(
+          ".execution-dropdown .setup-account:not(.setup-account-automatic)",
+        )!;
+        const bar = document.createElement("span");
+        bar.className = "setup-limit";
+        bar.append(document.createElement("span"));
+        tile.querySelector(".mantine-Button-inner")!.after(bar);
+        const box = tile.getBoundingClientRect();
+        const name = tile
+          .querySelector(".setup-account-name")!
+          .getBoundingClientRect();
+        const limit = bar.getBoundingClientRect();
+        const model = document
+          .querySelector(".execution-dropdown .setup-models button")!
+          .getBoundingClientRect();
+        return {
+          gap: limit.top - name.bottom,
+          above: name.top - box.top,
+          below: box.bottom - limit.bottom,
+          insets: [name.left, limit.left].map((left) =>
+            Math.round(left - box.left),
+          ),
+          modelInset: Math.round(
+            document
+              .querySelector(
+                ".execution-dropdown .setup-models button .mantine-Button-label",
+              )!
+              .getBoundingClientRect().left - model.left,
+          ),
+        };
+      });
+      expect(tile.gap).toBeGreaterThanOrEqual(3);
+      expect(Math.abs(tile.above - tile.below)).toBeLessThanOrEqual(1);
+      expect(tile.insets).toEqual([tile.modelInset, tile.modelInset]);
       await page.keyboard.press("Escape");
       await page
         .getByRole("button", { name: "New chat", exact: true })

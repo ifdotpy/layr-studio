@@ -12,6 +12,8 @@ export type AgentSetupPickerProps = {
   role: SetupRole;
   onRole: (role: SetupRole) => void;
   roleSwitchId?: string;
+  /** With subagents off, the lead has no Workers role to set. */
+  workersHidden?: boolean;
   readOnlyReason?: string | undefined;
   provider: string;
   // Provider whose capabilities gate the model and effort fields. Defaults to provider.
@@ -64,7 +66,7 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
         onChange={(role) => p.onRole(role as SetupRole)}
         data={[
           { value: "orchestrator", label: "Lead" },
-          { value: "worker", label: "Workers" },
+          ...(p.workersHidden ? [] : [{ value: "worker", label: "Workers" }]),
           { value: "review", label: "Review" },
         ]}
       />
