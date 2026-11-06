@@ -155,11 +155,14 @@ struct FakeCleanup;
 impl CleanupPorts for FakeCleanup {
     fn perform(
         &self,
-        _agent: &Value,
+        _agent: &studio_runtime_store::AgentRecord,
         _effect: &CleanupEffect,
         _request_id: &str,
-    ) -> Result<Value, EffectFailure> {
-        Ok(json!({"state":"done"}))
+    ) -> Result<studio_json::OwnedRawJson, EffectFailure> {
+        Ok(
+            studio_json::OwnedRawJson::from_string(json!({"state":"done"}).to_string())
+                .expect("fixture receipt is valid JSON"),
+        )
     }
 }
 

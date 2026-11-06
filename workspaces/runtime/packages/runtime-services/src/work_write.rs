@@ -14,6 +14,7 @@ use studio_runtime_schema::persistence::{
     OutboxKind, OutboxStatus, OwnerKind, RequestIdentity, WorkEffectStatus,
 };
 use studio_runtime_schema::queue_command::Field;
+use studio_runtime_schema::raw_json::RawJson;
 use studio_runtime_schema::shared_values::{
     TASK_SUBMISSION_MAX_FILES, TASK_SUBMISSION_PATH_MAX_CODEPOINTS,
 };
@@ -129,8 +130,8 @@ struct ArchiveIntent {
     next_attempt_at: Option<f64>,
     attempt_started_at: Option<f64>,
     updated: Option<f64>,
-    last_outcome: Option<Value>,
-    outcome: Option<Value>,
+    last_outcome: Option<RawJson>,
+    outcome: Option<RawJson>,
     public_request_id: Option<String>,
     public_admission: Option<AdmittedRequest>,
     public_response: Option<LegacyWorkReply>,
@@ -144,6 +145,222 @@ struct ArchiveNotice {
 #[derive(serde::Deserialize)]
 struct ArchiveDecision {
     reason: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct WorkDecisionNotice<'a> {
+    task: &'a str,
+    decision: &'a str,
+    reason: Option<&'a str>,
+}
+
+fn decision_notice(task: &str, decision: &str, reason: Option<&str>) -> String {
+    studio_runtime_store::projection_value(&WorkDecisionNotice {
+        task,
+        decision,
+        reason,
+    })
+    .to_string()
+}
+
+#[derive(serde::Serialize)]
+struct WorkReviewNotice<'a> {
+    task: &'a str,
+    title: Option<&'a str>,
+    result: RawJson,
+}
+
+fn work_review_notice(task: &str, title: Option<&str>, result: &Value) -> String {
+    studio_runtime_store::projection_value(&WorkReviewNotice {
+        task,
+        title,
+        result: RawJson(studio_json::to_raw_value(result).expect("JSON result serializes")),
+    })
+    .to_string()
+}
+
+#[derive(serde::Serialize)]
+struct ResultRefusalNotice<'a> {
+    task: &'a str,
+    owner: &'a str,
+    version: Option<&'a studio_json::Number>,
+    refusal: RawJson,
+}
+
+fn refusal_notice(
+    task: &str,
+    owner: &str,
+    version: Option<&studio_json::Number>,
+    refusal: &Value,
+) -> String {
+    studio_runtime_store::projection_value(&ResultRefusalNotice {
+        task,
+        owner,
+        version,
+        refusal: RawJson(studio_json::to_raw_value(refusal).expect("JSON value serializes")),
+    })
+    .to_string()
+}
+
+#[derive(serde::Deserialize)]
+struct ResultIdentity {
+    #[serde(default, deserialize_with = "optional_string")]
+    id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    revision: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ChildResultIdentity {
+    #[serde(default, deserialize_with = "optional_string")]
+    agent_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewerArchiveView {
+    #[serde(default, deserialize_with = "optional_string")]
+    review_archive_scheduled: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    parent_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    root_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    role: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    status: Option<String>,
+    agent_archive: Option<RawJson>,
+    review_archive_error: Option<RawJson>,
+}
+
+#[derive(serde::Deserialize)]
+struct ReviewerArchiveOutcome {
+    #[serde(default, deserialize_with = "optional_string")]
+    status: Option<String>,
+    blockers: Option<RawJson>,
+}
+
+fn raw_truthy(raw: Option<&RawJson>) -> bool {
+    let value = raw.and_then(|raw| studio_json::from_str::<Value>(raw.0.as_str()).ok());
+    event_write::truthy(value.as_ref())
+}
+
+fn result_identity(work: &WorkItemRecord) -> Option<ResultIdentity> {
+    let result = work.results()?.last()?;
+    <ResultIdentity as serde::Deserialize>::deserialize(&Value::Object(result.clone())).ok()
+}
+
+fn optional_string<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum StringOrOther {
+        String(String),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(
+        match <StringOrOther as serde::Deserialize>::deserialize(deserializer)? {
+            StringOrOther::String(value) => Some(value),
+            StringOrOther::Other(_) => None,
+        },
+    )
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArchiveOutcomeView {
+    status: ArchiveOutcomeStatus,
+    #[serde(default)]
+    retryable: bool,
+    #[serde(default)]
+    cleanup_pending: bool,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ArchiveOutcomeStatus {
+    Archived,
+    Blocked,
+    Kept,
+    Skipped,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeptOutcome<'a> {
+    status: &'static str,
+    reason: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cleanup_pending: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tasks: Option<&'a [String]>,
+}
+
+fn kept_outcome(reason: &str) -> KeptOutcome<'_> {
+    KeptOutcome {
+        status: "kept",
+        reason,
+        cleanup_pending: None,
+        retryable: None,
+        tasks: None,
+    }
+}
+
+fn kept(reason: &str) -> Value {
+    studio_runtime_store::projection_value(&kept_outcome(reason))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ArchiveWorktreeState {
+    Missing,
+    Removed,
+    Kept,
+    None,
+}
+
+#[derive(serde::Serialize)]
+struct ArchiveWorktree<'a> {
+    state: ArchiveWorktreeState,
+    bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    reason: Field<&'a str>,
+}
+
+#[derive(serde::Serialize)]
+struct ArchivedOutcome<'a> {
+    status: &'static str,
+    worktree: ArchiveWorktree<'a>,
+}
+
+#[cfg(test)]
+mod archive_outcome_view_tests {
+    use super::{ArchiveOutcomeStatus, ArchiveOutcomeView, RawJson, ResultIdentity};
+
+    #[test]
+    fn legacy_unused_fields_are_preserved_without_decoding() {
+        let encoded = r#"{"status":"archived","agent":{"epoch":["legacy"]},"worktree":42,"extra":{"nested":true}}"#;
+        let raw: RawJson = studio_json::from_str(encoded).expect("raw outcome");
+        let view: ArchiveOutcomeView = studio_json::from_str(raw.0.as_str()).expect("outcome view");
+        assert_eq!(view.status, ArchiveOutcomeStatus::Archived);
+        assert!(!view.retryable);
+        assert!(!view.cleanup_pending);
+        assert_eq!(studio_json::to_string(&raw).expect("round trip"), encoded);
+    }
+
+    #[test]
+    fn result_identity_ignores_legacy_fields_and_wrong_revision_type() {
+        let encoded =
+            r#"{"id":"r1","revision":{"old":true},"files":false,"result":{"nested":[1,2]}}"#;
+        let identity: ResultIdentity = studio_json::from_str(encoded).expect("identity");
+        assert_eq!(identity.id.as_deref(), Some("r1"));
+        assert_eq!(identity.revision, None);
+        let raw: RawJson = studio_json::from_str(encoded).expect("raw result");
+        assert_eq!(studio_json::to_string(&raw).expect("round trip"), encoded);
+    }
 }
 
 /// Retry accepted-result archives whose Python-compatible retry deadline has
@@ -266,17 +483,17 @@ async fn run_accepted_archive(
     };
     let dispatch_actor_epoch = intent.actor_epoch;
 
-    let task_for_preflight = task_id.clone();
     let work_for_preflight = work.clone();
     let intent_for_preflight = intent.clone();
     let owner_for_preflight = owner_id.clone();
     let root_for_preflight = root_id.clone();
-    let (preflight, owner_snapshot) = store
+    let (preflight, owner_snapshot, revision) = store
         .read_async("runtime-services/work_write", move |connection| {
+            let result = result_identity(&work_for_preflight);
             let outcome = accepted_archive_preflight(
                 connection,
-                &task_for_preflight,
-                &work_for_preflight.value(),
+                &work_for_preflight,
+                result.as_ref(),
                 &intent_for_preflight,
                 &owner_for_preflight,
                 &root_for_preflight,
@@ -284,27 +501,19 @@ async fn run_accepted_archive(
             )?;
             let owner =
                 AgentRepository::get(connection, &AgentId::from(owner_for_preflight.as_str()))?
-                    .map(|agent| agent.value());
-            Ok::<_, WorkWriteError>((outcome, owner))
+                    .map(Box::new);
+            Ok::<_, WorkWriteError>((outcome, owner, result.and_then(|r| r.revision)))
         })
         .await?;
     let mut verify_terminal = false;
     let preflight = if preflight.is_none() {
         let owner = owner_snapshot.as_ref().expect("preflight requires owner");
-        if owner.get("executionMode").and_then(Value::as_str) != Some("vm")
-            && !crate::layr_native::is_native(owner)
+        if owner.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
+            && owner.workspace_mode
+                != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
         {
-            let cwd = owner
-                .get("cwd")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            let revision = work
-                .results()
-                .and_then(|items| items.last())
-                .and_then(|result| result.get("revision").and_then(Value::as_str))
-                .unwrap_or_default()
-                .to_owned();
+            let cwd = owner.cwd.as_deref().unwrap_or_default().to_owned();
+            let revision = revision.unwrap_or_default();
             let (on_main, remote) = studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-services/accepted-archive/git",
                 move || {
@@ -323,7 +532,7 @@ async fn run_accepted_archive(
                 } else {
                     "The result commit is not reachable from local main"
                 };
-                Some(json!({"status":"kept","reason":reason}))
+                Some(kept(reason))
             } else {
                 None
             }
@@ -371,12 +580,14 @@ async fn run_accepted_archive(
     }
     let (receipt_status, archive, retryable) = match outcome {
         Ok(value) => {
-            let retryable = value["retryable"] == true
-                || value["status"] == "blocked"
-                || value["cleanupPending"] == true;
+            let view = <ArchiveOutcomeView as serde::Deserialize>::deserialize(&value)
+                .map_err(studio_runtime_store::StoreError::from)?;
+            let retryable = view.retryable
+                || view.status == ArchiveOutcomeStatus::Blocked
+                || view.cleanup_pending;
             let receipt_status = if retryable {
                 WorkEffectStatus::Retryable
-            } else if value["status"] == "archived" {
+            } else if view.status == ArchiveOutcomeStatus::Archived {
                 WorkEffectStatus::Complete
             } else {
                 WorkEffectStatus::Terminal
@@ -385,7 +596,7 @@ async fn run_accepted_archive(
         }
         Err(error) => (
             WorkEffectStatus::Unknown,
-            json!({"status":"kept","reason":format!("The archive check failed: {error}")}),
+            kept(&format!("The archive check failed: {error}")),
             false,
         ),
     };
@@ -440,11 +651,15 @@ async fn run_accepted_archive(
             };
             final_intent.attempts = next_attempt;
             final_intent.next_attempt_at = Some(now + delay as f64);
-            final_intent.last_outcome = Some(archive.clone());
+            let raw_archive = RawJson(
+                studio_json::to_raw_value(&archive)
+                    .map_err(studio_runtime_store::StoreError::from)?,
+            );
+            final_intent.last_outcome = Some(raw_archive.clone());
             final_intent.updated = Some(now);
             final_intent.actor_epoch = dispatch_actor_epoch;
             if !retryable && receipt_status != WorkEffectStatus::Unknown {
-                final_intent.outcome = Some(archive.clone());
+                final_intent.outcome = Some(raw_archive);
             }
             current
                 .set(
@@ -482,8 +697,7 @@ async fn run_accepted_archive(
                         notice.version - 1
                     ),
                     "work_decision",
-                    json!({"task":task_id_for_settlement,"decision":"accept","reason":reason})
-                        .to_string(),
+                    decision_notice(&task_id_for_settlement, "accept", reason),
                     now,
                 )?;
             }
@@ -565,18 +779,18 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
         .transaction_with_error(move |tx| -> Result<(), WorkWriteError> {
             let candidates = ReviewerArchiveRepository::candidates(tx)?;
             for (child_id, encoded) in candidates {
-                let mut record: Value = studio_json::from_str(&encoded)
+                let record: ReviewerArchiveView = studio_json::from_str(&encoded)
                     .map_err(studio_runtime_store::StoreError::from)?;
-                if event_write::truthy(record.get("agentArchive"))
-                    || event_write::truthy(record.get("reviewArchiveError"))
+                if raw_truthy(record.agent_archive.as_ref())
+                    || raw_truthy(record.review_archive_error.as_ref())
                     || record
-                        .get("reviewArchiveScheduled")
-                        .and_then(Value::as_str)
+                        .review_archive_scheduled
+                        .as_deref()
                         .is_some_and(|value| !value.is_empty())
                 {
                     continue;
                 }
-                let Some(parent_id) = record.get("parentId").and_then(Value::as_str) else {
+                let Some(parent_id) = record.parent_id.as_deref() else {
                     continue;
                 };
                 let event_id =
@@ -584,13 +798,15 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                 let Some(event_id) = event_id else {
                     continue;
                 };
-                record["reviewArchiveScheduled"] = json!(event_id);
-                let child = AgentRecord::from_value(record).map_err(|_| {
+                let mut child: AgentRecord = studio_json::from_str(&encoded).map_err(|_| {
                     studio_runtime_store::StoreError::InvalidStoredObject {
                         table: "runtime_agents",
                         id: child_id.to_owned(),
                     }
                 })?;
+                child
+                    .extra
+                    .insert("reviewArchiveScheduled".into(), json!(event_id));
                 AgentRepository::put(tx, &child)?;
             }
             Ok(())
@@ -604,20 +820,20 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
         .await?;
 
     for (child_id, encoded) in due {
-        let record: Value =
+        let record: ReviewerArchiveView =
             studio_json::from_str(&encoded).map_err(studio_runtime_store::StoreError::from)?;
-        let Some(event_id) = record.get("reviewArchiveScheduled").and_then(Value::as_str) else {
+        let Some(event_id) = record.review_archive_scheduled.as_deref() else {
             continue;
         };
-        let Some(parent_id) = record.get("parentId").and_then(Value::as_str) else {
+        let Some(parent_id) = record.parent_id.as_deref() else {
             continue;
         };
-        let Some(root_id) = record.get("rootId").and_then(Value::as_str) else {
+        let Some(root_id) = record.root_id.as_deref() else {
             continue;
         };
-        if record.get("role").and_then(Value::as_str) != Some("reviewer")
-            || record.get("status").and_then(Value::as_str) != Some("completed")
-            || event_write::truthy(record.get("agentArchive"))
+        if record.role.as_deref() != Some("reviewer")
+            || record.status.as_deref() != Some("completed")
+            || raw_truthy(record.agent_archive.as_ref())
         {
             continue;
         }
@@ -637,14 +853,9 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                     .map_err(studio_runtime_store::StoreError::from)?;
                 Ok::<_, WorkWriteError>(event.is_some_and(|(event_parent, text)| {
                     event_parent == parent_id_for_read
-                        && studio_json::from_str::<Value>(&text)
+                        && studio_json::from_str::<ChildResultIdentity>(&text)
                             .ok()
-                            .and_then(|payload| {
-                                payload
-                                    .get("agent_id")
-                                    .and_then(Value::as_str)
-                                    .map(str::to_owned)
-                            })
+                            .and_then(|payload| payload.agent_id)
                             .as_deref()
                             == Some(child_id_for_read.as_str())
                 }))
@@ -676,21 +887,30 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
         )
         .await;
         let (error, retryable) = match outcome {
-            Ok(value) if value["status"] == "archived" => continue,
             Ok(value) => {
-                let blockers = value.get("blockers").and_then(Value::as_array);
-                let retryable = blockers.is_some_and(|items| !items.is_empty());
-                let error = if retryable {
-                    Some(value["blockers"].to_string())
-                } else {
-                    Some(
-                        value
-                            .get("status")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Archive was not completed")
-                            .to_owned(),
-                    )
-                };
+                let outcome: ReviewerArchiveOutcome = studio_json::from_str(&value.to_string())
+                    .map_err(studio_runtime_store::StoreError::from)?;
+                if outcome.status.as_deref() == Some("archived") {
+                    continue;
+                }
+                let blockers = outcome
+                    .blockers
+                    .as_ref()
+                    .and_then(|raw| studio_json::from_str::<Vec<RawJson>>(raw.0.as_str()).ok());
+                let retryable = blockers.as_ref().is_some_and(|items| !items.is_empty());
+                let error =
+                    if let Some(blockers) = blockers.as_ref().filter(|items| !items.is_empty()) {
+                        Some(
+                            studio_json::to_string(blockers)
+                                .map_err(studio_runtime_store::StoreError::from)?,
+                        )
+                    } else {
+                        Some(
+                            outcome
+                                .status
+                                .unwrap_or_else(|| "Archive was not completed".to_owned()),
+                        )
+                    };
                 (error, retryable)
             }
             Err(error) => (Some(error.to_string()), false),
@@ -705,15 +925,21 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                 else {
                     return Ok(());
                 };
-                let mut record = child.value();
-                if record.get("reviewArchiveScheduled").and_then(Value::as_str)
+                if child
+                    .extra
+                    .get("reviewArchiveScheduled")
+                    .and_then(Value::as_str)
                     != Some(event_for_settlement.as_str())
                 {
                     return Ok(());
                 }
-                record["reviewArchiveError"] = json!(error.chars().take(180).collect::<String>());
+                child.extra.insert(
+                    "reviewArchiveError".into(),
+                    json!(error.chars().take(180).collect::<String>()),
+                );
                 if retryable {
-                    let attempts = record
+                    let attempts = child
+                        .extra
                         .get("reviewArchiveAttempts")
                         .and_then(Value::as_u64)
                         .unwrap_or_default()
@@ -723,19 +949,15 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                         .min(u64::from(REVIEW_ARCHIVE_MAX_BACKOFF_EXPONENT));
                     let delay = (REVIEW_ARCHIVE_BASE_DELAY_SECONDS * 2_f64.powi(exponent as i32))
                         .min(REVIEW_ARCHIVE_MAX_DELAY_SECONDS);
-                    record["reviewArchiveAttempts"] = json!(attempts);
-                    record["reviewArchiveNextAt"] = json!(now + delay);
+                    child
+                        .extra
+                        .insert("reviewArchiveAttempts".into(), json!(attempts));
+                    child
+                        .extra
+                        .insert("reviewArchiveNextAt".into(), json!(now + delay));
                 } else {
-                    record
-                        .as_object_mut()
-                        .map(|value| value.remove("reviewArchiveScheduled"));
+                    child.extra.remove("reviewArchiveScheduled");
                 }
-                child = AgentRecord::from_value(record).map_err(|_| {
-                    studio_runtime_store::StoreError::InvalidStoredObject {
-                        table: "runtime_agents",
-                        id: child_for_settlement.clone(),
-                    }
-                })?;
                 AgentRepository::put(tx, &child)?;
                 Ok(())
             })
@@ -791,27 +1013,25 @@ async fn retry_refused_reviewer_archives(store: &Arc<RuntimeStore>) -> Result<()
                 .map_err(studio_runtime_store::StoreError::from)?;
             drop(statement);
             for (id, raw) in rows {
-                let mut record: Value =
+                let record: ReviewerArchiveView =
                     studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
-                if event_write::truthy(record.get("agentArchive")) {
+                if raw_truthy(record.agent_archive.as_ref()) {
                     continue;
                 }
-                if let Some(object) = record.as_object_mut() {
-                    for key in [
-                        "reviewArchiveError",
-                        "reviewArchiveScheduled",
-                        "reviewArchiveAttempts",
-                        "reviewArchiveNextAt",
-                    ] {
-                        object.remove(key);
-                    }
-                }
-                let agent = AgentRecord::from_value(record).map_err(|_| {
+                let mut agent: AgentRecord = studio_json::from_str(&raw).map_err(|_| {
                     studio_runtime_store::StoreError::InvalidStoredObject {
                         table: "runtime_agents",
                         id: id.clone(),
                     }
                 })?;
+                for key in [
+                    "reviewArchiveError",
+                    "reviewArchiveScheduled",
+                    "reviewArchiveAttempts",
+                    "reviewArchiveNextAt",
+                ] {
+                    agent.extra.remove(key);
+                }
                 AgentRepository::put(tx, &agent)?;
             }
             Ok(())
@@ -847,7 +1067,7 @@ pub async fn next_archive_retry_at(
 
 struct ArchiveGuard {
     work: WorkItemRecord,
-    owner: Value,
+    owner: Box<AgentRecord>,
     task_id: String,
     owner_id: String,
     root_id: String,
@@ -871,11 +1091,11 @@ impl ArchiveGuard {
         if current.status() != WorkStatus::Accepted
             || current.version() != self.work.version()
             || current.results() != self.work.results()
-            || owner.value() != self.owner
+            || owner != *self.owner
             || accepted_archive_preflight(
                 tx,
-                &self.task_id,
-                &current.value(),
+                &current,
+                result_identity(&current).as_ref(),
                 &self.intent,
                 &self.owner_id,
                 &self.root_id,
@@ -895,85 +1115,92 @@ impl ArchiveGuard {
 /// or a conflicting marker is held without repeating cleanup effects.
 fn accepted_archive_preflight(
     connection: &Connection,
-    task_id: &str,
-    work: &Value,
+    work: &WorkItemRecord,
+    result: Option<&ResultIdentity>,
     intent: &ArchiveIntent,
     owner_id: &str,
     root_id: &str,
     actor_epoch: i64,
 ) -> Result<Option<Value>, WorkWriteError> {
+    let task_id = work.id().as_ref();
     let Some(actor) = AgentRepository::get(connection, &AgentId::from(root_id))? else {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The archive actor changed"}),
-        ));
+        return Ok(Some(kept("The archive actor changed")));
     };
     if actor.epoch != actor_epoch || actor.deleted_at.is_some() {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The archive actor changed"}),
-        ));
+        return Ok(Some(kept("The archive actor changed")));
     }
     let Some(owner) = AgentRepository::get(connection, &AgentId::from(owner_id))? else {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The accepted task owner changed"}),
-        ));
+        return Ok(Some(kept("The accepted task owner changed")));
     };
     let owner_value = owner.value();
     if owner_value
         .get("remoteWorker")
         .is_some_and(|value| event_write::truthy(Some(value)))
     {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The remote worker workspace requires review on its own server"}),
-        ));
+        return Ok(Some(kept(
+            "The remote worker workspace requires review on its own server",
+        )));
     }
-    let Some(result) = work["results"].as_array().and_then(|items| items.last()) else {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The accepted task result is missing"}),
-        ));
+    let Some(result) = result else {
+        return Ok(Some(kept("The accepted task result is missing")));
     };
-    let Some(result_id) = result["id"].as_str() else {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The accepted task result is missing"}),
-        ));
+    let Some(result_id) = result.id.as_deref() else {
+        return Ok(Some(kept("The accepted task result is missing")));
     };
     if intent.intent_id != format!("{task_id}:{result_id}")
-        || work["owner"] != owner_id
-        || work["rootId"] != root_id
+        || work.owner() != Some(owner_id)
+        || work.root_id() != Some(root_id)
     {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The accepted task owner or result changed"}),
-        ));
+        return Ok(Some(kept("The accepted task owner or result changed")));
     }
 
-    let archive_marker = owner_value.get("agentArchive").unwrap_or(&Value::Null);
-    if !archive_marker.is_null() {
-        let canonical = archive_marker["by"] == root_id
-            && archive_marker["reason"] == "Accepted task result is on main"
-            && archive_marker["epoch"] == owner.epoch
-            && archive_marker.get("at") == owner_value.get("deletedAt").filter(|v| !v.is_null())
-            && archive_marker["at"].as_f64().unwrap_or_default() >= intent.created
-            && archive_marker["cleanupPending"] == false
-            && !event_write::truthy(archive_marker.get("cleanupPending"));
+    if let Some(archive_marker) = &owner.agent_archive {
+        let canonical = archive_marker.by.as_deref() == Some(root_id)
+            && archive_marker.reason.as_deref() == Some("Accepted task result is on main")
+            && i64::try_from(archive_marker.epoch).ok() == Some(owner.epoch)
+            && Some(archive_marker.at) == owner.deleted_at
+            && archive_marker.at >= intent.created
+            && archive_marker.cleanup_pending == Some(false);
         if !canonical {
-            return Ok(Some(json!({
-                "status":"kept",
-                "reason":"The accepted archive outcome is unconfirmed",
-                "cleanupPending":event_write::truthy(archive_marker.get("cleanupPending")),
+            return Ok(Some(studio_runtime_store::projection_value(&KeptOutcome {
+                cleanup_pending: Some(archive_marker.cleanup_pending.unwrap_or(false)),
+                ..kept_outcome("The accepted archive outcome is unconfirmed")
             })));
         }
-        let cleaned = owner_value
-            .get("cleanedWorktree")
-            .filter(|value| !value.is_null());
-        let worktree = if cleaned.is_some_and(|value| event_write::truthy(value.get("missing"))) {
-            json!({"state":"missing","reason":cleaned.and_then(|v| v.get("note")),"bytes":0})
+        let cleaned = owner.cleaned_worktree.as_ref();
+        let worktree = if cleaned.is_some_and(|value| value.missing == Some(true)) {
+            ArchiveWorktree {
+                state: ArchiveWorktreeState::Missing,
+                reason: cleaned
+                    .and_then(|v| v.note.as_deref())
+                    .map_or(Field::Null, Field::Value),
+                bytes: Some(0),
+            }
         } else if let Some(cleaned) = cleaned {
-            json!({"state":"removed","bytes":cleaned.get("bytes")})
-        } else if event_write::truthy(owner_value.get("worktreeReady")) {
-            json!({"state":"kept","reason":"The archived worktree remains","bytes":0})
+            ArchiveWorktree {
+                state: ArchiveWorktreeState::Removed,
+                reason: Field::Missing,
+                bytes: cleaned.bytes,
+            }
+        } else if owner.worktree_ready == Some(true) {
+            ArchiveWorktree {
+                state: ArchiveWorktreeState::Kept,
+                reason: Field::Value("The archived worktree remains"),
+                bytes: Some(0),
+            }
         } else {
-            json!({"state":"none","bytes":0})
+            ArchiveWorktree {
+                state: ArchiveWorktreeState::None,
+                reason: Field::Missing,
+                bytes: Some(0),
+            }
         };
-        return Ok(Some(json!({"status":"archived","worktree":worktree})));
+        return Ok(Some(studio_runtime_store::projection_value(
+            &ArchivedOutcome {
+                status: "archived",
+                worktree,
+            },
+        )));
     }
 
     let mut statement = connection
@@ -989,10 +1216,11 @@ fn accepted_archive_preflight(
         .collect::<Result<Vec<_>, _>>()
         .map_err(studio_runtime_store::StoreError::from)?;
     if !open_tasks.is_empty() {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The owner has another open task",
-            "tasks":open_tasks,"retryable":true}),
-        ));
+        return Ok(Some(studio_runtime_store::projection_value(&KeptOutcome {
+            retryable: Some(true),
+            tasks: Some(&open_tasks),
+            ..kept_outcome("The owner has another open task")
+        })));
     }
 
     if layr_result_needs_merge(root_id, &owner)
@@ -1000,12 +1228,10 @@ fn accepted_archive_preflight(
             connection,
             task_id,
             result_id,
-            result["revision"].as_str().unwrap_or_default(),
+            result.revision.as_deref().unwrap_or_default(),
         )?
     {
-        return Ok(Some(
-            json!({"status":"kept","reason":"The layr result merge is not confirmed"}),
-        ));
+        return Ok(Some(kept("The layr result merge is not confirmed")));
     }
     Ok(None)
 }
@@ -1239,7 +1465,7 @@ pub async fn prepare_layr_submission(
         let owner_id = work.owner().unwrap_or(&agent.id.0);
         let owner = event_write::checked_agent(tx, owner_id)?;
         // Invalid results reach submit's durable refusal before any workspace operation.
-        if result_refusal(tx, &work.value(), &owner, &input)?.is_some() {
+        if result_refusal(tx, &work, &owner, &input)?.is_some() {
             return Ok(LayrSubmissionPreparation::NotLayr);
         }
         if work.extension("resultSchema").is_none() {
@@ -1465,16 +1691,13 @@ pub async fn prepare_layr_accept(
                 .results()
                 .and_then(|items| items.last())
                 .ok_or_else(|| invalid("runtime_work", &task_id))?;
-            let result_id = result
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_work", &task_id))?
-                .to_owned();
+            let result =
+                <ResultIdentity as serde::Deserialize>::deserialize(&Value::Object(result.clone()))
+                    .map_err(|_| invalid("runtime_work", &task_id))?;
+            let result_id = result.id.ok_or_else(|| invalid("runtime_work", &task_id))?;
             let revision = result
-                .get("revision")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_work", &task_id))?
-                .to_owned();
+                .revision
+                .ok_or_else(|| invalid("runtime_work", &task_id))?;
             let rpc_id = format!("layr-accept:{result_id}");
             let mut view = read_layr_view(tx, &task_id)?;
             match &view.accept {
@@ -2489,13 +2712,38 @@ fn decide_claim(
     Ok(updated)
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmittedResult<'a> {
+    id: &'a str,
+    agent: &'a str,
+    text: &'a str,
+    checks: &'a str,
+    revision: &'a str,
+    files: &'a [String],
+    created: f64,
+    result_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<&'a RawJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layr_project_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layr_line: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layr_state_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    attempt_id: Field<&'a str>,
+}
+
 fn decide_submit(
     snapshot: WorkSnapshot<'_>,
     submitter: &AgentRecord,
     input: &SubmitWork,
-    identity: Option<(String, Option<String>)>,
+    identity: Option<&(String, Option<String>)>,
     now: f64,
-    result_id: String,
+    result_id: &str,
 ) -> Result<(WorkItemRecord, ResultArtifact), Error> {
     let record = snapshot.record;
     let id = record.id().as_ref();
@@ -2510,7 +2758,7 @@ fn decide_submit(
     }
     let title = record.title().ok_or_else(|| invalid("runtime_work", id))?;
     let submitter_id = submitter.id.0.as_str();
-    let path = result_path(&input.state_dir, id, &result_id)?;
+    let path = result_path(&input.state_dir, id, result_id)?;
     let structured = record
         .extension("resultSchema")
         .map(|schema| {
@@ -2529,37 +2777,46 @@ fn decide_submit(
         )?
     };
     let checks_text = python_bounded_text(&input.checks, 32000)?;
+    let structured = structured
+        .as_ref()
+        .map(|value| studio_json::to_raw_value(value).map(RawJson))
+        .transpose()
+        .map_err(studio_runtime_store::StoreError::from)?;
     let revision_text = if reviewer_without_revision(submitter, &input.revision) {
         String::new()
     } else {
         python_bounded_text(&input.revision, 200)?
     };
-    let mut result = json!({
-        "id": result_id,
-        "agent": submitter_id,
-        "text": result_text,
-        "checks": checks_text,
-        "revision": revision_text,
-        "files": input.files,
-        "created": now,
-        "resultFile": path.to_string_lossy(),
-    });
-    if let Some(value) = structured {
-        result["result"] = value;
-    }
     if let Some(evidence) = &input.layr_evidence {
         let normalized_revision = python_bounded_text(&input.revision, 200)?;
         if evidence.layr_state_id != normalized_revision {
             return Err(Error::InvalidRequest("Submit the exact layr state ID"));
         }
-        result["layrProjectId"] = json!(evidence.layr_project_id);
-        result["layrLine"] = json!(evidence.layr_line);
-        result["layrStateId"] = json!(evidence.layr_state_id);
     }
-    if let Some(identity) = identity {
-        result["runId"] = json!(identity.0);
-        result["attemptId"] = json!(identity.1);
-    }
+    let result = studio_runtime_store::projection_value(&SubmittedResult {
+        id: result_id,
+        agent: submitter_id,
+        text: &result_text,
+        checks: &checks_text,
+        revision: &revision_text,
+        files: &input.files,
+        created: now,
+        result_file: path.to_string_lossy().into_owned(),
+        result: structured.as_ref(),
+        layr_project_id: input
+            .layr_evidence
+            .as_ref()
+            .map(|e| e.layr_project_id.as_str()),
+        layr_line: input.layr_evidence.as_ref().map(|e| e.layr_line.as_str()),
+        layr_state_id: input
+            .layr_evidence
+            .as_ref()
+            .map(|e| e.layr_state_id.as_str()),
+        run_id: identity.as_ref().map(|i| i.0.as_str()),
+        attempt_id: identity.as_ref().map_or(Field::Missing, |i| {
+            i.1.as_deref().map_or(Field::Null, Field::Value)
+        }),
+    });
     let mut updated = record.clone();
     updated
         .results_mut()
@@ -2707,26 +2964,30 @@ fn result_artifact(record: &Value, state_dir: &Path) -> Result<ResultArtifact, E
     })
 }
 
+#[derive(serde::Deserialize)]
+struct ArtifactResult {
+    id: String,
+    text: String,
+    checks: String,
+    revision: String,
+    files: Vec<String>,
+}
+
 fn result_artifact_body(title: &str, result: &Value) -> Result<String, Error> {
-    let id = result["id"]
-        .as_str()
-        .ok_or_else(|| invalid("runtime_work", "<invalid>"))?;
-    let text = result["text"]
-        .as_str()
-        .ok_or_else(|| invalid("runtime_work", id))?;
-    let checks = result["checks"]
-        .as_str()
-        .ok_or_else(|| invalid("runtime_work", id))?;
-    let revision = result["revision"]
-        .as_str()
-        .ok_or_else(|| invalid("runtime_work", id))?;
-    let files = result["files"]
-        .as_array()
-        .ok_or_else(|| invalid("runtime_work", id))?
+    let id = result["id"].as_str().unwrap_or("<invalid>");
+    let result = <ArtifactResult as serde::Deserialize>::deserialize(result)
+        .map_err(|_| invalid("runtime_work", id))?;
+    let ArtifactResult {
+        id,
+        text,
+        checks,
+        revision,
+        files,
+    } = result;
+    let files = files
         .iter()
-        .map(|value| value.as_str().map(|value| format!("- `{value}`")))
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| invalid("runtime_work", id))?;
+        .map(|value| format!("- `{value}`"))
+        .collect::<Vec<_>>();
     Ok(format!(
         "# {title}\n\nResult ID: `{id}`\n\n## Result\n\n{text}\n\n## Checks\n\n{checks}\n\n## Revision\n\n{revision}\n\n## Files\n\n{}\n",
         if files.is_empty() {
@@ -2956,7 +3217,7 @@ fn mutate(
                         &recipient,
                         format!("work-decision:{task_id}:cancel"),
                         "work_decision",
-                        json!({"task":task_id,"decision":"cancel","reason":reason}).to_string(),
+                        decision_notice(&task_id, "cancel", Some(&reason)),
                         event_write::unix_time()?,
                     )?;
                 }
@@ -2990,7 +3251,7 @@ fn mutate(
                         &recipient,
                         format!("work-decision:{task_id}:{version}"),
                         "work_decision",
-                        json!({"task":task_id,"decision":"reject","reason":reason}).to_string(),
+                        decision_notice(&task_id, "reject", Some(&reason)),
                         event_write::unix_time()?,
                     )?;
                 }
@@ -3101,12 +3362,10 @@ fn submit(
     if !work.blocked_by(&dependency_statuses(tx, &work)?).is_empty() {
         return Err(Error::InvalidRequest("Dependencies have not been accepted").into());
     }
-    if let Some((counter_id, failed, errors)) =
-        result_refusal(tx, &work.value(), &submitter, &input)?
-    {
+    if let Some((counter_id, failed, errors)) = result_refusal(tx, &work, &submitter, &input)? {
         return refuse_result(
             tx,
-            &work.value(),
+            &work,
             &submitter,
             &counter_id,
             failed,
@@ -3157,9 +3416,9 @@ fn submit(
         },
         &submitter,
         &input,
-        identity,
+        identity.as_ref(),
         now,
-        result_id,
+        &result_id,
     )?;
     let gated = crate::task_gate::admit(
         tx,
@@ -3208,7 +3467,7 @@ fn submit(
             &lead,
             format!("work-result:{result_id}"),
             "work_review",
-            json!({"task":input.task_id,"title":work.title(),"result":result}).to_string(),
+            work_review_notice(&input.task_id, work.title(), &result),
             now,
         )?;
     }
@@ -3225,20 +3484,21 @@ fn submit(
 /// Shared identity for refusal writes and the current task read projection.
 fn submission_counter_id(
     connection: &Connection,
-    work: &Value,
+    work: &WorkItemRecord,
     owner: &AgentRecord,
 ) -> Result<String, WorkWriteError> {
     let attempt = WorkItemsRepository::submission_identity(connection, owner)?;
-    let identity = json!([
-        work["id"],
-        work["version"],
-        owner.id.0,
+    let identity = studio_json::to_string(&(
+        work.id().as_ref(),
+        work.version(),
+        &owner.id.0,
         owner.epoch,
-        attempt
-    ]);
+        attempt,
+    ))
+    .map_err(studio_runtime_store::StoreError::from)?;
     let counter_id = format!(
         "work-result-failures:{}",
-        studio_runtime_store::sha256_hex(identity.to_string().as_bytes())
+        studio_runtime_store::sha256_hex(identity.as_bytes())
     );
     Ok(counter_id)
 }
@@ -3254,45 +3514,46 @@ struct ResultFailures {
     errors: Vec<Value>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResultFailureView {
+    failed_submits: u64,
+    limit: u64,
+    retry_allowed: bool,
+    errors: Vec<Value>,
+}
+
+#[derive(serde::Serialize)]
+struct ResultRefusal {
+    message: &'static str,
+    #[serde(flatten)]
+    view: ResultFailureView,
+}
+
+fn submission_refusal_message(errors: Vec<Value>, failed: u64, limit: u64) -> Value {
+    studio_runtime_store::projection_value(&ResultRefusal {
+        message: "Result does not satisfy the task result contract",
+        view: ResultFailureView {
+            failed_submits: failed,
+            limit,
+            retry_allowed: failed < limit,
+            errors,
+        },
+    })
+}
+
 fn current_result_failures(
     connection: &Connection,
-    work: &Value,
+    work: &WorkItemRecord,
     owner: &AgentRecord,
 ) -> Result<Option<ResultFailures>, WorkWriteError> {
-    let Some(value) = work.get("resultFailures") else {
+    let Some(value) = work.extension("resultFailures") else {
         return Ok(None);
     };
-    let invalid_record = || invalid("runtime_work", work["id"].as_str().unwrap_or_default());
-    let provider_attempt = match value.get("providerAttempt") {
-        None | Some(Value::Null) => None,
-        Some(Value::Array(items)) if items.len() == 2 => {
-            let first = items[0].as_str().ok_or_else(invalid_record)?.to_owned();
-            let second = match &items[1] {
-                Value::Null => None,
-                Value::String(value) => Some(value.clone()),
-                Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
-                    return Err(invalid_record().into());
-                }
-            };
-            Some((first, second))
-        }
-        _ => return Err(invalid_record().into()),
-    };
-    let saved = ResultFailures {
-        version: value["version"].as_i64().ok_or_else(invalid_record)?,
-        owner: value["owner"]
-            .as_str()
-            .ok_or_else(invalid_record)?
-            .to_owned(),
-        epoch: value["epoch"].as_i64().ok_or_else(invalid_record)?,
-        provider_attempt,
-        count: value["count"].as_u64().ok_or_else(invalid_record)?,
-        errors: value["errors"]
-            .as_array()
-            .ok_or_else(invalid_record)?
-            .clone(),
-    };
-    let current = saved.version == work["version"]
+    let invalid_record = || invalid("runtime_work", work.id().as_ref());
+    let saved =
+        <ResultFailures as serde::Deserialize>::deserialize(value).map_err(|_| invalid_record())?;
+    let current = Some(saved.version) == work.version().and_then(studio_json::Number::as_i64)
         && saved.owner == owner.id.0
         && saved.epoch == owner.epoch
         && saved.provider_attempt == WorkItemsRepository::submission_identity(connection, owner)?;
@@ -3302,40 +3563,44 @@ fn current_result_failures(
 /// Project only the current task version, owner epoch and provider attempt.
 pub fn current_submission_refusal(
     connection: &Connection,
-    work: &Value,
+    work: &WorkItemRecord,
 ) -> Result<Value, WorkWriteError> {
     use studio_runtime_schema::task_results::MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT;
-    let mut view = json!({"failedSubmits":0,"limit":MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT,
-        "retryAllowed":true,"errors":[]});
-    let Some(owner_id) = work.get("owner").and_then(Value::as_str) else {
-        return Ok(view);
+    let mut view = ResultFailureView {
+        failed_submits: 0,
+        limit: MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT,
+        retry_allowed: true,
+        errors: Vec::new(),
+    };
+    let Some(owner_id) = work.owner() else {
+        return Ok(studio_runtime_store::projection_value(&view));
     };
     let Some(owner) = AgentRepository::get(connection, &AgentId::from(owner_id))? else {
-        return Ok(view);
+        return Ok(studio_runtime_store::projection_value(&view));
     };
     if let Some(counter) = current_result_failures(connection, work, &owner)? {
         if counter.count > MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT {
-            return Err(invalid("runtime_work", work["id"].as_str().unwrap_or_default()).into());
+            return Err(invalid("runtime_work", work.id().as_ref()).into());
         }
-        view["failedSubmits"] = json!(counter.count);
-        view["retryAllowed"] = json!(counter.count < MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT);
-        view["errors"] = json!(counter.errors);
+        view.failed_submits = counter.count;
+        view.retry_allowed = counter.count < MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT;
+        view.errors = counter.errors;
     }
-    Ok(view)
+    Ok(studio_runtime_store::projection_value(&view))
 }
 
 /// Counter identity includes the task version, worker epoch and provider attempt.
 /// A lead update or a new provider attempt permits another bounded set of tries.
 fn result_refusal(
     tx: &Transaction<'_>,
-    work: &Value,
+    work: &WorkItemRecord,
     owner: &AgentRecord,
     input: &SubmitWork,
 ) -> Result<Option<(String, u64, Vec<Value>)>, WorkWriteError> {
     use studio_runtime_schema::task_results::{
         MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT, validate_result,
     };
-    let Some(schema) = work.get("resultSchema") else {
+    let Some(schema) = work.extension("resultSchema") else {
         return Ok(None);
     };
     let counter_id = submission_counter_id(tx, work, owner)?;
@@ -3358,7 +3623,7 @@ fn result_refusal(
 #[allow(clippy::too_many_arguments)]
 fn refuse_result(
     tx: &Transaction<'_>,
-    work: &Value,
+    work: &WorkItemRecord,
     owner: &AgentRecord,
     counter_id: &str,
     failed: u64,
@@ -3372,45 +3637,42 @@ fn refuse_result(
         .min(MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT);
     let mut current = work.clone();
     if failed < MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT {
-        current["resultFailures"] = studio_runtime_store::projection_value(&ResultFailures {
-            version: work["version"]
-                .as_i64()
-                .ok_or_else(|| invalid("runtime_work", &work["id"].to_string()))?,
-            owner: owner.id.0.clone(),
-            epoch: owner.epoch,
-            provider_attempt: WorkItemsRepository::submission_identity(tx, owner)?,
-            count: next,
-            errors: errors.clone(),
-        });
-        WorkItemsRepository::update_work(
-            tx,
-            work["id"]
-                .as_str()
-                .ok_or(Error::InvalidRequest("Invalid task identity"))?,
-            &current,
-        )?;
+        current
+            .set(
+                "resultFailures",
+                studio_runtime_store::projection_value(&ResultFailures {
+                    version: work
+                        .version()
+                        .and_then(studio_json::Number::as_i64)
+                        .ok_or_else(|| invalid("runtime_work", work.id().as_ref()))?,
+                    owner: owner.id.0.clone(),
+                    epoch: owner.epoch,
+                    provider_attempt: WorkItemsRepository::submission_identity(tx, owner)?,
+                    count: next,
+                    errors: errors.clone(),
+                }),
+            )
+            .map_err(studio_runtime_store::StoreError::from)?;
+        WorkItemsRepository::update_checked_work(tx, work.id().as_ref(), &current)?;
     }
-    let refusal = json!({"message":"Result does not satisfy the task result contract", "errors":errors,
-        "failedSubmits":next,"limit":MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT,
-        "retryAllowed":next < MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT});
+    let refusal = submission_refusal_message(errors, next, MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT);
     let mut event_inserted = false;
     if failed < MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT
         && next == MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT
     {
         let lead = root_agent(tx, owner)?;
-        event_inserted = event_write::enqueue_recovery_event(tx, &lead,
-            format!("{counter_id}:limit"), "work_result_invalid",
-            json!({"task":work["id"],"owner":owner.id.0,"version":work["version"],"refusal":refusal}).to_string(),
-            event_write::unix_time()?)?;
+        event_inserted = event_write::enqueue_recovery_event(
+            tx,
+            &lead,
+            format!("{counter_id}:limit"),
+            "work_result_invalid",
+            refusal_notice(work.id().as_ref(), &owner.id.0, work.version(), &refusal),
+            event_write::unix_time()?,
+        )?;
     }
-    let mut record = single_view(tx, &WorkItemRecord::checked(&current)?)?;
+    let mut record = single_view(tx, &current)?;
     record["submissionRefusal"] = refusal;
-    studio_runtime_store::entity_publication::mark_stale(
-        "work",
-        work["id"]
-            .as_str()
-            .ok_or(Error::InvalidRequest("Invalid task identity"))?,
-    );
+    studio_runtime_store::entity_publication::mark_stale("work", work.id().as_ref());
 
     Ok(WorkWriteResult {
         record,
@@ -3509,7 +3771,7 @@ fn accept(
                     .unwrap_or_default()
             ),
             "work_decision",
-            json!({"task":input.task_id,"decision":"accept","reason":input.reason}).to_string(),
+            decision_notice(&input.task_id, "accept", Some(&input.reason)),
             now,
         )?;
     }
@@ -3704,18 +3966,32 @@ fn check_owner(
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssignmentPayload {
+    task: RawJson,
+    title: RawJson,
+    description: RawJson,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    result_schema: Field<RawJson>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    result_instructions: Field<String>,
+}
+
 fn assignment_payload(work: &Value) -> Value {
-    let mut payload = json!({
-        "task":work["id"],
-        "title":work["title"],
-        "description":work.get("description").cloned().unwrap_or_else(|| json!(""))
-    });
-    if let Some(schema) = work.get("resultSchema") {
-        payload["resultSchema"] = schema.clone();
-        payload["resultInstructions"] =
-            json!(studio_runtime_schema::task_results::assignment_text(work));
-    }
-    payload
+    let raw =
+        |value: &Value| RawJson(studio_json::to_raw_value(value).expect("JSON value serializes"));
+    let empty = json!("");
+    let schema = work.get("resultSchema");
+    studio_runtime_store::projection_value(&AssignmentPayload {
+        task: raw(&work["id"]),
+        title: raw(&work["title"]),
+        description: raw(work.get("description").unwrap_or(&empty)),
+        result_schema: schema.map_or(Field::Missing, |value| Field::Value(raw(value))),
+        result_instructions: schema.map_or(Field::Missing, |_| {
+            Field::Value(studio_runtime_schema::task_results::assignment_text(work))
+        }),
+    })
 }
 
 fn queue_assignment(
@@ -4021,6 +4297,218 @@ mod actor_tests {
         connection
     }
 
+    #[test]
+    fn legacy_result_identity_keeps_unused_fields_in_persisted_row() {
+        let connection = database();
+        let result = json!({"id":"r1","revision":{"legacy":true},"files":false,
+            "result":{"nested":[1,null]},"extra":{"keep":true}});
+        let item = work("legacy-identity", Some("worker"), "review", json!([result]));
+        insert_work(&connection, &item);
+        let saved = WorkItemsRepository::work_record(&connection, "legacy-identity")
+            .expect("read row")
+            .expect("row exists");
+        let identity = super::result_identity(&saved).expect("identity");
+        assert_eq!(identity.id.as_deref(), Some("r1"));
+        assert_eq!(identity.revision, None);
+        assert_eq!(saved.value()["results"], item["results"]);
+    }
+
+    #[test]
+    fn assignment_payload_bytes_match_legacy_wire() {
+        let work = json!({"id":"t1","title":"Task","description":"Notes"});
+        assert_eq!(
+            super::assignment_payload(&work).to_string(),
+            r#"{"description":"Notes","task":"t1","title":"Task"}"#
+        );
+    }
+
+    #[test]
+    fn reviewer_child_result_legacy_payload_bytes_and_identity() {
+        let encoded = r#"{"agent_id":"child","extra":{"malformed":[false,3]},"result":"done"}"#;
+        let payload: Value = studio_json::from_str(encoded).expect("payload");
+        assert_eq!(
+            payload.get("agent_id").and_then(Value::as_str),
+            Some("child")
+        );
+        assert_eq!(payload.to_string(), encoded);
+        let identity: super::ChildResultIdentity =
+            studio_json::from_str(encoded).expect("identity");
+        assert_eq!(identity.agent_id.as_deref(), Some("child"));
+    }
+
+    #[test]
+    fn reviewer_schedule_preserves_record_bytes() {
+        let seed = json!({"compactions":0,"accountKey":"default","provider":"codex",
+            "id":"child","rootId":"lead","parentId":"lead","epoch":2,"status":"completed",
+            "role":"reviewer","extraLegacy":{"malformed":[false,3]}});
+        let mut updated = AgentRecord::from_value(seed).expect("agent");
+        let mut record = updated.value();
+        record["reviewArchiveScheduled"] = json!("child:result-1");
+        let expected = record.to_string();
+        updated
+            .extra
+            .insert("reviewArchiveScheduled".into(), json!("child:result-1"));
+        assert_eq!(updated.value().to_string(), expected);
+    }
+
+    #[test]
+    fn reviewer_retry_preserves_record_bytes() {
+        let seed = json!({"compactions":0,"accountKey":"default","provider":"codex",
+            "id":"child","rootId":"lead","parentId":"lead","epoch":2,"status":"completed",
+            "role":"reviewer","reviewArchiveScheduled":"child:result-1","extraLegacy":{"x":false}});
+        let mut updated = AgentRecord::from_value(seed).expect("agent");
+        let mut record = updated.value();
+        record["reviewArchiveError"] = json!("blocked");
+        record["reviewArchiveAttempts"] = json!(1);
+        record["reviewArchiveNextAt"] = json!(12.0);
+        let expected = record.to_string();
+        updated
+            .extra
+            .insert("reviewArchiveError".into(), json!("blocked"));
+        updated
+            .extra
+            .insert("reviewArchiveAttempts".into(), json!(1));
+        updated
+            .extra
+            .insert("reviewArchiveNextAt".into(), json!(12.0));
+        assert_eq!(updated.value().to_string(), expected);
+    }
+
+    #[test]
+    fn reviewer_retry_clear_preserves_record_bytes() {
+        let seed = json!({"compactions":0,"accountKey":"default","provider":"codex",
+            "id":"child","rootId":"lead","parentId":"lead","epoch":2,"status":"completed",
+            "role":"reviewer","reviewArchiveScheduled":"child:result-1",
+            "reviewArchiveError":"blocked","reviewArchiveAttempts":1,"reviewArchiveNextAt":12.0,
+            "extraLegacy":{"x":false}});
+        let mut updated = AgentRecord::from_value(seed).expect("agent");
+        let mut record = updated.value();
+        for key in [
+            "reviewArchiveError",
+            "reviewArchiveScheduled",
+            "reviewArchiveAttempts",
+            "reviewArchiveNextAt",
+        ] {
+            record.as_object_mut().expect("object").remove(key);
+        }
+        let expected = record.to_string();
+        for key in [
+            "reviewArchiveError",
+            "reviewArchiveScheduled",
+            "reviewArchiveAttempts",
+            "reviewArchiveNextAt",
+        ] {
+            updated.extra.remove(key);
+        }
+        assert_eq!(updated.value().to_string(), expected);
+    }
+
+    #[test]
+    fn reviewer_blockers_keep_legacy_bytes() {
+        let outcome =
+            json!({"status":"blocked","blockers":[{"kind":"turn","count":1,"ids":["worker"]}]});
+        let view: super::ReviewerArchiveOutcome =
+            studio_json::from_str(&outcome.to_string()).expect("outcome");
+        let raw = view.blockers.expect("blockers");
+        let blockers: Vec<super::RawJson> = studio_json::from_str(raw.0.as_str()).expect("array");
+        assert!(!blockers.is_empty());
+        assert_eq!(
+            studio_json::to_string(&blockers).expect("blockers JSON"),
+            r#"[{"count":1,"ids":["worker"],"kind":"turn"}]"#
+        );
+    }
+
+    #[test]
+    fn work_decision_notification_bytes_match_legacy_wire() {
+        let event = super::decision_notice("t1", "accept", Some("approved"));
+        assert_eq!(
+            event,
+            r#"{"decision":"accept","reason":"approved","task":"t1"}"#
+        );
+        let nullable = super::decision_notice("t1", "accept", None);
+        assert_eq!(
+            nullable,
+            r#"{"decision":"accept","reason":null,"task":"t1"}"#
+        );
+    }
+
+    #[test]
+    fn work_review_and_refusal_notification_bytes_match_legacy_wire() {
+        let result = json!({"id":"r1","result":{"unknown":true}});
+        let review = super::work_review_notice("t1", Some("Task"), &result);
+        assert_eq!(
+            review,
+            r#"{"result":{"id":"r1","result":{"unknown":true}},"task":"t1","title":"Task"}"#
+        );
+        let refusal = json!({"errors":[],"failedSubmits":1});
+        let version = studio_json::Number::from(2);
+        let event = super::refusal_notice("t1", "worker", Some(&version), &refusal);
+        assert_eq!(
+            event,
+            r#"{"owner":"worker","refusal":{"errors":[],"failedSubmits":1},"task":"t1","version":2}"#
+        );
+    }
+
+    #[test]
+    fn submission_refusal_view_bytes_match_legacy_wire() {
+        let connection = database();
+        let item = work("refusal-bytes", None, "running", json!([]));
+        let result = super::current_submission_refusal(
+            &connection,
+            &super::WorkItemRecord::checked(&item).expect("work"),
+        )
+        .expect("refusal view");
+        assert_eq!(
+            result.to_string(),
+            format!(
+                r#"{{"errors":[],"failedSubmits":0,"limit":{},"retryAllowed":true}}"#,
+                studio_runtime_schema::task_results::MAX_FAILED_RESULT_SUBMITS_PER_ATTEMPT
+            )
+        );
+    }
+
+    #[test]
+    fn submission_counter_id_matches_legacy_identity_bytes() {
+        let connection = database();
+        let item = work("counter-bytes", Some("worker"), "running", json!([]));
+        let owner = AgentRepository::get(&connection, &AgentId::from("worker"))
+            .expect("owner read")
+            .expect("owner");
+        let attempt =
+            WorkItemsRepository::submission_identity(&connection, &owner).expect("identity");
+        let identity = json!([
+            item["id"],
+            item["version"],
+            owner.id.0,
+            owner.epoch,
+            attempt
+        ]);
+        let expected = format!(
+            "work-result-failures:{}",
+            studio_runtime_store::sha256_hex(identity.to_string().as_bytes())
+        );
+        assert_eq!(
+            super::submission_counter_id(
+                &connection,
+                &super::WorkItemRecord::checked(&item).expect("work"),
+                &owner
+            )
+            .expect("counter"),
+            expected
+        );
+    }
+
+    #[test]
+    fn submission_refusal_message_bytes_match_legacy_wire() {
+        let errors = json!([{"path":"/count","message":"invalid"}]);
+        let refusal =
+            super::submission_refusal_message(errors.as_array().expect("errors").clone(), 1, 3);
+        assert_eq!(
+            refusal.to_string(),
+            r#"{"errors":[{"message":"invalid","path":"/count"}],"failedSubmits":1,"limit":3,"message":"Result does not satisfy the task result contract","retryAllowed":true}"#
+        );
+    }
+
     #[tokio::test]
     async fn native_reviewer_submission_needs_no_revision_evidence() {
         let dir = tempfile::tempdir().unwrap();
@@ -4242,12 +4730,20 @@ mod actor_tests {
             "version":current["version"],"owner":"worker","epoch":3,
             "providerAttempt":null,"count":2,"errors":[{"path":"$.result","message":"required"}]
         });
-        let view = super::current_submission_refusal(&connection, &current).expect("projection");
+        let view = super::current_submission_refusal(
+            &connection,
+            &super::WorkItemRecord::checked(&current).expect("work"),
+        )
+        .expect("projection");
         assert_eq!(view["failedSubmits"], 2);
         assert_eq!(view["errors"], current["resultFailures"]["errors"]);
         current["version"] = json!(current["version"].as_i64().expect("version") + 1);
         assert_eq!(
-            super::current_submission_refusal(&connection, &current).expect("new version")["failedSubmits"],
+            super::current_submission_refusal(
+                &connection,
+                &super::WorkItemRecord::checked(&current).expect("work")
+            )
+            .expect("new version")["failedSubmits"],
             0
         );
     }
@@ -5168,7 +5664,7 @@ mod actor_tests {
             "accepted",
             json!([{"id":"result-1","agent":"worker","text":"done","checks":"checked","revision":revision,"files":[]}]),
         );
-        let saved_owner = owner.clone();
+        let saved_owner = AgentRecord::from_value(owner.clone()).expect("checked owner");
         let saved_work = super::WorkItemRecord::checked(&item).expect("checked work");
         store.transaction(move |tx| {
             AgentRepository::put(tx, &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running"}))?)?;
@@ -5193,7 +5689,7 @@ mod actor_tests {
             .expect("concurrent work change");
         let guard = super::ArchiveGuard {
             work: saved_work,
-            owner: saved_owner,
+            owner: Box::new(saved_owner),
             task_id: "race".into(),
             owner_id: "worker".into(),
             root_id: "lead".into(),
@@ -5637,11 +6133,13 @@ mod actor_tests {
             public_admission: None,
             public_response: None,
         };
+        let checked_result =
+            super::WorkItemRecord::checked(&result.record).expect("checked result");
         assert_eq!(
             super::accepted_archive_preflight(
                 &tx,
-                "review-task",
-                &result.record,
+                &checked_result,
+                super::result_identity(&checked_result).as_ref(),
                 &intent,
                 "worker",
                 "lead",

@@ -57,6 +57,7 @@ pub mod text_blobs;
 pub mod transfer_record;
 pub mod wal_backup;
 pub mod work_history;
+pub mod workspace_cleanup_intent;
 mod write_alert;
 pub mod writer_lanes;
 pub use schema::{
