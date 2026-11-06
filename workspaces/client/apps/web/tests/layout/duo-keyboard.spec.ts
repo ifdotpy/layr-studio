@@ -8,6 +8,7 @@ import {
 } from "../sidebar/sidebar-parity-fixture.ts";
 
 import { keyboardSequences, keyboardCycleFrames } from "./keyboardSequences.ts";
+import { agentId } from "../../src/ids";
 
 test.use({ hasTouch: true, reducedMotion: "reduce" });
 for (const count of [1, 8]) {
@@ -36,7 +37,7 @@ for (const count of [1, 8]) {
       {
         display: backgroundDisplay("monitor", "Duo monitor"),
         id: "duo-monitor",
-        agent: "overlap",
+        agent: agentId("overlap"),
         name: "Duo monitor",
         command: "fixture command",
         status: "running",
@@ -469,7 +470,7 @@ for (const count of [1, 8]) {
       ).toBeHidden();
       fixture.local.snapshot.runtime.requests = pending.map((request) => ({
         ...request,
-        agent: "overlap",
+        agent: agentId("overlap"),
       }));
       fixture.local.complete("attention");
       await expect(

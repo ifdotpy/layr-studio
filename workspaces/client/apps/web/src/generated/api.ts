@@ -4548,7 +4548,9 @@ export interface components {
       updatedAt: number;
     };
     /** @description Identity of the agent that owns the turn. */
-    AgentId: string;
+    AgentId: string & {
+      readonly __brand: "AgentId";
+    };
     /** AgentInboxEntry */
     AgentInboxEntry: {
       /** Agent */
@@ -8464,7 +8466,9 @@ export interface components {
       turn: components["schemas"]["TurnId"] | null;
     };
     /** @description Identity of one approval. Equals the legacy request id after migration. */
-    ApprovalId: string;
+    ApprovalId: string & {
+      readonly __brand: "ApprovalId";
+    };
     ApprovalState:
       | {
           /** @constant */
@@ -11081,7 +11085,9 @@ export interface components {
     /** @enum {string} */
     CommandErrorCode: "receipt_expired" | "native_layr_store";
     /** @description Identity of the outbox command that delivers an answer. */
-    CommandId: string;
+    CommandId: string & {
+      readonly __brand: "CommandId";
+    };
     CommandLeadMessageBody: {
       text: string;
     };
@@ -26216,7 +26222,9 @@ export interface components {
      */
     TransferStatus: "pending" | "completed" | "cancelled";
     /** @description Provider turn identifier. A domain Turn table replaces this later. */
-    TurnId: string;
+    TurnId: string & {
+      readonly __brand: "TurnId";
+    };
     /** TurnRecoveryRecordResponse */
     TurnRecoveryRecordResponse: {
       /**

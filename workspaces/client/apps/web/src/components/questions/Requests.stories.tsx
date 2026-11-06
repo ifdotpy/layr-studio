@@ -1,3 +1,4 @@
+import { commandId } from "../../ids";
 import { AgentSource, AgentStatus } from "../../generated/api";
 import { approval } from "../../approvalFixtures";
 import type { Meta, StoryObj } from "@storybook/react-vite";
@@ -92,7 +93,7 @@ const sending = {
       kind: "answers" as const,
       answers: [{ id: "scope", answer: ["One file"] }],
     },
-    command: "command",
+    command: commandId("command"),
   },
 };
 

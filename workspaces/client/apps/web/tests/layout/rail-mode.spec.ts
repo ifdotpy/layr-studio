@@ -1,5 +1,6 @@
 import { test, expect } from "../playwright.ts";
 import { sidebarParityFixture } from "../sidebar/sidebar-parity-fixture.ts";
+import { agentId } from "../../src/ids";
 
 test.use({ hasTouch: true });
 for (const check of [
@@ -88,7 +89,7 @@ for (const check of [
         ).toBe(true);
         fixture.local.snapshot.runtime.requests = pending.map((request) => ({
           ...request,
-          agent: "overlap",
+          agent: agentId("overlap"),
         }));
         fixture.local.complete("attention");
         await expect(rail.getByRole("button")).toHaveCount(3);

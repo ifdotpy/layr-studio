@@ -12,6 +12,7 @@ macro_rules! id_newtype {
         $(#[$meta])*
         #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
         #[serde(transparent)]
+        #[schemars(extend("x-studio-brand" = stringify!($name)))]
         pub struct $name(pub String);
         impl $name {
             pub fn as_str(&self) -> &str { &self.0 }

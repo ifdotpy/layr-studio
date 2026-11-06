@@ -1,3 +1,4 @@
+import { commandId } from "../../ids";
 import { AgentStatus } from "../../generated/api";
 import { approval, question } from "../../approvalFixtures";
 import { required } from "../componentTestFixtures.ts";
@@ -24,7 +25,7 @@ it("only includes pending requests that are not deferred", () => {
           id: "sending",
           agent: "sending",
           request,
-          state: { kind: "answering", answer, command: "command" },
+          state: { kind: "answering", answer, command: commandId("command") },
         }),
         approval({
           id: "answered",

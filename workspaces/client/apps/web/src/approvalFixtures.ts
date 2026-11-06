@@ -1,4 +1,5 @@
 import type { Approval } from "./approvals";
+import { agentId, approvalId, turnId } from "./ids";
 
 type Fixture = {
   request: Approval["request"];
@@ -26,9 +27,9 @@ export function approval({
   deferred = false,
 }: Fixture): Approval {
   return {
-    id,
-    agent,
-    turn,
+    id: approvalId(id),
+    agent: agentId(agent),
+    turn: turn === null ? null : turnId(turn),
     created,
     epoch,
     request,
@@ -132,6 +133,6 @@ export function browserOpen(
     expires_at: fields.expiresAt ?? null,
     phase: fields.phase ?? { kind: "link" },
     forward: null,
-    joined: fields.joined ?? [],
+    joined: (fields.joined ?? []).map(agentId),
   };
 }

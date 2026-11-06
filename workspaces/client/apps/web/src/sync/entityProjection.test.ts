@@ -1,3 +1,4 @@
+import { approvalId, commandId } from "../ids";
 import { LimitColor, RunwayColor } from "../generated/api";
 import { StudioErrorLevel } from "../generated/api";
 import {
@@ -726,11 +727,11 @@ it("shows the pending and answering request cards the server publishes", () => {
   });
   const sending = {
     ...request,
-    id: "sending",
+    id: approvalId("sending"),
     state: {
       kind: "answering",
       answer: { kind: "decision", decision: "accept" },
-      command: "command",
+      command: commandId("command"),
     },
   } satisfies typeof request;
   const initial = applyEntityChanges(

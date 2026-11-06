@@ -74,7 +74,7 @@ impl JsonSchema for CommandId {
         "CommandId".into()
     }
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type":"string","pattern":"^[a-f0-9-]{36}$"})
+        schemars::json_schema!({"type":"string","pattern":"^[a-f0-9-]{36}$","x-studio-brand":"CommandId"})
     }
 }
 
@@ -108,7 +108,7 @@ impl JsonSchema for MessageId {
         "MessageId".into()
     }
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type":"string","minLength":1})
+        schemars::json_schema!({"type":"string","minLength":1,"x-studio-brand":"MessageId"})
     }
 }
 

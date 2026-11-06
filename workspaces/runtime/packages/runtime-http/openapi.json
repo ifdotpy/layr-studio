@@ -6797,7 +6797,8 @@
       },
       "AgentId": {
         "description": "Identity of the agent that owns the turn.",
-        "type": "string"
+        "type": "string",
+        "x-studio-brand": "AgentId"
       },
       "AgentInboxEntry": {
         "additionalProperties": false,
@@ -16281,7 +16282,8 @@
       },
       "ApprovalId": {
         "description": "Identity of one approval. Equals the legacy request id after migration.",
-        "type": "string"
+        "type": "string",
+        "x-studio-brand": "ApprovalId"
       },
       "ApprovalState": {
         "oneOf": [
@@ -22413,7 +22415,8 @@
       },
       "CommandId": {
         "description": "Identity of the outbox command that delivers an answer.",
-        "type": "string"
+        "type": "string",
+        "x-studio-brand": "CommandId"
       },
       "CommandLeadMessageBody": {
         "additionalProperties": false,
@@ -60251,7 +60254,8 @@
       },
       "TurnId": {
         "description": "Provider turn identifier. A domain Turn table replaces this later.",
-        "type": "string"
+        "type": "string",
+        "x-studio-brand": "TurnId"
       },
       "TurnRecoveryRecordResponse": {
         "additionalProperties": {

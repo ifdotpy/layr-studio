@@ -8,7 +8,9 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     /** @description Identity of the agent that owns the turn. */
-    AgentId: string;
+    AgentId: string & {
+      readonly __brand: "AgentId";
+    };
     /** @description The answer a person or policy gives. Its kind must fit the request kind. */
     Answer:
       | {
@@ -52,7 +54,9 @@ export interface components {
       turn: components["schemas"]["TurnId"] | null;
     };
     /** @description Identity of one approval. Equals the legacy request id after migration. */
-    ApprovalId: string;
+    ApprovalId: string & {
+      readonly __brand: "ApprovalId";
+    };
     ApprovalState:
       | {
           /** @constant */
@@ -148,7 +152,9 @@ export interface components {
       status?: number | null | undefined;
     };
     /** @description Identity of the outbox command that delivers an answer. */
-    CommandId: string;
+    CommandId: string & {
+      readonly __brand: "CommandId";
+    };
     /** @enum {string} */
     Decision: "accept" | "accept_for_session" | "decline" | "cancel";
     /** @description The user moved the question aside. `active` is false after it came back. */
@@ -539,7 +545,9 @@ export interface components {
      */
     Timestamp: number;
     /** @description Provider turn identifier. A domain Turn table replaces this later. */
-    TurnId: string;
+    TurnId: string & {
+      readonly __brand: "TurnId";
+    };
   };
   responses: never;
   parameters: never;

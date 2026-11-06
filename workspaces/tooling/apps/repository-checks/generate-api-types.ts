@@ -189,9 +189,26 @@ const nodes = await openapiTS(
   {
     alphabetize: true,
     defaultNonNullable: false,
-    transform(_schema, { path }) {
+    transform(schema, { path }) {
       if (recursiveJsonValue && path === "#/components/schemas/JsonValue")
         return ts.factory.createTypeReferenceNode("JsonValue");
+      // A Rust id newtype marks its schema with `x-studio-brand`; the TypeScript type is a
+      // branded string, so one kind of id never passes where another is expected.
+      const brand = (schema as { "x-studio-brand"?: unknown })["x-studio-brand"];
+      if (typeof brand === "string")
+        return ts.factory.createIntersectionTypeNode([
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+          ts.factory.createTypeLiteralNode([
+            ts.factory.createPropertySignature(
+              [ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword)],
+              "__brand",
+              undefined,
+              ts.factory.createLiteralTypeNode(
+                ts.factory.createStringLiteral(brand),
+              ),
+            ),
+          ]),
+        ]);
       return undefined;
     },
   },

@@ -321,7 +321,9 @@ export function transcriptRequests(
   cards: (item: Message) => QuestionCardModel | undefined,
 ): Map<string, RequestDto | null> {
   const pending = requests.filter(needsAnswer);
-  const byId = new Map(pending.map((request) => [request.id, request]));
+  const byId = new Map<string, RequestDto>(
+    pending.map((request) => [request.id, request]),
+  );
   const byItem = new Map<string, RequestDto>(
     pending.flatMap((request) => {
       const itemId = approvalItemId(request);

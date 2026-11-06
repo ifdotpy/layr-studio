@@ -1,3 +1,4 @@
+import { commandId } from "../../ids";
 import { QuestionDecision } from "../../generated/api";
 import { approval, question } from "../../approvalFixtures";
 import type { Approval } from "../../approvals";
@@ -268,7 +269,7 @@ const sent: Extract<Approval["state"], { kind: "answered" }>["answer"] = {
 };
 const stateCases: [Approval["state"], boolean][] = [
   [{ kind: "pending" }, true],
-  [{ kind: "answering", answer: sent, command: "command" }, false],
+  [{ kind: "answering", answer: sent, command: commandId("command") }, false],
   [{ kind: "answered", answer: sent, by: { kind: "owner" }, at: 2 }, false],
   [{ kind: "unknown", answer: sent, since: 2 }, false],
   [{ kind: "closed", reason: "expired", at: 2 }, false],
