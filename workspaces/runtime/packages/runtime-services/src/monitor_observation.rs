@@ -73,16 +73,9 @@ fn read_in(
             "This monitor belongs to another agent or epoch",
         ));
     }
-    let raw: Option<String> = tx
-        .query_row(
-            "SELECT record FROM runtime_agents WHERE id=?",
-            [owner],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StoreError::from)?;
-    let agent: Value = studio_json::from_str(&raw.ok_or(MonitorError::Refused("Unknown agent"))?)
-        .map_err(StoreError::from)?;
+    // The merged record: the chat row owns autoWake and the other chat fields.
+    let agent: Value = studio_runtime_store::agent_volatile::merged_record(tx, owner)?
+        .ok_or(MonitorError::Refused("Unknown agent"))?;
     if studio_runtime_store::truthy(agent.get("deletedAt"))
         || agent["epoch"].as_i64() != Some(epoch)
         || agent["autoWake"] != true

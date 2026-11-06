@@ -232,6 +232,8 @@ pub fn sync_unload_deadlines(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    // The merged records: an agent written back keeps its chat, turn and volatile fields.
+    let records = studio_runtime_store::agent_volatile::merged_rows(connection, records)?;
     for (id, raw) in records {
         let mut agent: Value = studio_json::from_str(&raw)?;
         let mut episode: Episode = Episode::deserialize(&agent["idleCompactionEpisode"])

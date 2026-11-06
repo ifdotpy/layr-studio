@@ -509,8 +509,9 @@ mod tests {
         insert(&connection, "runtime_usage_resumes", "resume", &saved);
         let tx = connection.unchecked_transaction().expect("transaction");
         disable_usage_resume(&tx, AGENT, "resume", 200.0).expect("disable result");
-        let agent: studio_json::Value =
-            studio_json::from_str(&read(&tx, "runtime_agents", AGENT)).unwrap();
+        let agent = crate::agent_volatile::merged_record(&tx, AGENT)
+            .unwrap()
+            .expect("agent row");
         assert_eq!(agent["usageResumeEnabled"], false);
         assert_eq!(agent["usageResume"]["status"], "cancelled");
     }

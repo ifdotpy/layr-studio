@@ -185,6 +185,8 @@ fn read_agent(tx: &Connection, agent_id: &str) -> Result<Value, TitleError> {
         )
         .optional()?
         .ok_or(TitleError::AgentNotFound)?;
+    // The merged record: a caller may write it back whole.
+    let raw = studio_runtime_store::agent_volatile::merged_text(tx, agent_id, raw)?;
     let agent: Value = studio_json::from_str(&raw).map_err(StoreError::from)?;
     if agent.get("id").and_then(Value::as_str) != Some(agent_id) {
         return Err(invalid("runtime_agents", agent_id));

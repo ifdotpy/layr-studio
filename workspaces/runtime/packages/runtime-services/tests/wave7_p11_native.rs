@@ -1563,13 +1563,9 @@ fn python_failed_and_unknown_receipt_errors_are_not_lost() {
 }
 
 fn stored_agent(db: &Connection, id: &str) -> Value {
-    studio_json::from_str(
-        &db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1", [id], |r| {
-            r.get::<_, String>(0)
-        })
-        .expect("stored agent"),
-    )
-    .expect("agent JSON")
+    studio_runtime_store::agent_volatile::merged_record(db, id)
+        .expect("stored agent")
+        .expect("agent row")
 }
 
 /// Python `codex_agent_review.claim` and `Runtime.run_native_action` against

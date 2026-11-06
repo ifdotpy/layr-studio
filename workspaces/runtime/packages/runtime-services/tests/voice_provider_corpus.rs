@@ -1514,14 +1514,10 @@ async fn real_python_start_speech_end_rows_match_rust_with_rpc_boundary_stub() {
             .len(),
         3
     );
-    let rust_agent: studio_json::Value = connection
-        .query_row(
-            "SELECT record FROM runtime_agents WHERE id='agent'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .map(|raw| studio_json::from_str(&raw).expect("Rust agent row JSON"))
-        .expect("Rust voice actor row");
+    let rust_agent: studio_json::Value =
+        studio_runtime_store::agent_volatile::merged_record(&connection, "agent")
+            .expect("Rust voice actor row")
+            .expect("agent row");
     assert_eq!(rust_agent["autoWake"], expected["agent"]["autoWake"]);
     assert_eq!(rust_agent["turnEpoch"], expected["agent"]["turnEpoch"]);
     assert_eq!(rust_agent["autoWake"], true);

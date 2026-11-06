@@ -190,6 +190,10 @@ fn retained_question(
         )
         .optional()
         .map_err(studio_runtime_store::StoreError::from)?;
+    // The merged record: the chat row owns autoWake.
+    let raw = raw
+        .map(|raw| studio_runtime_store::agent_volatile::merged_text(tx, id, raw))
+        .transpose()?;
     let agent = match raw.map(|raw| studio_json::from_str::<Value>(&raw)) {
         None => return Ok(false),
         Some(Ok(agent)) if agent.is_object() => agent,

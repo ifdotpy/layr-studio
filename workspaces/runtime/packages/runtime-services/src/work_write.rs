@@ -790,6 +790,8 @@ async fn retry_refused_reviewer_archives(store: &Arc<RuntimeStore>) -> Result<()
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(studio_runtime_store::StoreError::from)?;
             drop(statement);
+            // The merged records: each agent is written back whole.
+            let rows = studio_runtime_store::agent_volatile::merged_rows(tx, rows)?;
             for (id, raw) in rows {
                 let mut record: Value =
                     studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;

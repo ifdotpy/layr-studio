@@ -64,13 +64,20 @@ pub async fn finish_stored_workspaces(store: &RuntimeStore) -> Result<usize, Sto
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     store
         .transaction(move |tx| {
+            // The merged records: this pass writes each agent back whole.
             let rows = {
                 let mut statement = tx.prepare(&format!(
-                    "SELECT record FROM runtime_agents WHERE {UNSETTLED_LEGACY_PREDICATE}"
+                    "SELECT id,record FROM runtime_agents WHERE {UNSETTLED_LEGACY_PREDICATE}"
                 ))?;
-                statement
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?
+                let rows = statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                studio_runtime_store::agent_volatile::merged_rows(tx, rows)?
+                    .into_iter()
+                    .map(|(_, raw)| raw)
+                    .collect::<Vec<_>>()
             };
             let mut count = 0;
             for row in rows {

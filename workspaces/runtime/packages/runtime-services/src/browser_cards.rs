@@ -333,6 +333,8 @@ fn refusal(
     let Some(raw) = raw else {
         return Ok(Some("The chat does not exist".into()));
     };
+    // The merged record: the chat row owns the execution mode.
+    let raw = studio_runtime_store::agent_volatile::merged_text(tx, agent_id, raw)?;
     let agent: Value = studio_json::from_str(&raw).unwrap_or(Value::Null);
     if python_truthy(agent.get("deletedAt")) {
         return Ok(Some("The chat was deleted".into()));

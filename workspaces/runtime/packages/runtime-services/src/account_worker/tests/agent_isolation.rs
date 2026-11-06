@@ -41,12 +41,8 @@ async fn record_of(state: &State, id: &str) -> Value {
     state
         .bridge
         .run(move |store| async move {
-            let raw: String = store.test_reader()?.query_row(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )?;
-            Ok(studio_json::from_str(&raw).unwrap())
+            let db = store.test_reader()?;
+            Ok(studio_runtime_store::agent_volatile::merged_record(&db, &id)?.expect("agent row"))
         })
         .await
         .unwrap()

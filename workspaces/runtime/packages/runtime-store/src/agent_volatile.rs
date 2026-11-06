@@ -48,6 +48,19 @@ pub const AGENT_VOLATILE_FIELDS: [&str; 9] = [
 /// back together with the volatile fields (#630 item 63).
 pub const START_ATTEMPT_FIELD: &str = "startAttempt";
 
+/// The prepared volatile-field read; None on a reduced test schema without the table.
+fn volatile_select(connection: &Connection) -> StoreResult<Option<rusqlite::CachedStatement<'_>>> {
+    match connection.prepare_cached(&SELECT_SQL) {
+        Ok(statement) => Ok(Some(statement)),
+        Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+            if message.starts_with("no such table: runtime_agent_volatile") =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// The start attempt JSON of chat `id`, from its turn row. A database without the domain
 /// tables (a reduced test schema) has none.
 fn stored_attempt(connection: &Connection, id: &str) -> StoreResult<Option<String>> {
@@ -331,10 +344,11 @@ pub fn merge(connection: &Connection, id: &str, record: &mut Value) -> StoreResu
     let Some(fields) = record.as_object_mut() else {
         return Ok(());
     };
-    let mut statement = connection.prepare_cached(&SELECT_SQL)?;
-    let mut rows = statement.query([id])?;
-    if let Some(row) = rows.next()? {
-        merge_row(row, id, fields)?;
+    if let Some(mut statement) = volatile_select(connection)? {
+        let mut rows = statement.query([id])?;
+        if let Some(row) = rows.next()? {
+            merge_row(row, id, fields)?;
+        }
     }
     merge_attempt_fields(connection, id, fields)?;
     Ok(())
@@ -348,10 +362,11 @@ pub(crate) fn merge_agent(
 ) -> StoreResult<()> {
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::VolatileLoad);
-    let mut statement = connection.prepare_cached(&SELECT_SQL)?;
-    let mut rows = statement.query([id])?;
-    if let Some(row) = rows.next()? {
-        merge_agent_row(row, id, agent)?;
+    if let Some(mut statement) = volatile_select(connection)? {
+        let mut rows = statement.query([id])?;
+        if let Some(row) = rows.next()? {
+            merge_agent_row(row, id, agent)?;
+        }
     }
     merge_agent_attempt(connection, id, agent)
 }
@@ -459,9 +474,15 @@ pub fn merged_text(connection: &Connection, id: &str, raw: String) -> StoreResul
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::VolatileLoad);
     let attempt = stored_attempt(connection, id)?;
-    let mut statement = connection.prepare_cached(&SELECT_SQL)?;
-    let mut rows = statement.query([id])?;
-    let row = rows.next()?;
+    let mut statement = volatile_select(connection)?;
+    let mut rows = match statement.as_mut() {
+        Some(statement) => Some(statement.query([id])?),
+        None => None,
+    };
+    let row = match rows.as_mut() {
+        Some(rows) => rows.next()?,
+        None => None,
+    };
     if row.is_none() && attempt.is_none() {
         return Ok(raw);
     }

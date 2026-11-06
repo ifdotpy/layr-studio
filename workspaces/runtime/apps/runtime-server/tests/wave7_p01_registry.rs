@@ -1386,12 +1386,10 @@ async fn legacy_image_rows_finish_without_provider_launch_or_row_loss() {
     assert!(launcher.opened.lock().unwrap().is_empty());
     let record = || {
         let db = fixture.store.test_reader().unwrap();
-        db.query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
-            [agent_id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap()
+        studio_runtime_store::agent_volatile::merged_record(&db, agent_id.as_str())
+            .unwrap()
+            .expect("agent row")
+            .to_string()
     };
     let db = fixture.store.test_reader().unwrap();
     let event_status: String = db
@@ -1873,16 +1871,12 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
             changes.changed().await.unwrap();
         }
     }).await.unwrap();
-    let actor: String = store
-        .test_reader()
-        .unwrap()
-        .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='managed-actor'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let actor: Value = studio_json::from_str(&actor).unwrap();
+    let actor: Value = studio_runtime_store::agent_volatile::merged_record(
+        &store.test_reader().unwrap(),
+        "managed-actor",
+    )
+    .unwrap()
+    .expect("agent row");
     assert_eq!(actor["startAttempt"]["id"], "retained-attempt");
     assert_eq!(actor["status"], "running");
     assert_eq!(actor["autoWake"], true);
