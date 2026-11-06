@@ -104,6 +104,11 @@ pub fn authorize(
     principal: &Principal,
     command: &Command,
 ) -> Result<(), CommandError> {
+    if matches!(command, Command::RestoreDeletedRoot { .. })
+        && !matches!(principal, Principal::Owner)
+    {
+        return Err(CommandError::Forbidden);
+    }
     // Only the user answers an approval, as in the answer route. Agents, peers, federated
     // rooms and automatic policy answers are refused here.
     if matches!(command, Command::Answer { .. })
@@ -129,7 +134,9 @@ pub fn authorize(
                 | Command::Stop { target, .. }
                 | Command::Pause { target, .. }
                 | Command::Delete { target, .. } => target.as_str().to_owned(),
-                Command::Answer { .. } | Command::LeadMessage { .. } => {
+                Command::Answer { .. }
+                | Command::LeadMessage { .. }
+                | Command::RestoreDeletedRoot { .. } => {
                     return Err(CommandError::Forbidden);
                 }
             };
@@ -691,6 +698,16 @@ pub fn execute_sync(
                 },
                 now,
                 ports,
+            )?;
+            agent_reference(tx, target.as_str())?
+        }
+        Command::RestoreDeletedRoot { target, .. } => {
+            reply = crate::agent_management_store::execute_in_transaction(
+                tx,
+                &Action::RestoreDeletedRoot {
+                    target: target.as_str().to_owned(),
+                },
+                now,
             )?;
             agent_reference(tx, target.as_str())?
         }

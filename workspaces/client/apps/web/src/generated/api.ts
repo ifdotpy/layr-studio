@@ -10825,7 +10825,8 @@ export interface components {
       | components["schemas"]["CommandRequestPause"]
       | components["schemas"]["CommandRequestAnswer"]
       | components["schemas"]["CommandRequestDelete"]
-      | components["schemas"]["CommandRequestLeadMessage"];
+      | components["schemas"]["CommandRequestLeadMessage"]
+      | components["schemas"]["CommandRequestRestoreDeletedRoot"];
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
       client: string;
@@ -10885,6 +10886,18 @@ export interface components {
       kind: "resolve";
       number: number;
       /** @description Outbox entry id */
+      target: string;
+    };
+    CommandRequestRestoreDeletedRoot: {
+      body: Record<string, never>;
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "restore_deleted_root";
+      number: number;
       target: string;
     };
     CommandRequestSend: {
@@ -10953,7 +10966,13 @@ export interface components {
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
-      kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
+      kind:
+        | "pause"
+        | "resolve"
+        | "restore_deleted_root"
+        | "send"
+        | "stop"
+        | "withdraw";
       ref_id: string;
       ref_kind: string;
       rev: number;
