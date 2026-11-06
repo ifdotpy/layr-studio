@@ -3,13 +3,78 @@ type LocalTimeOptions = Omit<
   "timeZone" | "hour12" | "hourCycle"
 >;
 
-// Resolve the device time zone on every call, including after a system change.
-export function localDateTime(date: Date, options: LocalTimeOptions = {}) {
-  return date.toLocaleString(undefined, { ...options, hourCycle: "h23" });
+const dateFields = ["weekday", "year", "month", "day"] as const;
+const timeFields = [
+  "dayPeriod",
+  "hour",
+  "minute",
+  "second",
+  "fractionalSecondDigits",
+] as const;
+const numericDate: LocalTimeOptions = {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+};
+const numericTime: LocalTimeOptions = {
+  hour: "numeric",
+  minute: "numeric",
+  second: "numeric",
+};
+/** How often the device time zone is read again, in milliseconds. */
+const ZONE_CHECK_MS = 1000;
+const formats = new Map<string, Intl.DateTimeFormat>();
+let zone = "";
+let zoneCheckedAt = -Infinity;
+
+/**
+ * A cached formatter: building one per message row cost most of a streamed
+ * reply's render time. A device time zone change still applies within
+ * ZONE_CHECK_MS, as the cache is cleared when the zone differs.
+ */
+function formatter(options: Intl.DateTimeFormatOptions) {
+  const now = Date.now();
+  if (now - zoneCheckedAt > ZONE_CHECK_MS) {
+    zoneCheckedAt = now;
+    const current = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (current !== zone) {
+      zone = current;
+      formats.clear();
+    }
+  }
+  const key = JSON.stringify(options);
+  let format = formats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(undefined, {
+      ...options,
+      hourCycle: "h23",
+    });
+    formats.set(key, format);
+  }
+  return format;
 }
 
+const has = (options: LocalTimeOptions, fields: readonly string[]) =>
+  fields.some(
+    (field) => field in options && options[field as never] !== undefined,
+  );
+
+/** The same text as Date#toLocaleString with these options and h23. */
+export function localDateTime(date: Date, options: LocalTimeOptions = {}) {
+  const styled = !!(options.dateStyle || options.timeStyle);
+  const bare =
+    !styled && !has(options, dateFields) && !has(options, timeFields);
+  return formatter(
+    bare ? { ...numericDate, ...numericTime, ...options } : options,
+  ).format(date);
+}
+
+/** The same text as Date#toLocaleTimeString with these options and h23. */
 export function localTime(date: Date, options: LocalTimeOptions = {}) {
-  return date.toLocaleTimeString(undefined, { ...options, hourCycle: "h23" });
+  const timed = !!options.timeStyle || has(options, timeFields);
+  return formatter(timed ? options : { ...options, ...numericTime }).format(
+    date,
+  );
 }
 
 // Provider notices contain text clocks, rather than timestamp fields.

@@ -208,6 +208,10 @@ test-browser-smoke *args:
 layout-shift-matrix *args:
     @node workspaces/client/apps/web/scripts/layout-shift-matrix.ts {{args}}
 
+[doc("Manual: measure UI responsiveness on a throttled phone (start, open a long chat, touch scroll, model picker, typing, a streamed reply): slow frames, long tasks and blocked time. Needs the renderer build and a debug server. Flags: --turns N --cpu RATE --runs N --profile SCENARIO,... --trace SCENARIO,...")]
+ui-responsiveness *args:
+    @node workspaces/client/apps/web/scripts/ui-responsiveness.ts {{args}}
+
 [doc("Check the main user scenarios on the app installed on this Mac, with its own test chats. See docs/testing.md, Installed scenario smoke.")]
 smoke-installed *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/installed-smoke/smoke.ts")}} "$@"

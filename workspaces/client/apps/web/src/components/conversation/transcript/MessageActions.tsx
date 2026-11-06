@@ -1,9 +1,8 @@
-import { ActionIcon, Loader, Tooltip } from "@mantine/core";
+import { Loader } from "@mantine/core";
 import { Copy, GitBranch, Pencil, Quote, RotateCcw } from "lucide-react";
+import type { ReactNode } from "react";
 
 import MessageInfo, { type MessageInfoProps } from "./MessageInfo";
-
-const messageActionTooltipEvents = { hover: true, focus: true, touch: false };
 
 export type MessageActionsProps = {
   hidden?: boolean;
@@ -18,6 +17,51 @@ export type MessageActionsProps = {
   onAnotherAnswer?: (() => void) | undefined;
   anotherAnswerDisabled?: boolean;
 };
+
+/**
+ * One message action with a hover hint. The button and hint are plain HTML
+ * and CSS (message-info.css), so a transcript re-render costs no Mantine
+ * component or tooltip state per action. A disabled action stays focusable
+ * through its wrapper and keeps its name.
+ */
+function Action({
+  tip,
+  label,
+  disabled = false,
+  className,
+  onClick,
+  onPointerDown,
+  children,
+}: {
+  tip: string;
+  label: string;
+  disabled?: boolean;
+  className?: string;
+  onClick: () => void;
+  onPointerDown?: (event: React.PointerEvent) => void;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className="message-action"
+      data-tip={tip}
+      role={disabled ? "group" : undefined}
+      aria-label={disabled ? label : undefined}
+      tabIndex={disabled ? 0 : undefined}
+    >
+      <button
+        type="button"
+        className={`message-action-button${className ? ` ${className}` : ""}`}
+        aria-label={label}
+        disabled={disabled}
+        onPointerDown={onPointerDown}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    </span>
+  );
+}
 
 export default function MessageActions({
   hidden = false,
@@ -35,113 +79,53 @@ export default function MessageActions({
   return (
     <div className="message-bottom" hidden={hidden && !info}>
       <div className="message-action-controls" hidden={hidden}>
-        <Tooltip
-          label="Copy this message"
-          position="top"
-          withArrow
-          events={messageActionTooltipEvents}
+        <Action
+          tip="Copy this message"
+          label="Copy message"
+          className="copy-message"
+          onClick={onCopy}
         >
-          <ActionIcon
-            size="sm"
-            className="copy-message"
-            aria-label="Copy message"
-            onClick={onCopy}
-          >
-            <Copy size={14} />
-          </ActionIcon>
-        </Tooltip>
+          <Copy size={14} />
+        </Action>
         {onQuote && (
-          <Tooltip
-            label="Quote this message in your reply"
-            position="top"
-            withArrow
-            events={messageActionTooltipEvents}
+          <Action
+            tip="Quote this message in your reply"
+            label="Quote message"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={onQuote}
           >
-            <ActionIcon
-              size="sm"
-              aria-label="Quote message"
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={onQuote}
-            >
-              <Quote size={14} />
-            </ActionIcon>
-          </Tooltip>
+            <Quote size={14} />
+          </Action>
         )}
         {onEdit && (
-          <Tooltip
-            label="Edit this message in a new chat"
-            position="top"
-            withArrow
-            events={messageActionTooltipEvents}
+          <Action
+            tip="Edit this message in a new chat"
+            label="Edit in a new chat"
+            disabled={editDisabled}
+            onClick={onEdit}
           >
-            <span
-              style={{ display: "inline-flex" }}
-              role={editDisabled ? "group" : undefined}
-              aria-label={editDisabled ? "Edit in a new chat" : undefined}
-              tabIndex={editDisabled ? 0 : undefined}
-            >
-              <ActionIcon
-                size="sm"
-                aria-label="Edit in a new chat"
-                disabled={editDisabled}
-                onClick={onEdit}
-              >
-                {editLoading ? <Loader size={14} /> : <Pencil size={14} />}
-              </ActionIcon>
-            </span>
-          </Tooltip>
+            {editLoading ? <Loader size={14} /> : <Pencil size={14} />}
+          </Action>
         )}
         {onBranch && (
-          <Tooltip
-            label="Start a new branch after this turn"
-            position="top"
-            withArrow
-            events={messageActionTooltipEvents}
+          <Action
+            tip="Start a new branch after this turn"
+            label="Branch after this turn"
+            disabled={branchDisabled}
+            onClick={onBranch}
           >
-            <span
-              style={{ display: "inline-flex" }}
-              role={branchDisabled ? "group" : undefined}
-              aria-label={branchDisabled ? "Branch after this turn" : undefined}
-              tabIndex={branchDisabled ? 0 : undefined}
-            >
-              <ActionIcon
-                size="sm"
-                aria-label="Branch after this turn"
-                disabled={branchDisabled}
-                onClick={onBranch}
-              >
-                <GitBranch size={14} />
-              </ActionIcon>
-            </span>
-          </Tooltip>
+            <GitBranch size={14} />
+          </Action>
         )}
         {onAnotherAnswer && (
-          <Tooltip
-            label="Prepare a request for another answer in a new chat"
-            position="top"
-            withArrow
-            events={messageActionTooltipEvents}
+          <Action
+            tip="Prepare a request for another answer in a new chat"
+            label="Another answer in a new chat"
+            disabled={anotherAnswerDisabled}
+            onClick={onAnotherAnswer}
           >
-            <span
-              style={{ display: "inline-flex" }}
-              role={anotherAnswerDisabled ? "group" : undefined}
-              aria-label={
-                anotherAnswerDisabled
-                  ? "Another answer in a new chat"
-                  : undefined
-              }
-              tabIndex={anotherAnswerDisabled ? 0 : undefined}
-            >
-              <ActionIcon
-                size="sm"
-                aria-label="Another answer in a new chat"
-                disabled={anotherAnswerDisabled}
-                onClick={onAnotherAnswer}
-              >
-                <RotateCcw size={14} />
-              </ActionIcon>
-            </span>
-          </Tooltip>
+            <RotateCcw size={14} />
+          </Action>
         )}
       </div>
       {info && <MessageInfo {...info} />}

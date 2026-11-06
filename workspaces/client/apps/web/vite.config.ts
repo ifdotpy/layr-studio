@@ -70,12 +70,20 @@ export default defineConfig({
           if (initial.has(`/${name}`)) return;
           initial.add(`/${name}`);
           const output = bundle[name];
-          if (output?.type === "chunk") output.imports.forEach(visit);
+          if (output?.type !== "chunk") return;
+          output.imports.forEach(visit);
+          output.viteMetadata?.importedCss.forEach(visit);
         };
         for (const match of String(html.source).matchAll(
           /(?:src|href)="\.\/([^"?#]+)"/g,
-        ))
-          visit(String(match[1]));
+        )) {
+          const name = String(match[1]);
+          visit(name);
+          // The entry imports the application (main.tsx), so it opens offline
+          // and at once after an update.
+          const entry = bundle[name];
+          if (entry?.type === "chunk") entry.dynamicImports.forEach(visit);
+        }
         // The shared Rust parser must be available on the first offline load.
         for (const name of Object.keys(bundle)) {
           if (name.endsWith(".wasm")) visit(name);

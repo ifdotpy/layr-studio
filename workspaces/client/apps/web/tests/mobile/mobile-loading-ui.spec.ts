@@ -90,9 +90,8 @@ test("mobile loading ui", async ({ browser: _browser }) => {
   const bootstrapPath = config.initial.find((path) =>
     path.includes("/studio-startup-"),
   )!;
-  const cssPath = config.initial.find((path) =>
-    /\/index-[^/]+\.css$/.test(path),
-  )!;
+  // The application stylesheet belongs to the chunk that main.tsx imports.
+  const cssPath = config.initial.find((path) => path.endsWith(".css"))!;
   const replacements: [[string, string], [string, string]] = [
     [bootstrapPath, bootstrapPath.replace(".js", "-update.js")],
     [cssPath, cssPath.replace(".css", "-update.css")],
@@ -340,8 +339,10 @@ test("mobile loading ui", async ({ browser: _browser }) => {
       draft,
     );
     const warmMs = Date.now() - warmStart;
+    // An installed app opens from its cache without waiting for the server;
+    // a network race would hold the cached shell for at least 1200 ms.
     assert.ok(
-      warmMs < 3000,
+      warmMs < 1200,
       `Sleeping Mac held the cached shell: ${warmMs} ms`,
     );
     documentDelay = 0;
