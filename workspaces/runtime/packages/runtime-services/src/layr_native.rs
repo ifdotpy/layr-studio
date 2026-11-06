@@ -518,7 +518,9 @@ mod receipt_tests {
         let state_id =
             run(state.path(), &cwd, &["rev-parse", "head"]).expect("fixture operation succeeds");
         assert_eq!(
-            evidence(state.path(), &worker, &state_id).expect("fixture operation succeeds")["stateId"],
+            evidence(state.path(), &worker, &state_id)
+                .expect("fixture operation succeeds")
+                .state_id,
             state_id
         );
         assert!(evidence(state.path(), &worker, &state_id[..8]).is_err());
@@ -913,10 +915,12 @@ esac
     fn native_layr_fake_evidence_retains_transport_fields() {
         let (state, worker, _binary_override) = fast_fixture();
         let response = evidence(state.path(), &worker, "full-named-state").unwrap();
+        assert_eq!(response.state_id, "full-named-state");
         assert_eq!(
-            response,
-            json!({"stateId":"full-named-state","projectId":worker["layrProjectId"],"line":worker["layrLine"]})
+            response.project_id.as_deref(),
+            worker["layrProjectId"].as_str()
         );
+        assert_eq!(response.line.as_deref(), worker["layrLine"].as_str());
         let mut unassociated = worker.clone();
         unassociated["cwd"] = json!(state.path().join("elsewhere"));
         assert!(evidence(state.path(), &unassociated, "full-named-state").is_err());
