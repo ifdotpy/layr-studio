@@ -61,4 +61,21 @@ describe("Project folder dialog", () => {
       ),
     ).not.toContain("Show folder");
   });
+
+  it("does not offer a folder for a legacy VM chat", () => {
+    const markup = render(
+      createElement(ProjectFolderDialog, {
+        agent: agent({
+          executionMode: "vm" as Agent["executionMode"],
+          layrProjectId: "app",
+          cwd: "/guest/path",
+        }),
+        canReveal: true,
+        onReveal: vi.fn(),
+      }),
+    );
+    expect(markup).toContain("folder is unavailable");
+    expect(markup).not.toContain("/guest/path");
+    expect(markup).not.toContain("Show folder");
+  });
 });

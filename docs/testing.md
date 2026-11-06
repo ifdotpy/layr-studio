@@ -77,8 +77,7 @@ to populate all target dependencies before an offline check. `deny.toml` permits
 `studio-json` and named third-party direct dependents of `serde_json`; when a
 dependency adds one, inspect `cargo tree --locked --target all --all-features -i serde_json -e
 normal,build,dev --workspace --depth 1` and deliberately add the third-party crate to the wrappers
-list. Workspace crates must use the facade. The separate vendored Layr workspace
-is excluded by the root Cargo workspace.
+list. Workspace crates must use the facade.
 
 | Purpose                                              | Command                                  |
 | ---------------------------------------------------- | ---------------------------------------- |

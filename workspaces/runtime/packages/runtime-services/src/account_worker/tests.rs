@@ -5269,3 +5269,47 @@ async fn thread_start_lost_before_turn_submission_remains_held() {
     );
     replacement.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn host_recovery_leaves_legacy_actor_receipt_unresolved() {
+    let state = State::new().await;
+    let agent_id = state.agent.clone();
+    let (recovered, unresolved) = state.bridge.run(move |store| async move {
+        store.transaction(move |tx| {
+            let context = Pending {
+                intent: TurnIntent {
+                    agent_id, epoch: 1, attempt_id: "legacy-vm-start".into(),
+                    account_key: "default".into(), provider: studio_runtime_providers::ProviderKind::Codex,
+                    thread_id: Some("fake-thread-0".into()), cwd: None, model: None,
+                    events: vec![], radio_authorized: false,
+                },
+                method: Method::ThreadStart, operation: "legacy-vm-start".into(),
+                thread: None, compiled: None,
+            };
+            let request = studio_runtime_schema::provider_call_contract::TransportRequest {
+                id: studio_runtime_providers::RequestId::String("legacy-vm-start".into()), generation: 1,
+                method: Method::ThreadStart, operation: "legacy-vm-start".into(), thread: None,
+                lightweight: false, deadline: 60_000, unknown: true, remote_id: None,
+            };
+            studio_runtime_store::outbox::Outbox::put(tx, &studio_runtime_store::outbox::OutboxRow {
+                id: "legacy-vm-start".into(), kind: studio_runtime_schema::persistence::OutboxKind::ProviderCall,
+                owner_kind: studio_runtime_schema::persistence::OwnerKind::Agent, owner_id: context.intent.agent_id.clone(),
+                account: Some("default".into()), stream_id: Some("default:vm:legacy-actor".into()), generation: Some(1),
+                request_id: None, signature: "legacy-call".into(), status: studio_runtime_schema::persistence::OutboxStatus::Unknown,
+                ordinal: None, next_at: None, created: 1,
+                payload: store::ProviderCall::Account(Box::new(store::AccountCall { context, request, written: None, restarted: false })),
+            })?;
+            Ok(())
+        }).await?;
+        let recovered = store::recover(&store, "default", Generation(1), true).await?;
+        let unresolved: i64 = store.test_reader()?.query_row(
+            "SELECT COUNT(*) FROM runtime_outbox WHERE id='legacy-vm-start' AND status='unknown'", [], |row| row.get(0),
+        )?;
+        Ok((recovered.len(), unresolved))
+    }).await.expect("host recovery succeeds");
+    assert_eq!(
+        recovered, 0,
+        "legacy actor receipt must not attach to a host ticket"
+    );
+    assert_eq!(unresolved, 1, "legacy receipt stays unresolved");
+}

@@ -70,6 +70,17 @@ test.each([
   expect(markup).toContain(`>${label}</span>`);
 });
 
+test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
+  const current = agent({
+    ...(remote ? { remoteWorker: { server: "remote", link: "link" } } : {}),
+    workspaceMode: "layr" as Agent["workspaceMode"],
+  });
+  expect(workspaceBadgeInfo(current)).toEqual({
+    label: "Unavailable",
+    title: "Legacy workspace unavailable · /projects/example",
+  });
+});
+
 test("missing modes retain lead and remote badge visibility", () => {
   expect(workspaceBadgeInfo()).toBeNull();
   for (const workspaceMode of [undefined, null]) {

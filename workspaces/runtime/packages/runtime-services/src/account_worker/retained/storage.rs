@@ -88,15 +88,7 @@ fn monitor_account_sql(agent_param: usize) -> String {
 /// Identify legacy VM workspaces that cannot use the host provider session.
 pub fn vm_actor(connection: &rusqlite::Connection, agent: &str) -> Result<bool, WorkerError> {
     let record = AgentRepository::get(connection, &AgentId::from(agent))?;
-    Ok(record.is_some_and(|record| {
-        let value = record.value();
-        crate::workspace_ready::vm_workspace_unsupported(
-            value["executionMode"].as_str(),
-            value["workspaceMode"].as_str(),
-            record.layr_ready == Some(true),
-            value["layrLine"].as_str().is_some(),
-        )
-    }))
+    Ok(record.is_some_and(|record| crate::workspace_ready::legacy_vm_record(&record)))
 }
 
 pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<bool, WorkerError> {
@@ -153,6 +145,9 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
     let Some(agent_record) = AgentRepository::get(tx, &AgentId::from(actor.agent.as_str()))? else {
         return Ok(false);
     };
+    if crate::workspace_ready::legacy_vm_record(&agent_record) {
+        return Ok(false);
+    }
     if call.method == Method::ThreadUnsubscribe {
         return crate::agent_management_recovery::authorize_release(
             tx,
@@ -1153,6 +1148,9 @@ pub(in crate::account_worker) async fn recover(
             )
             .map_err(outbox_error)?
             {
+                if row.stream_id.as_deref() != Some(account.as_str()) {
+                    continue;
+                }
                 let store::ProviderCall::Retained(payload) = row.payload else {
                     continue;
                 };
@@ -1630,6 +1628,9 @@ mod replay_identity_tests {
             let mut agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent-1","rootId":"agent-1","epoch":7,"threadId":"thread-1","status":"idle","autoWake":true}))?;
             AgentRepository::put(tx,&agent)?;
             assert!(authorize(tx,&request).expect("eligible handoff"));
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode','layr') WHERE id='agent-1'", [])?;
+            assert!(!authorize(tx,&request).expect("legacy handoff refused"));
+            AgentRepository::put(tx,&agent)?;
             agent.in_flight = Some(true); AgentRepository::put(tx,&agent)?;
             assert!(!authorize(tx,&request).expect("active handoff refused"));
             agent.in_flight = Some(false); AgentRepository::put(tx,&agent)?;
@@ -2021,7 +2022,9 @@ mod replay_identity_tests {
             }
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.executionMode','vm') WHERE id='agent-1'",[])?;
             assert!(!authorize(tx,&exact)?,"a host generation does not prove a guest process identity");
-            tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.executionMode') WHERE id='agent-1'",[])?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.executionMode'),'$.workspaceMode','layr') WHERE id='agent-1'",[])?;
+            assert!(!authorize(tx,&exact)?,"legacy workspace mode cannot use host identity");
+            tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.workspaceMode') WHERE id='agent-1'",[])?;
             tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.epoch',8) WHERE id='watch'",[])?;
             assert!(!crate::account_worker::retained::monitor_survives_account_transfer(tx,"watch","agent-1")?,"the monitor row epoch must match its actor and submitted operation");
             Ok::<_,WorkerError>(())
