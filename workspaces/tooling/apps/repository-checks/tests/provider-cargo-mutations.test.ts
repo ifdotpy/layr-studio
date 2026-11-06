@@ -51,7 +51,12 @@ test(
       ]) {
         const target = path.join(copy, file);
         mkdirSync(path.dirname(target), { recursive: true });
-        cpSync(path.join(root, file), target, { recursive: true });
+        // Same file times as the checkout: cargo then finds the warm units of the unchanged
+        // crates fresh, and only a mutation below makes it compile.
+        cpSync(path.join(root, file), target, {
+          recursive: true,
+          preserveTimestamps: true,
+        });
       }
       assert.equal(existsSync(path.join(copy, "node_modules")), false);
       const manifest = readFileSync(
