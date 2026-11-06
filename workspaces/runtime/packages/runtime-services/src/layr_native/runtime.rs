@@ -564,8 +564,23 @@ pub fn main_path(state_dir: &Path, project: &str) -> PathBuf {
     main_path_in_store(&store_path(state_dir), project)
 }
 
+/// The main line of `project`. `layr init --from-git` leaves main at the checkout path, outside
+/// the store; its metadata then names that folder.
 pub(super) fn main_path_in_store(root: &Path, project: &str) -> PathBuf {
-    root.join("projects").join(project).join("lines/main")
+    let main = root.join("projects").join(project).join("lines/main");
+    if main.exists() {
+        return main;
+    }
+    super::mapping::moved_main(root, project).unwrap_or(main)
+}
+
+/// The folder of `line` of `project`. `layr line new` makes it in the store even when main
+/// moved out of the store.
+pub(super) fn line_path_in_store(root: &Path, project: &str, line: &str) -> PathBuf {
+    if line == "main" {
+        return main_path_in_store(root, project);
+    }
+    root.join("projects").join(project).join("lines").join(line)
 }
 
 pub(super) fn admit_git_policy(state_dir: &Path, project: &str, without_git: bool) -> Result<()> {
@@ -833,10 +848,7 @@ pub(super) fn prepare_files_reporting(
             studio_runtime_store::sha256_hex(text(record, "id")?.as_bytes())
         )
     };
-    let cwd = main
-        .parent()
-        .ok_or_else(|| NativeLayrError::Refused("Invalid main path".into()))?
-        .join(&line);
+    let cwd = line_path_in_store(&root, &project, &line);
     if !lead && !reviewer {
         create_worker_line(
             state_dir, &root, &main, &project, &line, &cwd, record, &start, progress,
@@ -1009,10 +1021,7 @@ pub(super) fn associated_cwd(state_dir: &Path, record: &Value) -> Result<PathBuf
         ));
     }
     let root = settings::record_store(state_dir, record)?;
-    let expected = main_path_in_store(&root, &project)
-        .parent()
-        .ok_or_else(|| NativeLayrError::Refused("Invalid main path".into()))?
-        .join(expected_line);
+    let expected = line_path_in_store(&root, &project, &expected_line);
     let reviewer = record["role"] == "reviewer";
     if reviewer {
         let scratch = CanonicalPath::existing(state_dir)

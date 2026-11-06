@@ -140,11 +140,44 @@ fn project_origin(root: &Path, project: &str) -> Result<Option<String>> {
     .transpose()
 }
 
+/// The main line folder of `project` when `layr init --from-git` left it outside the store: the
+/// project metadata names the line id of `main` and the folder of that line.
+pub(super) fn moved_main(root: &Path, project: &str) -> Option<PathBuf> {
+    let meta = root.join("projects").join(project).join("meta");
+    let connection = Connection::open_with_flags(
+        meta.join("db/layr.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let id: String = connection
+        .query_row(
+            "SELECT id FROM lines WHERE name='main' AND deleted=0",
+            [],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let paths: std::collections::BTreeMap<String, PathBuf> =
+        studio_json::from_slice(&fs::read(meta.join("line-paths.json")).ok()?).ok()?;
+    paths.get(&id).cloned()
+}
+
+/// Whether `source` is the main line of `project` itself, moved in place out of the store.
+fn is_moved_main(root: &Path, source: &Path, project: &str) -> bool {
+    moved_main(root, project)
+        .and_then(|main| CanonicalPath::existing(&main).ok())
+        .zip(CanonicalPath::existing(source).ok())
+        .is_some_and(|(main, source)| main.into_path_buf() == source.into_path_buf())
+}
+
 pub(super) fn verify(root: &Path, source: &Path, project: &str) -> Result<Value> {
     if !valid_name(project) {
         return Err(NativeLayrError::Refused(
             "Invalid native Layr project name".into(),
         ));
+    }
+    // The source is the project's own main line: there is no second history to compare.
+    if is_moved_main(root, source, project) {
+        return Ok(json!({"inPlace":true,"projectOrigin":project_origin(root, project)?}));
     }
     let main = root.join("projects").join(project).join("lines/main");
     let expected = CanonicalPath::existing(root)?
@@ -306,6 +339,9 @@ pub(super) fn resolve(state: &Path, root: &Path, record: &Value) -> Result<Strin
     if metadata.join(format!("{fallback}.json")).is_file() {
         return Ok(fallback);
     }
+    if let [project] = projects_with_moved_main(root, &source)?.as_slice() {
+        return Ok(project.clone());
+    }
     let source_origin = match git(&source, &["config", "--get", "remote.origin.url"]) {
         Ok(value) if !value.is_empty() => value,
         _ => return Ok(fallback),
@@ -335,6 +371,21 @@ pub(super) fn resolve(state: &Path, root: &Path, record: &Value) -> Result<Strin
             "More than one project matches this source. Use native-layr map to select one.".into(),
         )),
     }
+}
+
+/// The projects whose main line is `source` itself, moved in place out of the store.
+fn projects_with_moved_main(root: &Path, source: &Path) -> Result<Vec<String>> {
+    let projects = root.join("projects");
+    let mut found = Vec::new();
+    if projects.is_dir() {
+        for entry in fs::read_dir(projects)? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            if valid_name(&name) && is_moved_main(root, source, &name) {
+                found.push(name);
+            }
+        }
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
@@ -467,6 +518,52 @@ null"#;
         git(&main, &["remote", "remove", "origin"]).unwrap();
         let record = json!({"hostProjectPath":main});
         assert_eq!(resolve(&state, &root, &record).unwrap(), "studio");
+    }
+
+    #[test]
+    fn a_main_line_moved_in_place_maps_its_own_folder_and_new_lines_stay_in_the_store() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let state = fixture.path().join("state");
+        let root = fixture.path().join("store");
+        // `layr init --from-git` leaves main at the checkout path, without a Git origin.
+        let source = fixture.path().join("attar");
+        commit(&source, "in place");
+        let meta = root.join("projects/attar/meta");
+        fs::create_dir_all(meta.join("db")).expect("metadata");
+        fs::create_dir_all(root.join("projects/attar/lines")).expect("lines");
+        let connection = Connection::open(meta.join("db/layr.sqlite")).expect("db");
+        connection
+            .execute_batch(
+                "CREATE TABLE config(key TEXT, value TEXT);
+                 INSERT INTO config VALUES('remote.origin.url','\"https://example.test/org/attar.git\"');
+                 CREATE TABLE lines(id TEXT PRIMARY KEY, name TEXT, deleted INTEGER DEFAULT 0);
+                 INSERT INTO lines VALUES('main-id','main',0);",
+            )
+            .expect("project");
+        fs::write(
+            meta.join("line-paths.json"),
+            json!({"main-id":source}).to_string(),
+        )
+        .expect("line paths");
+        settings::fixture_select(&state, &root);
+        let root = settings::selected_store(&state).expect("root");
+        assert_eq!(runtime::main_path_in_store(&root, "attar"), source);
+        assert_eq!(
+            runtime::line_path_in_store(&root, "attar", "agent-x"),
+            root.join("projects/attar/lines/agent-x")
+        );
+        assert_eq!(
+            resolve(&state, &root, &json!({"hostProjectPath":source})).expect("in place"),
+            "attar"
+        );
+        assert_eq!(
+            bind(&state, &source, "attar").expect("explicit map")["projectId"],
+            "attar"
+        );
+        // Another folder is not that main line.
+        let other = fixture.path().join("other");
+        commit(&other, "other");
+        assert!(verify(&root, &other, "attar").is_err());
     }
 
     #[test]
