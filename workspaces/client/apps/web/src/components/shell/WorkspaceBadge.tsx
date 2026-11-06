@@ -8,6 +8,13 @@ export type WorkspaceBadgeInfo = {
 
 export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
   if (!agent) return null;
+  if (agent.legacyVmWorkspace) {
+    const title = "Legacy workspace unavailable";
+    return {
+      label: "Unavailable",
+      title: !agent.isLead && agent.cwd ? `${title} · ${agent.cwd}` : title,
+    };
+  }
   if (agent.remoteWorker && (!agent.cwd || !agent.workspaceMode)) return null;
   // Legacy rows without a mode keep only the inference their flags prove.
   const mode =
@@ -23,18 +30,16 @@ export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
   // A chat lead never shows the shared mode of its own folder.
   if (
     !mode ||
-    !["layr-native", "layr", "worktree", "shared"].includes(mode) ||
+    !["layr-native", "worktree", "shared"].includes(mode) ||
     (agent.isLead && mode === "shared")
   )
     return null;
   const info: WorkspaceBadgeInfo =
     mode === "layr-native"
       ? { label: "Layr", title: "Native Layr workspace" }
-      : mode === "layr"
-        ? { label: "Unavailable", title: "Legacy workspace unavailable" }
-        : mode === "worktree"
-          ? { label: "WT", title: "Git worktree" }
-          : { label: "SHARED", title: "Shared folder" };
+      : mode === "worktree"
+        ? { label: "WT", title: "Git worktree" }
+        : { label: "SHARED", title: "Shared folder" };
   if (!agent.isLead && agent.cwd) info.title += ` · ${agent.cwd}`;
   return info;
 }
