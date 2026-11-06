@@ -1,4 +1,4 @@
-import { useServerApi } from "../servers/ServerServicesContext";
+import { useServerApi, useServerSync } from "../servers/ServerServicesContext";
 import { Tabs } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { errorText } from "../api";
@@ -8,6 +8,7 @@ import {
   type ProjectServerChoice,
 } from "../servers/projectLocations";
 import ProjectLocationsSettings from "./ProjectLocationsSettings";
+import { ProjectLayrStoreSettings } from "./ProjectLayrStoreSettings";
 import { ProjectPeers } from "./ProjectPeers";
 
 export default function ProjectFoldersDialog({
@@ -20,10 +21,36 @@ export default function ProjectFoldersDialog({
   saved: () => Promise<void>;
 }) {
   const { get } = useServerApi();
+  const { subscribeStateProjection } = useServerSync();
 
   const [project, setProject] = useState(initial);
   const [servers, setServers] = useState<ProjectServerChoice[]>([]);
   const [error, setError] = useState("");
+  useEffect(
+    () =>
+      subscribeStateProjection(
+        (snapshot) => {
+          const next = snapshot?.runtime.projects.find(
+            (row) => row.id === initial.id,
+          );
+          if (next)
+            setProject((current) => ({
+              ...current,
+              ...next,
+              path: next.path ?? current.path,
+              name: next.name ?? current.name,
+            }));
+        },
+        () => {},
+      ),
+    [initial.id, subscribeStateProjection],
+  );
+  const refreshProject = async () => {
+    const result = await get("/api/projects");
+    const next = result.items.find((row) => row.id === project.id);
+    if (next) setProject(next);
+    await saved();
+  };
   useEffect(() => {
     let active = true;
     void readProjectServers(get)
@@ -50,13 +77,9 @@ export default function ProjectFoldersDialog({
           project={project}
           servers={servers.length ? servers : undefined}
           initialServer={initialServer}
-          saved={async () => {
-            const result = await get("/api/projects");
-            const next = result.items.find((row) => row.id === project.id);
-            if (next) setProject(next);
-            await saved();
-          }}
+          saved={refreshProject}
         />
+        <ProjectLayrStoreSettings project={project} saved={refreshProject} />
       </Tabs.Panel>
       <Tabs.Panel value="peers" pt="md">
         <ProjectPeers projectId={project.id} notify={setError} />

@@ -61,6 +61,7 @@ pub enum ProjectAction {
     RemoveFolder,
     SetAccountGroups,
     SetWorkspacePolicy,
+    SetLayrStoreRoot,
 }
 
 impl ProjectAction {
@@ -78,6 +79,7 @@ impl ProjectAction {
             Self::RemoveFolder => "remove_folder",
             Self::SetAccountGroups => "set_account_groups",
             Self::SetWorkspacePolicy => "set_workspace_policy",
+            Self::SetLayrStoreRoot => "set_layr_store_root",
         }
     }
 }
@@ -115,6 +117,8 @@ pub struct ProjectWrite {
     pub server: Option<BoundedText<0, 128>>,
     #[serde(default)]
     pub workspace_policy: Field<WorkspacePolicy>,
+    #[serde(default)]
+    pub layr_store_root: Field<String>,
 }
 
 impl ProjectWrite {
@@ -134,6 +138,7 @@ impl ProjectWrite {
             request_id: None,
             server: None,
             workspace_policy: Field::Missing,
+            layr_store_root: Field::Missing,
         })
     }
 }

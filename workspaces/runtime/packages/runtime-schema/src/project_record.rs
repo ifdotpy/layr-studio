@@ -96,6 +96,12 @@ pub struct ProjectLive {
     #[schemars(with = "Option<u64>")]
     pub workspace_policy_revision: Field<u64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub layr_store_root: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub layr_store_root_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<BTreeMap<String, ProjectLocationIntent>>")]
     pub location_intents: Field<BTreeMap<String, ProjectLocationIntent>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]

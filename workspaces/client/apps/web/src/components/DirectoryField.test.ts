@@ -3,6 +3,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 
+vi.mock("../servers/ServerServicesContext", () => ({
+  useServerFileDialogs: () => ({
+    canPickDirectory: () => false,
+    pickDirectory: vi.fn(),
+  }),
+}));
 vi.mock("./ProjectDirectoryPicker", () => ({ default: () => null }));
 import DirectoryField from "./DirectoryField";
 

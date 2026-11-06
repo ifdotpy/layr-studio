@@ -41,6 +41,8 @@ pub enum ProjectsError {
     Conflict(&'static str),
     #[error("bad request: {0}")]
     BadRequest(&'static str),
+    #[error("invalid native Layr store: {0}")]
+    InvalidStore(String),
     #[error("not implemented: requires {0}")]
     Requires(&'static str),
     #[error("invalid stored {table} record {id}")]
@@ -571,6 +573,9 @@ pub async fn write(
     if action == "set_workspace_policy" {
         return set_workspace_policy(store, body, default_account, known_accounts).await;
     }
+    if action == "set_layr_store_root" {
+        return set_layr_store_root(store, body).await;
+    }
     if action == "set_account_groups" {
         return set_account_groups(store, body, default_account, known_accounts).await;
     }
@@ -992,6 +997,73 @@ async fn set_worker_environment(
             let mut project = project;
             project["workerEnvironment"] = json!(environment);
             project["workerEnvironmentRevision"] = json!(current + 1);
+            ProjectsRepository::put_project(tx, &project)?;
+            Ok(project)
+        })
+        .await
+}
+
+async fn set_layr_store_root(
+    store: Arc<RuntimeStore>,
+    body: ProjectWrite,
+) -> Result<Value, ProjectsError> {
+    let requested = match body.layr_store_root {
+        Field::Null => None,
+        Field::Value(root) => Some(root),
+        Field::Missing => return Err(ProjectsError::Invalid("store root is required")),
+    };
+    let expected = body
+        .expected_revision
+        .as_ref()
+        .and_then(|value| value.as_u64())
+        .ok_or(ProjectsError::Invalid("store root revision is invalid"))?;
+    let (prepared, path) =
+        prepare_path(store.clone(), Some(body.path.as_str().to_owned()), true).await?;
+    let projects = store
+        .read_async("projects/layr-store", |db| ProjectsRepository::owned(db))
+        .await?;
+    let state = store.state_dir().to_path_buf();
+    let local = store.local_server_id()?;
+    let root = studio_runtime_process::blocking_pool::spawn_blocking(
+        "projects/layr-store/validate",
+        move || {
+            requested
+                .map(|root| {
+                    let root = crate::layr_native::settings::resolve_root(Path::new(&root))
+                        .map_err(|error| ProjectsError::InvalidStore(error.to_string()))?;
+                    crate::layr_native::settings::check_projects_overlap(
+                        root.as_path(),
+                        &projects,
+                        local.as_deref(),
+                    )
+                    .map_err(|error| ProjectsError::InvalidStore(error.to_string()))?;
+                    crate::layr_native::settings::validate_resolved_root(&state, &root)
+                        .map_err(|error| ProjectsError::InvalidStore(error.to_string()))?;
+                    Ok::<_, ProjectsError>(root.as_path().to_string_lossy().into_owned())
+                })
+                .transpose()
+        },
+    )
+    .await
+    .map_err(|_| ProjectsError::PreparationWorker)??;
+    store
+        .transaction_with(move |tx| -> Result<Value, ProjectsError> {
+            prepared.recheck(tx)?;
+            let mut project = load_project(tx, &path)?
+                .ok_or(ProjectsError::Invalid("select an existing project"))?;
+            let current = revision_of(Some(&project), "layrStoreRootRevision", &path)?;
+            if project.get("layrStoreRoot").and_then(Value::as_str) == root.as_deref()
+                && (expected == current || expected.saturating_add(1) == current)
+            {
+                return Ok(project);
+            }
+            if current != expected {
+                return Err(ProjectsError::Conflict(
+                    "Store directory changed. Reload it before saving",
+                ));
+            }
+            project["layrStoreRoot"] = root.map_or(Value::Null, |value| json!(value));
+            project["layrStoreRootRevision"] = json!(current + 1);
             ProjectsRepository::put_project(tx, &project)?;
             Ok(project)
         })

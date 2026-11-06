@@ -871,9 +871,11 @@ fn radio_guard_error(error: crate::projects::ProjectsError) -> CallbackError {
         E::Store(error) => CallbackError::Store(error),
         E::Sqlite(error) => CallbackError::Store(error.into()),
         E::InvalidStored { table, id } => CallbackError::Stored(format!("{table}/{id}")),
-        E::Conflict(_) | E::BadRequest(_) | E::Requires(_) | E::PreparationWorker => {
-            CallbackError::Stored("runtime_rooms radio".into())
-        }
+        E::Conflict(_)
+        | E::BadRequest(_)
+        | E::InvalidStore(_)
+        | E::Requires(_)
+        | E::PreparationWorker => CallbackError::Stored("runtime_rooms radio".into()),
     }
 }
 

@@ -26,6 +26,12 @@ export default {
 
       "src/nativeErrors.schema.test.ts",
       "src/components/BackgroundShellSettings.test.ts",
+      "src/components/DirectoryField.test.ts",
+      "src/components/DirectoryField.picker.test.ts",
+      "src/components/LayrStoreDirectory.test.ts",
+      "src/components/LayrWorktreesSettings.test.ts",
+      "src/components/ProjectLayrStoreSettings.test.ts",
+      "src/components/ProjectFoldersDialog.test.ts",
       "src/precompressedAssets.test.ts",
       "src/platformNeutralCopy.test.ts",
       "src/App.connection.test.ts",
