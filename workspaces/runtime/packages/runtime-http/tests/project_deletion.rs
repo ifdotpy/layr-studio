@@ -441,14 +441,23 @@ async fn project_deletion_keeps_archive_cleanup_identity_and_drains_it() {
     };
     struct NoIo;
     impl CleanupPorts for NoIo {
-        fn perform(&self, _: &Value, _: &CleanupEffect, _: &str) -> Result<Value, EffectFailure> {
+        fn perform(
+            &self,
+            _: &studio_runtime_store::AgentRecord,
+            _: &CleanupEffect,
+            _: &str,
+        ) -> Result<studio_json::OwnedRawJson, EffectFailure> {
             panic!("absent worktree needs no IO")
         }
     }
     let mut archived = agent("archived", Some("lead"), "/absent-worktree");
     archived["deletedAt"] = json!(2);
     archived["agentArchive"] = json!({"at":2,"epoch":1,"cleanupPending":true});
-    let intent = cleanup::queued_cleanup_intent("archived", 1, CleanupAction::Archive);
+    let intent = studio_runtime_store::projection_value(&cleanup::queued_cleanup_intent(
+        "archived",
+        1,
+        CleanupAction::Archive,
+    ));
     archived["workspaceCleanupIntent"] = intent.clone();
     let f = Fixture::new(vec![agent("lead", None, "/p"), archived], vec![], false).await;
     let (status, r) = f.call(f.body.clone()).await;
