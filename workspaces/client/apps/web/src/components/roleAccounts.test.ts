@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AgentMode } from "../generated/api";
 import type { Agent } from "../types";
 import type { UsageAccount } from "./Usage";
 import { roleAccounts } from "./roleAccounts";
@@ -61,7 +62,7 @@ describe("role accounts", () => {
         lead({
           subagentConcurrencyVersion: undefined,
           agentModeSupported: true,
-          agentMode: "single",
+          agentMode: AgentMode.single,
         } as Partial<Agent>),
       ),
     ).toEqual(["Lead:default"]);
