@@ -843,7 +843,7 @@ async fn complaint_read_projects_a_page_with_one_agent_scan() {
     let tx = db.transaction().unwrap();
     let read = crate::notification_dispatch::agent_complaint_action(
         &tx,
-        &lead,
+        &studio_runtime_store::AgentRecord::from_value(lead.clone()).unwrap(),
         &json!({"action":"read"}),
         "read-page",
         200.0,
@@ -887,7 +887,7 @@ async fn complaint_submit_read_and_respond_share_the_notification_service() {
     let (_directory, store, oracle) = frozen::state().await;
     let worker = oracle["agents"][1].clone();
     let lead = oracle["agents"][0].clone();
-    let worker_for_submit = worker.clone();
+    let worker_for_submit = studio_runtime_store::AgentRecord::from_value(worker.clone()).unwrap();
     let submitted = store
         .transaction_with(move |tx| {
             crate::notification_dispatch::agent_complaint_action(
@@ -902,7 +902,7 @@ async fn complaint_submit_read_and_respond_share_the_notification_service() {
         .unwrap();
     assert_eq!(submitted["recipient"], "lead");
     let complaint_id = submitted["id"].as_str().unwrap().to_owned();
-    let lead_for_read = lead.clone();
+    let lead_for_read = studio_runtime_store::AgentRecord::from_value(lead.clone()).unwrap();
     let complaint_id_for_read = complaint_id.clone();
     let read = store
         .transaction_with(move |tx| {
@@ -917,7 +917,7 @@ async fn complaint_submit_read_and_respond_share_the_notification_service() {
         .await
         .unwrap();
     assert_eq!(read["complaints"][0]["readAt"], 21.0);
-    let lead_for_response = lead.clone();
+    let lead_for_response = studio_runtime_store::AgentRecord::from_value(lead.clone()).unwrap();
     let complaint_id_for_response = complaint_id.clone();
     let responded = store
         .transaction_with(move |tx| {

@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use studio_json::{Value, json};
 use studio_runtime_store::request_results::AdmittedRequest;
 use studio_runtime_store::{
-    ExecutionHistoryRepository, NotificationDispatchRepository, SchedulerRepository, Transaction,
+    AgentRecord, ExecutionHistoryRepository, NotificationDispatchRepository, SchedulerRepository,
+    Transaction,
 };
 
 use super::{
@@ -87,14 +88,21 @@ pub(super) fn record_submission(
                     .ok_or_else(|| stored("runtime_execution_attempts", attempt_id))?,
             ),
             SubmissionAuthorization::Current => {
-                let current = NotificationDispatchRepository::agent_record(tx, agent)
-                    .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
+                let current = NotificationDispatchRepository::agent_record(tx, agent)?
                     .ok_or_else(|| stored("runtime_agents", agent))?;
-                let attempt = current
-                    .pointer("/activeExecution/attemptId")
-                    .or_else(|| current.pointer("/startAttempt/id"))
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| stored("runtime_agents", agent))?;
+                // activeExecution remains an open record; preserve explicit-null refusal.
+                let attempt = match current
+                    .extra
+                    .get("activeExecution")
+                    .and_then(|execution| execution.get("attemptId"))
+                {
+                    Some(value) => value.as_str(),
+                    None => current
+                        .start_attempt
+                        .as_ref()
+                        .and_then(|attempt| attempt.id.as_deref()),
+                }
+                .ok_or_else(|| stored("runtime_agents", agent))?;
                 let root = ExecutionHistoryRepository::admission(tx, attempt)?
                     .ok_or_else(|| stored("runtime_execution_attempts", attempt))?;
                 (Some(attempt.to_owned()), root)
@@ -209,11 +217,10 @@ pub(super) fn validate_submission(
     {
         return Err(NotificationDispatchError::invalid());
     }
-    let agent = NotificationDispatchRepository::agent_record(transaction, agent_id)
-        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
+    let agent = NotificationDispatchRepository::agent_record(transaction, agent_id)?
         .ok_or_else(|| stored("runtime_agents", agent_id))?;
     validate_agent_write_fields(&agent, agent_id)?;
-    if agent.get("deletedAt").is_some_and(|value| !value.is_null()) {
+    if agent.deleted_at.is_some() {
         return Err(stored("runtime_agents", agent_id));
     }
     let mut unique = std::collections::BTreeSet::new();
@@ -279,7 +286,7 @@ pub(super) fn validate_submission(
 
 fn validate_submission_policy(
     transaction: &Transaction<'_>,
-    recipient: &Value,
+    recipient: &AgentRecord,
     event_id: &str,
     kind: &str,
     text: &str,
@@ -296,10 +303,7 @@ fn validate_submission_policy(
     if matches!(
         kind,
         "followup" | "agent_message" | "chat_review" | "complaint_response"
-    ) && recipient
-        .get("rootId")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
+    ) && recipient.root_id.as_ref().is_empty()
     {
         return Err(NotificationDispatchError::UnauthorizedSubmission);
     }
@@ -327,10 +331,7 @@ fn validate_submission_policy(
     if !payload.is_object() {
         return Err(stored("runtime_events", event_id));
     }
-    let recipient_id = recipient
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| stored("runtime_agents", "unknown"))?;
+    let recipient_id = recipient.id.as_ref();
     let sender_id = if kind == "agent_message" {
         let Some(sender) = payload.get("sender").and_then(Value::as_str) else {
             return Err(NotificationDispatchError::UnauthorizedSubmission);
@@ -343,7 +344,7 @@ fn validate_submission_policy(
                 .ok_or(NotificationDispatchError::UnauthorizedSubmission)?;
         match room.get("kind").and_then(Value::as_str) {
             Some("broadcast") => {
-                if room.get("rootId") != recipient.get("rootId")
+                if room.get("rootId").and_then(Value::as_str) != Some(recipient.root_id.as_ref())
                     || room.get("rootId").and_then(Value::as_str) == Some("all")
                 {
                     return Err(NotificationDispatchError::UnauthorizedSubmission);
@@ -420,27 +421,14 @@ fn validate_submission_policy(
 
 fn same_team(
     transaction: &Transaction<'_>,
-    recipient: &Value,
+    recipient: &AgentRecord,
     sender_id: &str,
 ) -> Result<bool, NotificationDispatchError> {
-    let Some(root) = recipient.get("rootId").and_then(Value::as_str) else {
-        return Err(stored(
-            "runtime_agents",
-            recipient
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown"),
-        ));
-    };
-    let Some(sender) =
-        NotificationDispatchRepository::related_record(transaction, "runtime_agents", sender_id)?
-    else {
+    let root = recipient.root_id.as_ref();
+    let Some(sender) = NotificationDispatchRepository::agent_record(transaction, sender_id)? else {
         return Ok(false);
     };
-    let sender_root = sender
-        .get("rootId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| stored("runtime_agents", sender_id))?;
+    let sender_root = sender.root_id.as_ref();
     Ok(!root.is_empty() && sender_root == root)
 }
 
@@ -452,49 +440,30 @@ fn peer_pair_allowed(
     if left_id == right_id {
         return Ok(false);
     }
-    let Some(left) =
-        NotificationDispatchRepository::related_record(transaction, "runtime_agents", left_id)?
-    else {
+    let Some(left) = NotificationDispatchRepository::agent_record(transaction, left_id)? else {
         return Ok(false);
     };
-    let Some(right) =
-        NotificationDispatchRepository::related_record(transaction, "runtime_agents", right_id)?
-    else {
+    let Some(right) = NotificationDispatchRepository::agent_record(transaction, right_id)? else {
         return Ok(false);
     };
-    for (id, agent) in [(left_id, &left), (right_id, &right)] {
-        if agent
-            .get("isLead")
-            .is_some_and(|value| !value.is_null() && !value.is_boolean())
-            || agent
-                .get("parentId")
-                .is_some_and(|value| !value.is_null() && !value.is_string())
-            || agent
-                .get("deletedAt")
-                .is_some_and(|value| !value.is_null() && !value.is_number())
-        {
-            return Err(stored("runtime_agents", id));
-        }
-    }
     let Some(path) = left
-        .get("cwd")
-        .and_then(Value::as_str)
+        .cwd
+        .as_deref()
         .and_then(studio_runtime_store::path_identity::lexical_text)
     else {
         return Ok(false);
     };
-    let is_lead = |agent: &Value| {
-        agent.get("isLead").and_then(Value::as_bool) == Some(true)
-            && agent.get("deletedAt").is_none_or(Value::is_null)
-            && agent.get("parentId").is_none_or(Value::is_null)
-            && agent.get("rootId").and_then(Value::as_str)
-                == agent.get("id").and_then(Value::as_str)
+    let is_lead = |agent: &AgentRecord| {
+        agent.is_lead == Some(true)
+            && agent.deleted_at.is_none()
+            && agent.parent_id.is_none()
+            && agent.root_id == agent.id
     };
     if !is_lead(&left)
         || !is_lead(&right)
         || right
-            .get("cwd")
-            .and_then(Value::as_str)
+            .cwd
+            .as_deref()
             .and_then(studio_runtime_store::path_identity::lexical_text)
             .as_deref()
             != Some(path.as_path())

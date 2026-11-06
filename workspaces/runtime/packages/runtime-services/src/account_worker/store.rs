@@ -2261,13 +2261,7 @@ fn complete_deleted_command(
     {
         return Ok(false);
     }
-    crate::notification_dispatch::recover_task_in_transaction(
-        tx,
-        &agent.into_value(),
-        &task,
-        item,
-        now(),
-    )?;
+    crate::notification_dispatch::recover_task_in_transaction(tx, &agent, &task, item, now())?;
     Ok(true)
 }
 

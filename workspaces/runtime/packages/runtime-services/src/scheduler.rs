@@ -61,59 +61,35 @@ pub enum SchedulerError {
 /// function validates the saved attempt and settles only its exact submission.
 pub(crate) fn settle_user_message_receipt_in_transaction(
     transaction: &rusqlite::Transaction<'_>,
-    agent: &Value,
+    agent: &AgentRecord,
     event_id: &str,
     account_key: &str,
     generation: u64,
     thread_id: &str,
     turn_id: &str,
 ) -> Result<bool, SchedulerError> {
-    let Some(agent_id) = agent.get("id").and_then(Value::as_str).map(str::to_owned) else {
-        return Err(StoreError::RecordContract("agent id").into());
-    };
-    let attempt = agent
-        .get("startAttempt")
-        .filter(|attempt| !attempt.is_null())
-        .or_else(|| {
-            agent
-                .get("disconnectRecovery")
-                .and_then(|recovery| recovery.get("startAttempt"))
-        })
-        .unwrap_or(&Value::Null);
-    let Some(epoch) = attempt.get("epoch").and_then(Value::as_i64) else {
+    let agent_id = agent.id.as_ref();
+    let Some(attempt) = agent.start_attempt.as_deref().or_else(|| {
+        agent
+            .disconnect_recovery
+            .as_ref()
+            .and_then(|recovery| recovery.start_attempt.as_deref())
+    }) else {
         return Ok(false);
     };
-    let attempt_events = attempt
-        .get("events")
-        .and_then(Value::as_array)
-        .and_then(|events| {
-            events
-                .iter()
-                .map(|event| event.as_str().map(str::to_owned))
-                .collect::<Option<Vec<_>>>()
-        });
-    let attempt_id = attempt
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let request_ticket = attempt
-        .get("requestTicket")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if agent
-        .get("accountKey")
-        .and_then(Value::as_str)
-        .unwrap_or("default")
-        != account_key
-        || attempt.get("accountKey").and_then(Value::as_str) != Some(account_key)
-        || attempt.get("submitted").and_then(Value::as_bool) != Some(true)
-        || attempt.get("threadId").and_then(Value::as_str) != Some(thread_id)
-        || agent.get("threadId").and_then(Value::as_str) != Some(thread_id)
-        || attempt.get("connectionGeneration").and_then(Value::as_u64) != Some(generation)
+    let Some(epoch) = attempt.epoch else {
+        return Ok(false);
+    };
+    let attempt_events = attempt.events.as_ref();
+    let attempt_id = attempt.id.as_deref().unwrap_or_default();
+    let request_ticket = attempt.request_ticket.as_deref().unwrap_or_default();
+    if agent.account_key != account_key
+        || attempt.account_key.as_deref() != Some(account_key)
+        || attempt.submitted != Some(true)
+        || attempt.thread_id.as_deref() != Some(thread_id)
+        || agent.thread_id.as_deref() != Some(thread_id)
+        || attempt.connection_generation != Some(generation)
         || !attempt_events
-            .as_ref()
             .and_then(|events| events.first())
             .is_some_and(|first_event| first_event == event_id)
     {
@@ -148,10 +124,10 @@ pub(crate) fn settle_user_message_receipt_in_transaction(
     }
     let accepted = SchedulerRepository::settle_started_provider(
         transaction,
-        &agent_id,
+        agent_id,
         epoch,
-        &attempt_id,
-        &request_ticket,
+        attempt_id,
+        request_ticket,
         account_key,
         generation,
         thread_id,
@@ -179,8 +155,8 @@ pub(crate) fn settle_user_message_receipt_in_transaction(
     };
     crate::account_worker::preparation::remember_delivered_manifests(
         transaction,
-        &agent_id,
-        &delivered_events,
+        agent_id,
+        delivered_events,
     )
     .map_err(|_| {
         SchedulerError::Store(StoreError::SchemaMismatch(

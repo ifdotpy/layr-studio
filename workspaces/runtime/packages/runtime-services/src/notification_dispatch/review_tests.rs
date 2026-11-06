@@ -53,7 +53,7 @@ fn p06_empty_deltas_arm_timer_and_coalesce_without_refusal() {
     );
     let mut restored: NotificationStreamBuffer =
         studio_json::from_slice(&serialized).expect("test invariant");
-    restored.flush_analytics(&key, &json!({"id":"agent","rootId":"agent","status":"idle","epoch":1,"accountKey":"default","compactions":0})).unwrap();
+    restored.flush_analytics(&key, &studio_runtime_store::AgentRecord::from_value(json!({"id":"agent","rootId":"agent","status":"idle","epoch":1,"accountKey":"default","compactions":0})).unwrap()).unwrap();
     let batch = restored.take_post_commit().expect("test invariant");
     assert_eq!(batch.sequence, 1);
     assert_eq!(batch.analytics_overflow, 0);
@@ -192,7 +192,6 @@ fn p06_recovery_message_retains_buffered_text_questions_and_atomicity() {
     .expect("test invariant");
     let streams = staged.stream_update.expect("test invariant");
     let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
-        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
         .expect("test invariant")
         .expect("test invariant");
     let original = agent.clone();
@@ -241,8 +240,8 @@ fn p06_recovery_message_retains_buffered_text_questions_and_atomicity() {
         .0;
     assert_eq!(record["text"], "retained");
     assert_eq!(record["streaming"], false);
-    assert_eq!(agent["events"], 2);
-    assert_eq!(agent["lastAnswer"], "retained");
+    assert_eq!(agent.events, Some(2));
+    assert_eq!(agent.last_answer.as_deref(), Some("retained"));
     assert_eq!(next.pending_bytes(), 0);
     assert!(
         streams.pending_bytes() > 0,

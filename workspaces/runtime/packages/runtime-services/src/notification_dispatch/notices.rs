@@ -1,8 +1,14 @@
 //! Pure native notice decisions. The adapter supplies checked stored records and time.
+use serde::Deserialize;
 use studio_json::{Value, json};
 use studio_runtime_schema::provider_errors::{KnownCodexErrorKind, known_error_kind};
+use studio_runtime_schema::{agent_entity_nested::NativeStatusPhase, queue_command::Field};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::sha256_hex;
+use studio_runtime_store::{
+    AgentActivity, AgentRecord, NativeSafetyBuffering, NativeStatus, NativeThreadBlock,
+    NativeTurnError, StoredTransferObject, StoredTransferValue,
+};
 
 use super::{NotificationDispatchError, format_utc};
 
@@ -74,7 +80,7 @@ pub(super) struct NoticeItem {
 }
 #[derive(Default)]
 pub(super) struct NoticeDecision {
-    pub agent: Option<Value>,
+    pub agent: Option<AgentRecord>,
     pub item: Option<NoticeItem>,
     pub refresh_limits: bool,
 }
@@ -156,8 +162,8 @@ pub(super) fn decide(
         return Ok(decision);
     }
     if !captures_analytics(
-        original["turnId"].as_str(),
-        original["inFlight"] == true,
+        original.turn_id.as_deref(),
+        original.in_flight == Some(true),
         method,
         params,
     ) {
@@ -166,29 +172,58 @@ pub(super) fn decide(
     let mut agent = original.clone();
     match kind {
         NoticeKind::Safety => {
-            let previous = &original["nativeSafetyBuffering"];
-            let same = previous["turnId"] == *turn;
-            let mut buffering = params.clone();
-            buffering["accountKey"] = json!(account);
-            buffering["connectionId"] = json!(format!("connection-{generation}"));
-            buffering["at"] = if same {
-                previous.get("at").cloned().unwrap_or(json!(at))
-            } else {
-                json!(at)
+            let previous = original.native_safety_buffering.as_ref();
+            let turn_id = Option::<String>::deserialize(turn)?;
+            let same =
+                previous.and_then(|previous| previous.turn_id.as_deref()) == turn_id.as_deref();
+            let mut buffering = NativeSafetyBuffering {
+                account_key: None,
+                at: None,
+                connection_id: None,
+                dismissed: None,
+                response_started: None,
+                faster_model: Option::<String>::deserialize(&params["fasterModel"])?,
+                show_buffering_ui: Option::<bool>::deserialize(&params["showBufferingUi"])?,
+                thread_id: Option::<String>::deserialize(&params["threadId"])?,
+                turn_id: turn_id.clone(),
             };
-            buffering["dismissed"] = json!(same && previous["dismissed"] == true);
-            buffering["responseStarted"] = json!(
-                (same && previous["responseStarted"] == true)
-                    || original["nativeResponseTurn"] == *turn
+            buffering.account_key = Some(account.to_owned());
+            buffering.connection_id = Some(format!("connection-{generation}"));
+            buffering.at = Some(if same {
+                previous.and_then(|previous| previous.at).unwrap_or(at)
+            } else {
+                at
+            });
+            buffering.dismissed =
+                Some(same && previous.is_some_and(|previous| previous.dismissed == Some(true)));
+            buffering.response_started = Some(
+                (same && previous.is_some_and(|previous| previous.response_started == Some(true)))
+                    || original.native_response_turn.as_deref() == turn_id.as_deref(),
             );
-            if params["showBufferingUi"] == true && buffering["responseStarted"] != true {
-                agent["nativeStatus"] = json!({"phase":"safety","turnId":turn,"at":at,"message":"Codex is checking this request"});
-                agent["activity"] = json!({"phase":"safety","at":at});
-            } else if agent["nativeStatus"]["phase"] == "safety" {
-                remove(&mut agent, "nativeStatus");
-                agent["activity"] = json!({"phase":"thinking","at":at});
+            if params["showBufferingUi"] == true && buffering.response_started != Some(true) {
+                agent.native_status = Some(NativeStatus {
+                    phase: Some(NativeStatusPhase::Safety),
+                    turn_id,
+                    at: Some(at),
+                    message: Some("Codex is checking this request".into()),
+                    error: None,
+                });
+                agent.activity = Some(AgentActivity {
+                    phase: Some("safety".into()),
+                    at: Some(at),
+                    ..Default::default()
+                });
+            } else if agent.native_status.as_ref().and_then(|status| status.phase)
+                == Some(NativeStatusPhase::Safety)
+            {
+                agent.native_status = None;
+                agent.activity = Some(AgentActivity {
+                    phase: Some("thinking".into()),
+                    at: Some(at),
+                    ..Default::default()
+                });
             }
-            agent["nativeSafetyBuffering"] = buffering;
+            agent.native_safety_buffering = Some(buffering);
         }
         NoticeKind::Verification => {
             if params["verifications"]
@@ -238,7 +273,7 @@ pub(super) fn decide(
             {
                 return Ok(decision);
             }
-            let label = provider_label(original);
+            let label = provider_label(original.provider.value().copied());
             let fallback = json!({"message": format!("{label} reported an error.")});
             let raw_error = params
                 .get("error")
@@ -256,8 +291,18 @@ pub(super) fn decide(
                 )
             );
             if params["willRetry"] == true && !policy {
-                agent["nativeStatus"] = json!({"phase":"retrying","error":error_message(&error, label),"turnId":turn,"at":at});
-                agent["activity"] = json!({"phase":"retrying","at":at});
+                agent.native_status = Some(NativeStatus {
+                    phase: Some(NativeStatusPhase::Retrying),
+                    error: Some(error_message(&error, label)),
+                    turn_id: Option::<String>::deserialize(turn)?,
+                    at: Some(at),
+                    message: None,
+                });
+                agent.activity = Some(AgentActivity {
+                    phase: Some("retrying".into()),
+                    at: Some(at),
+                    ..Default::default()
+                });
             } else if error_kind == Some(KnownCodexErrorKind::ActiveTurnNotSteerable) {
                 decision.item = Some(notice(
                     format!("steer:{}", turn.as_str().unwrap_or_default()),
@@ -267,13 +312,18 @@ pub(super) fn decide(
                 ));
             } else {
                 if policy {
-                    agent["nativeFailureHold"] = json!(true);
+                    agent.set_native_failure_hold(true);
                 }
-                remove(&mut agent, "nativeStatus");
-                remove(&mut agent, "nativeSafetyBuffering");
+                agent.native_status = None;
+                agent.native_safety_buffering = None;
                 if error_kind == Some(KnownCodexErrorKind::MisalignmentPolicyViolation) {
-                    agent["nativeThreadBlock"] =
-                        json!({"threadId":agent["threadId"],"error":error});
+                    agent.native_thread_block =
+                        Field::Value(StoredTransferObject::Known(NativeThreadBlock {
+                            thread_id: agent.thread_id.clone().map_or(Field::Null, |id| {
+                                Field::Value(StoredTransferValue::Known(id))
+                            }),
+                            extra: [("error".into(), error.clone())].into(),
+                        }));
                 }
                 decision.refresh_limits = matches!(
                     error_kind,
@@ -282,25 +332,51 @@ pub(super) fn decide(
                             | KnownCodexErrorKind::RateLimitExceeded
                     )
                 );
-                agent["nativeTurnError"] = json!({"turnId":turn,"error":error});
-                agent["error"] = error.clone();
-                agent["activity"] = json!({"phase":"error","at":at});
+                agent.native_turn_error =
+                    Field::Value(StoredTransferObject::Known(NativeTurnError {
+                        turn_id: Field::Value(StoredTransferValue::Known(
+                            turn.as_str().expect("error turn checked above").to_owned(),
+                        )),
+                        extra: [("error".into(), error.clone())].into(),
+                    }));
+                agent.error = Field::Value(typed);
+                agent.activity = Some(AgentActivity {
+                    phase: Some("error".into()),
+                    at: Some(at),
+                    ..Default::default()
+                });
                 decision.item = Some(notice(
                     format!("error:{}", turn.as_str().unwrap_or_default()),
                     error_message(&error, label),
                     "error",
-                    json!({"turnId":turn,"nativeError":error,"cyberAccessProgram":agent["cyberAccessProgram"]}),
+                    json!({"turnId":turn,"nativeError":error,"cyberAccessProgram":agent.cyber_access_program.value()}),
                 ));
             }
         }
         NoticeKind::AuthStarted | NoticeKind::AuthCompleted => {
             let started = kind == NoticeKind::AuthStarted;
             if started {
-                agent["nativeStatus"] = json!({"phase":"auth","message":params["message"].as_str(),"turnId":turn,"at":at});
-                agent["activity"] = json!({"phase":"auth","at":at});
-            } else if agent["nativeStatus"]["phase"] == "auth" {
-                remove(&mut agent, "nativeStatus");
-                agent["activity"] = json!({"phase":"thinking","at":at});
+                agent.native_status = Some(NativeStatus {
+                    phase: Some(NativeStatusPhase::Auth),
+                    message: params["message"].as_str().map(str::to_owned),
+                    turn_id: Option::<String>::deserialize(turn)?,
+                    at: Some(at),
+                    error: None,
+                });
+                agent.activity = Some(AgentActivity {
+                    phase: Some("auth".into()),
+                    at: Some(at),
+                    ..Default::default()
+                });
+            } else if agent.native_status.as_ref().and_then(|status| status.phase)
+                == Some(NativeStatusPhase::Auth)
+            {
+                agent.native_status = None;
+                agent.activity = Some(AgentActivity {
+                    phase: Some("thinking".into()),
+                    at: Some(at),
+                    ..Default::default()
+                });
             }
             decision.item = Some(notice(
                 format!("auth:{}", turn.as_str().unwrap_or("None")),
@@ -341,13 +417,8 @@ pub(super) fn decide(
             ));
         }
     }
-    agent["events"] = json!(
-        original["events"]
-            .as_u64()
-            .unwrap_or_default()
-            .saturating_add(1)
-    );
-    agent["lastEvent"] = json!(format_utc(at)?);
+    agent.events = Some(original.events.unwrap_or_default().saturating_add(1));
+    agent.last_event = Some(format_utc(at)?);
     decision.agent = Some(agent);
     Ok(decision)
 }
@@ -441,11 +512,6 @@ fn hook(kind: NoticeKind, params: &Value, previous: Option<&Value>) -> Option<No
     ))
 }
 
-pub(super) fn remove(value: &mut Value, key: &str) {
-    if let Some(fields) = value.as_object_mut() {
-        fields.remove(key);
-    }
-}
 const ERROR_MESSAGES: &[(KnownCodexErrorKind, &str)] = &[
     (
         KnownCodexErrorKind::CyberPolicy,
@@ -481,9 +547,10 @@ pub(crate) fn error_message(error: &Value, label: &str) -> String {
 }
 
 /// Display a known identity, or a generic label for an invalid stored provider.
-pub(crate) fn provider_label(agent: &Value) -> &'static str {
-    studio_runtime_schema::ProviderKind::of_record(agent)
-        .map_or("Provider", studio_runtime_schema::ProviderKind::label)
+pub(crate) fn provider_label(
+    provider: Option<studio_runtime_schema::ProviderKind>,
+) -> &'static str {
+    provider.map_or("Provider", studio_runtime_schema::ProviderKind::label)
 }
 
 pub(super) use studio_runtime_store::python_json_utf8 as json_text;
@@ -677,14 +744,31 @@ mod provider_label_tests {
             json!({"provider":"future"}),
             json!({"provider":7}),
         ] {
-            assert_eq!(provider_label(&agent), "Provider", "{agent}");
             assert_eq!(
-                error_message(&json!({}), provider_label(&agent)),
+                provider_label(studio_runtime_schema::ProviderKind::of_record(&agent).ok()),
+                "Provider",
+                "{agent}"
+            );
+            assert_eq!(
+                error_message(
+                    &json!({}),
+                    provider_label(studio_runtime_schema::ProviderKind::of_record(&agent).ok())
+                ),
                 "Provider reported an error."
             );
         }
-        assert_eq!(provider_label(&json!({"provider":"codex"})), "Codex");
-        assert_eq!(provider_label(&json!({"provider":"claude"})), "Claude");
+        assert_eq!(
+            provider_label(
+                studio_runtime_schema::ProviderKind::of_record(&json!({"provider":"codex"})).ok()
+            ),
+            "Codex"
+        );
+        assert_eq!(
+            provider_label(
+                studio_runtime_schema::ProviderKind::of_record(&json!({"provider":"claude"})).ok()
+            ),
+            "Claude"
+        );
     }
 
     #[test]
@@ -693,8 +777,18 @@ mod provider_label_tests {
         let original = extension.clone();
         assert_eq!(error_message(&extension, "Codex"), "Provider detail");
         assert_eq!(extension, original);
-        assert_eq!(provider_label(&json!({"provider": "claude"})), "Claude");
-        assert_eq!(provider_label(&json!({"provider":"codex"})), "Codex");
+        assert_eq!(
+            provider_label(
+                studio_runtime_schema::ProviderKind::of_record(&json!({"provider": "claude"})).ok()
+            ),
+            "Claude"
+        );
+        assert_eq!(
+            provider_label(
+                studio_runtime_schema::ProviderKind::of_record(&json!({"provider":"codex"})).ok()
+            ),
+            "Codex"
+        );
         assert_eq!(
             error_message(&json!({}), "Claude"),
             "Claude reported an error."
@@ -714,7 +808,7 @@ mod tests {
     #[test]
     fn encoded_biological_error_is_normalized_in_published_notice() {
         let snapshot = NotificationSnapshot::from_records(
-            json!({"id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread","accountKey":"default","provider":"codex","turnId":"turn","inFlight":true,"autoWake":false,"created":0,"compactions":0,"activeTools":[],"events":0}),
+            AgentRecord::from_value(json!({"id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread","accountKey":"default","provider":"codex","turnId":"turn","inFlight":true,"autoWake":false,"created":0,"compactions":0,"activeTools":[],"events":0})).unwrap(),
             None,
             None,
         )

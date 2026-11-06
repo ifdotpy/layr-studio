@@ -688,7 +688,6 @@ impl CompletionWriter for RestartInputCompletion {
             let items = turn["items"]
                 .as_array()
                 .ok_or(RecoveryError::CommitFailed)?;
-            let mut agent_value = agent.value();
             let mut streams = super::store::load_streams(tx, &scope.account)
                 .map_err(|_| RecoveryError::CommitFailed)?;
             for item in items.iter().filter(|item| item["type"] == "agentMessage") {
@@ -709,7 +708,7 @@ impl CompletionWriter for RestartInputCompletion {
                 let next = streams
                     .recover_agent_message_in_transaction(
                         tx,
-                        &mut agent_value,
+                        &mut agent,
                         &scope.account,
                         scope.generation,
                         turn,
@@ -721,14 +720,14 @@ impl CompletionWriter for RestartInputCompletion {
                     streams = next;
                 }
                 let params = json!({
-                    "threadId":agent_value["threadId"],
+                    "threadId":agent.thread_id,
                     "turnId":turn_id,
                     "item":item
                 });
                 streams.stage_recovered_notification(
                     format!("restart:{attempt_id}:{turn_id}:item:{item_native_id}"),
                     crate::notification_dispatch::RecoveredNotificationObservation {
-                        agent: agent_value.clone(),
+                        agent: agent.value(),
                         method: "item/completed".into(),
                         params,
                         observed_at: crate::notification_dispatch::ObservationTime::new(
@@ -738,11 +737,7 @@ impl CompletionWriter for RestartInputCompletion {
                     },
                 );
             }
-            AgentRepository::put(
-                tx,
-                &studio_runtime_store::AgentRecord::from_value(agent_value)
-                    .map_err(|_| RecoveryError::CommitFailed)?,
-            )?;
+            AgentRepository::put(tx, &agent)?;
             let error = turn.get("error").filter(|v| !v.is_null()).cloned();
             let settled = SchedulerRepository::settle_terminal(
                 tx,

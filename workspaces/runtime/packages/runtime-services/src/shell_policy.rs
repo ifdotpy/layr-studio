@@ -154,7 +154,7 @@ pub fn maintain_monitor(
             .is_some_and(|dispatch| dispatch.status == MonitorCancelStatus::Unknown)
     {
         let report = json!({"id":format!("monitor:{}:{}:cleanup_unknown", before.id(), cleanup.generation),"kind":"cleanup_unknown","message":format!("Critical memory pressure: the stop outcome for monitor {} is unknown. Inspect the monitor before another stop.",before.id())});
-        observe(tx, &agent, &report, now)
+        observe(tx, actor, &report, now)
             .map_err(|_| MonitorError::Refused("Could not record the shell cleanup outcome"))?;
     }
     if monitor.status != MonitorStatus::Running
@@ -205,7 +205,7 @@ pub fn maintain_monitor(
         )
     };
     let report = json!({"id":format!("monitor:{}:{generation}:{kind}",before.id()),"kind":kind,"message":message,"monitorId":before.id()});
-    observe(tx, &agent, &report, now).map_err(|error| match error {
+    observe(tx, actor, &report, now).map_err(|error| match error {
         crate::notification_dispatch::NotificationDispatchError::RequestResult(error) => {
             MonitorError::Store(StoreError::RequestResult(error))
         }
@@ -256,7 +256,7 @@ pub fn maintain_monitor(
 /// request remains distinct from a confirmed stop or an unknown outcome.
 pub fn observe(
     tx: &Transaction<'_>,
-    agent: &Value,
+    actor: &AgentRecord,
     report: &Value,
     at: f64,
 ) -> Result<(), crate::notification_dispatch::NotificationDispatchError> {
@@ -280,7 +280,6 @@ pub fn observe(
     ) {
         return Err(crate::notification_dispatch::NotificationDispatchError::invalid());
     }
-    let actor = AgentRecord::from_value(agent.clone()).map_err(StoreError::from)?;
     let key = format!("{}:shell-policy:{id}", actor.id.0);
     if NotificationDispatchRepository::notification_item(tx, &actor.id.0, &key)?.is_none() {
         let item = json!({"id":key,"role":"system","title":"Background shell","text":text,"at":at,"nativeNotice":"info","shellPolicy":report});
@@ -308,7 +307,7 @@ pub fn observe(
     }
     crate::event_write::enqueue_recovery_event(
         tx,
-        &actor,
+        actor,
         key.clone(),
         "shell_policy",
         json!({"message":text,"shellPolicy":report}).to_string(),
