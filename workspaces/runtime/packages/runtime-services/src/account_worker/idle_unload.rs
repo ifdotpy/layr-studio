@@ -1078,8 +1078,8 @@ impl Worker {
         )
     }
 
-    /// The worker holds no provider request, callback, effect, or recovery.
-    /// Buffered stream text needs no provider; closing flushes it.
+    /// The worker holds no provider request, callback, effect, recovery, or
+    /// active session work. Buffered stream text needs no provider; closing flushes it.
     // Queued commands are fenced at the final stop decision; they do not erase
     // the provider's idle clock before those commands have been processed.
     fn provider_quiescent(&self) -> bool {

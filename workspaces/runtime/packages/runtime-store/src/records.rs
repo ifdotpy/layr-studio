@@ -3409,14 +3409,11 @@ mod tests {
             ("error", studio_json::json!(42)),
             ("capacity", studio_json::json!(null)),
             ("naming", studio_json::json!(null)),
-<<<<<<< head
-=======
             ("sharedRoomId", studio_json::json!(null)),
             ("convertedFromLead", studio_json::json!(null)),
             ("projectFolderRevision", studio_json::json!(null)),
             ("taskDefaultGate", studio_json::json!(null)),
             ("movedFrom", studio_json::json!(null)),
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             ("id", studio_json::json!(null)),
         ] {
             let mut agent = super::AgentRecord::from_value(studio_json::json!({

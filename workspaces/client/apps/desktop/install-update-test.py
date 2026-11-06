@@ -94,6 +94,9 @@ class InstallUpdate(unittest.TestCase):
         self.mac = FakeMac()
         self.stops = []
         self.verified = []
+        environment = patch.dict(os.environ, {})
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def verify(self, config, state):
         # The build at the installed path when the backend is proved.
@@ -330,6 +333,9 @@ class BackendRestartAfterSwap(unittest.TestCase):
                        "backend": "rust", "runtimeServer": str(binary)}
         self.identity = {"pid": self.backend.pid, "backendKind": "rust",
                          "backendBuild": installer.recovery.file_sha256(binary)}
+        environment = patch.dict(os.environ, {})
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def listeners(self, argv, **options):
         """lsof is not at the same path on every host; the backend owns its listener."""

@@ -418,6 +418,7 @@ for (const [theme, viewport] of [
                   name: "Home project",
                 },
               ],
+              // Only the remote server reports layr support for its folder.
             }
           : {}),
       } satisfies Partial<ProjectEntityDto>);
@@ -649,7 +650,7 @@ for (const [theme, viewport] of [
   });
 }
 
-test("offline folder expansion does not change the saved source state after reconnect", async ({
+test("offline folder expansion preserves the saved source state after reconnect", async ({
   page,
   context,
 }, testInfo) => {

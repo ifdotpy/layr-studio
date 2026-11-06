@@ -1,11 +1,7 @@
 //! Select and admit the complete tree before writing imported entries.
 use super::{NativeLayrError, private_tree::Directory};
 mod filesystem_ffi;
-<<<<<<< head
-use crate::vm_preparation::vm_archive_identity;
-=======
-use crate::workspace_paths::vm_archive_identity;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
+use crate::layr_native::source_tree::archive_identity;
 #[cfg(target_os = "macos")]
 pub(super) use filesystem_ffi::is_copy_on_write;
 use filesystem_ffi::{case_sensitive, clone_file};
@@ -564,7 +560,7 @@ impl Plan {
                 .map_err(std::io::Error::from)?;
             } else {
                 let source = open_source(&self.source, &entry.relative)?;
-                if vm_archive_identity(&source.metadata()?) != vm_archive_identity(meta) {
+                if archive_identity(&source.metadata()?) != archive_identity(meta) {
                     return Err(source_changed());
                 }
                 if entry.cloneable {
@@ -657,7 +653,7 @@ impl Plan {
     fn verify_source(&self) -> Result<()> {
         for entry in &self.entries {
             let after = fs::symlink_metadata(self.source.join(&entry.relative))?;
-            if vm_archive_identity(&after) != vm_archive_identity(&entry.metadata) {
+            if archive_identity(&after) != archive_identity(&entry.metadata) {
                 return Err(source_changed());
             }
         }
@@ -864,7 +860,7 @@ pub(super) fn verify_imported_head(main: &Path, repository: &Path, head: &str) -
         let git = if marker.is_dir() {
             marker
         } else {
-            crate::workspace_paths::read_gitdir_pointer(&folder, &marker)?.into_path_buf()
+            crate::layr_native::source_tree::read_gitdir_pointer(&folder, &marker)?.into_path_buf()
         };
         metadata::validate_stored_git(&main, &git)?;
         let git = git
@@ -920,7 +916,9 @@ fn collect_tree(
         tree.project_root = root.to_owned();
     }
     let path = root.join(relative);
-    if !cache && tree.ignored.contains(relative) && !crate::workspace_paths::regenerable_path(&path)
+    if !cache
+        && tree.ignored.contains(relative)
+        && !crate::layr_native::source_tree::regenerable_path(&path)
     {
         return Ok(());
     }
@@ -929,7 +927,7 @@ fn collect_tree(
     if !inside_git && directory {
         if !relative.as_os_str().is_empty()
             && !cache
-            && crate::workspace_paths::regenerable_path(&path)
+            && crate::layr_native::source_tree::regenerable_path(&path)
         {
             cache = true;
             tree.caches.push(relative.to_owned());
@@ -963,7 +961,9 @@ fn collect_tree(
                         if relative.as_os_str().is_empty() && worktree {
                             // Validate this pointer against the original project boundary below.
                         } else {
-                            match crate::workspace_paths::read_gitdir_pointer(&path, &marker) {
+                            match crate::layr_native::source_tree::read_gitdir_pointer(
+                                &path, &marker,
+                            ) {
                                 Ok(target)
                                     if internal_worktree(tree.project_root.as_path(), &target) =>
                                 {

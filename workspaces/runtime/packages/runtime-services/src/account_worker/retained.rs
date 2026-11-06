@@ -257,19 +257,6 @@ impl RetainedSessionPort {
             .map_err(|_| PortError::Identity)?
     }
 }
-fn account_refresh_shape(
-    scope: &ConnectionScope,
-    root: &str,
-    operation: &str,
-    method: Method,
-    params: &Value,
-) -> bool {
-    method == Method::AccountRead
-        && operation == format!("vm-codex-token-refresh:{}:{root}", scope.account)
-        && params.as_object().is_some_and(|params| {
-            params.len() == 1 && params.get("refreshToken") == Some(&Value::Bool(true))
-        })
-}
 
 pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
     let turn_view = request.params.get("itemsView").and_then(Value::as_str);
@@ -1226,7 +1213,7 @@ pub(crate) fn monitor_command_scope(
 }
 
 /// Whether a host monitor can keep its original process through an account move.
-/// Missing command identity and VM process ownership remain explicit blockers.
+/// Missing command identity remains an explicit blocker.
 pub(crate) fn monitor_survives_account_transfer(
     tx: &rusqlite::Transaction<'_>,
     id: &str,
@@ -1246,7 +1233,7 @@ pub(crate) fn monitor_survives_account_transfer(
         || record.epoch.get() != actor.epoch
         || operation.agent.as_str() != agent
         || operation.epoch.get() != actor.epoch
-        || vm_actor(tx, agent)?
+        || actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
     {
         return Ok(false);
     }
@@ -1406,7 +1393,6 @@ pub(super) struct PendingBarrier {
 mod runtime;
 pub(in crate::account_worker) mod storage;
 pub(super) use storage::recover;
-pub use storage::vm_actor;
 #[cfg(feature = "test-support")]
 pub use storage::{checkpoint_covered, record_outcome, submitted};
 #[cfg(test)]

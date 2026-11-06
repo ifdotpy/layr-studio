@@ -261,6 +261,28 @@ mod registration_tests {
     }
 
     #[test]
+    fn removed_vm_routes_are_not_registered() {
+        let operations = super::manifest::operation_manifest().expect("valid route manifest");
+        for operation in operations {
+            assert!(!matches!(
+                operation.path(),
+                "/api/linux-vm/settings"
+                    | "/api/mac-sync/config"
+                    | "/api/mac-sync/resolve"
+                    | "/api/agents/move-to-host"
+                    | "/api/project-secrets/list"
+                    | "/api/project-secrets/remove"
+                    | "/api/project-secrets/set"
+                    | "/api/vault/aws-login"
+                    | "/api/vault/pull"
+                    | "/api/vault/setup"
+                    | "/api/vault/setup/facts"
+                    | "/api/vault/unlock"
+            ));
+        }
+    }
+
+    #[test]
     fn route_groups_are_returned_in_stable_order() {
         let groups = super::registered_route_groups();
         assert_eq!(groups.len(), super::registered_route_groups().len());

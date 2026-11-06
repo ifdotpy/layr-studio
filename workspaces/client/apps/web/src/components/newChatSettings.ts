@@ -17,7 +17,10 @@ import {
 import { serverCredentialAdapter } from "../servers/transport";
 import type { StudioServer } from "../servers/registry";
 
-export type NewChatWorkspaceMode = (typeof CHAT_WORKSPACE_MODES)[number];
+export type NewChatWorkspaceMode = Exclude<
+  (typeof CHAT_WORKSPACE_MODES)[number],
+  "layr"
+>;
 
 export type NewChatSettings = Pick<
   PostBody<"/api/conversation">,
@@ -149,6 +152,7 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   ];
   if (Object.keys(value).some((key) => !allowed.includes(key))) return false;
   if (
+    value.workspaceMode === "layr" ||
     typeof value.workspaceMode !== "string" ||
     !(CHAT_WORKSPACE_MODES as readonly string[]).includes(value.workspaceMode)
   )

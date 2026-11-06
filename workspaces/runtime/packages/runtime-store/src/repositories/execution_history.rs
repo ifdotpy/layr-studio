@@ -179,35 +179,6 @@ impl ExecutionHistoryRepository {
         .map(|raw| studio_json::from_str(&raw).map_err(StoreError::from))
         .transpose()
     }
-<<<<<<< head
-    fn set_vm_admission(
-        tx: &Transaction<'_>,
-        id: &str,
-        kind: VmAdmission,
-        source: &AdmittedRequest,
-        admitted: &AdmittedRequest,
-    ) -> StoreResult<()> {
-        if Self::admission(tx, id)?.as_ref() != Some(source) {
-            return Err(Self::invalid("runtime_execution_attempts", id));
-        }
-        if let Some(saved) = Self::admission_at(tx, id, kind.path())? {
-            return if saved == *admitted {
-                Ok(())
-            } else {
-                Err(Self::invalid("runtime_execution_attempts", id))
-            };
-        }
-        let changed = tx.execute(
-            "UPDATE runtime_execution_attempts SET record=json_set(record,?1,json(?2)) WHERE id=?3",
-            params![kind.path(), studio_json::to_string(admitted)?, id],
-        )?;
-        if changed != 1 {
-            return Err(Self::invalid("runtime_execution_attempts", id));
-        }
-        Ok(())
-    }
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     /// Domain settlement survives response-cache expiry and never grants a fresh dispatch.
     pub fn start_settled(db: &rusqlite::Connection, id: &str) -> StoreResult<bool> {
         let row=db.query_row("SELECT json_extract(record,'$.submission'),json_extract(record,'$.executionOutcome'),json_extract(record,'$.turnStatus') FROM runtime_execution_attempts WHERE id=?1",[id],|row|Ok((row.get::<_,AttemptSubmission>(0)?,row.get::<_,Option<ExecutionStatus>>(1)?,row.get::<_,Option<ExecutionStatus>>(2)?))).optional()?;

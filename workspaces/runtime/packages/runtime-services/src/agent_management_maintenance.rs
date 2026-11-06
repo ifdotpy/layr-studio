@@ -1,13 +1,6 @@
 //! Read-only workspace maintenance facts for one authorized team.
 
 use crate::agent_management::{ManagementError, ManagementSnapshot, Records};
-<<<<<<< head
-#[cfg(unix)]
-use crate::linux_vm_guest::GuestRpc;
-#[cfg(unix)]
-use std::time::Duration;
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,

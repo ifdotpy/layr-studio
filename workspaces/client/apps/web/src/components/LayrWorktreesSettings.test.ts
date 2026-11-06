@@ -43,10 +43,6 @@ it("lists the settings tab and displays the installed version and store", () => 
   });
   expect(html).toContain("0.14.2 (a6879be)");
   expect(html).toContain("Default store directory");
-<<<<<<< head
-  expect(html).toContain("Worktrees");
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 });
 it("displays the missing binary", () => {
   expect(render({ version: null, storeRoot: "/store" })).toContain(

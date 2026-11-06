@@ -96,11 +96,7 @@ async fn main() {
         store.transaction_with(|tx| {
             for index in 0..=studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
                 let id = format!("older-{index}");
-<<<<<<< head
-                SyncDocumentsRepository::put_entity(tx, "agentSummary", &id, studio_json::json!({"id":id,"status":"idle","source":"managed"}), false)?;
-=======
                 AgentRepository::put(tx, &AgentRecord::from_value(studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"idle","accountKey":"default","name":id,"compactions":0}))?)?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             }
             AgentRepository::put(tx, &AgentRecord::from_value(studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","epoch":1,"status":"idle","accountKey":"default","name":"Lead","compactions":0}))?)?;
             Ok::<_, StoreError>(())

@@ -241,8 +241,6 @@ fn to_raw_value_matches_serde_bytes() {
         assert_eq!(actual.as_str(), expected.get());
     }
 }
-<<<<<<< head
-=======
 
 #[cfg(feature = "serde-backend")]
 #[test]
@@ -345,4 +343,3 @@ fn serde_raw_marker_matches_backend() {
         studio_json::RAW_VALUE_TOKEN
     );
 }
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31

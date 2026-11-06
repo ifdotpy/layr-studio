@@ -207,50 +207,6 @@ impl EventWriteRepository {
     pub fn set_agent_sync_name(
         transaction: &Transaction<'_>,
         agent_id: &str,
-<<<<<<< head
-        update: impl FnOnce(&mut studio_json::Map<String, Value>) -> bool,
-    ) -> StoreResult<()> {
-        let old = transaction
-            .query_row_cached(
-                "SELECT payload,deleted FROM sync_entities WHERE collection='agent' AND id=?1",
-                [agent_id],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()?;
-        let Some((Some(old_payload), 0)) = old else {
-            return Err(StoreError::SchemaMismatch(
-                "agent sync projection is missing or deleted".to_owned(),
-            ));
-        };
-        let mut payload: Value = studio_json::from_str(&old_payload)?;
-        if payload.get("collection").and_then(Value::as_str) != Some("agent")
-            || payload.get("id").and_then(Value::as_str) != Some(agent_id)
-        {
-            return Err(StoreError::SchemaMismatch(
-                "agent sync projection identity is invalid".to_owned(),
-            ));
-        }
-        let value = payload
-            .get_mut("value")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| StoreError::SchemaMismatch("agent sync projection is invalid".into()))?;
-        if value.get("id").and_then(Value::as_str) != Some(agent_id) {
-            return Err(StoreError::SchemaMismatch(
-                "agent sync projection identity is invalid".to_owned(),
-            ));
-        }
-        if !update(value) {
-            return Ok(());
-        }
-        let payload = studio_json::to_string(&payload)?;
-        let hash = hash_payload(&payload);
-        let sequence = next_sequence(transaction)?;
-        transaction.execute_cached(
-            "UPDATE sync_entities SET seq=?1,hash=?2,payload=?3 \
-             WHERE collection='agent' AND id=?4 AND deleted=0",
-            params![sequence, hash, payload, agent_id],
-        )?;
-=======
         _name: &str,
     ) -> StoreResult<()> {
         Self::mark_agent_fields(transaction, agent_id)
@@ -261,7 +217,6 @@ impl EventWriteRepository {
     fn mark_agent_fields(transaction: &Transaction<'_>, agent_id: &str) -> StoreResult<()> {
         Self::mark_agent_views(transaction, agent_id)?;
         crate::entity_publication::mark_published("agent", agent_id);
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         Ok(())
     }
 
@@ -287,135 +242,6 @@ mod tests {
                  CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
                  CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,4);",
             )
-<<<<<<< head
-            .expect("updated projection exists");
-        assert_eq!(sequence, 2);
-        assert_eq!(
-            studio_json::from_str::<studio_json::Value>(&payload)
-                .expect("updated projection remains JSON"),
-            json!({
-                "collection":"agent","id":"a","value":{"id":"a","status":"queued","overview":{"result":"","resultTruncated":false,"resultTurnId":null,"task":"keep"}}
-            })
-        );
-    }
-
-    #[test]
-    fn agent_projection_lifecycle_write_updates_activity_and_turn_identity() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
-        connection
-            .execute_batch(
-                "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 INSERT INTO sync_entities VALUES('agent','a',1,'old', '{\"collection\":\"agent\",\"id\":\"a\",\"value\":{\"id\":\"a\",\"status\":\"starting\",\"inFlight\":false,\"turnId\":null}}',0);",
-            )
-            .expect("projection fixture creates");
-        connection
-            .execute_batch(&crate::agent_columns::fixture_sql(
-                "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);",
-            ))
-            .expect("runtime agent fixture creates");
-        connection
-            .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
-            .expect("volatile agent table creates");
-        connection
-            .execute(
-                "INSERT INTO runtime_agents(id,record) VALUES('a',?1)",
-                [
-                    json!({"compactions":0,"accountKey":"default","id":"a","provider":"codex","rootId":"a","name":"Agent","status":"running","epoch":2,
-                "inFlight":true,"turnId":"turn-1","lastAnswer":"",
-                "disconnectRecovery":{"epoch":2,"turnId":"turn-1"},
-                "startOutcomeHold":{"stage":"held","reason":"pending"},
-                "restartRecovery":{"stage":"held"}})
-                    .to_string(),
-                ],
-            )
-            .expect("runtime lifecycle receipt persists");
-        let transaction = connection.transaction().expect("transaction begins");
-        EventWriteRepository::set_agent_sync_lifecycle(
-            &transaction,
-            "a",
-            "running",
-            true,
-            Some("turn-1"),
-        )
-        .expect("lifecycle projection updates");
-        transaction.commit().expect("transaction commits");
-        let payload: String = connection
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='agent' AND id='a'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("projection exists");
-        let value = studio_json::from_str::<studio_json::Value>(&payload)
-            .expect("projection remains JSON")["value"]
-            .clone();
-        assert_eq!(value["status"], "running");
-        assert_eq!(value["inFlight"], true);
-        assert_eq!(value["turnId"], "turn-1");
-        assert_eq!(
-            value["startOutcomeHold"],
-            json!({"stage":"held","reason":"pending"})
-        );
-        assert_eq!(
-            (
-                &value["lastAnswer"],
-                &value["disconnectRecovery"],
-                &value["restartRecovery"]
-            ),
-            (
-                &json!(""),
-                &json!({"epoch":2,"turnId":"turn-1"}),
-                &json!({"stage":"held"})
-            )
-        );
-    }
-
-    #[test]
-    fn agent_projection_name_write_advances_revision_and_preserves_other_fields() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
-        connection
-            .execute_batch(
-                "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 INSERT INTO sync_entities VALUES('agent','a',1,'old','{\"collection\":\"agent\",\"id\":\"a\",\"value\":{\"id\":\"a\",\"name\":\"Old\",\"naming\":\"pending_title\",\"role\":\"orchestrator\"}}',0);",
-            )
-            .expect("projection fixture creates");
-        let transaction = connection.transaction().expect("transaction begins");
-        EventWriteRepository::set_agent_sync_name(&transaction, "a", "New")
-            .expect("agent title projection updates");
-        transaction.commit().expect("transaction commits");
-        let (sequence, hash, payload) = connection
-            .query_row(
-                "SELECT seq,hash,payload FROM sync_entities WHERE collection='agent' AND id='a'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .expect("updated projection exists");
-        assert_eq!(sequence, 2);
-        assert_eq!(
-            payload,
-            r#"{"collection":"agent","id":"a","value":{"id":"a","name":"New","naming":"manual","role":"orchestrator"}}"#
-        );
-        // SHA-256 of the payload text above.
-        assert_eq!(
-            hash,
-            "479117e334e36d6086763c6fdaa607248774b31c33490bab45fee0d9d741e8b6"
-        );
-        assert_eq!(
-            studio_json::from_str::<studio_json::Value>(&payload)
-                .expect("updated projection remains JSON")["value"],
-            json!({"id":"a","name":"New","naming":"manual","role":"orchestrator"})
-        );
-=======
             .expect("counter fixture creates");
         let mark = |connection: &Connection| {
             connection
@@ -449,7 +275,6 @@ mod tests {
             transaction.commit().expect("transaction commits");
             assert_eq!(mark(&connection), expected);
         }
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 
     #[test]

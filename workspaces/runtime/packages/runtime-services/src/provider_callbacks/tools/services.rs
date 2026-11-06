@@ -1100,8 +1100,8 @@ pub(super) fn execute(
         ToolKind::SignIn => Err(CallbackError::Dependency(
             super::runtime_dispatch::SIGN_IN_DEPENDENCY,
         )),
-        // The managed-tool dispatcher runs host_exec through its attached runtime.
-        ToolKind::HostExec => Err(CallbackError::Dependency("host-exec/unavailable")),
+        // Old host_exec requests cannot run after VM removal.
+        ToolKind::HostExec => Err(CallbackError::Dependency("host-exec/removed")),
         // The managed-tool dispatcher runs layr_read through the guest channel.
         ToolKind::LayrRead => Err(CallbackError::Dependency("native-layr/read")),
         ToolKind::Title => {

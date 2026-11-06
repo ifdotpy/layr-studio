@@ -5,6 +5,7 @@
 //! so startup must hold the earlier reservation as an unknown outcome.
 use super::*;
 use crate::provider_session_task::PreparedRequest;
+use rusqlite::OptionalExtension;
 
 /// One request to commit, built by the worker and run in the agent's task
 /// (or inline for an interrupt).
@@ -53,6 +54,23 @@ impl Commit {
                 })
                 .await?
             {
+                return Ok(Committed::Nothing);
+            }
+        }
+        if matches!(
+            self.context.method,
+            Method::ThreadStart | Method::TurnStart | Method::TurnInterrupt | Method::ThreadResume
+        ) {
+            let agent_id = self.context.intent.agent_id.clone();
+            let unsupported = self.bridge.worker_run("execution_mode", move |store| async move {
+                store.read_async("runtime-services/account_worker_execution_mode", move |connection| {
+                    Ok::<_, WorkerError>(connection.query_row(
+                        "SELECT json_extract(record,'$.executionMode')='vm' FROM runtime_agents WHERE id=?1",
+                        [&agent_id], |row| row.get::<_, Option<bool>>(0),
+                    ).optional()?.is_none_or(|mode| mode.unwrap_or(false)))
+                }).await
+            }).await?;
+            if unsupported {
                 return Ok(Committed::Nothing);
             }
         }

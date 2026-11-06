@@ -555,6 +555,7 @@ impl HttpState {
         let mut sources = Vec::new();
         if let Some(guest) = &self.browser_answer_host_guest {
             sources.push(studio_runtime_services::browser_cards::CardSource {
+                source: "host",
                 guest: Arc::clone(guest),
                 forwarder: self.browser_host_local_forwarder.clone(),
                 http_providers: Default::default(),
@@ -1169,11 +1170,7 @@ mod tests {
                     .expect("validator");
             let app = super::with_boundary(Router::new().route("/api/commands", post(move || async move {
                 store.transaction(|tx| {
-<<<<<<< head
                     SyncDocumentsRepository::put_entity(tx, "agent", "agent", studio_json::json!({"id": "agent", "name":"Agent", "status":"idle", "source":"managed", "tail": "entity content ".repeat(512)}), false)?;
-=======
-                    SyncDocumentsRepository::put_entity(tx, "project", "project", studio_json::json!({"id": "project", "name":"Project", "tail": "entity content ".repeat(512)}), false)?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                     Ok(())
                 }).await.expect("entity mutation");
                 Json(studio_json::json!({
@@ -1325,11 +1322,7 @@ mod tests {
         assert_eq!(view.resources, entities);
         assert!(!view.entity_reset, "known entity writes remain incremental");
         store.transaction(|tx| {
-<<<<<<< head
             studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "agent", "agent", studio_json::json!({"id":"agent","status":"idle"}), false)?;
-=======
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "project", "project", studio_json::json!({"id":"project"}), false)?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             tx.execute("INSERT INTO runtime_items(id,agent,created,record) VALUES('mixed','agent',1,'{}')", [])?;
             Ok(())
         }).await.expect("mixed commit");

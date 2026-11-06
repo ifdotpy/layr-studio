@@ -85,39 +85,8 @@ fn monitor_account_sql(agent_param: usize) -> String {
     )
 }
 
-/// Identify legacy VM workspaces that cannot use the host provider session.
-pub fn vm_actor(connection: &rusqlite::Connection, agent: &str) -> Result<bool, WorkerError> {
-    let record = AgentRepository::get(connection, &AgentId::from(agent))?;
-    Ok(record.is_some_and(|record| {
-        let value = record.value();
-        crate::workspace_ready::vm_workspace_unsupported(
-            value["executionMode"].as_str(),
-            value["workspaceMode"].as_str(),
-            record.layr_ready == Some(true),
-            value["layrLine"].as_str().is_some(),
-        )
-    }))
-}
-
 pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<bool, WorkerError> {
     let Some(actor) = call.actor.as_ref() else {
-        if call.transfer.is_none()
-            && call.deleted_actor_session.is_none()
-            && super::account_refresh_shape(
-                &call.scope,
-                &call.root_request_id,
-                &call.operation,
-                call.method,
-                &call.params,
-            )
-        {
-            let Some(token) = &call.admitted_request else {
-                return Ok(false);
-            };
-            let saved = recorded_operation(tx, &call.key(), Some(token.id()))?;
-            return Ok(saved.is_some_and(|record| same_replay_identity(record.call(), call)));
-        }
-
         if let Some(transfer) = call.transfer.as_ref() {
             let Some(operation) =
                 studio_runtime_store::AccountTransferRepository::get(tx, &transfer.transfer_id)?
@@ -153,6 +122,9 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
     let Some(agent_record) = AgentRepository::get(tx, &AgentId::from(actor.agent.as_str()))? else {
         return Ok(false);
     };
+    if crate::workspace_ready::legacy_vm_record(&agent_record) {
+        return Ok(false);
+    }
     if call.method == Method::ThreadUnsubscribe {
         return crate::agent_management_recovery::authorize_release(
             tx,
@@ -410,7 +382,6 @@ fn authorize_retained_monitor_control(
         || operation.agent.as_str() != actor.agent
         || operation.epoch.get() != actor.epoch
         || operation.account_key.as_str() != call.scope.account
-        || vm_actor(tx, &actor.agent)?
     {
         return Ok(false);
     }
@@ -754,14 +725,7 @@ pub(super) fn reserve(
     {
         return Ok(());
     }
-    let actor_id = match &call.actor {
-        Some(actor) if vm_actor(tx, &actor.agent)? => Some(actor.agent.as_str()),
-        _ => None,
-    };
-    let stream = actor_id.map_or_else(
-        || call.scope.account.clone(),
-        |actor| super::super::historical_actor_journal_scope(&call.scope.account, actor),
-    );
+    let stream = call.scope.account.clone();
     let row = OutboxRow {
         id: call.key(),
         kind: OutboxKind::ProviderCall,
@@ -1153,6 +1117,9 @@ pub(in crate::account_worker) async fn recover(
             )
             .map_err(outbox_error)?
             {
+                if row.stream_id.as_deref() != Some(account.as_str()) {
+                    continue;
+                }
                 let store::ProviderCall::Retained(payload) = row.payload else {
                     continue;
                 };
@@ -1171,15 +1138,11 @@ pub(in crate::account_worker) async fn recover(
                         payload.call.method.as_str(),
                         &payload.call.params,
                     );
-                let actor_id = match &payload.call.actor {
-                    Some(actor) if vm_actor(tx, &actor.agent)? => Some(actor.agent.clone()),
-                    _ => None,
-                };
                 recovered.push((
                     PendingRequest {
                         call: payload.call,
                         ticket: request.ticket.clone(),
-                        actor_id,
+                        actor_id: None,
                         reply: None,
                         result: payload
                             .outcome
@@ -2020,8 +1983,11 @@ mod replay_identity_tests {
                 assert!(!authorize(tx,&invalid)?,"{field}");
             }
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.executionMode','vm') WHERE id='agent-1'",[])?;
-            assert!(!authorize(tx,&exact)?,"a host generation does not prove a guest process identity");
-            tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.executionMode') WHERE id='agent-1'",[])?;
+
+            assert!(!authorize(tx,&exact)?,"a legacy VM process cannot use host identity");
+            tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.executionMode'),'$.workspaceMode','layr') WHERE id='agent-1'",[])?;
+            assert!(!authorize(tx,&exact)?,"legacy workspace mode cannot use host identity");
+            tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.workspaceMode') WHERE id='agent-1'",[])?;
             tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.epoch',8) WHERE id='watch'",[])?;
             assert!(!crate::account_worker::retained::monitor_survives_account_transfer(tx,"watch","agent-1")?,"the monitor row epoch must match its actor and submitted operation");
             Ok::<_,WorkerError>(())

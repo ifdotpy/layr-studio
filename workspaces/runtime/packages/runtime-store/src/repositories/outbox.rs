@@ -51,10 +51,7 @@ impl Outbox {
     }
 
     pub fn put<P: Serialize>(tx: &Transaction<'_>, row: &OutboxRow<P>) -> Result<()> {
-<<<<<<< head
-=======
         let hint_position = crate::outbox_hint_position();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let changed = tx.execute_cached("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) ON CONFLICT(id) DO UPDATE SET status=excluded.status,next_at=excluded.next_at,payload=excluded.payload WHERE kind=excluded.kind AND owner_kind=excluded.owner_kind AND owner_id=excluded.owner_id AND request_id IS excluded.request_id AND signature=excluded.signature AND account IS excluded.account AND stream_id IS excluded.stream_id AND generation IS excluded.generation AND ordinal IS excluded.ordinal AND created=excluded.created", params![row.id,row.kind,row.owner_kind,row.owner_id,row.request_id,row.signature,row.status,row.account,row.stream_id,row.generation,row.ordinal,row.next_at,studio_json::to_string(&row.payload)?,row.created])?;
         if changed == 0 {
             return Err(OutboxError::Conflict(row.id.clone()));

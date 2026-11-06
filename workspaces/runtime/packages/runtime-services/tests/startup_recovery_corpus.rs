@@ -325,15 +325,10 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
             .get_version_num(),
         7
     );
-<<<<<<< head
-    let deviations_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/turn_lifecycle/deviations.json");
-=======
     let deviations_path = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
     )
     .join("tests/turn_lifecycle/deviations.json");
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     let deviations: Value = studio_json::from_slice(
         &std::fs::read(deviations_path).expect("read registered differences"),
     )

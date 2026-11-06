@@ -4,12 +4,8 @@ import {
   useServerApi,
   useServerResources,
 } from "../servers/ServerServicesContext";
-<<<<<<< head
-import { Button } from "@mantine/core";
-=======
 import { Button, Group } from "@mantine/core";
 import DirectoryField from "./DirectoryField";
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 import { SettingsRow } from "./ui/primitives";
 
 type Configuration = GetResult<"/api/native-layr/settings">;
@@ -49,39 +45,6 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
                   ? "Unavailable"
                   : "Not installed"}
             </SettingsRow>
-<<<<<<< head
-            <SettingsRow
-              label={
-                <label htmlFor="layr-store-root">Default store directory</label>
-              }
-            >
-              <input
-                id="layr-store-root"
-                value={storeRoot}
-                onChange={(event) => setStoreRoot(event.currentTarget.value)}
-              />
-            </SettingsRow>
-            <Button
-              loading={busy}
-              onClick={() => {
-                setBusy(true);
-                setError("");
-                void post("/api/native-layr/settings", {
-                  storeRoot: storeRoot.trim(),
-                })
-                  .then(
-                    () => {},
-                    (failure) => setError(errorText(failure)),
-                  )
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Save store directory
-            </Button>
-            <p>Leave the directory empty to use Studio's default store.</p>
-            {configuration.readiness?.status === "notReady" && (
-              <p role="status">{configuration.readiness.reason}</p>
-=======
             <DirectoryField
               id="layr-store-root"
               label="Default store directory"
@@ -117,9 +80,7 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
               <p role="alert" className="layr-settings-detail">
                 {configuration.error}
               </p>
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             )}
-            {configuration.error && <p role="alert">{configuration.error}</p>}
           </>
         )}
         {error && <p role="alert">{error}</p>}

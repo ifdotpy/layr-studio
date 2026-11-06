@@ -490,27 +490,21 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
     );
     // Rebuild through the same projector used for repair/startup, retaining the
     // room records and history. Both retained broadcast and shared rows stay dead.
-    let (sources, projects) = f
+    let sources = f
         .store
         .read_async("project-deletion/rebuild", |tx| {
-            Ok::<_, studio_runtime_store::StoreError>((
-                studio_runtime_services::sync_entity_context::RoomSources::read_for_sync(tx)?,
-                studio_runtime_services::sync_policy::ProjectSnapshot::stored_projects(tx)?,
-            ))
+            studio_runtime_services::sync_entity_context::RoomSources::read_for_sync(tx)
         })
         .await
         .expect("sources");
     let directory = studio_runtime_services::sync_entity_context::RoomDirectory::prepare(sources)
         .expect("directory");
-    let vault =
-        studio_runtime_services::sync_policy::ProjectSnapshot::capture(f.store.root(), &projects);
     let root = f.store.root().to_string_lossy().into_owned();
     f.store
         .transaction(move |tx| {
             studio_runtime_services::sync_policy::maintain_entity_projections(
                 tx,
                 &root,
-                &vault,
                 &directory,
                 |_, _, _, _| true,
             )

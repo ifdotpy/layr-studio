@@ -65,7 +65,7 @@ pub(super) fn object_paths(project: &Path, directory: &Path) -> Result<BTreeSet<
     let git = if metadata.is_dir() && !metadata.file_type().is_symlink() {
         marker
     } else if metadata.is_file() && !metadata.file_type().is_symlink() {
-        crate::workspace_paths::read_gitdir_pointer(directory, &marker)?.into_path_buf()
+        crate::layr_native::source_tree::read_gitdir_pointer(directory, &marker)?.into_path_buf()
     } else {
         return Err(NativeLayrError::Refused(format!(
             "Unsupported Git metadata link: {}",

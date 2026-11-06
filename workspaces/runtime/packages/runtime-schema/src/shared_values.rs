@@ -325,7 +325,7 @@ pub const SIGN_IN_OPEN_LIMIT_SECONDS: u64 = 1800;
 /// answers (`browser_answer`) use it.
 pub const SIGN_IN_NOT_SENT_CODE: &str = "not_sent";
 /// The state of a sign-in request that waits on the open request of another chat with the
-/// same Linux user, sign-in host and client ID (its `joinedTo`), instead of a card of its own
+/// same user, sign-in host and client ID (its `joinedTo`), instead of a card of its own
 /// The host bridge (`browser_host::JOINED`) and the card poll (`browser_cards`) use it.
 pub const SIGN_IN_JOINED_STATE: &str = "joined";
 /// The `closeReason` of a joined sign-in request whose sign-in finished on the card that it

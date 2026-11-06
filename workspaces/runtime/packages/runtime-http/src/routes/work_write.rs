@@ -189,7 +189,7 @@ async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
     let mut command =
         work_write::task_command(command, agent.clone(), state.state_dir.clone().into())
             .map_err(|error| write_error(WorkWriteError::Event(error)))?;
-    if is_accept {
+    if is_accept || matches!(command, WorkWrite::Submit(_)) {
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let receipt = work_write::read_work_receipt(
             &store,
@@ -210,6 +210,39 @@ async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
             StatusCode::BAD_REQUEST,
             "Field must not be empty",
         ));
+    }
+    if matches!(command, WorkWrite::Submit(_) | WorkWrite::Accept(_)) {
+        let task_id = match &command {
+            WorkWrite::Submit(input) => input.task_id.clone(),
+            WorkWrite::Accept(input) => input.task_id.clone(),
+            WorkWrite::Create(_) | WorkWrite::Mutate(_) | WorkWrite::Claim(_) => unreachable!(),
+        };
+        let actor = agent.clone();
+        let store = state.store.clone().ok_or_else(ApiError::internal)?;
+        store
+            .read_async("runtime-http/work-legacy-vm", move |tx| {
+                let actor = studio_runtime_services::event_write::checked_agent(tx, &actor)
+                    .map_err(|e| write_error(WorkWriteError::Event(e)))?;
+                let owner = studio_runtime_store::WorkItemsRepository::work_record(tx, &task_id)
+                    .map_err(|_| ApiError::internal())?
+                    .and_then(|task| task.owner().map(str::to_owned));
+                let owner = owner
+                    .map(|id| studio_runtime_services::event_write::checked_agent(tx, &id))
+                    .transpose()
+                    .map_err(|e| write_error(WorkWriteError::Event(e)))?;
+                if actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+                    || owner.is_some_and(|owner| {
+                        owner.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+                    })
+                {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "VM agents are no longer supported",
+                    ));
+                }
+                Ok(())
+            })
+            .await?;
     }
     #[cfg(unix)]
     if let WorkWrite::Submit(input) = &mut command {
@@ -290,15 +323,9 @@ async fn prepare_layr_accept(
         .await
         .map_err(write_error)?;
     match preparation {
-<<<<<<< head
-        VmAcceptPreparation::NotVm => {}
-        VmAcceptPreparation::Merged(result_id) => input.merged_result_id = Some(result_id),
-        VmAcceptPreparation::Call(call) => {
-=======
         LayrAcceptPreparation::NotLayr => {}
         LayrAcceptPreparation::Merged(result_id) => input.merged_result_id = Some(result_id),
         LayrAcceptPreparation::Call(call) => {
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             let params = studio_json::json!({
                 "agentId": call.lead_id,
                 "sourceAgentId": call.owner_id,
@@ -318,6 +345,9 @@ async fn prepare_layr_accept(
             let response = studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/work_write",
                 move || {
+                    if !studio_runtime_services::layr_native::is_native(&native_lead) {
+                        return Err(WorkLayrError::UnsupportedVm);
+                    }
                     studio_runtime_services::layr_native::merge(
                         &runtime_state,
                         &native_lead,
@@ -395,11 +425,7 @@ async fn prepare_layr_submission(
             input.layr_evidence = Some(evidence);
             input.layr_evidence_request_id = Some(request_id);
         }
-<<<<<<< head
-        VmSubmissionPreparation::Call(call) => {
-=======
         LayrSubmissionPreparation::Call(call) => {
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             let params = studio_json::json!({
                 "agentId": call.owner_id,
                 "stateId": call.revision,
@@ -415,6 +441,9 @@ async fn prepare_layr_submission(
             let response = studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/work_write",
                 move || {
+                    if !studio_runtime_services::layr_native::is_native(&native_owner) {
+                        return Err(WorkLayrError::UnsupportedVm);
+                    }
                     studio_runtime_services::layr_native::evidence(
                         &runtime_state,
                         &native_owner,
@@ -816,6 +845,47 @@ mod managed_work_port_tests {
             .await,
         );
         assert_eq!(cancelled["status"], "cancelled");
+    }
+
+    #[tokio::test]
+    async fn work_refuses_legacy_vm_actor_and_owner() {
+        let (state, store, _directory) = state().await;
+        let port = managed_work_port(state, None);
+        let task = written(
+            port.act(
+                "lead",
+                &json!({"action":"create", "title":"Task", "owner":"worker"}),
+                &request_id("legacy-create"),
+            )
+            .await,
+        );
+        store
+            .transaction(|tx| {
+                let mut worker =
+                    AgentRepository::get(tx, &studio_runtime_store::AgentId::from("worker"))?
+                        .unwrap()
+                        .value();
+                worker["executionMode"] = json!("vm");
+                AgentRepository::put(tx, &AgentRecord::from_value(worker)?)
+            })
+            .await
+            .unwrap();
+        for (actor, action) in [
+            (
+                "worker",
+                json!({"action":"submit", "task_id":task["id"], "result":"done", "checks":"ok", "revision":"abc"}),
+            ),
+            (
+                "lead",
+                json!({"action":"accept", "task_id":task["id"], "result":"done"}),
+            ),
+        ] {
+            let outcome = port.act(actor, &action, &request_id(actor)).await;
+            assert!(
+                matches!(outcome, WorkActionOutcome::Refused(ref message) if message.contains("VM agents are no longer supported")),
+                "{outcome:?}"
+            );
+        }
     }
 
     fn schema() -> Value {
@@ -1901,6 +1971,7 @@ inventory::submit! {
 #[derive(Debug)]
 enum WorkLayrError {
     Native(studio_runtime_services::layr_native::NativeLayrError),
+    UnsupportedVm,
 }
 
 #[cfg(unix)]
@@ -1908,6 +1979,7 @@ impl std::fmt::Display for WorkLayrError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Native(error) => error.fmt(f),
+            Self::UnsupportedVm => f.write_str("VM agents are no longer supported"),
         }
     }
 }
@@ -1921,6 +1993,7 @@ impl WorkLayrError {
                 studio_runtime_services::layr_native::NativeLayrError::Refused(_)
                     | studio_runtime_services::layr_native::NativeLayrError::Conflict(_)
             ),
+            Self::UnsupportedVm => false,
         }
     }
 }
@@ -1939,5 +2012,6 @@ mod layr_error_tests {
             "Native Layr merge conflict: CONFLICT (content): file"
         );
         assert!(!error.uncertain());
+        assert!(!WorkLayrError::UnsupportedVm.uncertain());
     }
 }

@@ -314,6 +314,23 @@ describe("server sidebar projection", () => {
     expect(projected.savedOrder).toEqual({ projects: ["/legacy"] });
   });
 
+  it("shows Layr chats in their host project", () => {
+    const line = "/var/lib/codex-studio/layr/projects/da54bb40/lines/main";
+    const native = {
+      id: "native",
+      cwd: line,
+      executionMode: "native",
+      projectPath: "/Users/me/Projects/attar",
+    } as Snapshot["threads"][number];
+    const data = snapshot();
+    data.threads = [native];
+    const threads = sidebarSnapshot(data).threads;
+    expect(threads.map((row) => row.projectPath)).toEqual([
+      "/Users/me/Projects/attar",
+    ]);
+    expect(native.cwd).toBe(line);
+  });
+
   it("uses empty saved preferences when keys are missing or invalid", () => {
     const data = snapshot();
     records.set(`codex-project-compact:${data.stateDir}`, "invalid");

@@ -1,4 +1,4 @@
-//! URL validation and sign-in link detection for the browser bridge.
+//! URL rules for the browser sign-in bridge.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -715,15 +715,8 @@ mod tests {
 
     #[test]
     fn sign_in_links_follow_the_shared_corpus() {
-<<<<<<< head
-        // The owner (vm-guest/browser_policy.py) checks the same file.
-        let corpus: Vec<studio_json::Value> =
-            studio_json::from_str(include_str!("../../../apps/vm-guest/sign_in_links.json"))
-                .expect("corpus");
-=======
         let corpus: Vec<studio_json::Value> =
             studio_json::from_str(include_str!("sign_in_links.json")).expect("corpus");
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         assert!(corpus.len() > 20);
         for case in corpus {
             let expected: Vec<String> =

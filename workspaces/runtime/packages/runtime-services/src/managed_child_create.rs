@@ -19,7 +19,7 @@ use thiserror::Error;
 use crate::managed_host_tools::MAX_SPAWN_BATCH_AGENTS;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_PROMPT_CHARS: usize = 32_000;
-/// A new worker uses its parent's workspace mode; ordinary reviewers share the folder.
+/// A reviewer uses the shared folder unless its parent uses native Layr.
 pub(crate) fn default_workspace<'a>(role: &str, parent: &'a Value) -> &'a str {
     if role == "reviewer" && !crate::layr_native::is_native(parent) {
         "shared"
@@ -29,6 +29,18 @@ pub(crate) fn default_workspace<'a>(role: &str, parent: &'a Value) -> &'a str {
             .and_then(Value::as_str)
             .unwrap_or("worktree")
     }
+}
+
+fn refuse_legacy_parent(parent: &AgentRecord) -> Result<(), Error> {
+    if parent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+        || parent.workspace_mode == Some(studio_runtime_schema::records::WorkspaceMode::Layr)
+    {
+        return Err(crate::managed_host_tools::Error::Invalid(
+            "Legacy VM parents cannot create workers or reviews",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
@@ -191,79 +203,8 @@ pub(crate) struct WorkerSettingsRequest<'a> {
 
 async fn account_scope(
     store: &RuntimeStore,
-<<<<<<< head
-    environment: &dyn ManagedCreationEnvironment,
-    request: WorkerSettingsRequest<'_>,
-) -> Result<ResolvedWorkerSettings, WorkerSettingsError> {
-    let WorkerSettingsRequest {
-        parent,
-        root,
-        spec,
-        profile,
-        role,
-        requested_account_key,
-        account_load,
-    } = request;
-    let defaults = root.worker_defaults.value();
-    let known = match defaults {
-        Some(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => Some(defaults),
-        _ => None,
-    };
-    let unreadable = match defaults {
-        Some(studio_runtime_store::StoredWorkerDefaults::Unreadable(value)) => Some(value),
-        _ => None,
-    };
-    let default_model = known
-        .and_then(|value| value.model.value().map(String::as_str))
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("model"))
-                .and_then(Value::as_str)
-        });
-    let default_effort = known
-        .and_then(|value| value.effort.value().map(String::as_str))
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("effort"))
-                .and_then(Value::as_str)
-        });
-    let default_account = known
-        .and_then(|value| value.account_key.value().map(String::as_str))
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("accountKey"))
-                .and_then(Value::as_str)
-        });
-    let default_fast = known
-        .and_then(|value| value.fast_mode.value().copied())
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("fastMode"))
-                .and_then(Value::as_bool)
-        });
-    let default_daybreak = known
-        .and_then(|value| value.daybreak_enabled.value().copied())
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("daybreakEnabled"))
-                .and_then(Value::as_bool)
-        });
-    let profile_model = profile.map(|profile| profile.model.as_str());
-    let review = (role == "reviewer")
-        .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort));
-    let requested_model = spec
-        .model
-        .value()
-        .map(String::as_str)
-        .or(profile_model)
-        .or_else(|| review.as_ref().and_then(|(model, _, _)| model.as_deref()))
-        .or(default_model)
-        .or(root.model.as_deref())
-        .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL);
-=======
     root: &AgentRecord,
 ) -> Result<(Vec<String>, Option<Vec<String>>, Option<Vec<String>>), StoreError> {
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     let excluded = root
         .excluded_account_keys
         .value()
@@ -377,10 +318,6 @@ pub(crate) async fn resolve_worker_settings(
     let (account_key, account) =
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key: &parent.account_key,
-<<<<<<< head
-            requested_account_key,
-            default_account_key: default_account,
-=======
             requested_account_key: if role == "reviewer" {
                 requested_account_key.or_else(|| {
                     root.review_defaults
@@ -402,7 +339,6 @@ pub(crate) async fn resolve_worker_settings(
             } else {
                 default_account
             },
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             model: requested_model,
             excluded_account_keys: &excluded,
             project_account_keys: keys.as_deref(),
@@ -510,6 +446,7 @@ pub(crate) async fn spawn_agents(
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = Box::new(actor.record().clone());
+    refuse_legacy_parent(&actor_record)?;
     if actor_record.role.value().copied()
         == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
     {
@@ -538,10 +475,6 @@ pub(crate) async fn spawn_agents(
     let root = Box::new(stored_root(store, AgentId::from(root_id)).await?);
     event_write::assert_delegation(&root)
         .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
-<<<<<<< head
-    let root_value = root.value();
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     let parent_cwd =
         actor_record
             .cwd
@@ -648,12 +581,7 @@ pub(crate) async fn spawn_agents(
         if spec.server.as_ref().is_some_and(|value| !value.is_empty()) {
             return Err(Error::Unavailable("multi-server/worker-call"));
         }
-        if parent_value.get("executionMode").and_then(Value::as_str) == Some("vm") {
-            return Err(crate::managed_host_tools::Error::Unavailable(
-                "workspace-state/unavailable",
-            )
-            .into());
-        }
+        // A relative host folder starts at the parent's folder.
         let alternate_directory = spawn_directory(parent_cwd, spec.cwd.as_deref())?
             .filter(|directory| directory.as_str() != parent_cwd);
         let child_directory = alternate_directory.as_deref().unwrap_or(parent_cwd);
@@ -696,6 +624,12 @@ pub(crate) async fn spawn_agents(
                 )
                 .into());
             }
+        }
+        if matches!(workspace, "layr" | "linux") {
+            return Err(crate::managed_host_tools::Error::Invalid(
+                "A VM workspace requires a VM parent",
+            )
+            .into());
         }
         if workspace == "layr-native" && !crate::layr_native::is_native(&parent_value) {
             return Err(crate::managed_host_tools::Error::Invalid(
@@ -794,10 +728,9 @@ pub(crate) async fn spawn_agents(
         let base_ref_request = requested_base_ref.or(project_worker_base);
         let (worktree, (base_ref, base_commit, main_ref, behind_main)) =
             resolve_child_base(worktree, Path::new(host_cwd), base_ref_request)?;
-        let workspace_in_git = in_git;
         let body = json!({"account_key":account_key,"name":name,"model":model,"effort":effort,
             "prompt":prompt,"workspace_explicit":spec.workspace.is_some(),
-            "_workspaceInGit":workspace_in_git});
+            "_workspaceInGit":in_git});
         let mut draft = crate::host_worker_create::prepare_work_item(
             &body,
             Path::new(host_cwd),
@@ -1444,11 +1377,7 @@ pub(crate) async fn request_review(
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = Box::new(actor.record().clone());
-    if actor_record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        return Err(
-            crate::managed_host_tools::Error::Unavailable("workspace-state/unavailable").into(),
-        );
-    }
+    refuse_legacy_parent(&actor_record)?;
     if actor_record.provider.value().copied() != Some(studio_runtime_providers::ProviderKind::Codex)
     {
         return Err(crate::managed_host_tools::Error::Invalid(
@@ -1721,17 +1650,8 @@ impl crate::native_review::ReviewCreator for ReviewCreator<'_> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-<<<<<<< head
-mod vm_review_identity_tests {
-    use super::{
-        Error, WorkerBase, host_project_cwd, resolve_child_base, validate_vm_parent_workspace,
-        vm_review_guest_ids,
-    };
-    use studio_json::json;
-=======
 mod review_identity_tests {
     use super::{WorkerBase, resolve_child_base};
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 
     #[test]
     fn worker_recheck_refusal_reports_its_cause() {

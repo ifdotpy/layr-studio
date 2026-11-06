@@ -6,6 +6,4 @@ if (!process.features.typescript) {
   );
   process.exit(1);
 }
-await import(
-  process.argv[2] === "--refresh-auth" ? "./refresh-auth.ts" : "./bridge.ts"
-);
+await import("./bridge.ts");

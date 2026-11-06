@@ -1175,8 +1175,9 @@ impl CleanupPorts for ProductionPorts {
             CleanupEffect::ArchiveImage | CleanupEffect::RemoveImage => {
                 Ok(json!({"state":"kept","reason":"legacy image workspace"}))
             }
+            // Old cleanup receipts remain readable, but no VM command can be sent.
             CleanupEffect::SaveVmTurn { .. } | CleanupEffect::ReleaseVmLine { .. } => {
-                Err(EffectFailure::Unavailable)
+                Err(EffectFailure::NotSent)
             }
             CleanupEffect::SaveWorktreeRef { identity } => {
                 save_worktree_archive_ref(identity)?;
@@ -1459,6 +1460,26 @@ mod tests {
         begin_effect, cleanup_agent_workspace_with_ports, complete_effect, queued_cleanup_intent,
         reconcile_pending_cleanup,
     };
+
+    #[test]
+    fn production_refuses_legacy_vm_cleanup_effects() {
+        let ports = super::ProductionPorts {
+            state_dir: PathBuf::from("/unused"),
+        };
+        for effect in [
+            CleanupEffect::SaveVmTurn {
+                turn_id: "old".into(),
+            },
+            CleanupEffect::ReleaseVmLine {
+                method: "line.remove".into(),
+            },
+        ] {
+            assert_eq!(
+                ports.perform(&json!({"id":"old"}), &effect, "request"),
+                Err(EffectFailure::NotSent)
+            );
+        }
+    }
 
     struct FakePorts {
         outcomes: Mutex<Vec<Result<Value, EffectFailure>>>,
@@ -1832,6 +1853,46 @@ mod tests {
             saved["workspaceCleanupIntent"]["operationId"],
             "replacement-operation"
         );
+    }
+
+    #[tokio::test]
+    async fn definite_not_sent_retry_uses_a_new_guest_request_identity() {
+        let (_directory, store) = fixture().await;
+        put_agent(
+            &store,
+            json!({
+                "executionMode":"vm", "layrReady":true,
+                "layrTurnSaves":{"turn-1":{"status":"pending"}},
+                "agentArchive":{"cleanupPending":true}
+            }),
+        )
+        .await;
+        let ports = Arc::new(FakePorts::new(vec![
+            Err(EffectFailure::NotSent),
+            Ok(json!({"stateId":"state-1"})),
+            Ok(json!({"stateId":"state-2"})),
+        ]));
+        assert!(matches!(
+            cleanup_agent_workspace_with_ports(
+                Arc::clone(&store),
+                "cleanup-agent".to_owned(),
+                CleanupAction::Archive,
+                ports.clone()
+            )
+            .await,
+            Err(WorkspaceCleanupError::NotSent)
+        ));
+        cleanup_agent_workspace_with_ports(
+            Arc::clone(&store),
+            "cleanup-agent".to_owned(),
+            CleanupAction::Archive,
+            ports.clone(),
+        )
+        .await
+        .expect("definitely unsent effect retries");
+        let calls = ports.calls.lock().expect("calls mutex");
+        assert_ne!(calls[0].1, calls[1].1);
+        assert!(matches!(calls[2].0, CleanupEffect::ReleaseVmLine { .. }));
     }
 
     #[tokio::test]

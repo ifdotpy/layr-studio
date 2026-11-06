@@ -30,6 +30,22 @@ test("disk recovery, folder sync, workspaces and sign-in use platform-neutral pr
       workspaceMode: WorkspaceMode.image,
     } as Agent),
   ).toBeNull();
+  expect(
+    workspaceBadgeInfo({
+      isLead: true,
+      workspaceMode: WorkspaceMode.layr,
+    } as Agent),
+  ).toEqual({ label: "Unavailable", title: "Legacy workspace unavailable" });
+  expect(
+    resultTarget(
+      {
+        host: "id.example.com",
+        url: "https://id.example.com/",
+        port: 8000,
+      },
+      "Build server",
+    ),
+  ).toBe("Build server, port 8000");
   expect(deviceName("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0)")).toBe(
     "Computer",
   );
@@ -43,7 +59,6 @@ test("user-supplied server labels and raw error details stay intact", () => {
       {
         host: "id.example.com",
         url: "https://id.example.com/",
-        source: "host",
         port: 8000,
       },
       "Linux build server",

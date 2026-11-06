@@ -47,7 +47,6 @@ async fn journal(state: &State, entries: Vec<JournalEntry>) {
         entries,
         &Value::Null,
         None,
-        None,
         Vec::new(),
         None,
         false,
@@ -1439,10 +1438,11 @@ async fn a_burst_beyond_the_callback_limits_is_answered_once_each() {
 /// Accept a record directly, as an earlier worker run would have left it.
 async fn leave_record(state: &State, generation: u64, cursor: u64, frame: &Value) {
     let entry = entry(generation, cursor, frame);
+    let scope = SCOPE.to_owned();
     state
         .bridge
         .store
-        .transaction_with(move |tx| callback_record::accept(tx, "default", SCOPE, None, &entry))
+        .transaction_with(move |tx| callback_record::accept(tx, "default", &scope, &entry))
         .await
         .expect("leave record");
 }

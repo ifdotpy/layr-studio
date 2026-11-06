@@ -212,24 +212,12 @@ async fn view_value(
                     json!({"legacyMessages":studio_runtime_store::projection_value(&messages)}),
                 );
             }
-<<<<<<< head
-            let mut room = studio_json::to_value(
-                super::messages::room_snapshot(
-                    state,
-                    r.room_id.as_str().to_owned(),
-                    None,
-                    None,
-                    studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
-                )
-                .await?,
-=======
             let mut room = super::messages::room_snapshot(
                 state,
                 r.room_id.as_str().to_owned(),
                 None,
                 None,
                 studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             )
             .await?;
             // Preserve an exclusive history boundary while fitting a bounded tail.
@@ -632,27 +620,6 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .ok(),
         ResourceRef::AuthProgressResource(resource) => {
             studio_json::to_vec(&auth_progress(&state, resource.request_id.as_str()).await?).ok()
-<<<<<<< head
-        }
-        ResourceRef::VaultJobProgressResource(resource) => studio_json::to_vec(
-            &super::host_secrets::job_progress(&state, resource.job, resource.request_id.as_str())
-                .await,
-        )
-        .ok(),
-        ResourceRef::VaultReadinessResource(resource) => {
-            let settings = super::host_secrets::settings_dir(&state.state_dir);
-            studio_runtime_process::blocking_pool::spawn_blocking(
-                "runtime-http/vault-readiness",
-                move || {
-                    studio_runtime_services::vault::keys_ready(&settings, resource.prefix.as_str())
-                },
-            )
-            .await
-            .ok()?
-            .ok()
-            .and_then(|ready| studio_json::to_vec(&ready).ok())
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         }
         ResourceRef::MultiServerResource(_) if cfg!(unix) => {
             studio_json::to_vec(&super::multi_server::read_snapshot(&state).await.ok()?).ok()

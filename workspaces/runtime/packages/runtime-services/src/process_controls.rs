@@ -254,10 +254,14 @@ fn retained_monitor_scope(
     {
         return Ok(None);
     }
-    match crate::account_worker::retained::vm_actor(tx, operation.agent.as_str()) {
-        Ok(false) => {}
-        Err(crate::account_worker::WorkerError::Store(error)) => return Err(Error::Store(error)),
-        _ => return Ok(None),
+    let actor = studio_runtime_store::AgentRepository::get(
+        tx,
+        &studio_runtime_store::AgentId::from(operation.agent.as_str()),
+    )?;
+    if actor.is_some_and(|actor| {
+        actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+    }) {
+        return Ok(None);
     }
     match crate::account_worker::retained::monitor_command_scope(tx, &monitor.id, operation) {
         Ok(scope) => Ok(scope),

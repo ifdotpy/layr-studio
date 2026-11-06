@@ -74,7 +74,6 @@ pub(super) async fn journal(
         entries,
         &Value::Null,
         None,
-        None,
         Vec::new(),
         None,
         false,

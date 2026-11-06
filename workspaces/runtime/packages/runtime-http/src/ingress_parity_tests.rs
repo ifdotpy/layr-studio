@@ -273,77 +273,6 @@ fn opted_in_ingress_matches_schema() {
         }
         for body in cases {
             let decoded = match name {
-<<<<<<< head
-                "NativeActionRequest" => {
-                    studio_json::from_value::<Object<generated::NativeActionRequest>>(body.clone())
-                        .is_ok()
-                }
-                "ClaudeAddStartRequest" => studio_json::from_value::<
-                    Object<generated::ClaudeAddStartRequest>,
-                >(body.clone())
-                .is_ok(),
-                "ClaudeCancelRequest" => {
-                    studio_json::from_value::<Object<generated::ClaudeCancelRequest>>(body.clone())
-                        .is_ok()
-                }
-                "ClaudeCodeRequest" => {
-                    studio_json::from_value::<Object<generated::ClaudeCodeRequest>>(body.clone())
-                        .is_ok()
-                }
-                "ClaudeStartRequest" => {
-                    studio_json::from_value::<Object<generated::ClaudeStartRequest>>(body.clone())
-                        .is_ok()
-                }
-                "ProjectSecretsListRequest" => studio_json::from_value::<
-                    Object<generated::ProjectSecretsListRequest>,
-                >(body.clone())
-                .is_ok(),
-                "ProjectSecretSetRequest" => studio_json::from_value::<
-                    Object<generated::ProjectSecretSetRequest>,
-                >(body.clone())
-                .is_ok(),
-                "ProjectSecretRemoveRequest" => studio_json::from_value::<
-                    Object<generated::ProjectSecretRemoveRequest>,
-                >(body.clone())
-                .is_ok(),
-                "VaultLoginRequest" => {
-                    studio_json::from_value::<Object<generated::VaultLoginRequest>>(body.clone())
-                        .is_ok()
-                }
-                "VaultPullRequest" => {
-                    studio_json::from_value::<Object<generated::VaultPullRequest>>(body.clone())
-                        .is_ok()
-                }
-                "VaultSetupFactsRequest" => studio_json::from_value::<
-                    Object<generated::VaultSetupFactsRequest>,
-                >(body.clone())
-                .is_ok(),
-                "MacSyncConfigRequest" => {
-                    studio_json::from_value::<Object<generated::MacSyncConfigRequest>>(body.clone())
-                        .is_ok()
-                }
-                "MacSyncResolveRequest" => studio_json::from_value::<
-                    Object<generated::MacSyncResolveRequest>,
-                >(body.clone())
-                .is_ok(),
-                "VaultSetupRequest" => {
-                    studio_json::from_value::<Object<generated::VaultSetupRequest>>(body.clone())
-                        .is_ok()
-                }
-                "VaultUnlockRequest" => {
-                    studio_json::from_value::<Object<generated::VaultUnlockRequest>>(body.clone())
-                        .is_ok()
-                }
-                "IdRequest" => {
-                    studio_json::from_value::<Object<generated::IdRequest>>(body.clone()).is_ok()
-                }
-                "McpReconnectRequest" => {
-                    studio_json::from_value::<Object<generated::McpReconnectRequest>>(body.clone())
-                        .is_ok()
-                }
-                "ProjectDeleteRequest" => {
-                    studio_json::from_value::<Object<generated::ProjectDeleteRequest>>(body.clone())
-=======
                 "IdRequest" => {
                     studio_json::from_value::<Object<generated::IdRequest>>(body.clone()).is_ok()
                 }
@@ -373,7 +302,6 @@ fn opted_in_ingress_matches_schema() {
                 }
                 "ClaudeStartRequest" => {
                     studio_json::from_value::<Object<generated::ClaudeStartRequest>>(body.clone())
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                         .is_ok()
                 }
                 "CheckpointCaptureRequest" => studio_json::from_value::<
@@ -488,29 +416,6 @@ fn named_patterns_match_openapi() {
         for value in values {
             let wire = json!(value);
             let ok = match (schema, field) {
-<<<<<<< head
-                ("ProjectSecretsListRequest", _) => {
-                    studio_json::from_value::<ProjectId>(wire.clone()).is_ok()
-                }
-                ("ProjectSecretSetRequest", "name") => {
-                    studio_json::from_value::<SecretName>(wire.clone()).is_ok()
-                }
-                ("ProjectSecretSetRequest", _) => {
-                    studio_json::from_value::<SecretRequestId>(wire.clone()).is_ok()
-                }
-                ("VaultLoginRequest", "requestId") => {
-                    studio_json::from_value::<VaultRequestId>(wire.clone()).is_ok()
-                }
-                ("VaultLoginRequest", _) => {
-                    studio_json::from_value::<AwsProfileName>(wire.clone()).is_ok()
-                }
-                ("VaultSetupRequest", "prefix") => studio_json::from_value::<
-                    studio_runtime_schema::resource_ref::VaultPrefix,
-                >(wire.clone())
-                .is_ok(),
-                ("VaultSetupRequest", _) => studio_json::from_value::<Region>(wire.clone()).is_ok(),
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                 ("AccountGroupRequest", _) => studio_json::from_value::<
                     Option<studio_runtime_schema::project_ingress::AccountGroup>,
                 >(wire.clone())

@@ -1907,6 +1907,42 @@ it("connection: real lifecycle removes every registered listener across disposal
   }
 });
 
+it("connection: foreign, stale and invalid progress cannot heal a replacement stream", async () => {
+  const f = await fixture(false, true, true);
+  const resource = { kind: "auth-progress", requestId: "login-one" } as const;
+  f.transport.watchResourceChanges(resource, vi.fn());
+  await vi.advanceTimersByTimeAsync(50);
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
+  const progress = {
+    protocol: SYNC_PROTOCOL_VERSION,
+    workspaceId: "workspace",
+    epoch: "epoch",
+    revision: 10,
+    resource,
+    value: { requestId: "login-one", accountKey: "account", status: "ready" },
+  };
+  f.source.emit("resource-progress", progress);
+  const status = vi.fn();
+  f.transport.watchResourceConnection(status);
+  f.source.onerror?.();
+  await vi.advanceTimersByTimeAsync(1_000);
+  const replacement = f.sources[1]!;
+  replacement.emit("api-schema", { hash: API_SCHEMA_HASH });
+  for (const fields of [
+    { workspaceId: "foreign" },
+    { epoch: "foreign" },
+    { revision: 9 },
+  ]) {
+    replacement.emit("resource-progress", { ...progress, ...fields });
+    expect(status.mock.lastCall?.[0]).toBe("degraded");
+  }
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+  replacement.emit("resource-progress", { ...progress, value: "invalid" });
+  expect(replacement.closed).toBe(true);
+  expect(status.mock.lastCall?.[0]).toBe("degraded");
+  quiet.mockRestore();
+});
+
 it("staged application must not overtake an earlier resource frame", async () => {
   const f = await fixture();
   const listener = vi.fn();

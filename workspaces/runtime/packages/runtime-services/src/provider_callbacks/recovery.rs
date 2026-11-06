@@ -200,20 +200,7 @@ fn settle_tool_abandoned(
         } else {
             record["stage"] = json!("interrupted");
             record["error"] = json!("Server restarted before the execution receipt");
-            let mut message = "The server stopped before this request recorded its result; it may have run. Do not repeat the mutation with a new id.".to_owned();
-            // A host command keeps its guest operation: the caller reads its
-            // outcome with action status or list.
-            if record["tool"] == "host_exec"
-                && let Some(operation) = record
-                    .get("hostExecRequest")
-                    .and_then(|request| request.pointer("/params/operationId"))
-                    .and_then(Value::as_str)
-            {
-                message.push(' ');
-                message.push_str(&format!(
-                    "Operation: {operation}. Use action status or list; never repeat the command."
-                ));
-            }
+            let message = "The server stopped before this request recorded its result; it may have run. Do not repeat the mutation with a new id.".to_owned();
             json!({
                 "requestId":id, "stage":"interrupted", "outcome":"unknown",
                 "message":message

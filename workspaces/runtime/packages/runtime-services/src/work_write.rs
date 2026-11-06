@@ -1255,15 +1255,6 @@ pub async fn prepare_layr_submission(
             return Ok(LayrSubmissionPreparation::NotLayr);
         }
         let rpc_id = format!("layr-evidence:{owner_id}:{revision}");
-<<<<<<< head
-        let mut view = read_vm_view(tx, &input.task_id)?;
-        match &view.vm_submit {
-            Some(VmWorkIntent::Pending(..) | VmWorkIntent::Unknown(..) | VmWorkIntent::UnknownUnattributed(..)) => return Err(Error::Conflict("A prior layr evidence request has an unknown outcome; inspect it before retrying").into()),
-            Some(VmWorkIntent::Completed { owner, result }) if owner.request_id==rpc_id && owner.owner==owner_id && Some(owner.id.version)==work.version().and_then(studio_json::Number::as_i64) && owner.revision==revision => return Ok(VmSubmissionPreparation::Evidence{evidence:result.evidence.clone(),request_id:rpc_id}),
-            Some(VmWorkIntent::Completed { .. } | VmWorkIntent::NotSent(..)) | None => {}
-        }
-        view.vm_submit = Some(VmWorkIntent::Pending(VmOwner {request_id:rpc_id.clone(),owner:owner_id.into(),revision:revision.clone(),id:Submission { version:work.version().and_then(studio_json::Number::as_i64).ok_or_else(|| invalid("runtime_work", &input.task_id))? },public:None}));
-=======
         let mut view = read_layr_view(tx, &input.task_id)?;
         match &view.submit {
             Some(LayrWorkIntent::Pending(..) | LayrWorkIntent::Unknown(..) | LayrWorkIntent::UnknownUnattributed(..)) => return Err(Error::Conflict("A prior layr evidence request has an unknown outcome; inspect it before retrying").into()),
@@ -1271,7 +1262,6 @@ pub async fn prepare_layr_submission(
             Some(LayrWorkIntent::Completed { .. } | LayrWorkIntent::NotSent(..)) | None => {}
         }
         view.submit = Some(LayrWorkIntent::Pending(LayrOwner {request_id:rpc_id.clone(),owner:owner_id.into(),revision:revision.clone(),id:Submission { version:work.version().and_then(studio_json::Number::as_i64).ok_or_else(|| invalid("runtime_work", &input.task_id))? },public:None}));
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         if let Some(root) = request_id.as_deref()
             && admit_layr_work_request(tx, &agent, root, &input.task_id, &signature, event_write::unix_time()?)?.is_none() {
             return Ok(LayrSubmissionPreparation::Replay);
@@ -4200,11 +4190,7 @@ mod actor_tests {
         let missing = r#"{"status":"completed","requestId":"evidence","taskId":"task","owner":"worker","revision":"state","version":2,"created":1.0}"#;
         assert!(
             studio_json::from_str::<
-<<<<<<< head
-                super::VmWorkIntent<super::Submission, super::VmSubmissionResult>,
-=======
                 super::LayrWorkIntent<super::Submission, super::LayrSubmissionResult>,
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             >(missing)
             .is_err()
         );
@@ -4214,11 +4200,7 @@ mod actor_tests {
     fn vm_submission_migrated_unknown_round_trips() {
         let stored =
             r#"{"status":"unknown","requestId":"rpc","owner":"a","revision":"rev","version":1}"#;
-<<<<<<< head
-        let intent: super::VmWorkIntent<super::Submission, super::VmSubmissionResult> =
-=======
         let intent: super::LayrWorkIntent<super::Submission, super::LayrSubmissionResult> =
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             studio_json::from_str(stored).expect("migrated intent");
         assert_eq!(
             studio_runtime_store::projection_value(&intent),

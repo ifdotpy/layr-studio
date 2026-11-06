@@ -193,12 +193,7 @@ mod tests {
         let ProjectRecord::Live(project) = studio_json::from_str(r#"{"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":[],"sidebarHidden":false,"workspacePolicy":"isolated"}"#).unwrap() else { panic!("live") };
         let mut project = *project;
         project.account_groups = Field::Value(vec!["x".repeat(12_001); 201]);
-<<<<<<< head
-        let projection =
-            project_record(project, Field::Null, Field::Missing, Field::Missing, &[]).unwrap();
-=======
         let projection = project_record(project, &[]).unwrap();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let encoded = studio_json::to_string(&projection).unwrap();
         let actual: studio_json::Value = studio_json::from_str(&encoded).unwrap();
         assert_eq!(actual["name"], json!(null));
@@ -246,18 +241,7 @@ mod tests {
                 label: "Laptop".into(),
             }]
         );
-<<<<<<< head
-        let projection = project_record(
-            team_project(),
-            Field::Null,
-            Field::Missing,
-            Field::Missing,
-            &leads,
-        )
-        .unwrap();
-=======
         let projection = project_record(team_project(), &leads).unwrap();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let encoded = studio_json::to_string(&projection).unwrap();
         assert!(
             encoded.contains(
@@ -271,18 +255,7 @@ mod tests {
     fn revoked_grant_gives_no_peer_lead() {
         let grants = [grant("g1", "LeadMessages", Some(20))];
         assert!(active_peer_leads("proj-a", &grants).is_empty());
-<<<<<<< head
-        let projection = project_record(
-            team_project(),
-            Field::Null,
-            Field::Missing,
-            Field::Missing,
-            &[],
-        )
-        .unwrap();
-=======
         let projection = project_record(team_project(), &[]).unwrap();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let encoded = studio_json::to_string(&projection).unwrap();
         assert!(!encoded.contains("peerLeads"), "{encoded}");
         assert!(

@@ -21,15 +21,9 @@ the hosted gate composition.
 
 `just test-fast` runs the [`fast` nextest profile](../.config/nextest.toml), desktop
 recovery and retained-helper boundaries, web API/type witnesses, tooling tests,
-<<<<<<< head
-generated-contract and dependency guards including Cargo bans, and the VM guest Python suite through its
-[runner](../workspaces/runtime/apps/vm-guest/run-guest-suite.mts). The facade uses five
+generated-contract and dependency guards including Cargo bans. The facade uses four
 bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
-independent tooling/provider/desktop checks, and the guest suite. Independent
-=======
-generated-contract and dependency guards including Cargo bans. The facade uses bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
 and independent tooling/provider/desktop checks. Independent
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 checks start immediately; artifact consumers wait only for their preparation. Cargo compilation stays in the Rust lane with four build jobs. WASM is
 generated once; the renderer is built once for the web checks.
 Type checks wait for WASM; web tests wait for the workspace build's debug
@@ -84,34 +78,8 @@ to populate all target dependencies before an offline check. `deny.toml` permits
 `studio-json` and named third-party direct dependents of `serde_json`; when a
 dependency adds one, inspect `cargo tree --locked --target all --all-features -i serde_json -e
 normal,build,dev --workspace --depth 1` and deliberately add the third-party crate to the wrappers
-list. Workspace crates must use the facade. The separate vendored Layr workspace
-is excluded by the root Cargo workspace.
+list. Workspace crates must use the facade.
 
-<<<<<<< head
-| Purpose                                               | Command                                  |
-| ----------------------------------------------------- | ---------------------------------------- |
-| Short safety gate                                     | `just test-fast`                         |
-| Publication gate                                      | `just test-comprehensive`                |
-| Generated contracts                                   | `just contracts-check`                   |
-| Workspace boundaries                                  | `just boundaries-check`                  |
-| Cargo dependency bans                                 | `just deny-bans`                         |
-| Browser smoke                                         | `just test-browser-smoke`                |
-| Full browser project, manual heavy                    | `just test-browser` or `just test-heavy` |
-| Multi-server browser recovery, manual heavy           | `just test-browser-multi-server`         |
-| Full deterministic Rust corpora, manual heavy         | `just test-rust-runtime-corpora`         |
-| Full account-worker crash matrix, manual heavy        | `just test-crash-matrix-full`            |
-| Provider-session scheduling diagnostic, manual heavy  | `just test-rust-session-fairness`        |
-| Guest worker and suite process cleanup, manual        | `just test-guest-runner-processes`       |
-| Provider child reap timing, manual heavy              | `just test-provider-reap-timing`         |
-| Detached host_exec lifecycle and guest broker, manual | `just test-host-exec-processes`          |
-| Live handover with real servers, manual               | `just test-live-handover`                |
-| Load-sensitive Rust tests, manual heavy               | `just test-quarantine`                   |
-| Real launcher process probe (lsof), manual            | `just test-real-process-probe`           |
-| Many-agent scenario, manual heavy                     | `just test-rust-many-agents`             |
-| Continuation corpus and store faults, manual heavy    | `just test-rust-usage-resume-corpora`    |
-| Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
-| Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
-=======
 | Purpose                                              | Command                                  |
 | ---------------------------------------------------- | ---------------------------------------- |
 | Short safety gate                                    | `just test-fast`                         |
@@ -138,7 +106,6 @@ is excluded by the root Cargo workspace.
 | Hidden Rust native WebView scenarios, manual heavy   | `just test-native-webview`               |
 
 Refresh the captured entity transfer fixture with `just regenerate-entity-server-frames`.
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 
 Eight Rust tests failed only under load and are `#[ignore]` until
 [issue #616](https://github.com/ifdotpy/layr-studio/issues/616) is fixed; `just test-quarantine`
@@ -354,8 +321,7 @@ switch is on.
 - Owner of the switch name: `RETEST_ENV` in
   `workspaces/tooling/apps/repository-checks/gate-config.ts`.
 - Safety: no Studio Rust test reads `LAYR_ROOT` from the gate or starts `layr` from
-  `PATH`. The tests that mention `LAYR_ROOT` build an environment for a guest or
-  use fake scripts. Still, with the switch on, the facade gives the step an empty
+  `PATH`. The tests that mention `LAYR_ROOT` use fake scripts. Still, with the switch on, the facade gives the step an empty
   temporary `LAYR_ROOT`. A shim first on `PATH` runs the real `layr` with the real
   store only for calls that layr-retest itself makes (no
   `LAYR_RETEST_PROFILE_DIR` is set for those), and a test never gets it.

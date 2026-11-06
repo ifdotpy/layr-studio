@@ -1220,19 +1220,7 @@ mod tests {
     #[test]
     fn scope_visibility_tracks_predicate_moves_atomically_without_replaying_appends() {
         use studio_json::json;
-<<<<<<< head
-        let mut connection = Connection::open_in_memory().expect("memory SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common schema"),
-            )
-            .expect("bootstrap owner");
-=======
         let mut connection = crate::fresh_state::test_canvas();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let tx = connection.transaction().expect("transaction");
         for (id, root) in [("a", "alpha"), ("b", "beta")] {
             member(&tx, id, root);
@@ -1299,23 +1287,9 @@ mod tests {
     }
 
     #[test]
-<<<<<<< head
-    fn scope_visibility_retains_deleted_owner_until_restore_and_ignores_team_for_root_only_work() {
-        use studio_json::json;
-        let mut connection = Connection::open_in_memory().expect("SQLite");
-        connection
-            .execute_batch(
-                include_str!("../sync_schema.sql")
-                    .split("-- section: runtime_events")
-                    .next()
-                    .expect("common sync schema section"),
-            )
-            .expect("bootstrap scope fixture schema");
-=======
     fn scope_visibility_retains_deleted_owner_until_restore() {
         use studio_json::json;
         let mut connection = crate::fresh_state::test_canvas();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let tx = connection.transaction().expect("scope fixture transaction");
         for (id, root) in [("a", "alpha"), ("b", "beta")] {
             member(&tx, id, root);

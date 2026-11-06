@@ -325,11 +325,7 @@ impl ProjectsRepository {
             params![project.id, record],
             |row| row.get(0),
         )?;
-<<<<<<< head
-        let record = studio_json::OwnedRawJson::from_string(stored)?;
-=======
         let record = studio_json::value::RawValue::from_string(stored)?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         SyncDocumentsRepository::put_entity(
             transaction,
             "project",
@@ -373,11 +369,7 @@ impl ProjectsRepository {
             params![id, patch],
             |row| Ok((row.get(0)?, row.get::<_, Option<bool>>(1)?.unwrap_or(false))),
         )?;
-<<<<<<< head
-        let record = studio_json::OwnedRawJson::from_string(record)?;
-=======
         let record = studio_json::value::RawValue::from_string(record)?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         SyncDocumentsRepository::put_entity(transaction, "project", id, record, hidden)?;
         Ok(())
     }

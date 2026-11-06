@@ -95,14 +95,15 @@ export default function ProjectServerCards({
   const nativeReason =
     server?.nativeLayrMessage ??
     (fetched?.key === connectionKey ? fetched.nativeLayrMessage : undefined);
-  const defaultMode =
+  const reportedMode =
     server?.defaultWorkspaceMode ??
     (fetched?.key === connectionKey ? fetched.defaultWorkspaceMode : undefined);
-  const supportedDefaultMode = defaultMode
-    ? defaultMode === "layr-native"
-      ? "layr-native"
-      : "worktree"
-    : undefined;
+  const supportedDefaultMode =
+    reportedMode === "layr-native" || reportedMode === "worktree"
+      ? reportedMode
+      : reportedMode
+        ? "worktree"
+        : undefined;
   const fetchedKey = useRef("");
   fetchedKey.current = fetched?.key || "";
   const [modeChoice, setModeChoice] = useState<{

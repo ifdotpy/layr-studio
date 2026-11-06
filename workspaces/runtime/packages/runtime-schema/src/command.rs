@@ -472,9 +472,6 @@ mod tests {
         let delete = format!(
             r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{}}}}"#
         );
-<<<<<<< head
-        assert!(studio_json::from_str::<CommandRequest>(&delete).is_err());
-=======
         let delete: CommandRequest = studio_json::from_str(&delete).expect("delete");
         assert_eq!(delete.command.name(), "delete");
         assert_eq!(delete.command.target(), "chat");
@@ -482,7 +479,6 @@ mod tests {
             r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{"descendants":false}}}}"#
         );
         assert!(studio_json::from_str::<CommandRequest>(&with_option).is_err());
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 
     #[test]

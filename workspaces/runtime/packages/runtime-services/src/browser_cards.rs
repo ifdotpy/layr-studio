@@ -296,6 +296,8 @@ pub(crate) fn waits_for_address(phase: &BrowserPhase) -> bool {
 /// A bridge that the server polls.
 #[derive(Clone)]
 pub struct CardSource {
+    /// Source of links for commands running on this server.
+    pub source: &'static str,
     pub guest: Arc<dyn BrowserRpc>,
     /// The forwards that this server holds for the source's approvals.
     pub forwarder: Option<Arc<BrowserForwarder>>,
@@ -326,6 +328,9 @@ fn refusal(
     let agent: Value = studio_json::from_str(&raw).unwrap_or(Value::Null);
     if python_truthy(agent.get("deletedAt")) {
         return Ok(Some("The chat was deleted".into()));
+    }
+    if agent.get("executionMode").and_then(Value::as_str) == Some("vm") {
+        return Ok(Some("This workspace is no longer available".into()));
     }
     if let Some(project) = agent
         .get("layrProjectId")

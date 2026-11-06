@@ -339,12 +339,7 @@ async fn answered_approval_retires_card_and_replays_without_another_start() {
         let selected = id.clone();
         store.transaction(move |tx| {
             tx.execute("UPDATE runtime_monitors SET record=json_remove(json_set(record,'$.status','approval'),'$.operation') WHERE id=?1", [&selected])?;
-<<<<<<< head
-            let request = pending_approval(tx, &selected);
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", "approval", studio_json::to_value(&request)?, false)?;
-=======
             pending_approval(tx, &selected);
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             Ok(())
         }).await.expect("pending approval");
         let pending_seq = studio_runtime_services::entity_scope::direct_document(

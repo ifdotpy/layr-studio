@@ -173,21 +173,6 @@ pub struct Asset {
     /// Additional public metadata; typed identity fields override conflicting entries.
     pub view: Map<String, Value>,
 }
-<<<<<<< head
-/// Guest path and exact source evidence produced by VM attachment preparation.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AssetPath {
-    pub source_fingerprint: String,
-    pub path: String,
-}
-/// Fingerprint every source field before a transport path can replace it.
-pub(crate) fn asset_fingerprint(asset: &Asset) -> Result<String, PrepareError> {
-    studio_json::to_vec(asset)
-        .map(|value| sha256_hex(&value))
-        .map_err(|_| PrepareError::InvalidAssetProjection)
-}
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EventMetadata {
     pub assets: Vec<String>,

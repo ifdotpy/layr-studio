@@ -679,11 +679,7 @@ fn finish(
 mod tests {
     use super::{BrowserAnswerContext, answer};
     use crate::browser_cards::fixture;
-<<<<<<< head
-    use crate::linux_vm_guest::{GuestError, GuestRpc};
-=======
     use crate::browser_rpc::{BrowserRpc, BrowserRpcError};
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use studio_json::{Value, json};

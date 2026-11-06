@@ -5,10 +5,6 @@ use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-<<<<<<< head
-use rusqlite::OptionalExtension;
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use studio_json::{Value, json};
 use studio_runtime_schema::annotation_command::{
     AnnotationCommandResponse, AnnotationData, AnnotationEntityRow, AnnotationRowOperation,
@@ -207,26 +203,6 @@ pub(crate) async fn annotation(
     }
     let reference = result.reference;
     let id = reference.id.clone();
-<<<<<<< head
-    let rows = store.read_async("runtime-http/annotation-response", move |connection| {
-        #[derive(serde::Deserialize)]
-        struct Payload {
-            collection: RequestReferenceKind,
-            id: String,
-            value: AnnotationData,
-        }
-        let row: Option<(i64, String)> = connection.query_row(
-            "SELECT seq,payload FROM sync_entities WHERE collection='annotation' AND id=?1 AND deleted=0",
-            [&id], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?;
-        let Some((seq, payload)) = row else { return Ok::<_, studio_runtime_store::StoreError>(Vec::new()) };
-        let payload: Payload = studio_json::from_str(&payload)?;
-        if payload.collection != RequestReferenceKind::Annotation || payload.id != id || payload.value.id != id {
-            return Err(studio_runtime_store::StoreError::InvalidStoredObject { table: "sync_entities", id });
-        }
-        Ok(vec![AnnotationEntityRow { collection: payload.collection, id: payload.id, op: AnnotationRowOperation::Upsert, seq, value: payload.value }])
-    }).await.map_err(ApiError::stored)?;
-=======
     let rows = store
         .read_async("runtime-http/annotation-response", move |connection| {
             #[derive(serde::Deserialize)]
@@ -265,7 +241,6 @@ pub(crate) async fn annotation(
         })
         .await
         .map_err(ApiError::stored)?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     Ok(Json(AnnotationCommandResponse {
         status: RequestResultStatus::Applied,
         ref_kind: reference.kind,

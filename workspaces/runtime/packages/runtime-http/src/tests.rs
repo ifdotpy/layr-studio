@@ -150,14 +150,10 @@ fn api_responses_include_schema_and_security_headers() {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn workspace_keeps_studio_json_maps_sorted() {
-<<<<<<< head
-    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../");
-=======
     let workspace = std::path::Path::new(
         &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
     )
     .join("../../../../");
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     let output = std::process::Command::new("cargo")
         .args([
             "tree",

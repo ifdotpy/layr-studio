@@ -101,17 +101,9 @@ async fn long_answers_use_canonical_bounded_agent_sync_projection() {
     store
         .transaction(|tx| {
             for (id, _) in AGENTS {
-<<<<<<< head
-                let raw: String = tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
-                    [id],
-                    |row| row.get(0),
-                )?;
-=======
                 let raw = crate::entity_scope::direct_document(tx, "agent", id)?
                     .and_then(|row| row.payload)
                     .expect("agent projection");
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                 let envelope: Value = studio_json::from_str(&raw)?;
                 let payload = &envelope["value"];
                 assert_eq!(
@@ -177,7 +169,6 @@ async fn journal_projection_failure_rolls_back_sources_and_receipts() {
         &NotificationStreamBuffer::default(),
         notifications(),
         &Value::Null,
-        None,
         None,
         Vec::new(),
         None,

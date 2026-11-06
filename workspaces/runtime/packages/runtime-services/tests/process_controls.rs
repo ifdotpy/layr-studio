@@ -6,8 +6,6 @@ use studio_runtime_store::{RuntimeStore, StoreError};
 
 fn corpus() -> Value {
     studio_json::from_str(include_str!("fixtures/process-controls.json")).unwrap()
-<<<<<<< head
-=======
 }
 #[tokio::test]
 async fn task_rows_include_only_running_tasks_for_the_owner() {
@@ -24,7 +22,6 @@ async fn task_rows_include_only_running_tasks_for_the_owner() {
         assert!(matches!(&rows[0].1, process_controls::ProcessSource::Task(task) if task.id().as_ref() == "active"));
         Ok::<_, process_controls::Error>(())
     }).await.unwrap();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 }
 #[tokio::test]
 async fn listing_is_atomic_as_a_command_process_starts_and_ends() {

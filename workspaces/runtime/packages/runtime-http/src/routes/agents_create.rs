@@ -327,8 +327,6 @@ mod workspace_admission_tests {
     use super::*;
 
     #[test]
-<<<<<<< head
-=======
     fn legacy_layr_parent_is_refused() {
         let parent = studio_runtime_store::AgentRecord::from_value(studio_json::json!({
             "compactions":0,"accountKey":"default","id":"parent","rootId":"parent",
@@ -340,7 +338,6 @@ mod workspace_admission_tests {
     }
 
     #[test]
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     fn lead_intent_preserves_native_store_override_for_replay() {
         let request = generated::CreateLeadRequest {
             layr_store_root: Some("/store".to_owned()),

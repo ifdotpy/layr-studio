@@ -3411,6 +3411,98 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     assert_eq!(child["accountKey"], "alternate");
     drop(read);
 
+    actor_value["executionMode"] = json!("vm");
+    actor_value["workspaceMode"] = json!("layr");
+    actor_value["cwd"] = json!("/home/studio/project");
+    actor_value["hostProjectPath"] = json!(project_path);
+    actor_value["layrReady"] = json!(true);
+    actor_value["layrProjectId"] = json!("project-17");
+    actor_value["layrLine"] = json!("main");
+    actor_value["provider"] = json!("codex");
+    actor_value["isLead"] = json!(true);
+    let actor_value_for_vm_tx = actor_value.clone();
+    store
+        .transaction_with::<_, StoreError>(move |tx| {
+            let record = studio_runtime_store::AgentRecord::from_value(actor_value_for_vm_tx)
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+            studio_runtime_store::AgentRepository::put(tx, &record)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for (execution, workspace) in [("vm", "worktree"), ("native", "layr")] {
+        let mut legacy = actor_value.clone();
+        legacy["executionMode"] = json!(execution);
+        legacy["workspaceMode"] = json!(workspace);
+        let legacy_actor = Actor::from_record(&legacy, &context.agent, context.epoch).unwrap();
+        let error = crate::managed_child_create::spawn_agents(
+            &store,
+            &legacy_actor,
+            &json!({"agents":[{"name":"Worker","prompt":"Work"}]}),
+            "legacy-spawn",
+            22.0,
+            &CreationEnvironment,
+        )
+        .await
+        .expect_err("legacy parents cannot spawn");
+        assert!(
+            error
+                .to_string()
+                .contains("Legacy VM parents cannot create workers or reviews")
+        );
+        let error = crate::managed_child_create::request_review(
+            &store,
+            &legacy_actor,
+            &json!({"target":{"type":"uncommittedChanges"}}),
+            "legacy-review",
+            22.0,
+            &CreationEnvironment,
+        )
+        .await
+        .expect_err("legacy parents cannot review");
+        assert!(
+            error
+                .to_string()
+                .contains("Legacy VM parents cannot create workers or reviews")
+        );
+    }
+    let vm_actor = Actor::from_record(&actor_value, &context.agent, context.epoch).unwrap();
+    let before_vm_review: i64 = store
+        .test_reader()
+        .unwrap()
+        .query_row("SELECT count(*) FROM runtime_agents", [], |row| row.get(0))
+        .unwrap();
+    let vm_review_error = crate::managed_child_create::request_review(
+        &store,
+        &vm_actor,
+        &json!({"target":{"type":"uncommittedChanges"}}),
+        "dispatcher-vm-review-api",
+        22.0,
+        &CreationEnvironment,
+    )
+    .await
+    .expect_err("legacy VM review creation is refused");
+    assert!(matches!(
+        vm_review_error,
+        crate::managed_child_create::Error::Managed(crate::managed_host_tools::Error::Invalid(
+            "Legacy VM parents cannot create workers or reviews"
+        ))
+    ));
+    let after_vm_review: i64 = store
+        .test_reader()
+        .unwrap()
+        .query_row("SELECT count(*) FROM runtime_agents", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        before_vm_review, after_vm_review,
+        "no VM reviewer was enqueued"
+    );
+    let after_uncertain_review: i64 = store
+        .test_reader()
+        .unwrap()
+        .query_row("SELECT count(*) FROM runtime_agents", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(before_vm_review, after_uncertain_review);
     let root_agent_id = context.agent.clone();
     let native_cwd = project_path.clone();
     store

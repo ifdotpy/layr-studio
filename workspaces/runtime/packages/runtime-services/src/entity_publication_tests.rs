@@ -1077,13 +1077,7 @@ async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
     store
         .transaction(|tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            crate::sync_policy::maintain_entity_projections(
-                tx,
-                "",
-                &Default::default(),
-                &rooms,
-                |_, _, _, _| true,
-            )
+            crate::sync_policy::maintain_entity_projections(tx, "", &rooms, |_, _, _, _| true)
         })
         .await
         .expect("upgrade seeds projections and marker");
@@ -1131,13 +1125,7 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
     store
         .transaction(|tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            crate::sync_policy::maintain_entity_projections(
-                tx,
-                "",
-                &Default::default(),
-                &rooms,
-                |_, _, _, _| true,
-            )
+            crate::sync_policy::maintain_entity_projections(tx, "", &rooms, |_, _, _, _| true)
         })
         .await
         .expect("rebuild projections");
@@ -1234,13 +1222,7 @@ async fn message_send_projection_upgrade_on_reflink_copy() {
     reopened
         .transaction(|tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            crate::sync_policy::maintain_entity_projections(
-                tx,
-                "",
-                &Default::default(),
-                &rooms,
-                |_, _, _, _| true,
-            )
+            crate::sync_policy::maintain_entity_projections(tx, "", &rooms, |_, _, _, _| true)
         })
         .await
         .expect("rebuild copied projections");

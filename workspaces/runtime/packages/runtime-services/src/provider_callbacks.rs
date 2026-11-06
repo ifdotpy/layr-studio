@@ -266,7 +266,7 @@ pub(crate) async fn dispatch_with_managed_tools(
         }
         let result = match request.method.as_str() {
             "currentTime/read" => Some(ResponseBody::Result(json!({"currentTimeAt":now.trunc() as u64}))),
-            "account/chatgptAuthTokens/refresh" => Some(ResponseBody::Error(json!({"code":-32601,"message":"Authentication refresh is unavailable; use the host account authentication flow"}))),
+            "account/chatgptAuthTokens/refresh" => Some(ResponseBody::Error(json!({"code":-32601,"message":"Not implemented; use the host account authentication flow"}))),
             method if cards::interactive(method) => {
                 let snapshot = storage::snapshot(tx, &context)?;
                 if let Some(body) = cards::immediate(&snapshot, &request)? {

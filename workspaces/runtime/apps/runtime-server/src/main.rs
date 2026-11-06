@@ -352,23 +352,6 @@ fn panic_observed_log(location: Option<&std::panic::Location<'_>>) -> String {
     format!("runtime server observed panic{location} (payload redacted)")
 }
 
-<<<<<<< head
-/// The vault writer layr-desk runs: configure the VM writer from the configuration on standard input.
-#[cfg(unix)]
-fn vault_configure(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let [vm_state_dir, source] = args else {
-        return Err("vault-configure requires a VM state directory and a project folder".into());
-    };
-    let given: studio_json::Value = studio_json::from_reader(std::io::stdin())?;
-    let guest = studio_runtime_services::linux_vm_guest::UnixGuestRpc::new(vm_state_dir);
-    let result =
-        studio_runtime_services::vault::configure(&guest, Path::new(vm_state_dir), source, &given)?;
-    println!("{}", studio_json::to_string_pretty(&result)?);
-    Ok(())
-}
-
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 async fn run(
     shutdown_requested: Sender<()>,
 ) -> Result<Option<handover::Handed>, Box<dyn std::error::Error>> {

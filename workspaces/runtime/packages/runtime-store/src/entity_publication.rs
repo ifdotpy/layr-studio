@@ -277,11 +277,6 @@ pub(crate) fn pending(
                     | Source::Event
                     | Source::EventMeta
                     | Source::Item
-<<<<<<< head
-                    | Source::Plan
-                    | Source::Annotation
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                     | Source::Task
                     | Source::Work
                     | Source::Terminal
@@ -297,22 +292,6 @@ pub(crate) fn pending(
     }
     let mut pending = PendingEntities::default();
     for ((source, _), id) in &ids {
-<<<<<<< head
-        if *source != Source::Work {
-            continue;
-        }
-        if id.is_none() {
-            let mut statement = transaction.prepare_cached(
-                "SELECT DISTINCT id FROM sync_entities WHERE collection IN ('work','workDetail') AND deleted=0 AND NOT EXISTS(SELECT 1 FROM runtime_work WHERE runtime_work.id=sync_entities.id)",
-            )?;
-            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-                pending.work.insert(row?);
-            }
-        }
-    }
-    for ((source, _), id) in &ids {
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         if *source == Source::Agent {
             if let Some(id) = id {
                 let root: Option<String> = transaction
@@ -406,14 +385,8 @@ pub(crate) fn pending(
                 pending.agents.insert(agent);
             }
         } else {
-<<<<<<< head
-            let mut statement = transaction.prepare_cached(
-                "SELECT id FROM sync_entities WHERE collection='agentSummary' AND deleted=0",
-            )?;
-=======
             let mut statement = transaction
                 .prepare_cached("SELECT id FROM runtime_agents WHERE deleted_at IS NULL")?;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             for row in statement.query_map([], |row| row.get::<_, String>(0))? {
                 pending.agents.insert(row?);
             }
@@ -493,12 +466,8 @@ mod tests {
             .collect();
         events.push(Event::Row(Source::Event, 101));
         let result = pending(&tx, Journal(events)).unwrap();
-<<<<<<< head
-        assert_eq!(result.agents.len(), 101);
-=======
         assert_eq!(result.agents.len(), 100);
         assert_eq!(result.team_roots, BTreeSet::from(["root".to_owned()]));
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         let expected_queues: BTreeSet<_> = (0..100)
             .map(|i| format!("agent-{i}"))
             .chain(["event-only-owner".to_owned()])

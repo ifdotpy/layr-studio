@@ -1,4 +1,5 @@
 //! Host Layr workspaces. The Studio state directory owns the store and guard.
+pub(crate) mod source_tree;
 use std::path::{Path, PathBuf};
 use studio_json::{Value, json};
 use studio_runtime_store::path_identity::CanonicalPath;

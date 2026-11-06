@@ -1,5 +1,17 @@
-//! Sign-in links submitted by an agent or found in its completed messages.
-//! The host browser bridge creates the corresponding approval card.
+//! Sign-in links that an agent gives to the person (docs/vm-browser-bridge.md, section 7).
+//!
+//! The Rust port of `codex_browser_bridge.submit`, `sign_in` and `message_links`. Two paths
+//! reach the sign-in card of section 6.2:
+//!
+//! - the managed tool `orchestration_sign_in` (`tool`), and
+//! - a completed agent message with a sign-in link (`note_message`, `run_messages`). The rule
+//!   is `browser_policy::sign_in_links`; the message text does not change.
+//!
+//! Both send the link to the browser bridge of the chat (`browser.submit` of the host bridge) and write its card at once with `browser_cards::apply`, the one owner of the
+//! card. The bridge gives one request to one link of a chat, so a retry, the tool call, the
+//! message and the command's own `BROWSER` call make one card. The owner of the tool definition
+//! and of its result texts is `sign_in_contract.json`; this module reads the texts,
+//! and a test checks the bundled catalog against the definition.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -43,7 +55,7 @@ fn text(state: &str) -> &'static str {
         .unwrap_or_default()
 }
 
-/// The host browser bridge that receives an agent's sign-in links.
+/// The browser bridge that takes an agent's links and supplies cards to `browser_cards`.
 #[derive(Clone, Default)]
 pub struct SignInSources {
     sources: Vec<CardSource>,
@@ -55,7 +67,7 @@ impl SignInSources {
     }
 
     fn source(&self) -> Option<&CardSource> {
-        self.sources.first()
+        self.sources.iter().find(|source| source.source == "host")
     }
 }
 
@@ -77,11 +89,11 @@ pub async fn submit(
     request_id: &str,
 ) -> Result<(Value, Option<String>), String> {
     if agent.get("executionMode").and_then(Value::as_str) == Some("vm") {
-        return Err("The sign-in source is unavailable".to_owned());
+        return Err("This workspace is no longer available".to_owned());
     }
     let source = sources
         .source()
-        .ok_or("The browser bridge is not running")?;
+        .ok_or_else(|| "The browser bridge of native chats is not running".to_owned())?;
     let agent_id = agent
         .get("id")
         .and_then(Value::as_str)

@@ -216,17 +216,12 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
                 println!(
                     "{}",
                     studio_json::to_string_pretty(
-<<<<<<< head
-                        &studio_runtime_services::layr_native::migration::migrate_with_options(
-                            &state, &project, dry_run, options
-=======
                         &studio_runtime_services::layr_native::migration::migrate_with_progress(
                             &state,
                             &project,
                             dry_run,
                             options,
                             Some(&progress)
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                         )?
                     )?
                 );

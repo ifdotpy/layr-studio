@@ -5,13 +5,7 @@ use crate::{model_catalog::ModelCatalogService, thread_prepare as thread, turn_p
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::path::{Path, PathBuf};
-<<<<<<< head
-use std::{future::Future, pin::Pin};
 use studio_json::Map;
-use studio_runtime_process::ProviderLaunchSpec;
-=======
-use studio_json::Map;
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentRecord, Transaction};
@@ -558,8 +552,7 @@ pub(super) async fn authorization_rows(
 }
 
 /// The resolved paths that one authorization decision over `rows` reads:
-/// every agent cwd and project path. Run it before SQL; a VM cwd gets a
-/// stable guest identity instead of a host resolution.
+/// every agent cwd and project path. Run it before SQL.
 pub(in crate::account_worker) fn authorization_paths(
     rows: &crate::submit_gates::AuthorizationRecords,
 ) -> Result<BTreeMap<String, String>, WorkerError> {
@@ -567,18 +560,10 @@ pub(in crate::account_worker) fn authorization_paths(
     for row in rows.agents.values() {
         let row = row.as_ref().map_err(|_| invalid("cwd"))?;
         if let Some(path) = row.cwd.as_deref().filter(|path| !path.is_empty()) {
-            let resolved = if row.execution_mode.as_deref() == Some("vm") {
-                // Guest paths keep a stable identity without host filesystem resolution.
-                vm_guest_identity(
-                    row.id.as_deref().ok_or_else(|| invalid("vm-agent-id"))?,
-                    path,
-                )
-            } else {
-                CanonicalPath::ancestor_nonstrict(Path::new(path))
-                    .map_err(|_| invalid("cwd"))?
-                    .to_string_lossy()
-                    .into_owned()
-            };
+            let resolved = CanonicalPath::ancestor_nonstrict(Path::new(path))
+                .map_err(|_| invalid("cwd"))?
+                .to_string_lossy()
+                .into_owned();
             resolved_paths.insert(path.to_owned(), resolved);
         }
     }
@@ -615,38 +600,6 @@ impl FilesystemSnapshot {
     }
 }
 
-fn vm_guest_identity(agent_id: &str, guest_cwd: &str) -> String {
-    format!(
-        "/__codex_vm__/{agent_id}/{}",
-        studio_runtime_store::sha256_hex(guest_cwd.as_bytes())
-    )
-}
-
-#[cfg(test)]
-mod vm_identity_tests {
-    use super::vm_guest_identity;
-
-    #[test]
-    fn guest_cwd_gets_a_normalized_host_independent_identity() {
-        let identity = vm_guest_identity("agent-1", "/guest/project/lines/main");
-        assert!(identity.starts_with("/__codex_vm__/agent-1/"));
-        let path = std::path::Path::new(&identity);
-        assert!(path.is_absolute());
-        assert!(
-            !path
-                .components()
-                .any(|part| part == std::path::Component::ParentDir)
-        );
-        assert_eq!(
-            identity,
-            vm_guest_identity("agent-1", "/guest/project/lines/main")
-        );
-        assert_ne!(
-            identity,
-            vm_guest_identity("agent-1", "/guest/project/lines/other")
-        );
-    }
-}
 pub(super) fn authorize(
     tx: &Transaction<'_>,
     intent: &TurnIntent,
@@ -890,8 +843,8 @@ fn catalog_source(record: &Value) -> Result<thread::CatalogSource, WorkerError> 
     )
 }
 
-/// Providers that resend tools each turn use current definitions. Other agents retain
-/// their saved catalog source. Callers apply frozen overrides.
+/// Providers that resend tools each turn use current definitions.
+/// Other agents retain their saved catalog source. Callers apply frozen overrides.
 fn catalog_definitions<'a>(
     resources: &'a PreparationResources,
     record: &Value,
@@ -2092,8 +2045,13 @@ mod resource_tests {
             .map(|_| ()),
             _ => unreachable!(),
         };
+        let expected = if matches!(kind, "native" | "review") {
+            "workspace-readiness/unsupported-execution-mode"
+        } else {
+            "VmWorkspaceUnsupported"
+        };
         assert!(
-            matches!(result, Err(crate::account_worker::WorkerError::PreparationRefused(ref reason)) if reason == "VmWorkspaceUnsupported"),
+            matches!(result, Err(crate::account_worker::WorkerError::PreparationRefused(ref reason)) if reason == expected),
             "{result:?}"
         );
     }
@@ -2310,8 +2268,8 @@ mod resource_tests {
         }
     }
 
-    /// Host Codex agents keep their saved source. Both catalogs include sign-in.
-    /// A fixture description distinguishes their selection without removing tools.
+    /// Claude resends its tools on each turn. Old host threads need the current
+    /// catalog without changing their saved source or exact moved tool list.
     #[tokio::test]
     async fn an_unfrozen_native_claude_on_an_old_thread_gets_the_current_catalog() {
         let directory = tempfile::tempdir().expect("temporary state directory");
@@ -2324,8 +2282,7 @@ mod resource_tests {
         store
             .transaction_with(move |tx| {
                 let failed = |error: WorkerError| StoreError::SchemaMismatch(error.to_string());
-                let mode = "native";
-                {
+                for mode in ["native"] {
                     for (thread_id, source) in [
                         (Some("thread-old"), None),
                         (Some("thread-old"), Some("legacy")),
@@ -2442,7 +2399,8 @@ mod resource_tests {
         assert!(host.contains_key("shell_environment_policy.set.BROWSER"));
         assert!(host.contains_key("shell_environment_policy.set.STUDIO_BROWSER_SOCKET"));
         {
-            let config = config(json!({"id":"claude", "isLead":true, "provider":"claude"}));
+            let record = json!({"id":"claude", "isLead":true, "provider":"claude"});
+            let config = config(record);
             assert!(
                 !config
                     .keys()
@@ -2503,9 +2461,10 @@ mod resource_tests {
             assert_eq!(servers["node_repl"], *server, "{role}");
         }
 
-        // Claude agents do not use the Codex browser setup.
+        // Claude agents do not use this browser setup.
         {
-            let other = bundle(&resources, json!({"id":"c", "provider":"claude"}));
+            let record = json!({"id":"c", "provider":"claude"});
+            let other = bundle(&resources, record);
             assert_eq!(other.browser, None);
             assert!(other.thread_config.get("mcp_servers.node_repl").is_none());
         }
@@ -2566,6 +2525,11 @@ mod resource_tests {
             None
         );
     }
+}
+
+#[cfg(test)]
+mod workspace_fence_tests {
+    use super::*;
 
     #[test]
     fn legacy_reviewer_store_uses_read_line_not_prepared_scratch() {

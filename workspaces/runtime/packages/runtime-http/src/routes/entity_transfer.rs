@@ -187,9 +187,6 @@ fn byte_pages(
         let size = studio_json::to_vec(&document)
             .map_err(ApiError::json)?
             .len();
-<<<<<<< head
-        if !batch.documents.is_empty() && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2 {
-=======
         // Documents built from one main-table change share its number. A batch ends
         // only between numbers, so the next batch never repeats its `after`.
         let same_change = batch
@@ -200,7 +197,6 @@ fn byte_pages(
             && !same_change
             && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2
         {
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             batch.through = batch.documents.last().ok_or_else(data_error)?.seq;
             let next = EntityChangeBatch {
                 after: batch.through,
@@ -353,34 +349,12 @@ mod tests {
         id: &str,
         agent: &str,
         status: &str,
-<<<<<<< head
-    ) -> studio_runtime_schema::process_controls::TaskProjection {
-        use studio_runtime_schema::task_record::{TaskStatus, TaskType};
-        let mut record = studio_runtime_store::TaskRecord::new(
-            agent.into(),
-            id.into(),
-            "turn".into(),
-            studio_json::from_str("1").expect("valid timestamp"),
-            TaskType::CommandExecution,
-            "commandExecution".into(),
-        );
-        record.set_status(match status {
-            "running" => TaskStatus::Running,
-            "completed" => TaskStatus::Completed,
-            _ => panic!("unsupported fixture status"),
-        });
-        let mut projection = studio_runtime_services::sync_views::project_task_record(&record)
-            .expect("task projection");
-        projection.id = id.into();
-        projection
-=======
     ) -> Result<(), studio_runtime_store::StoreError> {
         studio_runtime_services::notification_dispatch::test_put_task(
             tx,
             &task_record(id, agent, status),
         )
         .map_err(|_| studio_runtime_store::StoreError::RecordContract("task write"))
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 
     fn delete_task(

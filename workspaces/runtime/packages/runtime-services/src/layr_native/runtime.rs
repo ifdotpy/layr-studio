@@ -1661,24 +1661,14 @@ esac
             replay("duplicate", &intent).unwrap(),
             json!({"opaque":[1,null]})
         );
-<<<<<<< head
-        let special: Value = studio_json::from_str(
-            r#"{"kind":"inspect","data":{"$serde_json::private::Number":"1"}}"#,
-        )
-=======
         let special: Value = studio_json::from_str(&format!(
             r#"{{"kind":"inspect","data":{{"{}":"1"}}}}"#,
             studio_json::NUMBER_TOKEN
         ))
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         .unwrap();
         write("number_key", format!(r#"{{"intent":{{"kind":"inspect","data":{{"{0}":"1"}}}},"status":"completed","result":{{"{0}":"1"}}}}"#, studio_json::NUMBER_TOKEN).as_bytes());
         let expected: Value =
-<<<<<<< head
-            studio_json::from_str(r#"{"$serde_json::private::Number":"1"}"#).unwrap();
-=======
             studio_json::from_str(&format!(r#"{{"{}":"1"}}"#, studio_json::NUMBER_TOKEN)).unwrap();
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         assert_eq!(replay("number_key", &special).unwrap(), expected);
         for (id, raw) in [
             (
@@ -2249,9 +2239,7 @@ mod progress_tests {
         }
     }
     #[test]
-    fn vendored_git_import_progress_is_typed_at_the_boundary() {
-        let source = include_str!("../../../../apps/layr/src/gitbridge.rs");
-        assert!(source.contains("layr: imported {imported} commits of {refname}"));
+    fn git_import_progress_is_typed_at_the_boundary() {
         let progress =
             super::parse_import_progress(b"layr: imported 50 commits of local/main").unwrap();
         assert_eq!(

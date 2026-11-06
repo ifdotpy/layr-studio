@@ -36,7 +36,7 @@ export function ProjectDeleteDialog({
       </p>
       <p>
         History, cost accounting, the project folder and Git worktrees are kept.
-        Disposable managed images may be removed.
+        Disposable managed workspace lines may be removed.
       </p>
       <p>This cannot be undone in Studio.</p>
       {error && <p role="alert">{error}</p>}

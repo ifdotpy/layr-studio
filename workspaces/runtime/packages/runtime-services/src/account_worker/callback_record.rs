@@ -237,7 +237,6 @@ pub(super) fn accept(
     tx: &Transaction<'_>,
     account: &str,
     scope: &str,
-    actor: Option<(&str, i64)>,
     entry: &JournalEntry,
 ) -> Result<(), WorkerError> {
     let JournalPayload::Frame(frame) = &entry.payload else {
@@ -268,8 +267,8 @@ pub(super) fn accept(
         request_id: id,
         method,
         frame: String::from_utf8(bytes).map_err(|_| invalid(&operation))?,
-        actor: actor.map(|(id, _)| id.into()),
-        epoch: actor.map(|(_, epoch)| epoch),
+        actor: None,
+        epoch: None,
         submitted: None,
         root_request_id: String::new(),
         source_admission: None,
@@ -544,7 +543,7 @@ pub(super) async fn written(
 }
 
 // These selectors visit current callback tasks, never completed reply history.
-const TASKS: &str = "FROM runtime_tool_requests WHERE kind=?1 AND status IN (?2,?3,?4) AND json_extract(record,'$.payload.accepted.account')=?5";
+const TASKS: &str = "FROM runtime_tool_requests WHERE kind=?1 AND status IN (?2,?3,?4) AND json_extract(record,'$.payload.accepted.account')=?5 AND json_extract(record,'$.payload.accepted.actor') IS NULL";
 const UNSENT: &str = " AND (json_extract(record,'$.payload.accepted.generation')<?6 OR (status!=?4 AND (json_type(record,'$.payload.submitted')='null' OR json_extract(record,'$.payload.recovery_attempted')=0)))";
 pub(super) fn any_unsent(
     db: &Connection,
@@ -640,8 +639,8 @@ mod tests {
             .transaction_with(|tx| {
                 let first = request(1, json!({}));
                 let second = request(2, json!({}));
-                accept(tx, "account", "account", None, &first)?;
-                accept(tx, "account", "account", None, &second)?;
+                accept(tx, "account", "account", &first)?;
+                accept(tx, "account", "account", &second)?;
                 let first = task(tx, &operation("account", 7, 1))?.expect("first obligation");
                 let second = task(tx, &operation("account", 7, 2))?.expect("second obligation");
                 assert_ne!(first.id, second.id);
@@ -654,13 +653,12 @@ mod tests {
                         tx,
                         "account",
                         "account",
-                        None,
                         &request(1, json!({"changed":true}))
                     )
                     .is_err()
                 );
                 retire(tx, &first.origin_key)?;
-                accept(tx, "account", "account", None, &request(1, json!({})))?;
+                accept(tx, "account", "account", &request(1, json!({})))?;
                 let retired = task(tx, &first.origin_key)?.expect("retained operation fence");
                 assert_eq!(retired.status, ToolRequestStatus::Completed);
                 assert!(retired.payload.accepted.frame.is_empty());

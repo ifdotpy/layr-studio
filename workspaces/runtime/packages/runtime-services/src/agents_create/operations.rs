@@ -830,6 +830,11 @@ async fn create(
         )
         .await;
     }
+    if workspace == "layr" {
+        return Err(OperationError::Invalid(
+            "VM workspaces are no longer available",
+        ));
+    }
     if !studio_runtime_schema::workspace_modes::accepts_chat(&workspace) {
         return Err(OperationError::Invalid("Unknown workspace mode"));
     }
@@ -1585,6 +1590,14 @@ fn validate_parent_workspace_for_create(
     if workspace == "layr-native" && !crate::layr_native::is_native(parent) {
         return Err(OperationError::Invalid(
             "A native Layr workspace requires a native Layr parent",
+        ));
+    }
+    if workspace == "layr"
+        || parent.get("executionMode").and_then(Value::as_str) == Some("vm")
+        || parent.get("workspaceMode").and_then(Value::as_str) == Some("layr")
+    {
+        return Err(OperationError::Invalid(
+            "VM workspaces are no longer available",
         ));
     }
     Ok(())
@@ -4987,12 +5000,20 @@ mod tests {
             child_role_workspace(Some("orchestrator"), None, "worktree", false),
             Err(OperationError::Invalid("Invalid agent role"))
         ));
-        assert!(matches!(
-            child_role_workspace(None, None, "layr", true),
-            Err(OperationError::Invalid(
-                "The parent workspace is unavailable"
-            ))
-        ));
+        for parent in [
+            json!({"executionMode":"native"}),
+            json!({"executionMode":"vm"}),
+            json!({"workspaceMode":"layr"}),
+        ] {
+            assert!(validate_parent_workspace_for_create("layr", &parent).is_err());
+        }
+        assert!(
+            validate_parent_workspace_for_create("shared", &json!({"executionMode":"vm"})).is_err()
+        );
+        assert!(
+            validate_parent_workspace_for_create("shared", &json!({"workspaceMode":"layr"}))
+                .is_err()
+        );
         assert!(
             validate_parent_workspace_for_create("worktree", &json!({"executionMode":"native"}))
                 .is_ok()
@@ -5265,6 +5286,35 @@ mod tests {
             crate::project_path::ProjectPath::new("/studio/store/projects/id/other".into(), store)
                 .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_workspace_creation_is_refused() {
+        let state = tempfile::tempdir().expect("state");
+        let store =
+            std::sync::Arc::new(RuntimeStore::open(Some(state.path())).await.expect("store"));
+        let context = Context {
+            store,
+            accounts: None,
+            driver: None,
+            catalog: None,
+            managed_creation_environment: None,
+            validate: std::sync::Arc::new(|_, _| true),
+        };
+        for draft in [true, false] {
+            let request = Creation {
+                workspace: Some("layr".into()),
+                ..Creation::default()
+            };
+            let result = create(&context, request, draft).await;
+            assert!(
+                matches!(
+                    result,
+                    Err(OperationError::Invalid("Unknown workspace mode"))
+                ),
+                "{result:?}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -249,6 +249,7 @@ async fn a_phone_signs_in_a_kubelogin_style_command_with_a_pasted_redirect() {
     let guest: Arc<dyn BrowserRpc> =
         Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let source = CardSource {
+        source: "host",
         guest: Arc::clone(&guest),
         forwarder: None,
         http_providers: providers.clone(),
@@ -421,6 +422,7 @@ async fn an_aws_style_device_code_card_shows_the_code_and_needs_no_forward() {
     let guest: Arc<dyn BrowserRpc> =
         Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let source = CardSource {
+        source: "host",
         guest: Arc::clone(&guest),
         forwarder: None,
         http_providers: BTreeSet::new(),
@@ -613,6 +615,7 @@ async fn a_link_from_the_tool_and_from_the_message_gets_one_card() {
     let guest: Arc<dyn BrowserRpc> =
         Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let sources = sign_in::SignInSources::new(vec![CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: BTreeSet::new(),
@@ -749,6 +752,7 @@ async fn a_new_host_card_is_published_to_clients_and_pushed_to_the_phone() {
     let guest: Arc<dyn BrowserRpc> =
         Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: providers,

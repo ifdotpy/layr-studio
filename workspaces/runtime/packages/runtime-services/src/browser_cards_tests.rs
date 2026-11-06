@@ -1,11 +1,7 @@
 //! Cards from a fake guest `browser.wait` (the Python server's `Bridge.apply` rules).
 
 use super::{CardSource, card_id, load, poll_once, save};
-<<<<<<< head
-use crate::linux_vm_guest::{GuestError, GuestRpc};
-=======
 use crate::browser_rpc::{BrowserRpc, BrowserRpcError};
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -148,6 +144,7 @@ async fn a_card_is_stored_while_pending_and_closes_with_its_request() {
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -202,6 +199,7 @@ async fn pending_links_become_cards_once_and_unknown_chats_are_refused() {
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest: guest.clone(),
         forwarder: None,
         http_providers: Default::default(),
@@ -263,6 +261,7 @@ async fn non_string_url_or_host_never_creates_a_browser_card() {
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -305,6 +304,7 @@ async fn a_final_guest_state_expires_the_card_and_tells_the_chat_after_an_approv
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -404,6 +404,7 @@ async fn a_card_follows_the_request_deadline_and_tells_the_chat_when_nobody_answ
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -463,6 +464,41 @@ async fn a_card_follows_the_request_deadline_and_tells_the_chat_when_nobody_answ
 }
 
 #[tokio::test]
+async fn the_host_bridge_refuses_a_legacy_vm_chat() {
+    let (_dir, store) = store().await;
+    store.transaction_with(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.executionMode','vm') WHERE id=?1", [AGENT])?;
+        Ok::<_, studio_runtime_store::StoreError>(())
+    }).await.expect("legacy VM agent");
+    let bridge = "3".repeat(32);
+    let redirect = json!({"host":"localhost","port":8000,"path":"/"});
+    let guest = Arc::new(WaitGuest {
+        batches: Mutex::new(VecDeque::from([json!({"items":[
+            item(&bridge, AGENT, KUBE, redirect, "pending", 1),
+        ], "next": 1})])),
+        calls: Mutex::new(Vec::new()),
+    });
+    let source = CardSource {
+        source: "host",
+        guest: guest.clone(),
+        forwarder: None,
+        http_providers: Default::default(),
+    };
+    poll_once(&store, &source, 0, 0, None)
+        .await
+        .expect("test step");
+    assert!(request(&store, &bridge).is_none());
+    assert!(
+        guest
+            .calls
+            .lock()
+            .expect("test step")
+            .iter()
+            .any(|call| call.0 == "browser.close")
+    );
+}
+
+#[tokio::test]
 async fn a_card_whose_page_this_mac_opened_closes_as_answered_when_its_command_stops() {
     let (_dir, store) = store().await;
     let bridge = "4".repeat(32);
@@ -478,6 +514,7 @@ async fn a_card_whose_page_this_mac_opened_closes_as_answered_when_its_command_s
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -532,6 +569,7 @@ async fn a_card_comes_back_after_a_backend_restart_while_its_request_is_open() {
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),
@@ -660,6 +698,7 @@ async fn joined_requests_wait_on_one_card_and_hear_how_it_ended() {
         calls: Mutex::new(Vec::new()),
     });
     let source = CardSource {
+        source: "host",
         guest: guest.clone(),
         forwarder: None,
         http_providers: Default::default(),

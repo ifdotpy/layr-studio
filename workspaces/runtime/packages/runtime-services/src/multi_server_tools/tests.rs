@@ -1530,6 +1530,7 @@ async fn sign_in_shows_one_card_through_the_chat_bridge() {
         crate::browser_rpc::UnixSocketBrowserRpc::new(service.control_socket.clone()),
     );
     let sources = crate::sign_in::SignInSources::new(vec![crate::browser_cards::CardSource {
+        source: "host",
         guest,
         forwarder: None,
         http_providers: Default::default(),

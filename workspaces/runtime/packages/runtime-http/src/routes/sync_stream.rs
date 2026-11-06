@@ -747,23 +747,6 @@ async fn sampled_resource_content(
 fn discard_sample(samples: &Mutex<BTreeMap<String, Vec<u8>>>, resource: &SubscribedResource) {
     if let Ok(mut samples) = samples.lock() {
         samples.remove(&resource.key);
-<<<<<<< head
-    }
-}
-
-/// Only sessions with a live readiness selector own a filesystem source. Dropping
-/// the stream or removing that selector drops its OS watcher as well.
-async fn readiness_source(
-    state: &HttpState,
-    resources: &[SubscribedResource],
-) -> Result<Option<studio_runtime_services::vault::VaultReadinessWatcher>, ApiError> {
-    if !resources
-        .iter()
-        .any(|resource| matches!(resource.resource, ResourceRef::VaultReadinessResource(_)))
-    {
-        return Ok(None);
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 }
 

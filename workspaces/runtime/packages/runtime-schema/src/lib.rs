@@ -65,6 +65,7 @@ pub mod plan_record;
 pub mod pricing;
 pub mod process_controls;
 pub mod progress_selector;
+// Legacy migration decoder; new projections do not publish these fields.
 pub mod project_ingress;
 pub mod project_projection;
 pub mod project_record;

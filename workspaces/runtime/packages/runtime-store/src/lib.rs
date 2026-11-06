@@ -1048,7 +1048,6 @@ pub struct RuntimeStore {
     /// Count of jobs admitted to this store's serialized writer lane since open.
     /// Unit: jobs. Process-local; read by tests that require no writer use.
     writer_admissions: AtomicU64,
-    last_entity_projection_state: Mutex<Option<(u64, String)>>,
     entity_projection_maintenance_lock: tokio::sync::Mutex<()>,
     /// Flush policy of both databases; commits request, the server's
     /// maintenance owner runs [`RuntimeStore::checkpoint_wal_if_due`].
@@ -1492,7 +1491,6 @@ impl RuntimeStore {
             simulate_unknown_commit_after_success: Arc::new(AtomicBool::new(false)),
             committed_change_generation: Arc::new(AtomicU64::new(0)),
             writer_admissions: AtomicU64::new(0),
-            last_entity_projection_state: Mutex::new(None),
             entity_projection_maintenance_lock: tokio::sync::Mutex::new(()),
             wal_flush: Arc::new(sqlite_durability::WalFlushSchedule::default()),
             write_alert: Arc::new(write_alert::WriteAlert::default()),
@@ -2371,47 +2369,11 @@ impl RuntimeStore {
         self.committed_change_generation.load(Ordering::Acquire)
     }
 
-    /// Whether projection maintenance has not observed the current commit generation and vault signature.
-    pub fn entity_projections_need_maintenance(
-        &self,
-        project_signature: &str,
-    ) -> StoreResult<bool> {
-        let last = self
-            .last_entity_projection_state
-            .lock()
-            .map_err(|_| StoreError::WriterPoisoned)?;
-        let current_generation = self.committed_change_generation();
-        Ok(match last.as_ref() {
-            Some((generation, signature)) => {
-                *generation != current_generation || signature != project_signature
-            }
-            None => true,
-        })
-    }
-
     /// Serialize the cold entity projection maintenance path for this process store.
     pub async fn lock_entity_projection_maintenance(
         &self,
     ) -> StoreResult<tokio::sync::MutexGuard<'_, ()>> {
         Ok(self.entity_projection_maintenance_lock.lock().await)
-    }
-
-    /// Record the committed store generation and vault input signature after maintenance commits.
-    pub fn mark_entity_projections_maintained(
-        &self,
-        generation: u64,
-        project_signature: String,
-    ) -> StoreResult<()> {
-        if generation > self.committed_change_generation() {
-            return Err(StoreError::RecordContract(
-                "entity projection generation is newer than committed store state",
-            ));
-        }
-        *self
-            .last_entity_projection_state
-            .lock()
-            .map_err(|_| StoreError::WriterPoisoned)? = Some((generation, project_signature));
-        Ok(())
     }
 
     pub fn verify_schema(&self) -> StoreResult<()> {
@@ -3286,12 +3248,6 @@ mod diagnostics_hook_tests {
             .await
             .expect("commit before pull maintenance completion");
         assert!(store.wal_flush.is_requested());
-        store
-            .mark_entity_projections_maintained(
-                store.committed_change_generation(),
-                "pull-witness".to_owned(),
-            )
-            .expect("record completed pull maintenance");
         assert!(
             !EVENTS
                 .lock()
@@ -5060,77 +5016,6 @@ mod sync_pull_admission_tests {
 }
 
 #[cfg(test)]
-mod projection_generation_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn projection_watermark_tracks_changes_and_restarts_unset() {
-        let directory = tempfile::tempdir().expect("temporary state directory");
-        let store = RuntimeStore::open(Some(directory.path()))
-            .await
-            .expect("store opens");
-        assert!(
-            store
-                .entity_projections_need_maintenance("vault-a")
-                .expect("watermark is readable")
-        );
-
-        let initial = store.committed_change_generation();
-        store
-            .mark_entity_projections_maintained(initial, "vault-a".to_owned())
-            .expect("initial projection generation is recorded");
-        assert!(
-            !store
-                .entity_projections_need_maintenance("vault-a")
-                .expect("watermark is readable")
-        );
-        assert!(
-            store
-                .entity_projections_need_maintenance("vault-b")
-                .expect("changed vault signature invalidates watermark")
-        );
-        store
-            .transaction(|_| Ok(()))
-            .await
-            .expect("no-op transaction succeeds");
-        assert!(
-            !store
-                .entity_projections_need_maintenance("vault-a")
-                .expect("no-op preserves watermark")
-        );
-
-        store
-            .transaction(|transaction| {
-                transaction.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",
-                    [
-                        "generation-agent",
-                        r#"{"id":"generation-agent","provider":"codex","rootId":"generation-agent","epoch":0,"status":"idle"}"#,
-                    ],
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("source record write succeeds");
-        assert!(
-            store
-                .entity_projections_need_maintenance("vault-a")
-                .expect("source write advances generation")
-        );
-        drop(store);
-
-        let restarted = RuntimeStore::open(Some(directory.path()))
-            .await
-            .expect("store reopens");
-        assert!(
-            restarted
-                .entity_projections_need_maintenance("vault-a")
-                .expect("restart begins without a process-local watermark")
-        );
-    }
-}
-
-#[cfg(test)]
 mod wal_flush_tests {
     use super::*;
 
@@ -5344,15 +5229,6 @@ mod projection_adapter_tests {
             count: 3,
         });
         assert_eq!(projected, studio_json::json!({"name":"sample", "count":3}));
-<<<<<<< head
-    }
-}
-
-impl From<studio_json::error::Error> for StoreError {
-    fn from(value: studio_json::error::Error) -> Self {
-        Self::Json(value.into())
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 }
 

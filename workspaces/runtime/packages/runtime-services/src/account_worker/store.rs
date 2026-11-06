@@ -114,8 +114,7 @@ pub(crate) struct JournalSettlement {
     notification: Option<crate::notification_dispatch::NotificationSettlement>,
 }
 
-/// The payload key that marks a worker call. The VM provider stores its
-/// obligations under the same owner and kind with a different shape.
+/// The payload key that marks a worker call.
 const PROVIDER_CALL_TAG: &str = "family";
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -176,10 +175,6 @@ pub(super) fn save_account_submission(
     if account_submission(tx, &context.operation)?.is_some() {
         return Err(invalid(&context.operation));
     }
-    let vm = AgentRepository::get(tx, &AgentId::from(context.intent.agent_id.as_str()))?
-        .is_some_and(|agent| {
-            agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        });
     let account = &context.intent.account_key;
     let request = super::retained::storage::TransportRequest::from(request);
     let signature = studio_runtime_store::sha256_hex(
@@ -197,11 +192,7 @@ pub(super) fn save_account_submission(
             signature,
             status: OutboxStatus::Unknown,
             account: Some(account.clone()),
-            stream_id: Some(if vm {
-                super::historical_actor_journal_scope(account, &context.intent.agent_id)
-            } else {
-                account.clone()
-            }),
+            stream_id: Some(account.clone()),
             generation: Some(request.generation as i64),
             ordinal: None,
             next_at: None,
@@ -250,15 +241,8 @@ fn save_journal(
         signature: studio_runtime_store::sha256_hex(id.as_bytes()),
         id,
         kind: OutboxKind::JournalEntry,
-        owner_kind: if identity.expected_vm_actor.is_some() {
-            OwnerKind::Agent
-        } else {
-            OwnerKind::Account
-        },
-        owner_id: identity
-            .expected_vm_actor
-            .map_or(identity.account, |(actor, _)| actor)
-            .to_owned(),
+        owner_kind: OwnerKind::Account,
+        owner_id: identity.account.to_owned(),
         request_id: None,
         status: OutboxStatus::Pending,
         account: Some(identity.account.to_owned()),
@@ -334,22 +318,15 @@ pub fn put_notification(
         if let Some(row) = Outbox::get::<JournalSettlement>(tx, &id).map_err(StoreError::from)? {
             row
         } else {
-            let (account, actor) = scope
-                .rsplit_once(":vm:")
-                .map_or((scope, None), |(account, actor)| (account, Some(actor)));
             OutboxRow {
                 signature: studio_runtime_store::sha256_hex(id.as_bytes()),
                 id,
                 kind: OutboxKind::JournalEntry,
-                owner_kind: if actor.is_some() {
-                    OwnerKind::Agent
-                } else {
-                    OwnerKind::Account
-                },
-                owner_id: actor.unwrap_or(account).to_owned(),
+                owner_kind: OwnerKind::Account,
+                owner_id: scope.to_owned(),
                 request_id: None,
                 status: OutboxStatus::Pending,
-                account: Some(account.to_owned()),
+                account: Some(scope.to_owned()),
                 stream_id: Some(scope.to_owned()),
                 generation: Some(identity.generation as i64),
                 ordinal: Some(identity.cursor as i64),
@@ -691,19 +668,12 @@ pub(super) async fn recover(
         let rows = account_obligations(tx,&account)?;
         let mut recovered = Vec::new();
         for mut row in rows {
+            if row.stream_id.as_deref() != Some(account.as_str()) { continue; }
             let ProviderCall::Account(call) = &mut row.payload else {continue;};
             let context = call.context.clone();
             let held: bool = tx.query_row_cached("SELECT hold_status!='clear' FROM runtime_agents WHERE id=?1",[&context.intent.agent_id],|r|r.get(0)).optional()?.unwrap_or(false);
             if held {continue;}
             let request = call.written.as_ref().unwrap_or(&call.request).recovered();
-            let vm_owned =
-                AgentRepository::get(tx, &AgentId::from(context.intent.agent_id.as_str()))?
-                    .is_some_and(|agent| {
-                        agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-                    });
-            if vm_owned {
-                continue;
-            }
             if context.method == Method::TurnStart {
                 uncertain(tx, &context, Some(&request.ticket), false)?;
             }
@@ -1055,11 +1025,7 @@ pub(super) fn hold_invalid_agent_record_in(
         Err(StoreError::InvalidSyncObjectField { .. }) => return Ok(()),
         Err(error) => return Err(error.into()),
     }
-<<<<<<< head
-    let parsed: Value = studio_json::from_str(&raw).map_err(|_| StoreError::InvalidSyncObject {
-=======
     studio_json::from_str::<Value>(&raw).map_err(|_| StoreError::InvalidSyncObject {
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         scope: "runtime_agents".into(),
         id: agent_id.to_owned(),
     })?;
@@ -2187,7 +2153,6 @@ pub(super) async fn journal_batch(
     streams: &NotificationStreamBuffer,
     entries: Vec<JournalEntry>,
     claude_account_pin: &Value,
-    expected_vm_actor: Option<(&str, i64)>,
     native_source: Option<crate::notification_dispatch::NativeProcessSource>,
     delivered: Vec<DeliveredPublication>,
     outcome: Option<Box<OutcomeStep>>,
@@ -2227,11 +2192,9 @@ pub(super) async fn journal_batch(
     let account_for_read = account.to_owned();
     let (publication, limits_observation) =
         crate::diagnostics::measure_runtime_stage_async("journal.snapshot", async {
-            let mut publication = crate::notification_dispatch::PublicationContext::default()
+            let publication = crate::notification_dispatch::PublicationContext::default()
                 .with_native_source(native_source);
-            if let Some((actor, epoch)) = expected_vm_actor {
-                publication = publication.with_vm_journal(account, actor, epoch, journal_scope)?;
-            } else if journal_scope != account {
+            if journal_scope != account {
                 return Err(invalid(journal_scope));
             }
             let limits_observation = if needs_limits {
@@ -2255,7 +2218,6 @@ pub(super) async fn journal_batch(
     let account = account.to_owned();
     let journal_scope = journal_scope.to_owned();
     let claude_account_pin = claude_account_pin.clone();
-    let expected_vm_actor = expected_vm_actor.map(|(actor, epoch)| (actor.to_owned(), epoch));
     let streams = streams.clone();
     let state_root = store.root().to_path_buf();
     scheduler::lifecycle_transaction_with(&store, move |tx| {
@@ -2288,9 +2250,6 @@ pub(super) async fn journal_batch(
             let identity = JournalIdentity {
                 account: &account,
                 journal_scope: &journal_scope,
-                expected_vm_actor: expected_vm_actor
-                    .as_ref()
-                    .map(|(actor, epoch)| (actor.as_str(), *epoch)),
             };
             let mut subject = None;
             let faults_before = faults.len();
@@ -2500,8 +2459,7 @@ fn record_manual_release_closure(
         connection: source.connection.clone(),
         generation: entry.generation.0,
     };
-    if identity.expected_vm_actor.is_some()
-        || source.provider != "codex"
+    if source.provider != "codex"
         || source.account != identity.account
         || source.connection.is_empty()
         || source.generation != Some(entry.generation.0)
@@ -2552,13 +2510,9 @@ fn journal_one(
     let JournalIdentity {
         account,
         journal_scope,
-        expected_vm_actor,
     } = identity;
     let operation = journal_operation(journal_scope, entry.generation.0, entry.cursor.0);
     let digest = journal_digest(entry, &operation)?;
-    if expected_vm_actor.is_some() {
-        return Err(WorkerError::UnavailableActor);
-    }
     let stream_generation = current_stream_generation(tx, journal_scope, entry.generation.0)?;
     if entry.cursor.0 <= checkpoint(tx, journal_scope, stream_generation)? {
         return Ok(Some((streams.clone(), None)));
@@ -2602,7 +2556,7 @@ fn journal_one(
                                 cursor_scope: journal_scope,
                                 generation: entry.generation.0,
                                 cursor: entry.cursor.0,
-                                expected_agent: expected_vm_actor.map(|(actor, _)| actor),
+                                expected_agent: None,
                             },
                             &delta,
                         )
@@ -2651,7 +2605,6 @@ fn journal_one(
                 &JournalIdentity {
                     account,
                     journal_scope,
-                    expected_vm_actor,
                 },
                 publication,
                 entry,
@@ -2678,9 +2631,6 @@ fn journal_one(
                 thread,
                 turn,
             )?;
-            let attempt = attempt.filter(|(identity, _)| {
-                expected_vm_actor.is_none_or(|(actor_id, _)| identity.agent_id == actor_id)
-            });
             let attempt = match attempt {
                 Some(attempt) => Some(attempt),
                 None if method == "turn/completed" => {
@@ -2704,7 +2654,7 @@ fn journal_one(
                         entry.generation.0,
                         thread,
                         turn,
-                        expected_vm_actor.map(|(actor_id, _)| actor_id),
+                        None,
                     )?
                     .map(|identity| (identity, true)),
                     None => None,
@@ -2771,7 +2721,6 @@ fn journal_one(
                                 JournalIdentity {
                                     account,
                                     journal_scope,
-                                    expected_vm_actor,
                                 },
                                 entry,
                                 digest,
@@ -2949,7 +2898,7 @@ fn journal_one(
     }
     // A provider request is accepted with its batch: its record owns the
     // answer, so the cursor settles without waiting for it.
-    super::callback_record::accept(tx, account, journal_scope, expected_vm_actor, entry)?;
+    super::callback_record::accept(tx, account, journal_scope, entry)?;
     save_journal(tx, identity, entry, digest, true)?;
     Ok(Some((next, effect)))
 }
@@ -3340,18 +3289,6 @@ pub(crate) fn checkpoint(
     journal_scope: &str,
     generation: u64,
 ) -> Result<u64, StoreError> {
-    if let Some((account, actor)) = journal_scope.rsplit_once(":vm:")
-        && let Some(agent) = AgentRepository::get(tx, &AgentId::from(actor))?
-        && account_key(&agent) == account
-        && agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-    {
-        let state = agent.extra.get("providerStream").unwrap_or(&Value::Null);
-        return Ok(if state["generation"].as_u64() == Some(generation) {
-            state["ack"].as_u64().unwrap_or(0)
-        } else {
-            0
-        });
-    }
     studio_runtime_store::account_state::provider_checkpoint(tx, journal_scope, generation)
 }
 
@@ -3360,18 +3297,8 @@ fn current_stream_generation(
     scope: &str,
     origin: u64,
 ) -> Result<u64, WorkerError> {
-    let generation = if let Some((account, actor)) = scope.rsplit_once(":vm:") {
-        let agent = AgentRepository::get(tx, &AgentId::from(actor))?
-            .filter(|agent| account_key(agent) == account)
-            .ok_or_else(|| invalid(scope))?;
-        let (state, _) = studio_runtime_store::account_state::provider_state(
-            tx,
-            studio_runtime_store::account_state::ProviderOwner::Agent(&agent),
-        )?
-        .ok_or_else(|| invalid(scope))?;
-        Some(state.generation())
-    } else {
-        tx.query_row(
+    let generation = tx
+        .query_row(
             "SELECT connection_generation FROM runtime_account_state WHERE account=?1",
             [scope],
             |row| row.get::<_, Option<i64>>(0),
@@ -3381,8 +3308,7 @@ fn current_stream_generation(
         .map(u64::try_from)
         .transpose()
         .map_err(|_| invalid(scope))?
-    }
-    .unwrap_or(origin);
+        .unwrap_or(origin);
     if generation < origin {
         return Err(invalid(scope));
     }
@@ -3411,25 +3337,6 @@ fn set_checkpoint(
     generation: u64,
     cursor: u64,
 ) -> Result<(), WorkerError> {
-    if let Some((account, actor)) = scope.rsplit_once(":vm:")
-        && let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(actor))?
-        && account_key(&agent) == account
-        && agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-    {
-        let state = agent
-            .extra
-            .entry("providerStream".into())
-            .or_insert_with(|| json!({"generation":generation,"ack":0,"streams":null}));
-        if state.get("generation").is_none() {
-            state["generation"] = json!(generation);
-        }
-        if state["generation"].as_u64() != Some(generation) {
-            return Err(invalid(scope));
-        }
-        state["ack"] = json!(state["ack"].as_u64().unwrap_or(0).max(cursor));
-        AgentRepository::put(tx, &agent)?;
-        return Ok(());
-    }
     Ok(
         studio_runtime_store::account_state::set_provider_checkpoint(
             tx, scope, generation, cursor,
@@ -3446,20 +3353,16 @@ pub(super) async fn attach_provider_stream(
 ) -> Result<(), WorkerError> {
     let account = account.to_owned();
     let connection = connection.to_owned();
-    store.transaction_with(move |tx| {
-        studio_runtime_store::account_state::ensure_account(tx, &account)?;
-        let current = studio_runtime_store::account_state::provider_state(
-            tx, studio_runtime_store::account_state::ProviderOwner::Account(&account),
-        )?;
-        let previous = current.as_ref().map(|(state, _)| state.generation());
-        let ack = current.as_ref().map_or(0, |(_, ack)| *ack);
-        let generation = i64::try_from(generation).map_err(|_| invalid(&account))?;
-        let next_generation = generation.checked_add(1).ok_or_else(|| invalid(&account))?;
-        if previous.is_some_and(|old| old > generation as u64) { return Err(invalid(&account)); }
-        if let Some(previous) = previous && previous != generation as u64 {
-            super::retained::storage::checkpoint_covered(tx, &account, previous, ack)?;
-        }
-        tx.execute_cached("UPDATE runtime_account_state SET connection_generation=?2,connection_id=?3,journal_ack=CASE WHEN connection_generation=?2 THEN journal_ack ELSE 0 END,recovery_required=0,next_generation=MAX(next_generation,?4) WHERE account=?1", params![account,generation,connection,next_generation])?;
+    store.transaction_with(move|tx| {
+            studio_runtime_store::account_state::ensure_account(tx,&account)?;
+            let current=studio_runtime_store::account_state::provider_state(tx,studio_runtime_store::account_state::ProviderOwner::Account(&account))?;
+            let previous=current.as_ref().map(|(state,_)|state.generation());
+            let ack=current.as_ref().map_or(0,|(_,ack)|*ack);
+            let generation=i64::try_from(generation).map_err(|_|invalid(&account))?;
+            let next_generation=generation.checked_add(1).ok_or_else(||invalid(&account))?;
+            if previous.is_some_and(|old|old>generation as u64){return Err(invalid(&account));}
+            if let Some(previous)=previous && previous!=generation as u64 {super::retained::storage::checkpoint_covered(tx,&account,previous,ack)?;}
+            tx.execute_cached("UPDATE runtime_account_state SET connection_generation=?2,connection_id=?3,journal_ack=CASE WHEN connection_generation=?2 THEN journal_ack ELSE 0 END,recovery_required=0,next_generation=MAX(next_generation,?4) WHERE account=?1",params![account,generation,connection,next_generation])?;
         Ok(())
     }).await
 }
@@ -3609,7 +3512,6 @@ pub(super) fn journal_digest(entry: &JournalEntry, operation: &str) -> Result<St
 struct JournalIdentity<'a> {
     account: &'a str,
     journal_scope: &'a str,
-    expected_vm_actor: Option<(&'a str, i64)>,
 }
 /// One account's pending publication receipts as seen inside one writer
 /// transaction. Loaded on first use and kept current by its writes, so each
@@ -4053,9 +3955,6 @@ pub(super) struct AccountStreams {
     metadata: NotificationStreamBuffer,
 }
 
-const VM_STREAM_OWNERS_SQL: &str = "SELECT r.id FROM chats ch INDEXED BY chats_vm CROSS JOIN runtime_agents r ON r.id=ch.id WHERE ch.execution_mode='vm' AND r.account_key=?1 AND r.hold_status='clear'";
-const VM_STREAM_LANES_SQL: &str = "SELECT r.id,json_extract(r.record,'$.providerStream.streams') FROM chats ch INDEXED BY chats_vm CROSS JOIN runtime_agents r ON r.id=ch.id WHERE ch.execution_mode='vm' AND r.account_key=?1 AND r.hold_status='clear' AND json_type(r.record,'$.providerStream.streams')='object'";
-
 fn persist_stream_lane(
     tx: &studio_runtime_store::Transaction<'_>,
     account: &str,
@@ -4118,20 +4017,7 @@ pub(crate) fn persist_streams(
     streams: &mut NotificationStreamBuffer,
 ) -> Result<(), WorkerError> {
     let revision = uuid::Uuid::new_v4().to_string();
-    let mut host = streams.clone();
-    let mut query = tx.prepare_cached(VM_STREAM_OWNERS_SQL)?;
-    let actors = query
-        .query_map([account], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for actor in actors {
-        let lane = host.take_owner(&actor);
-        let scope = super::historical_actor_journal_scope(account, &actor);
-        let saved = persist_stream_lane(tx, account, &scope, Some(&actor), &revision, &lane)?;
-        stored_agent(tx, &actor)?;
-        tx.execute_cached("UPDATE runtime_agents SET record=json_set(record,'$.providerStream.streams',json(?2)) WHERE id=?1", params![actor, studio_json::to_string(&saved).map_err(StoreError::from)?])?;
-    }
-    let saved = persist_stream_lane(tx, account, account, None, &revision, &host)?;
+    let saved = persist_stream_lane(tx, account, account, None, &revision, streams)?;
     studio_runtime_store::account_state::put_streams(
         tx,
         account,
@@ -4191,22 +4077,6 @@ pub(super) fn load_streams(
             metadata: NotificationStreamBuffer::default(),
         }
     };
-    let mut query = tx.prepare_cached(VM_STREAM_LANES_SQL)?;
-    let lanes = query
-        .query_map([account], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for (actor, raw) in lanes {
-        let scope = super::historical_actor_journal_scope(account, &actor);
-        let saved = restore_stream_lane(
-            tx,
-            &scope,
-            studio_json::from_str(&raw).map_err(|_| invalid(&actor))?,
-        )?;
-        host.metadata.merge_owner(saved.metadata)?;
-    }
     host.metadata.store_revision = Some((account.to_owned(), host.revision));
     Ok(host.metadata)
 }
@@ -4280,62 +4150,6 @@ pub(super) fn pending_preparations(
             Ok((id, row.epoch))
         })
         .collect()
-}
-
-#[cfg(test)]
-mod stream_owner_query_tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    #[test]
-    fn vm_stream_queries_skip_json_for_host_agents() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
-            .unwrap();
-        db.execute_batch(&studio_runtime_store::domain::tables_sql())
-            .unwrap();
-        for n in 0..20 {
-            let id = format!("host-{n}");
-            let raw = studio_json::json!({"compactions":0,"id":id,"rootId":id,"provider":"codex","epoch":1,"status":"idle","accountKey":"default","executionMode":"host"});
-            db.execute(
-                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                rusqlite::params![id, raw.to_string()],
-            )
-            .unwrap();
-            db.execute(
-                "INSERT INTO chats(id,state,status,execution_mode) VALUES(?1,'active','idle','host')",
-                [&id],
-            )
-            .unwrap();
-        }
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&calls);
-        db.create_scalar_function(
-            "json_extract",
-            2,
-            rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC
-                | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
-            move |_| {
-                counted.fetch_add(1, Ordering::Relaxed);
-                Ok(None::<i64>)
-            },
-        )
-        .unwrap();
-        for sql in [super::VM_STREAM_OWNERS_SQL, super::VM_STREAM_LANES_SQL] {
-            assert!(
-                db.prepare(sql)
-                    .unwrap()
-                    .query(["default"])
-                    .unwrap()
-                    .next()
-                    .unwrap()
-                    .is_none()
-            );
-        }
-        assert_eq!(calls.load(Ordering::Relaxed), 0);
-    }
 }
 
 #[cfg(test)]

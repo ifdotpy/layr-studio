@@ -429,7 +429,15 @@ impl RetainedMonitorPort {
         let vm_owner = self
             .store
             .read_async("runtime-server/monitor-reattach-owner", move |db| {
-                retained::vm_actor(db, &agent)
+                Ok::<_, WorkerError>(
+                    studio_runtime_store::AgentRepository::get(
+                        db,
+                        &studio_runtime_store::AgentId::from(agent.as_str()),
+                    )?
+                    .is_some_and(|actor| {
+                        studio_runtime_services::workspace_ready::legacy_vm_record(&actor)
+                    }),
+                )
             })
             .await;
         match vm_owner {

@@ -753,10 +753,10 @@ fn native_turn_params(
             .thread_config
             .contains_key("shell_environment_policy.set.LAYR_ROOT")
     {
-        let permissions = layr_reviewer_permissions(
+        let permissions = native_reviewer_permissions(
             &json!({"workspaceMode":"layr-native","role":"reviewer","layrScratch":snapshot.actor.cwd}),
         );
-        apply_layr_reviewer_permissions(&mut params, permissions.as_ref());
+        apply_native_reviewer_permissions(&mut params, permissions.as_ref());
     }
     Ok(params)
 }
@@ -776,6 +776,22 @@ pub(crate) async fn before_start(
     resources: &PreparationResources,
     agent_id: &str,
 ) -> Result<(), WorkerError> {
+    let id = AgentId::from(agent_id);
+    let unsupported = store
+        .read_async(
+            "runtime-services/account_worker_execution_mode",
+            move |db| {
+                Ok::<_, WorkerError>(AgentRepository::get(db, &id)?.is_some_and(|record| {
+                    record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+                }))
+            },
+        )
+        .await?;
+    if unsupported {
+        return Err(refusal(
+            "workspace-readiness/unsupported-execution-mode".into(),
+        ));
+    }
     // Transfer preparation can itself prepare a destination thread. Its exact
     // Reading owner bypasses this entry in prepare_native_snapshot.
     Box::pin(crate::account_transfer_executor::before_start(
@@ -881,7 +897,7 @@ pub(crate) async fn workspace(
     _resources: &PreparationResources,
     intent: &TurnIntent,
 ) -> Result<crate::workspace_ready::ReadyToken, WorkerError> {
-    Box::pin(workspace_host(store, intent)).await
+    Box::pin(workspace_for_action(store, intent)).await
 }
 
 /// The stored agent of a turn being prepared; a missing row is invalid.
@@ -913,10 +929,16 @@ async fn stored_agent_value(store: &RuntimeStore, agent_id: &str) -> Result<Valu
         .await
 }
 
-async fn workspace_host(
+async fn workspace_for_action(
     store: Arc<RuntimeStore>,
     intent: &TurnIntent,
 ) -> Result<crate::workspace_ready::ReadyToken, WorkerError> {
+    let record = workspace_agent(&store, &intent.agent_id).await?;
+    if record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
+        return Err(refusal(
+            "workspace-readiness/unsupported-execution-mode".into(),
+        ));
+    }
     // Git provisioning acquires its own short transactions. No store transaction is held here.
     match Box::pin(crate::workspace_ready_git::prepare(
         Arc::clone(&store),
@@ -1287,8 +1309,8 @@ fn execution_cwd(record: &Value, validated_workspace_cwd: &Path) -> Option<Strin
     Some(validated_workspace_cwd.to_string_lossy().into_owned())
 }
 
-/// Keep native Layr reviewers read-only except for their private scratch folder.
-fn layr_reviewer_permissions(record: &Value) -> Option<Value> {
+/// Native reviewers may write only to their private scratch folder.
+fn native_reviewer_permissions(record: &Value) -> Option<Value> {
     if !crate::layr_native::is_native(record) || record["role"] != "reviewer" {
         return None;
     }
@@ -1304,17 +1326,11 @@ fn layr_reviewer_permissions(record: &Value) -> Option<Value> {
     Some(json!({"approvalPolicy":"never","sandboxPolicy":sandbox}))
 }
 
-<<<<<<< head
-fn apply_vm_reviewer_permissions(
+fn apply_native_reviewer_permissions(
     params: &mut studio_json::Map<String, Value>,
-    vm_reviewer: Option<&Value>,
-=======
-fn apply_layr_reviewer_permissions(
-    params: &mut studio_json::Map<String, Value>,
-    layr_reviewer: Option<&Value>,
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
+    native_reviewer: Option<&Value>,
 ) {
-    if let Some(Value::Object(permissions)) = layr_reviewer {
+    if let Some(Value::Object(permissions)) = native_reviewer {
         for (key, value) in permissions {
             params.insert(key.clone(), value.clone());
         }
@@ -1328,7 +1344,7 @@ fn monitor_command_settings(
     yolo_mode: Option<bool>,
 ) -> Result<Value, WorkerError> {
     let permissions = if let Some(permissions) =
-        layr_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
+        native_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
     {
         permissions
     } else {
@@ -1409,7 +1425,7 @@ async fn prepare_native_snapshot(
     let token = if allow_paused_start {
         None
     } else {
-        Some(workspace_host(Arc::clone(&store), &intent).await?)
+        Some(workspace_for_action(Arc::clone(&store), &intent).await?)
     };
     let restore_cwd = if allow_paused_start {
         let cwd = intent
@@ -1666,7 +1682,7 @@ pub(crate) async fn prepare_ready(
         mut turn_snapshot,
         events,
         mut prepared_intent,
-        layr_reviewer,
+        native_reviewer,
         filesystem,
         prepared_host,
         selection,
@@ -1691,7 +1707,7 @@ pub(crate) async fn prepare_ready(
             let cwd = token_for_snapshot
                 .validate(tx)?
                 .map_err(|_| refusal(WORKSPACE_TOKEN_STALE.into()))?;
-            let layr_reviewer = layr_reviewer_permissions(&frozen);
+            let native_reviewer = native_reviewer_permissions(&frozen);
             if let Some(execution_cwd) = execution_cwd(&frozen, &cwd) {
                 frozen["cwd"] = json!(execution_cwd);
             }
@@ -1722,7 +1738,7 @@ pub(crate) async fn prepare_ready(
                 turn_snapshot,
                 events,
                 prepared_intent,
-                layr_reviewer,
+                native_reviewer,
                 filesystem,
                 prepared_host,
                 selection_for_snapshot,
@@ -1798,7 +1814,7 @@ pub(crate) async fn prepare_ready(
         },
     )
     .map_err(thread_refusal)?;
-    apply_layr_reviewer_permissions(&mut params, layr_reviewer.as_ref());
+    apply_native_reviewer_permissions(&mut params, native_reviewer.as_ref());
     if snapshot.account.provider == studio_runtime_providers::ProviderKind::Claude {
         let agent_id = intent.agent_id.clone();
         let mode = store
@@ -2363,42 +2379,7 @@ mod daybreak_tests {
                 "approvalPolicy":"on-request","sandboxPolicy":{"type":"readOnly"}
             }))
         );
-<<<<<<< head
-
-        let vm_reviewer = monitor_command_settings(
-            &json!({"executionMode":"vm","role":"reviewer","sandbox":"danger-full-access"}),
-            "/workspace",
-            thread::Role::Reviewer,
-            Some(true),
-        );
-        assert_eq!(
-            vm_reviewer.ok(),
-            Some(json!({
-                "approvalPolicy":"never","sandboxPolicy":{"type":"readOnly"}
-            }))
-        );
-
-        let mut yolo_turn = studio_json::Map::from_iter([
-            ("approvalPolicy".into(), json!("never")),
-            ("sandboxPolicy".into(), json!({"type":"dangerFullAccess"})),
-        ]);
-        let old_guest = vm_reviewer_permissions(&json!({"executionMode":"vm","role":"reviewer"}));
-        apply_vm_reviewer_permissions(&mut yolo_turn, old_guest.as_ref());
-        assert_eq!(yolo_turn["approvalPolicy"], "never");
-        assert_eq!(yolo_turn["sandboxPolicy"], json!({"type":"readOnly"}));
-
-        // A reviewer of a current guest writes only its scratch folder, without network.
-        let scratch = vm_reviewer_permissions(&json!({
-            "executionMode":"vm","role":"reviewer","layrScratch":"/home/r/.studio/scratch/a"
-        }));
-        apply_vm_reviewer_permissions(&mut yolo_turn, scratch.as_ref());
-        assert_eq!(
-            yolo_turn["sandboxPolicy"],
-            json!({"type":"workspaceWrite","writableRoots":["/home/r/.studio/scratch/a"],"networkAccess":false})
-        );
-=======
         let native = json!({"workspaceMode":"layr-native", "role":"reviewer", "layrScratch":"/private/scratch"});
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         assert_eq!(
             monitor_command_settings(&native, "/workspace", thread::Role::Reviewer, Some(true))
                 .ok(),

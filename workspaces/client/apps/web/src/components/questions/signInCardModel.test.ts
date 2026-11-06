@@ -52,7 +52,7 @@ describe("sign-in card model", () => {
 
   it("says where the result goes", () => {
     expect(resultTarget(redirect, "igor-mbp")).toBe("igor-mbp, port 8000");
-    expect(resultTarget({ ...redirect, source: "host" }, undefined)).toBe(
+    expect(resultTarget(redirect, undefined)).toBe(
       "the chat's server, port 8000",
     );
     expect(resultTarget(device, "igor-mbp")).toBe("No result to forward");

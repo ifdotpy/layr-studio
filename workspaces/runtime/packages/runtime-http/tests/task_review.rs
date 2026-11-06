@@ -203,13 +203,6 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
     }
     store
         .test_read_transaction(|tx| {
-<<<<<<< head
-            let raw: String = tx.query_row(
-                "SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0",
-                [collection, id],
-                |row| row.get(0),
-            )?;
-=======
             let raw: String = if studio_runtime_store::AGENT_VIEW_COLLECTIONS.contains(&collection)
             {
                 studio_runtime_services::entity_scope::direct_document(tx, collection, id)?
@@ -224,7 +217,6 @@ fn projected(store: &RuntimeStore, collection: &str, id: &str) -> Value {
                     |row| row.get(0),
                 )?
             };
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             Ok(studio_json::from_str::<Value>(&raw)?["value"].clone())
         })
         .unwrap()

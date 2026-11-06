@@ -446,6 +446,8 @@ async fn sweep(
             use crate::account_worker::retained::{ProviderCallIntent, reserve_provider_call};
             use studio_runtime_schema::persistence::RequestIdentity;
             use studio_runtime_store::request_results::{Admission, RequestResults};
+            // Validate the current persisted owner after confirming a live account.
+            AgentRepository::get(tx, &studio_runtime_store::AgentId::from(id.as_str()))?;
             let allowed = eligible_view(tx, &agent)?;
             let root_request_id = RequestIdentity::issue_root();
             let operation = format!("shell-policy:{id}:{root_request_id}");

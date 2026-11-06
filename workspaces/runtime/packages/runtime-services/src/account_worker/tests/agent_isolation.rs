@@ -645,7 +645,6 @@ async fn a_faulting_frame_keeps_the_earlier_frames_of_its_batch() {
         ],
         &Value::Null,
         None,
-        None,
         Vec::new(),
         None,
         false,

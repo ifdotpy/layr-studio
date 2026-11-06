@@ -7,10 +7,7 @@ use super::{
 use std::fs;
 use std::{collections::BTreeSet, path::Path};
 use studio_json::{Value, json};
-<<<<<<< head
-=======
 use studio_runtime_schema::layr_progress::{CopyPhase, CopyUnit};
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use studio_runtime_store::path_identity::CanonicalPath;
 
 pub use super::runtime::ProgressSink;
@@ -1243,8 +1240,9 @@ mod tests {
             format!("{}\n", project.join("one/.git/objects").display()),
         )
         .expect("restore internal alternate");
-        let worktree_git = crate::workspace_paths::read_gitdir_pointer(&first, &first.join(".git"))
-            .expect("worktree metadata");
+        let worktree_git =
+            crate::layr_native::source_tree::read_gitdir_pointer(&first, &first.join(".git"))
+                .expect("worktree metadata");
         fs::write(
             worktree_git.join("commondir"),
             format!("{}\n", fixture.path().display()),

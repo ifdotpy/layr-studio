@@ -234,7 +234,6 @@ pub mod workspace_cleanup_runtime;
 pub mod workspace_files;
 pub mod workspace_operations;
 pub mod workspace_operations_effects;
-mod workspace_paths;
 pub mod workspace_ready;
 pub mod workspace_ready_git;
 pub mod workspace_views;

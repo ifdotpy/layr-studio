@@ -149,20 +149,6 @@ impl Fixture {
             tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
             studio_runtime_store::migrations::migrate_2026_10_20(tx)?;
             studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
-<<<<<<< head
-            let projections = {
-                let mut query = tx.prepare("SELECT id,payload FROM sync_entities WHERE collection='agent' AND deleted=0 AND payload IS NOT NULL")?;
-                let rows = query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()?
-            };
-            for (id, raw) in projections {
-                let mut payload: Value = studio_json::from_str(&raw)?;
-                crate::agent_view_fixtures::normalize_legacy_agent(payload.get_mut("value").expect("agent projection"));
-                let raw = payload.to_string();
-                tx.execute("UPDATE sync_entities SET payload=?1,hash=sync_entity_hash(?1) WHERE collection='agent' AND id=?2", (&raw, &id))?;
-            }
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
                 tx.execute(&format!("UPDATE runtime_agent_volatile SET \"{field}\"=NULL WHERE \"{field}\"='null'"), [])?;
             }

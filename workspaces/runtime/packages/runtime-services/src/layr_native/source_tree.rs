@@ -1,9 +1,10 @@
+//! Source metadata and Git pointer checks shared by native Layr imports.
 use std::{fs, path::Path};
 use studio_runtime_store::path_identity::CanonicalPath;
 
-type VmArchiveIdentity = (u64, u64, u64, i128, i128);
+pub(crate) type ArchiveIdentity = (u64, u64, u64, i128, i128);
 
-pub(crate) fn vm_archive_identity(metadata: &fs::Metadata) -> VmArchiveIdentity {
+pub(crate) fn archive_identity(metadata: &fs::Metadata) -> ArchiveIdentity {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -34,7 +35,7 @@ pub(crate) fn read_gitdir_pointer(
     if line.contains(['\n', '\r']) || line.trim() != line {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "Workspace source has malformed Git pointer metadata",
+            "Project source has malformed Git pointer metadata",
         ));
     }
     let target = line
@@ -43,12 +44,13 @@ pub(crate) fn read_gitdir_pointer(
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "Workspace source has malformed Git pointer metadata",
+                "Project source has malformed Git pointer metadata",
             )
         })?;
     CanonicalPath::existing(directory.join(target))
 }
 
+/// Build-output names used by native cache admission.
 pub(crate) fn regenerable_path(path: &Path) -> bool {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     if matches!(
@@ -69,4 +71,34 @@ pub(crate) fn regenerable_path(path: &Path) -> bool {
         && path
             .parent()
             .is_some_and(|parent| parent.join("Cargo.toml").is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_pointer_must_be_one_well_formed_line() {
+        let root = tempfile::tempdir().unwrap();
+        let git = root.path().join("git");
+        fs::create_dir(&git).unwrap();
+        let marker = root.path().join(".git");
+        fs::write(&marker, "gitdir: git\n").unwrap();
+        assert_eq!(
+            read_gitdir_pointer(root.path(), &marker).unwrap(),
+            CanonicalPath::existing(&git).unwrap()
+        );
+        fs::write(&marker, "gitdir: git\nextra\n").unwrap();
+        assert!(read_gitdir_pointer(root.path(), &marker).is_err());
+    }
+
+    #[test]
+    fn cache_detection_distinguishes_cargo_output() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("target");
+        assert!(!regenerable_path(&target));
+        fs::write(root.path().join("Cargo.toml"), "").unwrap();
+        assert!(regenerable_path(&target));
+        assert!(regenerable_path(&root.path().join("node_modules")));
+    }
 }

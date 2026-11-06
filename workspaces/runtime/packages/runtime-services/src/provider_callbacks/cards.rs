@@ -986,14 +986,13 @@ fn card_context(tx: &Transaction<'_>, card: &Approval) -> Result<CallbackContext
     let rpc = delivery(card)?;
     let actor =
         records::get(tx, "runtime_agents", card.agent.as_str())?.ok_or(CallbackError::Stale)?;
+    if actor["executionMode"] == "vm" {
+        return Err(CallbackError::Stale);
+    }
     Ok(CallbackContext {
         agent: card.agent.as_str().to_owned(),
         account: rpc.account.clone(),
-        stream_id: if actor["executionMode"] == "vm" {
-            crate::account_worker::historical_actor_journal_scope(&rpc.account, card.agent.as_str())
-        } else {
-            rpc.account.clone()
-        },
+        stream_id: rpc.account.clone(),
         connection: actor
             .pointer("/startAttempt/connectionId")
             .and_then(Value::as_str)

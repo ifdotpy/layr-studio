@@ -1,17 +1,15 @@
-//! Read-only Layr commands for native reviewers.
+//! Read-only Layr operations for native reviewers.
 
 use std::sync::OnceLock;
 
-<<<<<<< head
-use base64::Engine;
-=======
->>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use studio_json::{Value, json};
 
 use crate::managed_host_tools::{Actor, DispatchedOperation, OperationResult};
 
 /// The tool name.
 pub(crate) const TOOL: &str = "layr_read";
+/// The dependency named when native reviewer access is unavailable.
+pub(crate) const DEPENDENCY: &str = "layr-read/native";
 /// The layr commands that a reviewer may run, after optional `--line <line>` pairs.
 pub(crate) const COMMANDS: [&str; 9] = [
     "blame",
@@ -31,26 +29,26 @@ const MAX_ARGUMENT_CHARS: usize = 4096;
 /// Request ID prefix of one exact tool request.
 const REQUEST_ID_PREFIX: &str = "layr-read:";
 
-/// The tool definition for reviewers.
+/// The read-only tool definition.
 pub(crate) fn tool_definition() -> Option<&'static crate::thread_prepare::ToolDefinition> {
     static DEFINITION: OnceLock<Option<crate::thread_prepare::ToolDefinition>> = OnceLock::new();
     DEFINITION
         .get_or_init(|| {
-            studio_json::from_value(json!({
-                "type": "function", "name": TOOL,
-                "description": format!(
-                    "Run one read-only layr command as your Linux user in your read-only line, outside your sandbox: {}. \
+            Some(crate::thread_prepare::ToolDefinition {
+                name: TOOL.into(),
+                description: format!(
+                    "Run one read-only Layr command in your read-only line: {}. \
                      args is the argument list after `layr`, for example [\"diff\", \"<base>\", \"<state>\"] or \
                      [\"show\", \"<state>:<path>\"]. [\"--line\", \"<line>\", \"log\"] reads another line of your project. \
                      Use head for the current named state. log --json writes JSON Lines; status --json writes one JSON object. \
                      Write notes and copies only in $TMPDIR.",
                     COMMANDS.join(", ")
                 ),
-                "inputSchema": {"type": "object", "properties": {
+                input_schema: json!({"type": "object", "properties": {
                     "args": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_ARGUMENTS}},
-                    "required": ["args"]},
-            }))
-            .ok()
+                    "required": ["args"]}).as_object()?.clone(),
+                extra: [("type".into(), json!("function"))].into_iter().collect(),
+            })
         })
         .as_ref()
 }
@@ -98,9 +96,7 @@ pub(crate) fn command(args: &Value) -> Result<Vec<String>, String> {
     Ok(argv)
 }
 
-/// The guest request identity of tool request `request_id`: a retry of the
-/// same request gets the first answer of the guest, and the command does not
-/// run again.
+/// The stable identity for one exact tool request.
 pub(crate) fn identity(actor_id: &str, request_id: &str) -> String {
     format!(
         "{REQUEST_ID_PREFIX}{}",

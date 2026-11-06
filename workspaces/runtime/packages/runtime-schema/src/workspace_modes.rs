@@ -188,6 +188,8 @@ mod tests {
         assert!(!accepts_chat("layr"));
         assert!(!accepts_worker("layr"));
         assert!(!accepts_chat("image"));
+        assert!(!accepts_chat("layr"));
+        assert!(!accepts_worker("layr"));
         assert!(!accepts_chat("shared"));
         assert!(accepts_worker("shared"));
         let mut document = json!({});

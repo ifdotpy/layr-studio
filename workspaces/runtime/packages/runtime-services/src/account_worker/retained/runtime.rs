@@ -105,24 +105,6 @@ impl Worker {
             }
             Ok(Replay::Retry(ticket)) => Some(ticket),
         };
-        let actor_id = call.actor.as_ref().map(|actor| actor.agent.clone());
-        let actor_lookup = actor_id.clone();
-        let is_vm_actor = if let Some(actor) = actor_lookup {
-            self.db("retained_actor_mode", move |store| async move {
-                store
-                    .read_async("runtime-services/account_worker_read", move |connection| {
-                        super::storage::vm_actor(connection, &actor)
-                    })
-                    .await
-            })
-            .await?
-        } else {
-            false
-        };
-        if is_vm_actor {
-            let _ignored = reply.send(Err(PortError::NotSent("workspace-unavailable".into())));
-            return Ok(());
-        }
         let control = self.control.clone();
         let journal_actor_id: Option<String> = None;
         let remaining = tokio::time::Instant::from_std(request.deadline)
@@ -381,15 +363,15 @@ impl Worker {
         let mut scopes: BTreeSet<String> = self
             .retained_requests
             .values()
-            .map(|pending| self.journal_scope(pending.actor_id.as_deref()))
+            .map(|_| account.clone())
             .collect();
         // A journal barrier always belongs to the host session, including when
         // no retained requests are currently waiting.
         scopes.insert(account.clone());
         let request_scopes: BTreeMap<_, _> = self
             .retained_requests
-            .iter()
-            .map(|(id, pending)| (id.clone(), self.journal_scope(pending.actor_id.as_deref())))
+            .keys()
+            .map(|id| (id.clone(), account.clone()))
             .collect();
         let candidates: BTreeSet<(String, u64)> =
             self.retained_requests
@@ -411,12 +393,7 @@ impl Worker {
                             },
                         )
                 })
-                .map(|pending| {
-                    (
-                        self.journal_scope(pending.actor_id.as_deref()),
-                        pending.result_cursor,
-                    )
-                })
+                .map(|pending| (account.clone(), pending.result_cursor))
                 .collect();
         let (checkpoints, committed_replies) = self
             .db("retained_barrier", move |s| async move {
