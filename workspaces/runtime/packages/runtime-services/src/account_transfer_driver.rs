@@ -18,8 +18,9 @@ use studio_runtime_store::transfer_record::TransferRecord;
 
 /// The operation named by a nonterminal, readable agent summary.
 pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Option<&str> {
-    let studio_runtime_store::transfer_record::AgentTransferState::Summary(summary) =
-        agent.account_transfer.value()?
+    let studio_runtime_store::StoredTransferObject::Known(
+        studio_runtime_store::transfer_record::AgentTransferState::Summary(summary),
+    ) = agent.account_transfer.value()?
     else {
         return None;
     };
@@ -336,14 +337,19 @@ pub async fn request(
                 ));
             }
             let summary = match actor.account_transfer.value() {
-                Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_)) => {
+                Some(
+                    studio_runtime_store::StoredTransferObject::Unreadable(_)
+                    | studio_runtime_store::StoredTransferObject::Known(
+                        studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_),
+                    ),
+                ) => {
                     return Err(TransferError::Refused(
                         "Current transfer data is unreadable",
                     ));
                 }
-                Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(value)) => {
-                    Some(value)
-                }
+                Some(studio_runtime_store::StoredTransferObject::Known(
+                    studio_runtime_store::transfer_record::AgentTransferState::Summary(value),
+                )) => Some(value),
                 None => None,
             };
             if let Some(active) = summary.filter(|value| {
@@ -517,9 +523,9 @@ fn persist_request(
         .agents
         .get(operation.lead_id.as_str())
         .and_then(|agent| match agent.account_transfer.value() {
-            Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) => {
-                Some(summary.id.as_str())
-            }
+            Some(studio_runtime_store::StoredTransferObject::Known(
+                studio_runtime_store::transfer_record::AgentTransferState::Summary(summary),
+            )) => Some(summary.id.as_str()),
             _ => None,
         });
     let previous_created = old

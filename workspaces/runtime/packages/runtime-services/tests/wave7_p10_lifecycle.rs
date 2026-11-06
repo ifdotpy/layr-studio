@@ -1188,6 +1188,8 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
                     studio_json::from_str(payload.as_str().expect("agent payload"))
                         .expect("agent JSON");
                 if let Some(agent) = value["value"].as_object_mut() {
+                    // The additive full-agent project path postdates the frozen oracle.
+                    assert!(agent.contains_key("projectPath"));
                     for field in [
                         "accountChange",
                         "accountTransferProgress",
@@ -1213,6 +1215,9 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
                 payload["value"]["accountKey"] = json!("default");
             }
             use_current_ticket_shape(payload.get_mut("value").expect("agent projection"));
+            crate::agent_view_fixtures::expect_project_path(
+                payload.get_mut("value").expect("agent projection"),
+            );
             crate::normalize_agent_nulls(&mut payload);
             row[2] = json!(payload.to_string());
         }
@@ -1751,6 +1756,9 @@ async fn production_child_notification_matches_python_corpus() {
                 payload["value"]["accountKey"] = json!("default");
             }
             use_current_ticket_shape(payload.get_mut("value").expect("agent projection"));
+            crate::agent_view_fixtures::expect_project_path(
+                payload.get_mut("value").expect("agent projection"),
+            );
             crate::normalize_agent_nulls(&mut payload);
             row[2] = json!(payload.to_string());
         }

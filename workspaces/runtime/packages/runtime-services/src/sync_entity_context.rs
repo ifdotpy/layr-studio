@@ -8,34 +8,45 @@ use studio_json::json;
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{StoreResult, system_reads as records};
 
-use crate::event_write::truthy;
 use crate::submit_gates::{AgentAuthorityRow, Deletion, ProjectAuthorityRow};
 use crate::sync_policy::table_exists;
 use crate::sync_views::{AgentViewContext, RoomViewContext, TransferObservation};
+use studio_runtime_store::{AgentRecord, AgentStatus};
 
-fn transfer_observation(transaction: &Connection, record: &Value) -> TransferObservation {
-    if record.get("isLead").and_then(Value::as_bool) != Some(true) {
+fn transfer_observation(transaction: &Connection, record: &AgentRecord) -> TransferObservation {
+    use studio_runtime_store::transfer_record::{AgentTransferState, TransferStatus};
+    if record.is_lead != Some(true) {
         return TransferObservation::Absent;
     }
-    if let Some(summary) = record.get("accountTransfer")
-        && summary.get("kind").and_then(Value::as_str) == Some("unreadable")
-    {
-        return TransferObservation::Unreadable {
-            reason: summary
-                .get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or("Transfer data is unreadable")
-                .to_owned(),
-        };
+    let summary = record.account_transfer.value();
+    match summary {
+        Some(studio_runtime_store::StoredTransferObject::Known(
+            AgentTransferState::Unreadable(summary),
+        )) => {
+            return TransferObservation::Unreadable {
+                reason: summary.reason.clone(),
+            };
+        }
+        Some(studio_runtime_store::StoredTransferObject::Unreadable(value)) => {
+            return TransferObservation::Unreadable {
+                reason: value
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Transfer data is unreadable")
+                    .to_owned(),
+            };
+        }
+        _ => {}
     }
     let id = record
-        .get("accountTransferId")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            let summary = record.get("accountTransfer")?;
-            (summary.get("status").and_then(Value::as_str) == Some("pending"))
-                .then(|| summary.get("id").and_then(Value::as_str))
-                .flatten()
+        .account_transfer_id
+        .value()
+        .map(|id| id.as_str())
+        .or_else(|| match summary {
+            Some(studio_runtime_store::StoredTransferObject::Known(
+                AgentTransferState::Summary(summary),
+            )) if summary.status == TransferStatus::Pending => Some(summary.id.as_str()),
+            _ => None,
         });
     let Some(id) = id else {
         return TransferObservation::Absent;
@@ -89,18 +100,31 @@ fn account_destinations(
         .collect())
 }
 
-pub(crate) fn agent_view_context(
+// Temporary boundary for the projection caller until it retains the decoded record.
+pub(crate) fn agent_view_context_value_adapter(
     transaction: &Connection,
     record: &Value,
     project_server_id: Option<&str>,
 ) -> StoreResult<AgentViewContext> {
-    let id = record.get("id").and_then(Value::as_str).unwrap_or_default();
-    let empty_lead = truthy(record.get("isLead"))
-        && !truthy(record.get("deletedAt"))
-        && !truthy(record.get("accountTransferId"))
-        && record.get("status").and_then(Value::as_str) == Some("idle")
-        && !truthy(record.get("threadId"))
-        && !truthy(record.get("prompt"))
+    agent_view_context(
+        transaction,
+        &AgentRecord::from_value(record.clone())?,
+        project_server_id,
+    )
+}
+
+pub(crate) fn agent_view_context(
+    transaction: &Connection,
+    record: &AgentRecord,
+    project_server_id: Option<&str>,
+) -> StoreResult<AgentViewContext> {
+    let id = record.id.0.as_str();
+    let empty_lead = record.is_lead == Some(true)
+        && !record.deleted_at.is_some_and(|value| value != 0.0)
+        && record.account_transfer_id.value().is_none()
+        && record.status == AgentStatus::Idle
+        && record.thread_id.as_deref().is_none_or(str::is_empty)
+        && record.prompt.value().is_none_or(String::is_empty)
         && !exists_for_agent(transaction, "runtime_events", "agent", id)?
         && !exists_for_agent(transaction, "runtime_items", "agent", id)?
         && !transaction.query_row_cached(
@@ -151,7 +175,7 @@ pub(crate) fn agent_view_context(
     Ok(AgentViewContext {
         account_destinations: account_destinations(transaction)?,
         transfer: transfer_observation(transaction, record),
-        team_counts: team_counts(transaction, id, record)?,
+        team_counts: team_counts(transaction, id, record.is_lead == Some(true))?,
         command_progress: progress.commands,
         stall: progress.stall,
         project_server_id: project_server_id.map(str::to_owned),
@@ -198,7 +222,7 @@ pub(crate) fn team_counts_text(transaction: &Connection, id: &str) -> StoreResul
     if lead != Some(true) {
         return Ok(None);
     }
-    team_counts(transaction, id, &studio_json::json!({"isLead": true}))?
+    team_counts(transaction, id, true)?
         .map(|counts| studio_json::to_string(&counts))
         .transpose()
         .map_err(studio_runtime_store::StoreError::from)
@@ -207,9 +231,9 @@ pub(crate) fn team_counts_text(transaction: &Connection, id: &str) -> StoreResul
 fn team_counts(
     transaction: &Connection,
     id: &str,
-    record: &Value,
+    is_lead: bool,
 ) -> StoreResult<Option<studio_runtime_schema::agent_progress::TeamCounts>> {
-    if !truthy(record.get("isLead")) {
+    if !is_lead {
         return Ok(None);
     }
     let mut total = 0;
@@ -479,15 +503,12 @@ impl RoomDirectory {
 fn pending_attention(
     transaction: &Connection,
     id: &str,
-    record: &Value,
+    record: &AgentRecord,
 ) -> StoreResult<(bool, bool)> {
     if !table_exists(transaction, "approvals")? {
         return Ok((false, false));
     }
-    let epoch = record
-        .get("epoch")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
+    let epoch = record.epoch;
     transaction.query_row_cached(
         "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind IN ('question','elicitation')), \
                 EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind NOT IN ('question','elicitation'))",
@@ -500,6 +521,57 @@ mod room_preparation_tests {
     use super::*;
     use crate::submit_gates::{PeerTeamRow, StoredField};
     use std::sync::Arc;
+
+    #[test]
+    fn review_regression_malformed_transfer_blocks_selection() {
+        let db = Connection::open_in_memory().unwrap();
+        let agent = AgentRecord::from_value(json!({"id":"lead","rootId":"lead","epoch":0,
+            "status":"idle","accountKey":"default","isLead":true,"accountTransfer":{}}))
+        .unwrap();
+        assert!(crate::account_transfer::before_start(&agent).is_err());
+        let context = AgentViewContext {
+            transfer: transfer_observation(&db, &agent),
+            empty_lead: true,
+            ..Default::default()
+        };
+        let view = crate::sync_views::agent_entity_from_record(agent, &context).unwrap();
+        let value = serde::Serialize::serialize(&view, studio_json::value::Serializer).unwrap();
+        assert_eq!(value["accountTransferProgress"]["kind"], "unreadable");
+        assert_eq!(value["accountChange"]["kind"], "unavailable");
+    }
+
+    #[test]
+    fn legacy_transfer_fields_keep_context_behavior() {
+        let db = Connection::open_in_memory().unwrap();
+        let base = json!({"id":"lead","rootId":"lead","epoch":0,"status":"idle",
+            "accountKey":"default","isLead":true,"accountTransfer":{"kind":"unreadable"}});
+        let agent = AgentRecord::from_value(base).unwrap();
+        assert!(
+            matches!(transfer_observation(&db, &agent), TransferObservation::Unreadable { reason } if reason == "Transfer data is unreadable")
+        );
+        let agent = AgentRecord::from_value(json!({"id":"lead","rootId":"lead","epoch":0,
+            "status":"idle","accountKey":"default","isLead":true,"accountTransferId":""}))
+        .unwrap();
+        assert!(matches!(
+            transfer_observation(&db, &agent),
+            TransferObservation::Absent
+        ));
+    }
+
+    #[test]
+    fn agent_context_empty_lead_follows_typed_fields() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT, parent_id TEXT, root_id TEXT, deleted_at REAL, record TEXT); CREATE INDEX runtime_agent_live_root_v2 ON runtime_agents(root_id); CREATE TABLE runtime_work(id TEXT, record TEXT);").unwrap();
+        let mut agent = AgentRecord::from_value(json!({"id":"lead","rootId":"lead","epoch":0,"status":"idle","accountKey":"default","compactions":0,"isLead":true})).unwrap();
+        assert!(agent_view_context(&db, &agent, None).unwrap().empty_lead);
+        agent.deleted_at = Some(0.0);
+        assert!(agent_view_context(&db, &agent, None).unwrap().empty_lead);
+        agent.thread_id = Some("thread".into());
+        assert!(!agent_view_context(&db, &agent, None).unwrap().empty_lead);
+        agent.thread_id = None;
+        agent.prompt = studio_runtime_schema::queue_command::Field::Value("prompt".into());
+        assert!(!agent_view_context(&db, &agent, None).unwrap().empty_lead);
+    }
 
     fn agent(id: &str) -> AgentAuthorityRow {
         AgentAuthorityRow {

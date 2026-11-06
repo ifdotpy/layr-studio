@@ -1,3 +1,4 @@
+import { AgentPermissionMode } from "../../generated/api";
 import { AgentSource, AgentStatus, ProviderKind } from "../../generated/api";
 import { Button, NativeSelect, Switch, Textarea } from "@mantine/core";
 import type { PostBody } from "../../apiTypes";
@@ -400,18 +401,18 @@ const unsupportedAgents: Agent[] = [
     ...initial,
     id: "missing-provider",
     provider: undefined,
-    permissionMode: "default",
+    permissionMode: AgentPermissionMode["default"],
   },
   {
     ...initial,
     id: "null-provider",
     provider: null,
-    permissionMode: "default",
+    permissionMode: AgentPermissionMode["default"],
   },
   {
     ...initial,
     id: "unknown-provider",
-    permissionMode: "default",
+    permissionMode: AgentPermissionMode["default"],
     // @ts-expect-error A future wire identity must not gain Codex permission actions.
     provider: "future-provider",
   },
@@ -514,7 +515,7 @@ for (const agent of unsupportedAgents) {
 
 test("chat settings retains the known Codex permission caller and the Claude settings branch", () => {
   expect(
-    children(chatSettings({ ...initial, permissionMode: "default" })).some(
+    children(chatSettings({ ...initial, permissionMode: AgentPermissionMode["default"] })).some(
       (node) => node.type === ExecutionPermissions,
     ),
   ).toBe(true);
@@ -681,7 +682,7 @@ for (const role of ["implementer", "reviewer"] as const) {
       id: role,
       isLead: false,
       role,
-      permissionMode: "default",
+      permissionMode: AgentPermissionMode["default"],
       status: AgentStatus.running,
       nextTurnSettingsSupported: true,
     };
@@ -1213,7 +1214,7 @@ for (const status of ["running", "approval"] as const) {
         ...initial,
         status,
         inFlight: true,
-        permissionMode: "default",
+        permissionMode: AgentPermissionMode["default"],
       },
       true,
     ).controls;
@@ -1260,7 +1261,7 @@ test("Codex explains when Ask takes effect for a turn started with Full", () => 
       ...initial,
       status: AgentStatus.running,
       inFlight: true,
-      permissionMode: "default",
+      permissionMode: AgentPermissionMode["default"],
     },
     true,
   ).controls;
@@ -1275,7 +1276,7 @@ test("Codex explains when Ask takes effect for a turn started with Full", () => 
 
 test("Codex describes the selected Ask mode truthfully", () => {
   const controls = render(
-    { ...initial, permissionMode: "default" },
+    { ...initial, permissionMode: AgentPermissionMode["default"] },
     true,
   ).controls;
   const permission = children(controls).find(

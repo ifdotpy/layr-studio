@@ -1,3 +1,4 @@
+import { AgentWorktreePreparation } from "./generated/api";
 import { WorkspaceMode, AccountStatus, ProviderKind } from "./generated/api";
 import { required } from "./components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
@@ -208,8 +209,8 @@ describe("scale verifier helpers", () => {
       { workspaceMode: WorkspaceMode.shared },
       { cwd: "/project" },
       { cwd: "relative" },
-      { worktreePreparation: "waiting" },
-      { worktreePreparation: "preparing" },
+      { worktreePreparation: AgentWorktreePreparation["waiting"] },
+      { worktreePreparation: AgentWorktreePreparation["preparing"] },
     ] satisfies Partial<
       NonNullable<Parameters<typeof callbackWorktreeCwd>[0]>
     >[])
