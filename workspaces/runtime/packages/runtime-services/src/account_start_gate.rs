@@ -627,11 +627,11 @@ async fn agent_standing(
     let agent = agent.to_owned();
     Ok(store
         .read_async("runtime-services/account_start_gate", move |db| {
-            let mut statement = db.prepare_cached(
-                "SELECT json_extract(record,'$.parentId') IS NULL, \
-                        COALESCE(json_extract(record,'$.inFlight'),0)=1 \
+            let mut statement = db.prepare_cached(&format!(
+                "SELECT json_extract(record,'$.parentId') IS NULL, {} \
                  FROM runtime_agents WHERE id=?1",
-            )?;
+                studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+            ))?;
             let standing = statement
                 .query_row([agent], |row| Ok((row.get(0)?, row.get(1)?)))
                 .optional()?;

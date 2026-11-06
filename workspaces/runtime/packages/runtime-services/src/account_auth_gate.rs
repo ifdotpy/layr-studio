@@ -210,8 +210,6 @@ fn release_held_sql() -> String {
                  FROM chats ch JOIN runtime_agents a ON a.id=ch.id \
                  WHERE ch.status='failed' AND ch.auto_wake=1 \
                    AND NOT {busy} AND a.deleted_at IS NULL \
-                   AND json_extract(a.record,'$.autoWake')=1 \
-                   AND COALESCE(json_extract(a.record,'$.inFlight'),0)=0 \
                    AND json_extract(a.record,'$.error') IN (SELECT value FROM json_each(?1)) \
                    AND first IS NOT NULL \
                  ORDER BY first,a.rowid",

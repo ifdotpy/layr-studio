@@ -1086,15 +1086,16 @@ pub(crate) fn publish_agent_projection(
     )?;
     let team_counts = crate::sync_entity_context::team_counts_text(transaction, id)?;
     transaction
-        .prepare_cached(
+        .prepare_cached(&format!(
             "INSERT INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
            SELECT ?1,json_extract(record,'$.rootId'),json_extract(record,'$.isLead'),
                   json_extract(record,'$.deletedAt') IS NULL AND NOT ?2,
-                  COALESCE(json_extract(record,'$.inFlight'),0),?3
+                  {},?3
            FROM runtime_agents WHERE id=?1
          ON CONFLICT(id) DO UPDATE SET root_id=excluded.root_id,is_lead=excluded.is_lead,
            live=excluded.live,in_flight=excluded.in_flight,team_counts=excluded.team_counts",
-        )?
+            studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+        ))?
         .execute(rusqlite::params![id, deleted, team_counts])?;
     if deleted {
         transaction
