@@ -2175,6 +2175,98 @@ fn resolve_unbound_completion(
     Ok(UnboundCompletion::Error)
 }
 
+/// Admit only a terminal report for the exact prior-epoch command of a deleted actor.
+fn complete_deleted_command(
+    tx: &rusqlite::Transaction<'_>,
+    account: &str,
+    generation: u64,
+    expected_vm_actor: Option<(&str, i64)>,
+    method: &str,
+    params: &Value,
+) -> Result<bool, WorkerError> {
+    let item = &params["item"];
+    let (Some(thread), Some(turn), Some(item_id)) = (
+        params["threadId"].as_str(),
+        params["turnId"].as_str(),
+        item["id"].as_str(),
+    ) else {
+        return Ok(false);
+    };
+    if method != "item/completed"
+        || item["type"] != "commandExecution"
+        || !matches!(item["status"].as_str(), Some("completed" | "failed"))
+    {
+        return Ok(false);
+    }
+    let mut statement = tx.prepare_cached(
+        "SELECT t.id FROM runtime_tasks t JOIN runtime_agents a ON a.id=json_extract(t.record,'$.agent') \
+         WHERE a.account_key=?1 AND json_extract(t.record,'$.itemId')=?2 \
+         AND json_extract(t.record,'$.turnId')=?3 AND a.deleted_at IS NOT NULL LIMIT 2"
+    )?;
+    let ids = statement
+        .query_map(params![account, item_id, turn], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let [id] = ids.as_slice() else {
+        return Ok(false);
+    };
+    let Some(task) = studio_runtime_store::TaskRepository::get(
+        tx,
+        &studio_runtime_store::TaskId::from(id.as_str()),
+    )?
+    else {
+        return Ok(false);
+    };
+    let Some(agent) = studio_runtime_store::AgentRepository::get(
+        tx,
+        &studio_runtime_store::AgentId::from(task.agent()),
+    )?
+    else {
+        return Ok(false);
+    };
+    let Some(attempt) = agent.start_attempt.as_ref() else {
+        return Ok(false);
+    };
+    let Some(epoch) = task.owner_epoch else {
+        return Ok(false);
+    };
+    if !agent.is_deleted()
+        || agent.account_key != account
+        || agent.thread_id.as_deref() != Some(thread)
+        || attempt.connection_generation != Some(generation)
+        || attempt.epoch != Some(epoch)
+        || epoch.checked_add(1) != Some(agent.epoch)
+        || expected_vm_actor
+            .is_some_and(|(id, expected_epoch)| id != task.agent() || expected_epoch != epoch)
+        || task.source_account_key() != Some(account)
+        || task.source_thread_id() != Some(thread)
+        || task.kind() != studio_runtime_schema::task_record::TaskKind::Command
+        || task.status() != studio_runtime_schema::task_record::TaskStatus::Running
+        || item
+            .get("processId")
+            .zip(task.process_id())
+            .is_some_and(|(value, saved)| {
+                <studio_runtime_schema::task_record::ProcessId as serde::Deserialize>::deserialize(
+                    value.clone(),
+                )
+                .ok()
+                .as_ref()
+                    != Some(saved)
+            })
+    {
+        return Ok(false);
+    }
+    crate::notification_dispatch::recover_task_in_transaction(
+        tx,
+        &agent.into_value(),
+        &task,
+        item,
+        now(),
+    )?;
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn journal_batch(
     store: Arc<RuntimeStore>,
@@ -2661,6 +2753,17 @@ fn journal_one(
         {
             // Delivered busy-turn input frees the agent for its next queued input.
             effect = Some(Effect::Wake(agent, epoch));
+        } else if let Some((method, params)) = notice
+            && complete_deleted_command(
+                tx,
+                account,
+                entry.generation.0,
+                expected_vm_actor,
+                method,
+                params,
+            )?
+        {
+            // The exact deleted command completion updates only its existing task.
         } else if let Some((method, params)) = notice
             && let Some(thread) = params["threadId"].as_str()
         {

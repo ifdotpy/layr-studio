@@ -59,9 +59,9 @@ impl AccountSessionPort for InterruptBroker {
             assert_eq!(interrupt["outcome"], "unknown");
             assert_eq!(interrupt["requestTicket"], request.operation);
         } else {
-            // The command cleanup follows the settled interrupt.
+            // The receipt is recorded after command cleanup completes.
             assert_eq!(request.method, Method::ThreadBackgroundTerminalsClean);
-            assert_eq!(interrupt["outcome"], "accepted");
+            assert_eq!(interrupt["outcome"], "unknown");
             assert_eq!(request.params, json!({"threadId":"fixture-thread"}));
         }
         self.calls.lock().expect("calls lock").push(request.clone());

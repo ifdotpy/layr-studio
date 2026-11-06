@@ -740,12 +740,6 @@ export const layoutTokens = {
     purpose:
       "Main src/components/conversation/empty-chat-settings.css query: @container composer (min-width: 50em) {",
   },
-  "legacy_main_components_conversation_empty_chat_settings.query7a8a99ac": {
-    value: 35,
-    unit: "em",
-    purpose:
-      "Main src/components/conversation/empty-chat-settings.css query: @container composer (min-width: 35em) {",
-  },
   "legacy_main_components_conversation_empty_chat_settings.query62cf757f": {
     value: 25,
     unit: "em",
@@ -1139,7 +1133,6 @@ export const layoutValues = {
   },
   legacy_main_components_conversation_empty_chat_settings: {
     querybb18e0cc: 50,
-    query7a8a99ac: 35,
     query62cf757f: 25,
     query7269dc35: 20,
   },

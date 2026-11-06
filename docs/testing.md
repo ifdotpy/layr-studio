@@ -89,6 +89,7 @@ is excluded by the root Cargo workspace.
 | Cargo dependency bans                                | `just deny-bans`                         |
 | Browser smoke                                        | `just test-browser-smoke`                |
 | Layout shifts across UI states, manual               | `just layout-shift-matrix`               |
+| UI responsiveness on a throttled phone, manual       | `just ui-responsiveness`                 |
 | Real entity stream, manual heavy                     | `just test-entity-server-heavy`          |
 | Full browser project, manual heavy                   | `just test-browser` or `just test-heavy` |
 | Multi-server browser recovery, manual heavy          | `just test-browser-multi-server`         |
@@ -124,6 +125,13 @@ panel, terminals, draft) on desktop, phone and Duo profiles, with and without
 the on-screen keyboard, and writes `index.html` with the layout-shift score and
 the moved controls of each edge. The browser smoke witness for the same rule is
 `tests/layout/agent-turn-stability.spec.ts`.
+
+`just ui-responsiveness` is a manual measurement, not a test. It opens the
+fixture on a phone viewport with the CPU throttled (4x by default), builds a
+chat of scripted Markdown turns, and reports per scenario the duration, frames
+over 20 ms, long tasks and time blocked past 50 ms. `--profile` prints the
+largest self and total times of a scenario, and `--trace` the main-thread time
+per trace event. Compare runs taken on the same machine only.
 
 Heavy runs are announced and selected by hand. A test that needs repeated runs
 to be trusted must be rewritten or moved to the heavy tier. New tests fit the

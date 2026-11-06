@@ -1,4 +1,4 @@
-import { MessageSendStatus } from "./generated/api.ts";
+import { MessageSendStatus, StopOutcome } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
   AgentSource as GeneratedApiAgentSource,
@@ -615,6 +615,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const {
       data,
       error,
+      transportError,
       refresh,
       workspaceId,
       rememberCreated,
@@ -951,6 +952,15 @@ export default function App({ active = true }: { active?: boolean }) {
     agent?.source === GeneratedApiAgentSource.managed && !room
       ? scopedConversationData
       : data;
+  // An open managed chat shows the connection state in its activity row
+  // (useMessages), so the workspace notice does not repeat it.
+  const workspaceError =
+    error === transportError &&
+    agent?.source === GeneratedApiAgentSource.managed &&
+    !room &&
+    !(mobileClient && sidebar)
+      ? ""
+      : error;
   const conversationSelector = useMemo(createConversationDataSelector, []);
   const conversationData = conversationSelector(conversationSnapshot);
   const chatWaitSource = useMemo(() => new ChatWaitSource(), []);
@@ -1762,6 +1772,11 @@ export default function App({ active = true }: { active?: boolean }) {
       throw e;
     }
   };
+  const deletionStopNotice: Record<StopOutcome, string | undefined> = {
+    [StopOutcome.confirmed]: undefined,
+    [StopOutcome.unconfirmed]:
+      "The chat was deleted, but stopping its commands could not be confirmed.",
+  };
   const remove = (id: string, isRoom: boolean, isWorker = false) => {
     setModal({
       title: isWorker ? "Delete?" : "Delete chat?",
@@ -1813,6 +1828,12 @@ export default function App({ active = true }: { active?: boolean }) {
                 finishConversationDelete,
                 controller.signal,
               )
+                .then((result) => {
+                  if (result.kind === "delete") {
+                    const notice = deletionStopNotice[result.result.stopped];
+                    if (notice) notify(notice);
+                  }
+                })
                 .catch((error: unknown) => {
                   if (controller.signal.aborted) return;
                   notify(
@@ -2714,9 +2735,9 @@ export default function App({ active = true }: { active?: boolean }) {
                     }
                   />
                 ))}
-              {error && !offlineSendFeedback.owns(error) && (
+              {workspaceError && !offlineSendFeedback.owns(workspaceError) && (
                 <div id="error" role="alert">
-                  {error}
+                  {workspaceError}
                 </div>
               )}
               <div className="sync-notices">

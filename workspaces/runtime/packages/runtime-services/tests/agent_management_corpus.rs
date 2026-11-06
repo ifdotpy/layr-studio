@@ -482,6 +482,7 @@ fn missing_native_and_remote_effects_produce_no_decision() {
             &snapshot,
             &Action::Delete {
                 target: "lead".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             42.0,
         );

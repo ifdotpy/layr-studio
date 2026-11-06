@@ -675,11 +675,6 @@
       "unit": "em",
       "purpose": "Main src/components/conversation/empty-chat-settings.css query: @container composer (min-width: 50em) {"
     },
-    "legacy_main_components_conversation_empty_chat_settings.query7a8a99ac": {
-      "value": 35,
-      "unit": "em",
-      "purpose": "Main src/components/conversation/empty-chat-settings.css query: @container composer (min-width: 35em) {"
-    },
     "legacy_main_components_conversation_empty_chat_settings.query62cf757f": {
       "value": 25,
       "unit": "em",
@@ -1784,6 +1779,45 @@
     {
       "path": "src/components/studio-settings.css",
       "kind": "query",
+      "signature": "@media (min-width: 47.5rem) {",
+      "count": 1,
+      "key": "legacy_main_components_studio_settings.query0bafbd4a",
+      "plannedOwner": "main visual component",
+      "purpose": "Wide settings dialog keeps one height; the same boundary as its narrow layout"
+    },
+    {
+      "path": "src/style.css",
+      "kind": "layer",
+      "signature": "z-index: 40",
+      "count": 1,
+      "key": "workspaceNotices.layer",
+      "plannedOwner": "main visual component",
+      "purpose": "Workspace notices float over the transcript under the header",
+      "scope": "local"
+    },
+    {
+      "path": "src/components/conversation/transcript/message-info.css",
+      "kind": "layer",
+      "signature": "z-index: 1",
+      "count": 1,
+      "key": "messageActions.hintLayer",
+      "plannedOwner": "main visual component",
+      "purpose": "A message action hover hint stays over the next action in its row",
+      "scope": "local"
+    },
+    {
+      "path": "src/components/agents/execution-settings.css",
+      "kind": "layer",
+      "signature": "z-index: 1",
+      "count": 1,
+      "key": "executionSettings.roleSwitchLayer",
+      "plannedOwner": "main visual component",
+      "purpose": "The sticky model picker role switch stays over the scrolled picker body",
+      "scope": "local"
+    },
+    {
+      "path": "src/components/studio-settings.css",
+      "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
       "key": "legacy_main_components_studio_settings.query0bafbd4a",
@@ -2009,15 +2043,6 @@
     {
       "path": "src/components/conversation/empty-chat-settings.css",
       "kind": "query",
-      "signature": "@container composer (min-width: 35em) {",
-      "count": 1,
-      "key": "legacy_main_components_conversation_empty_chat_settings.query7a8a99ac",
-      "plannedOwner": "main visual component",
-      "purpose": "Retain the main component's exact query contract during responsive integration"
-    },
-    {
-      "path": "src/components/conversation/empty-chat-settings.css",
-      "kind": "query",
       "signature": "@container composer (max-width: 25em) {",
       "count": 2,
       "key": "legacy_main_components_conversation_empty_chat_settings.query62cf757f",
@@ -2046,7 +2071,7 @@
       "path": "src/components/conversation/empty-chat-settings.css",
       "kind": "query",
       "signature": "@container composer (max-width: 20em) {",
-      "count": 1,
+      "count": 2,
       "key": "legacy_main_components_conversation_empty_chat_settings.query7269dc35",
       "plannedOwner": "main visual component",
       "purpose": "Retain the main component's exact query contract during responsive integration"

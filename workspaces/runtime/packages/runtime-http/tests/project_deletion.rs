@@ -674,8 +674,8 @@ async fn project_deletion_unknown_interrupt_is_not_repeated() {
     let attempts = broker.calls.lock().expect("calls").clone();
     assert_eq!(
         attempts.len(),
-        2,
-        "one interrupt and one background-command cleanup"
+        1,
+        "cleanup waits for interrupt confirmation"
     );
     assert_eq!(
         f.agent("lead")["startAttempt"]["interrupt"]["outcome"],

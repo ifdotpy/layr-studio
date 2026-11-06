@@ -667,6 +667,57 @@ async fn a_sign_in_makes_the_auth_waits_of_its_account_due_now() {
 }
 
 #[tokio::test]
+async fn a_claude_sign_in_makes_the_auth_waits_of_its_account_due_and_wakes_the_scheduler() {
+    use studio_runtime_services::claude_login::{chats::StoredChats, ports::LoginChats};
+    let template = template();
+    let root = clone_template(template.path());
+    let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+    store
+        .transaction_with(|tx| -> std::result::Result<_, ContinuationError> {
+            let base: String = tx
+                .query_row(
+                    "SELECT record FROM runtime_usage_resumes WHERE id='resume'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)?;
+            let mut record: Value = studio_json::from_str(&base).map_err(StoreError::from)?;
+            record["id"] = json!("claude-wait");
+            record["accountKey"] = json!("default");
+            record["cause"] = json!("auth");
+            record["status"] = json!("scheduled");
+            record["failedAt"] = json!(900.0);
+            record["dueAt"] = json!(4_000_000_000.0);
+            if let Some(object) = record.as_object_mut() {
+                object.remove("proofAt");
+            }
+            tx.execute(
+                "INSERT INTO runtime_usage_resumes(id,agent,record) VALUES('claude-wait','a',?1)",
+                [record.to_string()],
+            )
+            .map_err(StoreError::from)?;
+            Ok(())
+        })
+        .await
+        .expect("auth wait");
+    let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    StoredChats::new(store.clone(), wake.clone())
+        .refresh("default")
+        .await
+        .expect("refresh");
+    let rows = all_usage_rows(&store);
+    let wait = rows
+        .iter()
+        .find(|r| r["id"] == "claude-wait")
+        .expect("wait");
+    assert!(wait["dueAt"].as_f64().expect("due") < 4_000_000_000.0);
+    assert!(wait["proofAt"].as_f64().is_some());
+    tokio::time::timeout(std::time::Duration::from_secs(1), wake.notified())
+        .await
+        .expect("the scheduler wakes");
+}
+
+#[tokio::test]
 async fn production_classifier_matches_python_word_boundaries_and_bounded_evidence() {
     use studio_runtime_services::provider_adapter::adapter;
     let cases = vec![

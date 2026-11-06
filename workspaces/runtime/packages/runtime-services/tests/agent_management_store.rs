@@ -365,6 +365,7 @@ async fn deleted_team_broadcast_projection_survives_repeated_delete() {
         .expect("room");
     let action = Action::Delete {
         target: "lead".to_owned(),
+        request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
     };
     execute(std::sync::Arc::clone(&store), &action, 100.0, None)
         .await
@@ -571,6 +572,7 @@ async fn lifecycle_effect_refusals_preserve_rows_and_projections() {
             let action = if delete {
                 Action::Delete {
                     target: "worker".into(),
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
                 }
             } else {
                 Action::Pause {
@@ -654,6 +656,7 @@ async fn ended_voice_allows_stop_and_delete_clears_saved_voice_in_transaction() 
         std::sync::Arc::clone(&store),
         &Action::Delete {
             target: "lead".into(),
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
         },
         1234568.0,
         None,
@@ -890,6 +893,7 @@ async fn incremental_lifecycle_projection_matches_full_rebuild() {
         (
             Action::Delete {
                 target: "lead-0003".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             Some("broadcast-0003"),
         ),
@@ -978,6 +982,7 @@ async fn lifecycle_projection_benchmark_on_large_state() {
             },
             Action::Delete {
                 target: "lead-0011".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
         ] {
             let started = std::time::Instant::now();
@@ -1029,6 +1034,7 @@ async fn delete_latency_on_live_shaped_state() {
         std::sync::Arc::clone(&store),
         &Action::Delete {
             target: "lead-0011".to_owned(),
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
         },
         SYNTHETIC_NOW_SECS,
         std::sync::Arc::new(ProductionLifecyclePorts::new(
