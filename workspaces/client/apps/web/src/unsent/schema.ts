@@ -1,20 +1,22 @@
-import { z } from "zod";
+// The functional build keeps the validators out of the startup bundle size:
+// the full zod API added about 85 kB to the first chunk.
+import { z } from "zod/mini";
 import { DeliveryMomentInput } from "../generated/api.ts";
 import type { CommandRequest } from "../commands.ts";
 import type { components } from "../generated/api.ts";
 
 type SendCommand = Extract<CommandRequest, { kind: "send" }>;
-const commandRequestSchema: z.ZodType<SendCommand> = z.strictObject({
+const commandRequestSchema: z.ZodMiniType<SendCommand> = z.strictObject({
   id: z.string(),
   client: z.string(),
-  number: z.number().int().safe(),
+  number: z.int(),
   kind: z.literal("send"),
   target: z.string(),
   body: z.strictObject({
     text: z.string(),
-    asTextFile: z.boolean().optional(),
-    assets: z.array(z.string()).optional(),
-    delivery: z.enum(DeliveryMomentInput).optional(),
+    asTextFile: z.optional(z.boolean()),
+    assets: z.optional(z.array(z.string())),
+    delivery: z.optional(z.enum(DeliveryMomentInput)),
   }),
 });
 const attachmentSchema = z.strictObject({
@@ -23,7 +25,7 @@ const attachmentSchema = z.strictObject({
   mime: z.string(),
   image: z.boolean(),
   size: z.number(),
-  preview: z.string().optional(),
+  preview: z.optional(z.string()),
 });
 const recordingSchema = z.strictObject({
   id: z.string(),
@@ -32,11 +34,11 @@ const recordingSchema = z.strictObject({
   sampleRate: z.number(),
   samples: z.number(),
   state: z.enum(["recording", "ready"]),
-  transcript: z.string().optional(),
-  reviewedText: z.string().optional(),
-  transcriptionAttempt: z.string().optional(),
-  error: z.string().optional(),
-  deletedAt: z.number().optional(),
+  transcript: z.optional(z.string()),
+  reviewedText: z.optional(z.string()),
+  transcriptionAttempt: z.optional(z.string()),
+  error: z.optional(z.string()),
+  deletedAt: z.optional(z.number()),
 });
 export type Recording = z.infer<typeof recordingSchema>;
 const uploadSchema = z
@@ -51,7 +53,7 @@ const uploadSchema = z
     created: z.number(),
     bytes: z.instanceof(Blob),
   })
-  .refine((row) => row.size === row.bytes.size);
+  .check(z.refine((row) => row.size === row.bytes.size));
 export type StoredUpload = z.infer<typeof uploadSchema>;
 const localSendSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stored") }),
@@ -65,17 +67,17 @@ const sendSchema = z.strictObject({
   workspaceId: z.string(),
   created: z.number(),
   attachments: z.array(attachmentSchema),
-  displayText: z.string().optional(),
+  displayText: z.optional(z.string()),
 });
 export type StoredSend = z.infer<typeof sendSchema>;
 // Unsent record format version, measured in format revisions.
 export const UNSENT_FORMAT_VERSION = 1;
 const version = z.literal(UNSENT_FORMAT_VERSION);
-const draftSchema: z.ZodType<components["schemas"]["SyncDocument"]> =
+const draftSchema: z.ZodMiniType<components["schemas"]["SyncDocument"]> =
   z.strictObject({
     id: z.string(),
     payload: z.string(),
-    seq: z.number().int().safe(),
+    seq: z.int(),
     _deleted: z.boolean(),
   });
 export const unsentRecordSchema = z.discriminatedUnion("kind", [
@@ -95,8 +97,8 @@ export const unsentRecordSchema = z.discriminatedUnion("kind", [
     version,
     kind: z.literal("chunk"),
     id: z.string(),
-    index: z.number().int().nonnegative(),
-    value: z.instanceof(Blob).refine((blob) => blob.size % 2 === 0),
+    index: z.int().check(z.nonnegative()),
+    value: z.instanceof(Blob).check(z.refine((blob) => blob.size % 2 === 0)),
   }),
   z.strictObject({ version, kind: z.literal("send"), value: sendSchema }),
 ]);
