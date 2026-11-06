@@ -1204,12 +1204,14 @@ fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
     let mut schema = studio_json::Map::new();
     schema.insert("properties".into(), studio_json::json!({}));
     crate::review::apply_tool_contract("orchestration_review", &mut schema)?;
-    let value = studio_json::to_string_pretty(&schema["properties"]["target"])
-        .map_err(|error| error.to_string())?;
-    for (name, field) in [
-        ("orchestration_spawn", "review"),
-        ("orchestration_review", "target"),
+    for (name, field, owner) in [
+        ("orchestration_spawn", "review", "target"),
+        ("orchestration_review", "target", "target"),
+        ("orchestration_review", "instructions", "instructions"),
+        ("orchestration_review", "account", "account"),
     ] {
+        let value = studio_json::to_string_pretty(&schema["properties"][owner])
+            .map_err(|error| error.to_string())?;
         let start = text
             .find(&format!("\"name\": \"{name}\""))
             .ok_or("tool name")?;
@@ -1219,10 +1221,11 @@ fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
         let marker = format!("\"{field}\":");
         if let Some(relative) = text[start..end].find(&marker) {
             let value_start = start + relative + marker.len();
-            let object_start = value_start
-                + text[value_start..]
-                    .find('{')
-                    .ok_or("review schema object")?;
+            let object_start =
+                value_start + text[value_start..].len() - text[value_start..].trim_start().len();
+            if !text[object_start..].starts_with('{') {
+                return Err("review schema must be an object".into());
+            }
             let mut depth = 0usize;
             let mut quoted = false;
             let mut escape = false;
@@ -1249,12 +1252,16 @@ fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
                 }
             }
             text.replace_range(object_start..object_end.ok_or("review schema end")?, &value);
-        } else if name == "orchestration_spawn" {
+        } else if name == "orchestration_spawn" || field != "target" {
             let insert = start
                 + text[start..end]
-                    .find("\"base_ref\":")
-                    .ok_or("spawn base_ref")?;
-            text.insert_str(insert, &format!("\"review\": {value},\n"));
+                    .find(if name == "orchestration_spawn" {
+                        "\"base_ref\":"
+                    } else {
+                        "\"target\":"
+                    })
+                    .ok_or("review schema insertion")?;
+            text.insert_str(insert, &format!("\"{field}\": {value},\n"));
         } else {
             return Err("missing review target".into());
         }

@@ -63,6 +63,38 @@ identifier!(
     |v: &str| !v.is_empty(),
     schemars::json_schema!({"type":"string","minLength":1})
 );
+/// Maximum reviewer instructions, measured in Unicode characters.
+pub const MAX_REVIEW_INSTRUCTIONS_CHARS: usize = 8000;
+/// Maximum review account key, measured in Unicode characters.
+pub const MAX_REVIEW_ACCOUNT_CHARS: usize = 200;
+identifier!(
+    ReviewInstructions,
+    |v: &str| v.chars().count() <= MAX_REVIEW_INSTRUCTIONS_CHARS,
+    schemars::json_schema!({"type":"string","maxLength":MAX_REVIEW_INSTRUCTIONS_CHARS})
+);
+identifier!(
+    ReviewAccount,
+    |v: &str| !v.is_empty()
+        && v.trim() == v
+        && v.chars().count() <= MAX_REVIEW_ACCOUNT_CHARS
+        && !v.chars().any(char::is_control),
+    schemars::json_schema!({"type":"string","minLength":1,"maxLength":MAX_REVIEW_ACCOUNT_CHARS})
+);
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewRequest {
+    pub target: ReviewTarget,
+    #[serde(default, deserialize_with = "present")]
+    pub request_id: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub instructions: Option<ReviewInstructions>,
+    #[serde(default, deserialize_with = "present")]
+    pub account: Option<ReviewAccount>,
+}
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
@@ -141,6 +173,25 @@ pub fn apply_tool_contract(
         .into_root_schema_for::<ReviewTarget>()
         .to_value();
     properties.insert(field.into(), schema);
+    if name == "orchestration_review" {
+        let generator = || {
+            schemars::generate::SchemaSettings::draft2020_12()
+                .with(|settings| settings.inline_subschemas = true)
+                .into_generator()
+        };
+        properties.insert(
+            "instructions".into(),
+            generator()
+                .into_root_schema_for::<ReviewInstructions>()
+                .to_value(),
+        );
+        properties.insert(
+            "account".into(),
+            generator()
+                .into_root_schema_for::<ReviewAccount>()
+                .to_value(),
+        );
+    }
     Ok(())
 }
 
@@ -173,5 +224,20 @@ mod tests {
         }
         assert!(GitCommit::try_from("f".repeat(39)).is_err());
         assert!(GitRef::try_from(String::new()).is_err());
+    }
+
+    #[test]
+    fn review_options_are_bounded_and_have_string_schemas() {
+        assert!(ReviewInstructions::try_from("a".repeat(MAX_REVIEW_INSTRUCTIONS_CHARS)).is_ok());
+        assert!(
+            ReviewInstructions::try_from("a".repeat(MAX_REVIEW_INSTRUCTIONS_CHARS + 1)).is_err()
+        );
+        assert!(ReviewAccount::try_from(" account ".to_owned()).is_err());
+        let mut schema = studio_json::Map::new();
+        schema.insert("properties".into(), studio_json::json!({}));
+        apply_tool_contract("orchestration_review", &mut schema).unwrap();
+        assert_eq!(schema["properties"]["instructions"]["type"], "string");
+        assert_eq!(schema["properties"]["account"]["type"], "string");
+        assert!(schema["properties"]["target"]["oneOf"].is_array());
     }
 }
