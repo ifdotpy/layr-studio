@@ -59,6 +59,17 @@ const stateOf = (agent: ConcurrencyAgent): Confirmed | undefined => {
     revision: agent.agentModeRevision,
   };
 };
+/**
+ * Whether the lead runs without subagents: "Off" (parallelism 0), or the
+ * legacy single mode of an older backend, as the lead record confirms it.
+ */
+export function subagentsOff(
+  lead: ConcurrencyAgent & Pick<Agent, "agentMode" | "agentModeSupported">,
+): boolean {
+  const confirmed = stateOf(lead);
+  if (confirmed) return confirmed.concurrency === MIN_CONCURRENCY;
+  return !!lead.agentModeSupported && lead.agentMode === AgentMode.single;
+}
 const pendingTarget = (
   request: PendingRequest | undefined,
 ): number | undefined => {

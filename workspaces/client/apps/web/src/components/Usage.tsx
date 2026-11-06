@@ -22,6 +22,7 @@ import { Button, Popover, Progress, Tabs, Tooltip } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { layoutQueries } from "../layout/layout-contract.generated";
 import BottomSheet from "./ui/BottomSheet";
+import { roleAccounts } from "./roleAccounts";
 import {
   ChevronUp,
   ExternalLink,
@@ -993,69 +994,76 @@ export default function Usage({
           role="group"
           aria-label="Account weekly allowance"
         >
-          {usageAccounts.map((item) => {
-            const projection = item.runway?.current;
-            const current = item.key === fallbackKey;
-            const provider = providerLabel(accountProvider(item));
-            const label = humanAccountLabel(item);
-            const details = [
-              `${label} (${provider})${current ? ", current chat account" : ""}`,
-              ...(typeof item.limits?.error === "string" && !item.limits?.data
-                ? [`Limits unavailable: ${item.limits.error}`]
-                : []),
-              ...(projection?.windows ?? []).map(
-                (window) =>
-                  `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
-              ),
-              !projection || (projection.days === null && !projection.unlimited)
-                ? "Projected days unavailable."
-                : projection.unlimited
-                  ? "At least 7 days left at the current rate. No weekly consumption recorded."
-                  : projection.windows.every((window) => window.resetFirst)
-                    ? "At least 7 days left at the current rate after reset."
-                    : projection.windows.length > 1
-                      ? `About ${projection.days?.toFixed(1)} days left across weekly limits.`
-                      : "",
-              "Rate uses consumption in the elapsed part of the weekly window.",
-            ]
-              .filter(Boolean)
-              .join("\n");
-            return (
-              <Tooltip
-                key={item.key}
-                label={
-                  <span className="account-limits-dot-tooltip">{details}</span>
-                }
-                multiline
-                w={300}
-                withArrow
-                events={{ hover: true, focus: true, touch: true }}
-              >
-                <button
-                  type="button"
-                  className="account-limits-dot-target"
-                  data-account-key={item.key}
-                  aria-label={`Open ${humanAccountLabel(item)} weekly allowance (${provider}). ${details}`}
-                  aria-current={current ? "true" : undefined}
-                  aria-haspopup="dialog"
-                  aria-expanded={
-                    limitsOpened && selectedAccountKey === item.key
+          {/* One dot per role (Lead, Workers, Review), not one per account. */}
+          {roleAccounts(agent, usageAccounts).map(
+            ({ role, account: item, automatic }) => {
+              const projection = item.runway?.current;
+              const current = role === "Lead";
+              const provider = providerLabel(accountProvider(item));
+              const label = humanAccountLabel(item);
+              const details = [
+                `${role}: ${automatic ? "automatic, now " : ""}${label} (${provider})${current ? ", current chat account" : ""}`,
+                ...(typeof item.limits?.error === "string" && !item.limits?.data
+                  ? [`Limits unavailable: ${item.limits.error}`]
+                  : []),
+                ...(projection?.windows ?? []).map(
+                  (window) =>
+                    `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
+                ),
+                !projection ||
+                (projection.days === null && !projection.unlimited)
+                  ? "Projected days unavailable."
+                  : projection.unlimited
+                    ? "At least 7 days left at the current rate. No weekly consumption recorded."
+                    : projection.windows.every((window) => window.resetFirst)
+                      ? "At least 7 days left at the current rate after reset."
+                      : projection.windows.length > 1
+                        ? `About ${projection.days?.toFixed(1)} days left across weekly limits.`
+                        : "",
+                "Rate uses consumption in the elapsed part of the weekly window.",
+              ]
+                .filter(Boolean)
+                .join("\n");
+              return (
+                <Tooltip
+                  key={role}
+                  label={
+                    <span className="account-limits-dot-tooltip">
+                      {details}
+                    </span>
                   }
-                  onClick={() => {
-                    setActiveAccountKey(item.key);
-                    changeOpened(true);
-                  }}
+                  multiline
+                  w={300}
+                  withArrow
+                  events={{ hover: true, focus: true, touch: true }}
                 >
-                  <span
-                    className="account-limits-dot"
-                    data-color={projection?.color ?? RunwayColor.gray}
-                    data-current={current || undefined}
-                    aria-hidden="true"
-                  />
-                </button>
-              </Tooltip>
-            );
-          })}
+                  <button
+                    type="button"
+                    className="account-limits-dot-target"
+                    data-account-key={item.key}
+                    data-role={role}
+                    aria-label={`${role}: open ${humanAccountLabel(item)} weekly allowance (${provider}). ${details}`}
+                    aria-current={current ? "true" : undefined}
+                    aria-haspopup="dialog"
+                    aria-expanded={
+                      limitsOpened && selectedAccountKey === item.key
+                    }
+                    onClick={() => {
+                      setActiveAccountKey(item.key);
+                      changeOpened(true);
+                    }}
+                  >
+                    <span
+                      className="account-limits-dot"
+                      data-color={projection?.color ?? RunwayColor.gray}
+                      data-current={current || undefined}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </Tooltip>
+              );
+            },
+          )}
         </div>
         {phone ? (
           <>

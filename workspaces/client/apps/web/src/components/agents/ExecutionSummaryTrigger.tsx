@@ -6,6 +6,7 @@ import { ActionButton } from "../ui/primitives";
 import { modelDisplayName, modelForValue } from "../models/modelOption";
 import { settingsFor } from "./ExecutionSettings";
 import { useWorkerModels } from "./WorkerModelPicker";
+import { subagentsOff } from "./SubagentConcurrencyControl";
 
 /** The composer anchor for the full role picker. */
 export function ExecutionSummaryTrigger({
@@ -84,12 +85,17 @@ export function ExecutionSummaryTrigger({
     },
     ...(root.isLead
       ? [
-          {
-            role: "worker",
-            label: "Workers",
-            value: worker,
-            fast: defaults.fast_mode,
-          },
+          // With subagents off only the lead and its reviews work.
+          ...(subagentsOff(root)
+            ? []
+            : [
+                {
+                  role: "worker",
+                  label: "Workers",
+                  value: worker,
+                  fast: defaults.fast_mode,
+                },
+              ]),
           {
             role: "review",
             label: "Review",

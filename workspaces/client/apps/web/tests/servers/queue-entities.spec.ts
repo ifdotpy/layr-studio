@@ -22,6 +22,15 @@ test("bounded entities render initial and live changes with zero resource GETs",
   const accounts = backend.snapshot.runtime.accountsSummary?.accounts;
   assert.ok(accounts?.[0]);
   accounts.push({ ...accounts[0], id: "outside-team", label: "Other account" });
+  // The footer shows one dot per role: the workers use the account outside
+  // the team, so its streamed entity has a dot of its own.
+  for (const thread of backend.snapshot.threads)
+    thread.workerDefaults = {
+      accountKey: "outside-team",
+      effort: null,
+      fastMode: false,
+      model: null,
+    };
   const queue = (
     text: string,
     revision: string,
@@ -139,7 +148,7 @@ test("bounded entities render initial and live changes with zero resource GETs",
     ).toBeVisible({ timeout: 20_000 });
     await expect(
       page.locator(
-        '.account-limits-dot-target[data-account-key="outside-team"]',
+        '.account-limits-dot-target[data-role="Workers"][data-account-key="outside-team"]',
       ),
     ).toBeVisible();
     await expect(

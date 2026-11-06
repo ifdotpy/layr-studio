@@ -57,6 +57,7 @@ import {
 import { ProviderMark, setupAccountName } from "../AccountTiles";
 import { useMediaQuery } from "@mantine/hooks";
 import { AgentSetupPicker, type SetupRole } from "./AgentSetupPicker";
+import { subagentsOff } from "./SubagentConcurrencyControl";
 import "./execution-settings.css";
 import { SettingsSection } from "../ui/primitives";
 import {
@@ -370,9 +371,15 @@ function ExecutionSettingsController(props: ControllerProps) {
         : props.agent,
     [props.agent, main, worker, review],
   );
-  const [role, setRole] = useState<SetupRole>(
+  const [selectedRole, setRole] = useState<SetupRole>(
     props.initialRole || (props.agent.isLead ? "orchestrator" : "worker"),
   );
+  // With subagents off, the composer picker of a lead has no Workers role; the
+  // settings rows still set the defaults for later subagents.
+  const workersHidden =
+    !props.settingsRow && !!props.agent.isLead && subagentsOff(props.agent);
+  const role =
+    workersHidden && selectedRole === "worker" ? "orchestrator" : selectedRole;
   const [opened, setOpened] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -460,6 +467,7 @@ function ExecutionSettingsController(props: ControllerProps) {
       roleSwitchId={roleSwitchId}
       teamDefaults={role === "review" || (role === "worker" && !!agent.isLead)}
       role={role}
+      workersHidden={workersHidden}
       onRole={(value) => {
         focusRole.current = true;
         setRole(value);
@@ -508,6 +516,7 @@ function ScopedExecutionSettings({
   readOnlyReason,
   inheritedUnavailable,
   roleSwitchId,
+  workersHidden = false,
   catalog: parentCatalog,
   accounts = [],
   refresh,
@@ -546,6 +555,7 @@ function ScopedExecutionSettings({
   inheritedUnavailable: boolean;
   roleSwitchId: string;
   role: SetupRole;
+  workersHidden?: boolean;
   onRole: (role: SetupRole) => void;
   opened: boolean;
   triggerRef: RefObject<HTMLButtonElement | null>;
@@ -1522,6 +1532,7 @@ function ScopedExecutionSettings({
         retainCurrentModel={!onDraftChange}
         role={role}
         onRole={onRole}
+        workersHidden={workersHidden}
         roleSwitchId={roleSwitchId}
         readOnlyReason={readOnlyReason}
         provider={pickerProvider}
