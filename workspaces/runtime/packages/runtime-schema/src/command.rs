@@ -327,14 +327,11 @@ pub enum CommandOutcome {
     Stop,
     Resolve,
     Pause,
-<<<<<<< head
     RestoreDeletedRoot,
-=======
     /// `deleted` is the chat and every descendant that the delete removed.
     Delete {
         result: DeleteResult,
     },
->>>>>>> main
     Answer {
         result: AnswerResult,
     },
@@ -367,14 +364,10 @@ impl CommandOutcome {
             Command::Stop { .. } => Self::Stop,
             Command::Resolve { .. } => Self::Resolve,
             Command::Pause { .. } => Self::Pause,
-<<<<<<< head
             Command::RestoreDeletedRoot { .. } => Self::RestoreDeletedRoot,
-            Command::Answer { .. } | Command::LeadMessage { .. } => return None,
-=======
             Command::Answer { .. } | Command::LeadMessage { .. } | Command::Delete { .. } => {
                 return None;
             }
->>>>>>> main
         })
     }
 }

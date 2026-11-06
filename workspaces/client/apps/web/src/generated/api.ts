@@ -10824,13 +10824,9 @@ export interface components {
       | components["schemas"]["CommandRequestResolve"]
       | components["schemas"]["CommandRequestPause"]
       | components["schemas"]["CommandRequestAnswer"]
-<<<<<<< head
+      | components["schemas"]["CommandRequestDelete"]
       | components["schemas"]["CommandRequestLeadMessage"]
       | components["schemas"]["CommandRequestRestoreDeletedRoot"];
-=======
-      | components["schemas"]["CommandRequestDelete"]
-      | components["schemas"]["CommandRequestLeadMessage"];
->>>>>>> main
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
       client: string;

@@ -132,16 +132,11 @@ pub fn authorize(
                 Command::Send { target, .. }
                 | Command::Withdraw { target, .. }
                 | Command::Stop { target, .. }
-<<<<<<< head
-                | Command::Pause { target, .. } => target.as_str().to_owned(),
+                | Command::Pause { target, .. }
+                | Command::Delete { target, .. } => target.as_str().to_owned(),
                 Command::Answer { .. }
                 | Command::LeadMessage { .. }
                 | Command::RestoreDeletedRoot { .. } => {
-=======
-                | Command::Pause { target, .. }
-                | Command::Delete { target, .. } => target.as_str().to_owned(),
-                Command::Answer { .. } | Command::LeadMessage { .. } => {
->>>>>>> main
                     return Err(CommandError::Forbidden);
                 }
             };
@@ -657,7 +652,6 @@ pub fn execute_sync(
             )?;
             agent_reference(tx, target.as_str())?
         }
-<<<<<<< head
         Command::RestoreDeletedRoot { target, .. } => {
             reply = crate::agent_management_store::execute_in_transaction(
                 tx,
@@ -665,7 +659,9 @@ pub fn execute_sync(
                     target: target.as_str().to_owned(),
                 },
                 now,
-=======
+            )?;
+            agent_reference(tx, target.as_str())?
+        }
         Command::Delete { target, .. } => {
             reply = run_stop(
                 tx,
@@ -674,7 +670,6 @@ pub fn execute_sync(
                 },
                 now,
                 ports,
->>>>>>> main
             )?;
             agent_reference(tx, target.as_str())?
         }
