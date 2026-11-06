@@ -2043,11 +2043,18 @@ mod tests {
                         } else {
                             row["workspaceMode"] = json!("worktree");
                             super::CompletedEffect::RemoveWorktree {
-                                identity: json!({"repository":"/project","relative":"worker"}),
-                                bytes: Value::Null,
+                                identity: Some(Box::new(
+                                    studio_json::from_str(
+                                        r#"{"repository":"/project","relative":"worker"}"#,
+                                    )
+                                    .expect("worktree identity"),
+                                )),
+                                bytes: None,
                             }
                         };
-                        super::apply_effect_result(row, &effect).expect("cleanup completed");
+                        let mut agent = worktree_owner(row.clone());
+                        super::apply_effect_result(&mut agent, &effect).expect("cleanup completed");
+                        *row = agent.into_value();
                     }
                 }
                 let snapshot = ManagementSnapshot::from_records(Records {
@@ -2110,8 +2117,10 @@ mod tests {
                 .expect("record")
                 .remove("workspaceCleanupIntent");
             if row["id"] == if cleaned_root { "root" } else { "child" } {
-                super::apply_effect_result(row, &super::CompletedEffect::ReleaseVmLine)
+                let mut agent = worktree_owner(row.clone());
+                super::apply_effect_result(&mut agent, &super::CompletedEffect::ReleaseVmLine)
                     .expect("cleanup completed");
+                *row = agent.into_value();
             }
         }
         let snapshot = ManagementSnapshot::from_records(Records {
