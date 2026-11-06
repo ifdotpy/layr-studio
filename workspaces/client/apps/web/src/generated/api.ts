@@ -24909,11 +24909,10 @@ export interface components {
      * @enum {string}
      */
     TerminalState: "running" | "exited" | "closed";
-    /** TextBlobRef */
+    /** @description The hash and size of a full text kept as a blob. */
     TextBlobRef: {
-      /** Hash */
       hash: string;
-      /** Size */
+      /** Format: int64 */
       size: number;
     };
     /** TextBlobResponse */
@@ -25265,26 +25264,17 @@ export interface components {
        */
       status?: null | string | undefined;
     };
-    /**
-     * TranscriptAsset
-     * @description Path-free attachment projection returned by the workspace service.
-     */
+    /** @description Path-free attachment metadata of a message. */
     TranscriptAsset: {
-      /** Agent */
       agent: string;
-      /** Created */
+      /** Format: double */
       created: number;
-      /** Hash */
       hash: string;
-      /** Id */
       id: string;
-      /** Image */
       image: boolean;
-      /** Mime */
       mime: string;
-      /** Name */
       name: string;
-      /** Size */
+      /** Format: uint64 */
       size: number;
     };
     /**
@@ -25319,474 +25309,112 @@ export interface components {
      * @description The threadId:restoredCheckpoint version, 1 to 8193 Unicode code points (two bounded stream identities and their separator).
      */
     TranscriptHistoryVersion: string;
-    /**
-     * TranscriptInput
-     * @description One native/runtime input batch entry shown inside a transcript item.
-     */
+    /** @description One input of a merged user message. */
     TranscriptInput: {
-      /**
-       * Assets
-       * @default []
-       */
       assets?: components["schemas"]["TranscriptAsset"][] | undefined;
-      /**
-       * At
-       * @default null
-       */
-      at?: null | number | undefined;
-      /**
-       * Clientmessageid
-       * @default null
-       */
-      clientMessageId?: null | string | undefined;
-      /**
-       * Deliveryerror
-       * @default null
-       */
-      deliveryError?: null | string | undefined;
+      /** Format: double */
+      at?: number | null | undefined;
+      clientMessageId?: string | null | undefined;
+      deliveryError?: string | null | undefined;
       deliveryStatus?:
         | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
-      /**
-       * Id
-       * @default null
-       */
-      id?: null | string | undefined;
-      /** Kind */
+      id?: string | null | undefined;
       kind: string;
-      /**
-       * Materialized
-       * @default null
-       */
       materialized?: boolean | null | undefined;
-      /**
-       * Pending
-       * @default null
-       */
       pending?: boolean | null | undefined;
-      /**
-       * Requesteddelivery
-       * @default null
-       */
       requestedDelivery?:
         | components["schemas"]["DeliveryMoment"]
         | null
         | undefined;
-      /** Text */
       text: string;
-      /** Truncated */
       truncated: boolean;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /**
-     * TranscriptItemResponse
-     * @description Full transcript item projection, including its canonical sync envelope.
-     */
-    TranscriptItemResponse: {
-      /**
-       * Accountwide
-       * @default null
-       */
-      accountWide?: boolean | null | undefined;
-      /**
-       * Agent
-       * @default null
-       */
-      agent?: null | string | undefined;
-      /**
-       * Assets
-       * @default null
-       */
-      assets?: components["schemas"]["TranscriptAsset"][] | null | undefined;
-      /**
-       * At
-       * @default null
-       */
-      at?: null | number | string | undefined;
-      /**
-       * Clientmessageid
-       * @default null
-       */
-      clientMessageId?: null | string | undefined;
-      /**
-       * Cyberaccessprogram
-       * @default null
-       */
-      cyberAccessProgram?: null | string | undefined;
-      /**
-       * Deliveryerror
-       * @default null
-       */
-      deliveryError?: null | string | undefined;
-      deliveryStatus?:
-        | components["schemas"]["MessageSendStatus"]
-        | null
-        | undefined;
-      /** @default null */
-      details?: components["schemas"]["JsonValue"] | null | undefined;
-      /** Id */
-      id: string;
-      /**
-       * Inputs
-       * @default null
-       */
-      inputs?: components["schemas"]["TranscriptInput"][] | null | undefined;
-      /**
-       * Kind
-       * @default null
-       */
-      kind?: null | string | undefined;
-      /**
-       * Materialized
-       * @default null
-       */
-      materialized?: boolean | null | undefined;
-      /** @default null */
-      nativeError?: components["schemas"]["JsonValue"] | null | undefined;
-      /**
-       * Nativehook
-       * @default null
-       */
-      nativeHook?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-      /**
-       * Nativehookquiet
-       * @default null
-       */
-      nativeHookQuiet?: boolean | null | undefined;
-      /**
-       * Nativenotice
-       * @default null
-       */
-      nativeNotice?: ("info" | "warning" | "error") | null | undefined;
-      /**
-       * Nativereview
-       * @default null
-       */
-      nativeReview?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-      /**
-       * Observedwait
-       * @default null
-       */
-      observedWait?: boolean | null | undefined;
-      /**
-       * Pending
-       * @default false
-       */
-      pending?: boolean | undefined;
-      /**
-       * Phase
-       * @default null
-       */
-      phase?: null | string | undefined;
-      /** @default null */
-      previousError?: components["schemas"]["JsonValue"] | null | undefined;
-      /**
-       * Reasoningms
-       * @default null
-       */
-      reasoningMs?: null | number | undefined;
-      /**
-       * Reasoningobservedat
-       * @default null
-       */
-      reasoningObservedAt?: null | number | undefined;
-      /**
-       * Reasoningsince
-       * @default null
-       */
-      reasoningSince?: null | number | undefined;
-      /**
-       * Requesteddelivery
-       * @default null
-       */
-      requestedDelivery?:
-        | components["schemas"]["DeliveryMoment"]
-        | null
-        | undefined;
-      /** Role */
-      role: string;
-      /**
-       * Sourceid
-       * @default null
-       */
-      sourceId?: null | string | undefined;
-      /**
-       * Streaming
-       * @default null
-       */
-      streaming?: boolean | null | undefined;
-      /** Text */
-      text: string;
-      /**
-       * Threadid
-       * @default null
-       */
-      threadId?: null | string | undefined;
-      /**
-       * Title
-       * @default
-       */
-      title?: string | undefined;
-      /**
-       * Toolstatus
-       * @default null
-       */
-      toolStatus?: null | string | undefined;
-      /**
-       * Truncated
-       * @default null
-       */
-      truncated?: boolean | null | undefined;
-      /**
-       * Turnerror
-       * @default null
-       */
-      turnError?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | string
-        | undefined;
-      /**
-       * Turnerrorresolved
-       * @default null
-       */
-      turnErrorResolved?: boolean | null | undefined;
-      /**
-       * Turnid
-       * @default null
-       */
-      turnId?: null | string | undefined;
-      /**
-       * Turnstatus
-       * @default null
-       */
-      turnStatus?: null | string | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /**
-     * TranscriptMessageRecord
-     * @description Transcript rows always carry their runtime role and display text.
-     */
+    TranscriptItemResponse: components["schemas"]["TranscriptMessageRecord"];
+    /** @description One transcript row: its runtime role and display text, with optional detail. */
     TranscriptMessageRecord: {
-      /**
-       * Accountwide
-       * @default null
-       */
       accountWide?: boolean | null | undefined;
-      /**
-       * Agent
-       * @default null
-       */
-      agent?: null | string | undefined;
-      /**
-       * Assets
-       * @default null
-       */
+      agent?: string | null | undefined;
       assets?: components["schemas"]["TranscriptAsset"][] | null | undefined;
-      /**
-       * At
-       * @default null
-       */
-      at?: null | number | string | undefined;
-      /**
-       * Clientmessageid
-       * @default null
-       */
-      clientMessageId?: null | string | undefined;
-      /**
-       * Cyberaccessprogram
-       * @default null
-       */
-      cyberAccessProgram?: null | string | undefined;
-      /**
-       * Deliveryerror
-       * @default null
-       */
-      deliveryError?: null | string | undefined;
+      at?: (number | string) | null | undefined;
+      clientMessageId?: string | null | undefined;
+      cyberAccessProgram?: string | null | undefined;
+      deliveryError?: string | null | undefined;
       deliveryStatus?:
         | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
-      /** @default null */
       details?: components["schemas"]["JsonValue"] | null | undefined;
-      /**
-       * Fulltextblob
-       * @default null
-       */
       fullTextBlob?: components["schemas"]["TextBlobRef"] | null | undefined;
-      /** Id */
       id: string;
       /** @description The notice confirms a completed idle compaction of a Claude session. */
       idleCompaction?: boolean | undefined;
-      /**
-       * Inputs
-       * @default null
-       */
       inputs?: components["schemas"]["TranscriptInput"][] | null | undefined;
-      /**
-       * Kind
-       * @default null
-       */
-      kind?: null | string | undefined;
-      /**
-       * Materialized
-       * @default null
-       */
+      kind?: string | null | undefined;
       materialized?: boolean | null | undefined;
-      /** @default null */
       nativeError?: components["schemas"]["JsonValue"] | null | undefined;
-      /**
-       * Nativehook
-       * @default null
-       */
       nativeHook?:
         | {
             [key: string]: components["schemas"]["JsonValue"] | undefined;
           }
         | null
         | undefined;
-      /**
-       * Nativehookquiet
-       * @default null
-       */
       nativeHookQuiet?: boolean | null | undefined;
       /**
-       * Nativenotice
-       * @default null
+       * @description The severity of a provider notice.
+       * @enum {string|null}
        */
-      nativeNotice?: ("info" | "warning" | "error") | null | undefined;
-      /**
-       * Nativereview
-       * @default null
-       */
+      nativeNotice?: "info" | "warning" | "error" | null | undefined;
       nativeReview?:
         | {
             [key: string]: components["schemas"]["JsonValue"] | undefined;
           }
         | null
         | undefined;
-      /**
-       * Observedwait
-       * @default null
-       */
       observedWait?: boolean | null | undefined;
-      /**
-       * Pending
-       * @default false
-       */
       pending?: boolean | undefined;
-      /**
-       * Phase
-       * @default null
-       */
-      phase?: null | string | undefined;
-      /** @default null */
+      phase?: string | null | undefined;
       previousError?: components["schemas"]["JsonValue"] | null | undefined;
-      /** @description Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text. */
+      /** @description Set on a stored provider item whose kind Studio does not know. */
       providerUnknown?:
         | {
             kind: string;
             raw: string;
           }
         | undefined;
-      /**
-       * Reasoningms
-       * @default null
-       */
-      reasoningMs?: null | number | undefined;
-      /**
-       * Reasoningobservedat
-       * @default null
-       */
-      reasoningObservedAt?: null | number | undefined;
-      /**
-       * Reasoningsince
-       * @default null
-       */
-      reasoningSince?: null | number | undefined;
-      /**
-       * Requesteddelivery
-       * @default null
-       */
+      /** Format: double */
+      reasoningMs?: number | null | undefined;
+      /** Format: double */
+      reasoningObservedAt?: number | null | undefined;
+      /** Format: double */
+      reasoningSince?: number | null | undefined;
       requestedDelivery?:
         | components["schemas"]["DeliveryMoment"]
         | null
         | undefined;
-      /** Role */
       role: string;
-      /**
-       * Sourceid
-       * @default null
-       */
-      sourceId?: null | string | undefined;
-      /**
-       * Streaming
-       * @default null
-       */
+      sourceId?: string | null | undefined;
       streaming?: boolean | null | undefined;
-      /** Text */
       text: string;
-      /**
-       * Threadid
-       * @default null
-       */
-      threadId?: null | string | undefined;
-      /**
-       * Title
-       * @default
-       */
+      threadId?: string | null | undefined;
       title?: string | undefined;
-      /**
-       * Toolstatus
-       * @default null
-       */
-      toolStatus?: null | string | undefined;
-      /**
-       * Truncated
-       * @default null
-       */
+      toolStatus?: string | null | undefined;
       truncated?: boolean | null | undefined;
-      /**
-       * Turnerror
-       * @default null
-       */
       turnError?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
+        | (
+            | {
+                [key: string]: components["schemas"]["JsonValue"] | undefined;
+              }
+            | string
+          )
         | null
-        | string
         | undefined;
-      /**
-       * Turnerrorresolved
-       * @default null
-       */
       turnErrorResolved?: boolean | null | undefined;
-      /**
-       * Turnid
-       * @default null
-       */
-      turnId?: null | string | undefined;
-      /**
-       * Turnstatus
-       * @default null
-       */
-      turnStatus?: null | string | undefined;
+      turnId?: string | null | undefined;
+      turnStatus?: string | null | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };

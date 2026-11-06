@@ -57379,13 +57379,13 @@
       },
       "TextBlobRef": {
         "additionalProperties": false,
+        "description": "The hash and size of a full text kept as a blob.",
         "properties": {
           "hash": {
-            "title": "Hash",
             "type": "string"
           },
           "size": {
-            "title": "Size",
+            "format": "int64",
             "type": "integer"
           }
         },
@@ -57393,7 +57393,6 @@
           "hash",
           "size"
         ],
-        "title": "TextBlobRef",
         "type": "object"
       },
       "TextBlobResponse": {
@@ -58017,40 +58016,34 @@
       },
       "TranscriptAsset": {
         "additionalProperties": false,
-        "description": "Path-free attachment projection returned by the workspace service.",
+        "description": "Path-free attachment metadata of a message.",
         "properties": {
           "agent": {
-            "title": "Agent",
             "type": "string"
           },
           "created": {
-            "title": "Created",
+            "format": "double",
             "type": "number"
           },
           "hash": {
-            "title": "Hash",
             "type": "string"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "image": {
-            "title": "Image",
             "type": "boolean"
           },
           "mime": {
-            "title": "Mime",
             "type": "string"
           },
           "name": {
-            "title": "Name",
             "type": "string"
           },
           "size": {
+            "format": "uint64",
             "maximum": 9007199254740991,
             "minimum": 0,
-            "title": "Size",
             "type": "integer"
           }
         },
@@ -58064,7 +58057,6 @@
           "hash",
           "created"
         ],
-        "title": "TranscriptAsset",
         "type": "object"
       },
       "TranscriptChangeBatch": {
@@ -58147,51 +58139,32 @@
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
-        "description": "One native/runtime input batch entry shown inside a transcript item.",
+        "description": "One input of a merged user message.",
         "properties": {
           "assets": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/TranscriptAsset"
             },
-            "title": "Assets",
             "type": "array"
           },
           "at": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "At"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "clientMessageId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Clientmessageid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deliveryError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Deliveryerror"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deliveryStatus": {
             "anyOf": [
@@ -58204,44 +58177,25 @@
             ]
           },
           "id": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Id"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "kind": {
-            "title": "Kind",
             "type": "string"
           },
           "materialized": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Materialized"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "pending": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Pending"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "requestedDelivery": {
             "anyOf": [
@@ -58251,16 +58205,12 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Requesteddelivery"
+            ]
           },
           "text": {
-            "title": "Text",
             "type": "string"
           },
           "truncated": {
-            "title": "Truncated",
             "type": "boolean"
           }
         },
@@ -58269,558 +58219,74 @@
           "text",
           "truncated"
         ],
-        "title": "TranscriptInput",
         "type": "object"
       },
       "TranscriptItemResponse": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Full transcript item projection, including its canonical sync envelope.",
-        "properties": {
-          "accountWide": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Accountwide"
-          },
-          "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Agent"
-          },
-          "assets": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TranscriptAsset"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Assets"
-          },
-          "at": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "At"
-          },
-          "clientMessageId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Clientmessageid"
-          },
-          "cyberAccessProgram": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Cyberaccessprogram"
-          },
-          "deliveryError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Deliveryerror"
-          },
-          "deliveryStatus": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MessageSendStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "details": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "inputs": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TranscriptInput"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Inputs"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Kind"
-          },
-          "materialized": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Materialized"
-          },
-          "nativeError": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "nativeHook": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativehook"
-          },
-          "nativeHookQuiet": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativehookquiet"
-          },
-          "nativeNotice": {
-            "anyOf": [
-              {
-                "enum": [
-                  "info",
-                  "warning",
-                  "error"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativenotice"
-          },
-          "nativeReview": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativereview"
-          },
-          "observedWait": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Observedwait"
-          },
-          "pending": {
-            "default": false,
-            "title": "Pending",
-            "type": "boolean"
-          },
-          "phase": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Phase"
-          },
-          "previousError": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "reasoningMs": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Reasoningms"
-          },
-          "reasoningObservedAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Reasoningobservedat"
-          },
-          "reasoningSince": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Reasoningsince"
-          },
-          "requestedDelivery": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DeliveryMoment"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Requesteddelivery"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "sourceId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Sourceid"
-          },
-          "streaming": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Streaming"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          },
-          "threadId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Threadid"
-          },
-          "title": {
-            "default": "",
-            "title": "Title",
-            "type": "string"
-          },
-          "toolStatus": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Toolstatus"
-          },
-          "truncated": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Truncated"
-          },
-          "turnError": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnerror"
-          },
-          "turnErrorResolved": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Turnerrorresolved"
-          },
-          "turnId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnid"
-          },
-          "turnStatus": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnstatus"
-          }
-        },
-        "required": [
-          "id",
-          "role",
-          "text"
-        ],
-        "title": "TranscriptItemResponse",
-        "type": "object"
+        "$ref": "#/components/schemas/TranscriptMessageRecord"
       },
       "TranscriptMessageRecord": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
-        "description": "Transcript rows always carry their runtime role and display text.",
+        "description": "One transcript row: its runtime role and display text, with optional detail.",
         "properties": {
           "accountWide": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Accountwide"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Agent"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "assets": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TranscriptAsset"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Assets"
+            "items": {
+              "$ref": "#/components/schemas/TranscriptAsset"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "at": {
             "anyOf": [
               {
+                "anyOf": [
+                  {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "description": "A message time: seconds, or the text form of older records."
+              },
+              {
                 "type": "null"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
               }
-            ],
-            "default": null,
-            "title": "At"
+            ]
           },
           "clientMessageId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Clientmessageid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "cyberAccessProgram": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Cyberaccessprogram"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deliveryError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Deliveryerror"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deliveryStatus": {
             "anyOf": [
@@ -58840,8 +58306,7 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           },
           "fullTextBlob": {
             "anyOf": [
@@ -58851,12 +58316,9 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Fulltextblob"
+            ]
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "idleCompaction": {
@@ -58864,43 +58326,25 @@
             "type": "boolean"
           },
           "inputs": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TranscriptInput"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Inputs"
+            "items": {
+              "$ref": "#/components/schemas/TranscriptInput"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "kind": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Kind"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "materialized": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Materialized"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "nativeError": {
             "anyOf": [
@@ -58910,96 +58354,59 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           },
           "nativeHook": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativehook"
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "nativeHookQuiet": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativehookquiet"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "nativeNotice": {
-            "anyOf": [
-              {
-                "enum": [
-                  "info",
-                  "warning",
-                  "error"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "description": "The severity of a provider notice.",
+            "enum": [
+              "info",
+              "warning",
+              "error",
+              null
             ],
-            "default": null,
-            "title": "Nativenotice"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "nativeReview": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativereview"
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "observedWait": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Observedwait"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "pending": {
-            "default": false,
-            "title": "Pending",
             "type": "boolean"
           },
           "phase": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Phase"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "previousError": {
             "anyOf": [
@@ -59009,11 +58416,10 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           },
           "providerUnknown": {
-            "description": "Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text.",
+            "description": "Set on a stored provider item whose kind Studio does not know.",
             "properties": {
               "kind": {
                 "type": "string"
@@ -59029,40 +58435,25 @@
             "type": "object"
           },
           "reasoningMs": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Reasoningms"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "reasoningObservedAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Reasoningobservedat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "reasoningSince": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Reasoningsince"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "requestedDelivery": {
             "anyOf": [
@@ -59072,136 +58463,85 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Requesteddelivery"
+            ]
           },
           "role": {
-            "title": "Role",
             "type": "string"
           },
           "sourceId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Sourceid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "streaming": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Streaming"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "text": {
-            "title": "Text",
             "type": "string"
           },
           "threadId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Threadid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "title": {
-            "default": "",
-            "title": "Title",
             "type": "string"
           },
           "toolStatus": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Toolstatus"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "truncated": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Truncated"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "turnError": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/JsonValue"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "description": "A turn error: the provider object, or the text of older records."
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
-            ],
-            "default": null,
-            "title": "Turnerror"
+            ]
           },
           "turnErrorResolved": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Turnerrorresolved"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "turnId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "turnStatus": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnstatus"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -59209,7 +58549,6 @@
           "role",
           "text"
         ],
-        "title": "TranscriptMessageRecord",
         "type": "object"
       },
       "TranscriptPageResponse": {

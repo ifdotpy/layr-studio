@@ -578,6 +578,38 @@ fn main() -> Result<(), Box<dyn Error>> {
         rust_type: "studio_runtime_schema::command::CommandRequest".to_owned(),
         serde_with: None,
     };
+    // The transcript message has one owner: runtime-schema `transcript_view`.
+    for (name, rust_type) in [
+        (
+            "TranscriptMessageRecord",
+            "studio_runtime_schema::transcript_view::TranscriptMessage",
+        ),
+        (
+            "TranscriptItemResponse",
+            "studio_runtime_schema::transcript_view::TranscriptMessage",
+        ),
+        (
+            "TranscriptInput",
+            "studio_runtime_schema::transcript_view::TranscriptInput",
+        ),
+        (
+            "TranscriptAsset",
+            "studio_runtime_schema::transcript_view::TranscriptAsset",
+        ),
+        (
+            "TextBlobRef",
+            "studio_runtime_schema::transcript_view::TextBlobRef",
+        ),
+    ] {
+        analysis
+            .schemas
+            .get_mut(name)
+            .ok_or("missing transcript schema")?
+            .schema_type = SchemaType::Primitive {
+            rust_type: rust_type.to_owned(),
+            serde_with: None,
+        };
+    }
     // The answer result and the forward of a sign-in have one owner too.
     for (name, rust_type) in [
         (

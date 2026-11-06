@@ -85,6 +85,7 @@ pub mod shared_values;
 pub mod shell_policy;
 pub mod start_attempt;
 mod stored_record;
+pub mod transcript_view;
 pub use stored_record::AgentCounter;
 pub use stored_record::NonnegativeNumber;
 pub mod tool_result;
