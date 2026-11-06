@@ -4272,7 +4272,7 @@ mod tests {
             .transaction(|tx| {
                 SyncDocumentsRepository::put_draft(
                     tx,
-                    "phone:chat",
+                    "chat",
                     r#"{"device":"phone","session":"chat","text":"draft","updated":1}"#,
                     false,
                 )?;
@@ -5504,7 +5504,7 @@ mod tests {
                     let payload = if scenario == "payload" { "broken".to_owned() } else {
                         json!({"device":"phone", "session":session, "text": "draft", "updated":1}).to_string()
                     };
-                    SyncDocumentsRepository::put_draft(tx, &format!("phone:{session}"), &payload, false)?;
+                    SyncDocumentsRepository::put_draft(tx, &format!("{session}"), &payload, false)?;
                 }
                 Ok(())
             }).await.expect("draft interval");
@@ -5549,7 +5549,7 @@ mod tests {
             let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
             let saved = payload.clone();
             store.transaction(move |tx| {
-                SyncDocumentsRepository::put_draft(tx, "phone:chat", &saved, false).map(|_| ())
+                SyncDocumentsRepository::put_draft(tx, "chat", &saved, false).map(|_| ())
             }).await.expect("draft");
             let state = HttpState::new("token".into(), "workspace".into(), root.path().display().to_string(), 4321, None, Some(store), None);
             let resource = ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
@@ -5581,7 +5581,7 @@ mod tests {
                     ),
                     ("good", "kept".to_owned()),
                 ] {
-                    let id = format!("phone:{session}");
+                    let id = format!("{session}");
                     let payload =
                         json!({"id":id,"device":"phone","session":session,"text":text,"updated":1})
                             .to_string();
@@ -5609,7 +5609,7 @@ mod tests {
             .expect("baseline");
         assert!(!snapshot.complete);
         assert_eq!(snapshot.documents.len(), 1);
-        assert_eq!(snapshot.documents[0].id, "phone:good");
+        assert_eq!(snapshot.documents[0].id, "good");
     }
 
     #[tokio::test]
@@ -5618,13 +5618,13 @@ mod tests {
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         let count = studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS;
         let payload = format!(
-            r#"{{"id":"phone:chat","device":"phone","session":"chat","text":"{}","updated":1}}"#,
+            r#"{{"id":"chat","device":"phone","session":"chat","text":"{}","updated":1}}"#,
             "\\ud83d\\ude00".repeat(count)
         );
         let saved = payload.clone();
         store
             .transaction(move |tx| {
-                SyncDocumentsRepository::put_draft(tx, "phone:chat", &saved, false).map(|_| ())
+                SyncDocumentsRepository::put_draft(tx, "chat", &saved, false).map(|_| ())
             })
             .await
             .expect("save");
@@ -5673,7 +5673,7 @@ mod tests {
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
             for index in 0..=SYNC_DRAFT_STREAM_MAX_DOCUMENTS {
-                let id = format!("phone:{index}");
+                let id = format!("{index}");
                 let payload = json!({"id":id,"device":"phone","session":index.to_string(),"text":"saved","updated":1}).to_string();
                 SyncDocumentsRepository::put_draft(tx, &id, &payload, false)?;
             }
@@ -5710,10 +5710,18 @@ mod tests {
         use tower::ServiceExt;
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
-        store.transaction(|tx| {
-            SyncDocumentsRepository::put_draft(tx, "phone:chat", r#"{"id":"phone:chat","device":"phone","session":"chat","text":"saved","updated":1}"#, false)?;
-            Ok(())
-        }).await.expect("draft");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_draft(
+                    tx,
+                    "chat",
+                    r#"{"id":"chat","device":"phone","session":"chat","text":"saved","updated":1}"#,
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("draft");
         let state = HttpState::new(
             "token".into(),
             "workspace".into(),
@@ -5741,7 +5749,7 @@ mod tests {
             let bytes = body.next().await.expect("baseline").expect("bytes");
             let text = std::str::from_utf8(&bytes).expect("utf8");
             assert!(
-                text.contains("phone:chat"),
+                text.contains("chat"),
                 "baseline must contain stored draft: {text}"
             );
         }
@@ -5777,8 +5785,8 @@ mod tests {
         state.http_state = Some(http);
         let raw = r#"{"device":"phone","session":"chat","text":"legacy bytes","updated":1.5}"#;
         store.transaction(move |tx| {
-            SyncDocumentsRepository::put_draft(tx, "phone:chat", raw, false)?;
-            SyncDocumentsRepository::put_draft(tx, "phone:removed", r#"{"id":"phone:removed","device":"phone","session":"removed","text":"","updated":2}"#, true)?;
+            SyncDocumentsRepository::put_draft(tx, "chat", raw, false)?;
+            SyncDocumentsRepository::put_draft(tx, "removed", r#"{"id":"removed","device":"phone","session":"removed","text":"","updated":2}"#, true)?;
             Ok(())
         }).await.expect("draft changes");
         let (event, _) = next_frame(state).await.expect("draft frame");
@@ -5842,7 +5850,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_draft(tx, "phone:chat", "draft", false)?;
+                SyncDocumentsRepository::put_draft(tx, "chat", "draft", false)?;
                 Ok(())
             })
             .await
@@ -5857,7 +5865,7 @@ mod tests {
         assert_eq!(edited.resources, resources, "real draft edits still notify");
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_draft(tx, "phone:chat", "draft", true)?;
+                SyncDocumentsRepository::put_draft(tx, "chat", "draft", true)?;
                 Ok(())
             })
             .await

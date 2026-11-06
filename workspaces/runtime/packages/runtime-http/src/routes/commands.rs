@@ -1334,7 +1334,7 @@ mod tests {
         let draft: String = store
             .transaction(|tx| {
                 Ok(tx.query_row(
-                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='workspace'",
                     [],
                     |row| row.get(0),
                 )?)
@@ -1359,7 +1359,7 @@ mod tests {
         let drafts: i64 = store
             .transaction(|tx| {
                 Ok(tx.query_row(
-                    "SELECT count(*) FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    "SELECT count(*) FROM sync_documents WHERE scope='drafts' AND id='workspace'",
                     [],
                     |row| row.get(0),
                 )?)
@@ -1378,7 +1378,7 @@ mod tests {
         let draft: String = store
             .transaction(|tx| {
                 Ok(tx.query_row(
-                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='workspace'",
                     [],
                     |row| row.get(0),
                 )?)

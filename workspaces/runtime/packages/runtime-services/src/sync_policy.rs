@@ -4111,11 +4111,20 @@ mod tests {
         let validate_draft = |id: &str, payload: &Value| {
             studio_runtime_schema::drafts::DraftVersion::from_stored_value(id, payload.clone())
         };
-        let payload = json!({"device":"phone","session":"chat","id":"phone:tab:chat","text":"draft","extra":true});
-        assert!(validate_draft("phone:tab:chat", &payload).is_ok());
-        assert!(validate_draft("phone:chat", &json!({})).is_err());
-        assert!(validate_draft("phone:chat", &Value::Null).is_err());
-        assert!(validate_draft("phone:chat", &json!({"device":"other","session":"chat"})).is_err());
+        // A chat has one draft: its id is the chat id.
+        let payload =
+            json!({"device":"phone","session":"chat","id":"chat","text":"draft","extra":true});
+        assert!(validate_draft("chat", &payload).is_ok());
+        assert!(
+            validate_draft(
+                "phone:tab:chat",
+                &json!({"device":"phone","session":"chat","id":"phone:tab:chat","text":"draft"})
+            )
+            .is_err()
+        );
+        assert!(validate_draft("chat", &json!({})).is_err());
+        assert!(validate_draft("chat", &Value::Null).is_err());
+        assert!(validate_draft("other", &json!({"device":"phone","session":"chat"})).is_err());
     }
 
     #[test]

@@ -81,13 +81,15 @@ async fn draft_push_ack_and_echo_follow_shared_contract() {
     changed["text"] = json!("stale writer");
     let mut stale = document;
     stale["payload"] = json!(changed.to_string());
+    // One draft per chat: a later write from another writer replaces it.
     let conflicts = request(
         &app,
         "POST",
         "/api/sync/drafts",
-        json!({"rows": [{"newDocumentState": stale}]}),
+        json!({"rows": [{"newDocumentState": stale.clone()}]}),
     )
     .await;
-    assert_eq!(conflicts[0]["payload"], first["documents"][0]["payload"]);
-    assert_eq!(conflicts[0]["seq"], first["documents"][0]["seq"]);
+    assert_eq!(conflicts, json!([]));
+    let replaced = request(&app, "GET", "/api/sync/pull?scope=drafts", Value::Null).await;
+    assert_eq!(replaced["documents"][0]["payload"], stale["payload"]);
 }

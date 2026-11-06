@@ -9,8 +9,6 @@ pub struct DraftWrite {
     pub version: studio_runtime_schema::drafts::DraftVersion,
     pub payload: Value,
     pub deleted: bool,
-    pub assumed_payload: Option<Value>,
-    pub assumed_deleted: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,7 +25,8 @@ pub enum DraftPushError {
     Store(#[from] StoreError),
 }
 
-/// Apply a batch atomically, returning current masters for conflicts.
+/// Apply a batch atomically. A chat has one draft and the last write wins, so the
+/// result has no conflicts.
 pub async fn push_drafts(
     store: &RuntimeStore,
     rows: Vec<DraftWrite>,
@@ -36,7 +35,8 @@ pub async fn push_drafts(
     let (result, _) = store
         .transaction_with_post_commit(
             move |transaction| {
-                let mut conflicts = Vec::new();
+                // One draft per chat, last write wins: a write never conflicts.
+                let conflicts = Vec::new();
                 let mut changed = false;
                 for row in rows {
                     let id = &row.version.id;
@@ -71,17 +71,13 @@ pub async fn push_drafts(
                         None
                     };
 
-                    if let (Some(current), Some(current_value)) = (&current, &current_value) {
-                        let same = row.payload == *current_value && row.deleted == current.deleted;
-                        let assumed_matches = row.assumed_payload.as_ref() == Some(current_value)
-                            && row.assumed_deleted == current.deleted;
-                        if !assumed_matches && !same {
-                            conflicts.push(current.clone());
-                            continue;
-                        }
-                        if same {
-                            continue;
-                        }
+                    // A chat has one draft: the last write wins, so a write never
+                    // conflicts. An unchanged write takes no new number.
+                    if let (Some(current), Some(current_value)) = (&current, &current_value)
+                        && row.payload == *current_value
+                        && row.deleted == current.deleted
+                    {
+                        continue;
                     }
 
                     let payload = studio_json::to_string(&row.payload).map_err(StoreError::from)?;

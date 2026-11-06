@@ -599,6 +599,9 @@ pub(crate) struct DraftPushRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DraftPushRow {
+    /// Sent by clients and accepted; not compared, because the last write of a chat's
+    /// draft wins.
+    #[allow(dead_code)]
     assumed_master_state: Option<DraftDocumentInput>,
     new_document_state: DraftDocumentInput,
 }
@@ -640,35 +643,12 @@ pub(crate) async fn push_drafts(
             payload.clone(),
         )
         .map_err(|_| draft_validation_error(index, "newDocumentState", "id"))?;
-        let assumed = row
-            .assumed_master_state
-            .as_ref()
-            .map(|assumed| {
-                if sync_policy::contains_unrepresentable_integer(&assumed.payload) {
-                    return Err(draft_validation_error(
-                        index,
-                        "assumedMasterState",
-                        "payload",
-                    ));
-                }
-                let payload: Value = studio_json::from_str(&assumed.payload)
-                    .map_err(|_| draft_validation_error(index, "assumedMasterState", "payload"))?;
-                if validate_draft_value(row.new_document_state.id.as_str(), &payload).is_err() {
-                    return Err(draft_validation_error(
-                        index,
-                        "assumedMasterState",
-                        "payload",
-                    ));
-                }
-                Ok::<_, ApiError>((payload, assumed.deleted))
-            })
-            .transpose()?;
+        // A chat has one draft and the last write wins; the assumed state of the
+        // client is not compared.
         writes.push(DraftWrite {
             version,
             payload,
             deleted: row.new_document_state.deleted,
-            assumed_payload: assumed.as_ref().map(|(payload, _)| payload.clone()),
-            assumed_deleted: assumed.is_some_and(|(_, deleted)| deleted),
         });
     }
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -1130,7 +1110,7 @@ mod vault_maintenance_tests {
         let original = raw.clone();
         store
             .transaction(move |tx| {
-                SyncDocumentsRepository::put_draft(tx, "phone:chat", &raw, false).map(|_| ())
+                SyncDocumentsRepository::put_draft(tx, "chat", &raw, false).map(|_| ())
             })
             .await
             .unwrap();
@@ -1176,11 +1156,11 @@ mod vault_maintenance_tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["documents"][0]["payload"], original);
         let canonical =
-            json!({"id":"phone:chat","device":"phone","session":"chat","text":"next","updated":2});
+            json!({"id":"chat","device":"phone","session":"chat","text":"next","updated":2});
         let mut different_assumption = legacy.clone();
         different_assumption["updated"] = json!(1.9);
-        let conflict_rows = json!({"rows":[{"newDocumentState":{"id":"phone:chat","payload":canonical.to_string(),"seq":0,"deleted":false},
-            "assumedMasterState":{"id":"phone:chat","payload":different_assumption.to_string(),"seq":1,"deleted":false}}]});
+        let conflict_rows = json!({"rows":[{"newDocumentState":{"id":"chat","payload":canonical.to_string(),"seq":0,"deleted":false},
+            "assumedMasterState":{"id":"chat","payload":different_assumption.to_string(),"seq":1,"deleted":false}}]});
         let conflict = app
             .clone()
             .oneshot(request("POST", "/api/sync/drafts", conflict_rows))
@@ -1190,10 +1170,10 @@ mod vault_maintenance_tests {
         let conflict: Value =
             studio_json::from_slice(&to_bytes(conflict.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        assert_eq!(conflict.as_array().unwrap().len(), 1);
-        assert_eq!(conflict[0]["payload"], original);
-        let rows = json!({"rows":[{"newDocumentState":{"id":"phone:chat","payload":canonical.to_string(),"seq":0,"deleted":false},
-            "assumedMasterState":{"id":"phone:chat","payload":original,"seq":1,"deleted":false}}]});
+        // One draft per chat: the last write wins, even over a stale assumption.
+        assert_eq!(conflict, json!([]));
+        let rows = json!({"rows":[{"newDocumentState":{"id":"chat","payload":canonical.to_string(),"seq":0,"deleted":false},
+            "assumedMasterState":{"id":"chat","payload":original,"seq":1,"deleted":false}}]});
         let response = app
             .clone()
             .oneshot(request("POST", "/api/sync/drafts", rows))
@@ -1206,7 +1186,7 @@ mod vault_maintenance_tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body, json!([]));
         let stored = store
-            .transaction(|tx| SyncDocumentsRepository::draft(tx, "phone:chat"))
+            .transaction(|tx| SyncDocumentsRepository::draft(tx, "chat"))
             .await
             .unwrap()
             .unwrap();
@@ -1228,8 +1208,8 @@ mod vault_maintenance_tests {
             .find(|fixture| fixture.name == "extension")
             .expect("shared native legacy extension fixture");
         let rows = json!({"rows":[{
-            "newDocumentState":{"id":"phone:chat","payload":native.payload.to_string(),"seq":0,"deleted":false},
-            "assumedMasterState":{"id":"phone:chat","payload":stored.payload,"seq":stored.sequence,"deleted":false}
+            "newDocumentState":{"id":"chat","payload":native.payload.to_string(),"seq":0,"deleted":false},
+            "assumedMasterState":{"id":"chat","payload":stored.payload,"seq":stored.sequence,"deleted":false}
         }]});
         let mut committed_sequence = None;
         for attempt in ["initial native legacy push", "same-value retry"] {
@@ -1245,7 +1225,7 @@ mod vault_maintenance_tests {
             assert_eq!(status, StatusCode::OK, "{attempt}: {body}");
             assert_eq!(body, json!([]), "{attempt}");
             let current = store
-                .transaction(|tx| SyncDocumentsRepository::draft(tx, "phone:chat"))
+                .transaction(|tx| SyncDocumentsRepository::draft(tx, "chat"))
                 .await
                 .unwrap()
                 .unwrap();

@@ -514,21 +514,20 @@ pub struct Executed {
     pub reply: studio_json::Value,
 }
 
-/// Write the text of a withdrawn message as a server draft of the chat. The draft stream
-/// delivers it to the composer. It is newer than every earlier version, so it wins, and a
-/// later edit of the user supersedes it like any other draft version.
+/// Write the text of a withdrawn message as the draft of the chat. A chat has one draft;
+/// the draft stream delivers it to every composer, and a later edit replaces it.
 pub(crate) fn server_draft(
     tx: &Transaction<'_>,
     chat: &str,
     text: &str,
     now_ms: i64,
 ) -> Result<(), CommandError> {
-    let id = format!("server:withdraw:{chat}");
+    let id = chat;
     let payload = studio_json::json!({
         "id": id, "session": chat, "device": "server",
         "text": text, "updated": now_ms, "seen": {},
     });
-    SyncDocumentsRepository::put_draft(tx, &id, &payload.to_string(), false)?;
+    SyncDocumentsRepository::put_draft(tx, id, &payload.to_string(), false)?;
     Ok(())
 }
 

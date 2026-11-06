@@ -2,7 +2,7 @@
   {
     "name": "canonical",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -14,7 +14,7 @@
   {
     "name": "audit_fraction",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -26,7 +26,7 @@
   {
     "name": "missing_updated",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x"
@@ -37,7 +37,7 @@
   {
     "name": "null_updated",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -60,7 +60,7 @@
   {
     "name": "safe_max",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -72,7 +72,7 @@
   {
     "name": "unsafe",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -84,7 +84,7 @@
   {
     "name": "negative",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -96,7 +96,7 @@
   {
     "name": "wrong_type",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -108,7 +108,7 @@
   {
     "name": "seen_unsafe",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -123,7 +123,7 @@
   {
     "name": "extension",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -138,7 +138,7 @@
   {
     "name": "extension_missing_updated",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -152,7 +152,7 @@
   {
     "name": "extension_null_updated",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",
@@ -167,7 +167,7 @@
   {
     "name": "extension_fractional_updated",
     "payload": {
-      "id": "phone:chat",
+      "id": "chat",
       "device": "phone",
       "session": "chat",
       "text": "x",

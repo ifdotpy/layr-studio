@@ -16,7 +16,6 @@ import { replaceStream } from "./resourceEvents.ts";
 import { createDirectDrafts } from "./directDrafts.ts";
 import { decodeDraftVersion } from "./draftDecoder.ts";
 import { encodeDraftPayload } from "./draftPayload.ts";
-import { draftVersionId } from "./draftIdentity.ts";
 import { activeDraftVersions } from "./draftVersions.ts";
 import { DRAFT_SYNC_TIMING_MS } from "./draftSyncTiming.ts";
 
@@ -77,7 +76,8 @@ export function createBrowserDrafts(options: {
       const alternatives: DraftVersion[] = [];
       for (const [session, group] of groups) {
         const active = activeDraftVersions(group);
-        const own = draftVersionId(device, writer, session);
+        // A chat has one draft: its id is the chat id.
+        const own = session;
         const chosen =
           active.find((record) => record.id === own) ??
           active.find((record) => !dismissed.current.has(key(record)));
@@ -156,7 +156,7 @@ export function createBrowserDrafts(options: {
           ...Object.keys(next),
         ])) {
           if (previous[session] === next[session]) continue;
-          const id = draftVersionId(device, writer, session);
+          const id = session;
           const seen = Object.fromEntries(
             versions.current
               .filter((version) => version.session === session)

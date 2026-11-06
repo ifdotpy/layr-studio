@@ -8,7 +8,7 @@
   ],
   "legacy": [
     {
-      "id": "phone:writer:legacy-conflict",
+      "id": "legacy-conflict",
       "device": "phone",
       "session": "legacy-conflict",
       "text": "legacy remote",
@@ -18,7 +18,7 @@
       }
     },
     {
-      "id": "phone:writer:legacy-lost-response",
+      "id": "legacy-lost-response",
       "device": "phone",
       "session": "legacy-lost-response",
       "text": "legacy remote",
@@ -29,7 +29,7 @@
     }
   ],
   "document": {
-    "id": "phone:writer:contract",
+    "id": "contract",
     "device": "phone",
     "session": "contract",
     "text": "first",

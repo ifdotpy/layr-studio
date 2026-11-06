@@ -11,10 +11,9 @@ and [`routes/sync_stream.rs`](../workspaces/runtime/packages/runtime-http/src/ro
 The client and server wire contract is in [`sync-protocol.md`](sync-protocol.md).
 
 The store serves the entity-based workspace projection, sparse transcript
-updates, and browser-owned draft branches. The
+updates, and one draft per chat. The
 entity and transcript streams use durable monotonically increasing sequences
-and bounded tombstone recovery. Draft writes use compare-and-swap conflict
-handling. Request receipts and scheduler observations remain owned by their
+and bounded tombstone recovery. A draft write replaces the chat's draft. Request receipts and scheduler observations remain owned by their
 runtime components.
 
 ## Invalidation and snapshots
@@ -57,10 +56,10 @@ safe after a lost response or failed analytics checkpoint. Runtime WAL and
 
 ## Draft identity
 
-Each browser tab owns its draft branch. A draft key can be `device:session` or
-`device:writer:session`, where `writer` is one nonempty tab identifier without
-colons. Identity fields in the payload must match that key. Conditional writes
-return the current master row on conflict, preserving other tabs' drafts.
+A chat has one draft, shared by every device and tab: its key is the chat id
+(`session`), and `device` names the device that wrote it last. The last write wins;
+a write never conflicts. Migration `2026-11-06-one-draft-per-chat` kept the newest
+of the old per-device versions of each chat.
 
 ## Checks
 
