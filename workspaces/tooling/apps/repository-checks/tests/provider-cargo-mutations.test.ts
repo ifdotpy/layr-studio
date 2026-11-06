@@ -6,8 +6,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   existsSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -21,6 +24,20 @@ import {
 } from "../gate-config.ts";
 
 const root = fileURLToPath(new URL("../../../../..", import.meta.url));
+
+// cpSync keeps the times of files, not of folders. A build script that watches a folder
+// (runtime-schema watches src/schemas/codex) would then run again on every copy.
+function keepFolderTimes(source: string, target: string) {
+  if (!statSync(source).isDirectory()) return;
+  for (const entry of readdirSync(source, { withFileTypes: true }))
+    if (entry.isDirectory())
+      keepFolderTimes(
+        path.join(source, entry.name),
+        path.join(target, entry.name),
+      );
+  const { atime, mtime } = statSync(source);
+  utimesSync(target, atime, mtime);
+}
 test(
   "Cargo refuses stale sources and regenerated incompatible vendor types",
   { timeout: 900000 },
@@ -57,6 +74,7 @@ test(
           recursive: true,
           preserveTimestamps: true,
         });
+        keepFolderTimes(path.join(root, file), target);
       }
       assert.equal(existsSync(path.join(copy, "node_modules")), false);
       const manifest = readFileSync(
