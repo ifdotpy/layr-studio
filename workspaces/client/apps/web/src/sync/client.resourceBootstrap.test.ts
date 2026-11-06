@@ -590,6 +590,96 @@ it.each(["degraded", "offline", "stopped"] as const)(
   },
 );
 
+// The captured initial pull had 501 rows at a shared sequence boundary,
+// followed by the missing live chat on a later page.
+it("continues an initial pull when a sequence boundary exceeds the page limit", async () => {
+  const f = await setup();
+  const chatId = "01a1ae42-f050-7fbf-9608-ba90f7316cf2";
+  const boundary = 1863195;
+  const chatSeq = 3131664;
+  mocks.syncGet.mockImplementation(
+    async (path: string, options: { query: { after: number } }) => {
+      if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
+      const first = options.query.after === 0;
+      return {
+        workspaceId: f.workspaceId,
+        initialHigh: 3179588,
+        maxSeq: 3179588,
+        checkpoint: { seq: first ? boundary : 3179588 },
+        documents: first
+          ? Array.from({ length: 501 }, (_, i) => ({
+              op: "delete",
+              collection: "retainedWorktree",
+              id: `old-${i}`,
+              seq: boundary,
+            }))
+          : [
+              {
+                op: "upsert",
+                collection: "agentSummary",
+                id: chatId,
+                seq: chatSeq,
+                value: {
+                  id: chatId,
+                  rootId: chatId,
+                  name: "Studio and layr",
+                  projectPath: "/project",
+                  status: AgentStatus.completed,
+                },
+              },
+              ...Array.from({ length: 500 }, (_, i) => ({
+                op: "delete",
+                collection: "retainedWorktree",
+                id: `final-${i}`,
+                seq: 3179588,
+              })),
+            ],
+      };
+    },
+  );
+  f.subscribe();
+  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
+  f.connection("degraded");
+  await vi.waitFor(() =>
+    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+  );
+  expect(f.pulls()).toHaveLength(2);
+  expect(f.pulls()[1]?.[1].query.after).toBe(boundary);
+  expect(f.snapshots.at(-1)?.threads.map((chat) => chat.id)).toContain(chatId);
+});
+
+it("rejects an oversized page that cannot advance the pull cursor", async () => {
+  const f = await setup();
+  mocks.syncGet.mockImplementation(async (path: string) => {
+    if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
+    if (f.pulls().length > 1) throw new Error("unexpected repeated pull");
+    return {
+      workspaceId: f.workspaceId,
+      initialHigh: 100,
+      maxSeq: 100,
+      checkpoint: { seq: 0 },
+      documents: Array.from({ length: 501 }, (_, i) => ({
+        op: "delete",
+        collection: "retainedWorktree",
+        id: `stalled-${i}`,
+        seq: 0,
+      })),
+    };
+  });
+  f.subscribe();
+  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
+  f.connection("degraded");
+  await vi.waitFor(() =>
+    expect(f.failed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "The server did not advance the sync checkpoint.",
+      }),
+    ),
+  );
+  expect(f.pulls()).toHaveLength(1);
+  expect(f.snapshots.at(-1)?.entitiesComplete).not.toBe(true);
+});
+
 it("does not use HTTP recovery to bypass a schema-mismatched stream", async () => {
   const f = await setup();
   f.subscribe();

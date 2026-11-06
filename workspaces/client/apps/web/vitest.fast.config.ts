@@ -58,6 +58,7 @@ export default {
       "src/sync/draftReplication.test.ts",
       "src/sync/client.draftServer.test.ts",
       "src/sync/client.entityServer.test.ts",
+      "src/sync/client.resourceBootstrap.test.ts",
       "src/sync/client.terminalServer.test.ts",
 
       // Token snapshots carry each agent once and derive team membership without entity projections.
