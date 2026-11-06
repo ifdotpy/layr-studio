@@ -712,10 +712,11 @@ fn require_not_excluded(
     agent: &studio_runtime_store::AgentRecord,
 ) -> Result<(), CoordinationError> {
     let account = agent.account_key.as_str();
-    if root
-        .excluded_account_keys
-        .value()
-        .is_some_and(|keys| keys.iter().any(|key| key == account))
+    if agent.id != root.id
+        && root
+            .excluded_account_keys
+            .value()
+            .is_some_and(|keys| keys.iter().any(|key| key == account))
     {
         return Err(CoordinationError::InvalidRequest(
             "This account is disabled for this chat",
@@ -1151,6 +1152,14 @@ mod tests {
     };
 
     #[test]
+    fn exclusions_do_not_block_the_lead_but_block_workers() {
+        let root = studio_runtime_store::AgentRecord::from_value(json!({"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]})).unwrap();
+        let child = studio_runtime_store::AgentRecord::from_value(json!({"id":"child","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"blocked","provider":"codex"})).unwrap();
+        assert!(super::require_not_excluded(&root, &root).is_ok());
+        assert!(super::require_not_excluded(&root, &child).is_err());
+    }
+
+    #[test]
     fn message_limit_counts_unicode_characters_for_paired_inputs() {
         assert!(message_text_within_limit(&"🙂".repeat(10_000)));
         assert!(!message_text_within_limit(&"🙂".repeat(32_001)));
@@ -1240,6 +1249,8 @@ mod tests {
         .expect("lead lookup succeeds")
         .expect("lead exists");
         lead.auto_wake = Some(true);
+        lead.excluded_account_keys =
+            studio_runtime_schema::queue_command::Field::Value(vec!["default".into()]);
         lead.profile_id = studio_runtime_schema::queue_command::Field::Value("profile-1".into());
         lead.profile_instructions =
             studio_runtime_schema::queue_command::Field::Value("Use the project profile.".into());

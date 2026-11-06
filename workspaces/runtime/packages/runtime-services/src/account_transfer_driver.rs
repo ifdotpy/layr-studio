@@ -333,7 +333,7 @@ pub async fn request(
                 &target,
             ) {
                 return Err(TransferError::Refused(
-                    "This account is disabled for this chat",
+                    "This account is excluded for this chat's agents. Include it first, or choose another account.",
                 ));
             }
             let summary = match actor.account_transfer.value() {
@@ -2169,7 +2169,7 @@ mod request_tests {
         }))
         .expect("test fixture operation succeeds");
         let before_blocked = snapshot();
-        assert!(
+        assert_eq!(
             request(
                 &store,
                 "5a300f72-4ea6-4d30-8a0e-9b2c13c4226f",
@@ -2179,7 +2179,9 @@ mod request_tests {
                 "codex",
                 10.0
             )
-            .is_err()
+            .unwrap_err()
+            .to_string(),
+            "This account is excluded for this chat's agents. Include it first, or choose another account."
         );
         assert_eq!(
             snapshot(),

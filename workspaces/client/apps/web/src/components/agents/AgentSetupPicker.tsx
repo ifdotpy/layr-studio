@@ -24,7 +24,9 @@ export type AgentSetupPickerProps = {
   accountKey: string;
   accountLabel?: string;
   onAccount: (key: string | null) => void;
-  automaticAccount?: boolean;
+  excludedAccountKeys?: readonly string[] | undefined;
+  onExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
+  showAccountChooser?: boolean;
   isAccountDisabled?: (account: Account) => boolean;
   accountUnavailableReason?:
     | ((account: Account) => string | undefined)
@@ -76,6 +78,7 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
         </Text>
       )}
       <AccountTiles
+        selectable={p.showAccountChooser !== false}
         showLabel={false}
         label={
           p.accountLabel ||
@@ -94,12 +97,8 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
         disabled={!!p.readOnlyReason || p.accountDisabled}
         accountDisabled={p.isAccountDisabled}
         accountUnavailableReason={p.accountUnavailableReason}
-        automatic={p.automaticAccount}
-        automaticDescription={
-          p.role === "review"
-            ? "Native reviews use the caller account; review tasks use the Workers default."
-            : undefined
-        }
+        excludedAccountKeys={p.excludedAccountKeys}
+        onExcludedAccountKeysChange={p.onExcludedAccountKeysChange}
       />
       {gated("model_change") && (
         <ModelField

@@ -29,10 +29,11 @@ impl Admission for MessageNativeAdmission {
             .get("accountKey")
             .and_then(Value::as_str)
             .unwrap_or("default");
-        if root
-            .excluded_account_keys
-            .value()
-            .is_some_and(|keys| keys.iter().any(|key| key == account))
+        if actor.id != root.id
+            && root
+                .excluded_account_keys
+                .value()
+                .is_some_and(|keys| keys.iter().any(|key| key == account))
         {
             return Err(NativeError::Invalid("account-excluded"));
         }
@@ -225,7 +226,7 @@ mod admission_tests {
     use studio_runtime_store::RuntimeStore;
 
     #[tokio::test]
-    async fn excluded_account_refuses_native_actions() {
+    async fn exclusion_blocks_worker_native_actions_but_not_the_lead() {
         let directory = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
         store
@@ -233,14 +234,17 @@ mod admission_tests {
                 let agent = json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle",
                 "compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]});
                 AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
+                let worker = json!({"id":"worker","rootId":"lead","epoch":1,"status":"idle",
+                "compactions":0,"accountKey":"blocked","provider":"codex"});
                 let admission = MessageNativeAdmission::new(Arc::new(
                     crate::message_admission::PreparedAdmission::default(),
                 ));
                 for action in [Action::Compact, Action::Review] {
                     assert!(matches!(
-                        admission.check(tx, &agent, action),
+                        admission.check(tx, &worker, action),
                         Err(NativeError::Invalid("account-excluded"))
                     ));
+                    assert!(!matches!(admission.check(tx, &agent, action), Err(NativeError::Invalid("account-excluded"))));
                 }
                 Ok::<_, studio_runtime_store::StoreError>(())
             })

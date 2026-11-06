@@ -143,7 +143,6 @@ window.fetch = async (input, options) => {
         model: body.worker_defaults.model,
         effort: body.worker_defaults.effort,
         delegationDepth: body.worker_defaults.delegation_depth,
-        accountKey: body.worker_defaults.account_key,
         fastMode: body.worker_defaults.fast_mode,
       };
     else if (body.review_defaults) next.reviewDefaults = body.review_defaults;

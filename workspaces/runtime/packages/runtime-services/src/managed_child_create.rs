@@ -63,8 +63,7 @@ pub trait ManagedCreationEnvironment: Send + Sync {
         Box::pin(async { Ok(()) })
     }
     /// Resolve the account and model as `codex_worker_accounts.resolve` does.
-    /// `requested_account_key` is the per-worker `account_key`; the default is
-    /// kept separate so an explicit value can be checked against chat settings.
+    /// `requested_account_key` is the optional per-worker `account_key`.
     /// `excluded_account_keys` comes from the root agent. Project keys are the
     /// resolved project settings allowlist, when the root has a project binding.
     /// Implicit selection picks the ready account with the fewest active agents
@@ -246,24 +245,20 @@ async fn select_review_account(
     model: &str,
     account_load: &std::collections::HashMap<String, i64>,
 ) -> Result<(String, crate::host_worker_create::AccountIdentity), WorkerSettingsError> {
-    let selected = explicit.or_else(|| {
-        root.review_defaults
+    let selected = explicit;
+    let (excluded, keys, groups) = account_scope(store, root).await?;
+    let caller_eligible = !excluded.contains(&parent.account_key)
+        && keys
             .as_ref()
-            .and_then(|value| value.account_key.as_deref())
-    });
-    let caller_offers =
-        selected.is_none() && environment.account_offers_model(&parent.account_key, model)?;
-    let (excluded, keys, groups) = if caller_offers {
-        (Vec::new(), None, None)
-    } else {
-        account_scope(store, root).await?
-    };
+            .is_none_or(|keys| keys.is_empty() || keys.contains(&parent.account_key));
+    let caller_offers = selected.is_none()
+        && caller_eligible
+        && environment.account_offers_model(&parent.account_key, model)?;
     Ok(
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key: &parent.account_key,
             requested_account_key: selected
                 .or_else(|| caller_offers.then_some(parent.account_key.as_str())),
-            default_account_key: None,
             model,
             excluded_account_keys: &excluded,
             project_account_keys: keys.as_deref(),
@@ -310,13 +305,6 @@ pub(crate) async fn resolve_worker_settings(
                 .and_then(|value| value.get("effort"))
                 .and_then(Value::as_str)
         });
-    let default_account = known
-        .and_then(|value| value.account_key.value().map(String::as_str))
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("accountKey"))
-                .and_then(Value::as_str)
-        });
     let default_fast = known
         .and_then(|value| value.fast_mode.value().copied())
         .or_else(|| {
@@ -359,7 +347,7 @@ pub(crate) async fn resolve_worker_settings(
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key: &parent.account_key,
             requested_account_key,
-            default_account_key: default_account,
+
             model: requested_model,
             excluded_account_keys: &excluded,
             project_account_keys: keys.as_deref(),
@@ -1471,7 +1459,6 @@ fn map_create_error(error: crate::agents_create::CreateError) -> Error {
         | crate::agents_create::CreateError::IdentityChanged
         | crate::agents_create::CreateError::Internal
         | crate::agents_create::CreateError::Stale
-        | crate::agents_create::CreateError::CurrentAccountExcluded
         | crate::agents_create::CreateError::InFlight
         | crate::agents_create::CreateError::Request(_)
         | crate::agents_create::CreateError::InvalidStoredObject { .. } => Error::Refused,
@@ -1498,7 +1485,6 @@ fn map_recheck_error(
         | crate::agents_create::MutationError::IdentityChanged
         | crate::agents_create::MutationError::Internal
         | crate::agents_create::MutationError::Stale
-        | crate::agents_create::MutationError::CurrentAccountExcluded
         | crate::agents_create::MutationError::InFlight
         | crate::agents_create::MutationError::InvalidStoredObject { .. }
         | crate::agents_create::MutationError::Request(_)) => {

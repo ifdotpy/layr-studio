@@ -922,7 +922,7 @@ async fn read_catalog(
 
 fn destination_settings(
     agent: &studio_runtime_store::AgentRecord,
-    source_account: &str,
+    _source_account: &str,
     source_provider: ProviderKind,
     target_provider: ProviderKind,
     catalog: &CatalogObservation,
@@ -978,20 +978,12 @@ fn destination_settings(
         .try_into()
         .map_err(|_| TransferError::Refused("Invalid destination account"))?;
     let mut defaults = worker_defaults(agent)?.value().cloned().unwrap_or_default();
-    // Defaults naming another account are the owner's own choice: keep them as they are.
-    if defaults
-        .account_key
-        .value()
-        .is_none_or(|key| key == source_account)
-    {
-        defaults.account_key = Field::Value(catalog.identity.account_key.clone());
-        if changed {
-            defaults.model = Field::Null;
-            defaults.effort = Field::Value("medium".into());
-            defaults.fast_mode = Field::Value(false);
-            defaults.daybreak_enabled = Field::Value(false);
-            defaults.cyber_access_program = Field::Value("standard".into());
-        }
+    if changed {
+        defaults.model = Field::Null;
+        defaults.effort = Field::Value("medium".into());
+        defaults.fast_mode = Field::Value(false);
+        defaults.daybreak_enabled = Field::Value(false);
+        defaults.cyber_access_program = Field::Value("standard".into());
     }
     let daybreak = !changed && agent.daybreak_enabled == Some(true);
     let cyber_program = match target_provider {
@@ -1782,18 +1774,14 @@ mod destination_settings_tests {
         .unwrap();
         let defaults = result.settings.worker_defaults.value().unwrap();
         assert_eq!(
-            defaults.account_key.value().map(String::as_str),
-            Some("codex-login")
-        );
-        assert_eq!(
             defaults.model.value().map(String::as_str),
             Some("gpt-6.1-sol")
         );
     }
 
     #[test]
-    fn transfer_moves_worker_defaults_naming_source_account() {
-        let agent = studio_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"source","model":"model-a"}}"#).unwrap();
+    fn transfer_preserves_worker_model_on_same_provider() {
+        let agent = studio_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"model":"model-a"}}"#).unwrap();
         let result = destination_settings(
             &agent,
             "source",
@@ -1803,10 +1791,6 @@ mod destination_settings_tests {
         )
         .unwrap();
         let defaults = result.settings.worker_defaults.value().unwrap();
-        assert_eq!(
-            defaults.account_key.value().map(String::as_str),
-            Some("target")
-        );
         assert_eq!(defaults.model.value().map(String::as_str), Some("model-a"));
     }
 

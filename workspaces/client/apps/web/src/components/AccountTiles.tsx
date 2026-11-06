@@ -1,9 +1,9 @@
 import { LimitColor } from "../generated/api.ts";
 import type { components } from "../generated/api";
 import { useServerSync } from "../servers/ServerServicesContext";
-import { Radio, SegmentedControl, Tooltip } from "@mantine/core";
-import { Check, Sparkles } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { Checkbox, SegmentedControl, Tooltip } from "@mantine/core";
+import { Check } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ActionButton } from "./ui/primitives";
 import {
   accountLimits,
@@ -291,13 +291,12 @@ function AccountTile({
 }
 
 type AccountTilesProps = {
-  automaticDescription?: string | undefined;
   label: string;
   showLabel?: boolean;
+  selectable?: boolean;
   visibleLabel?: string;
   accounts: Account[];
   disabled?: boolean | undefined;
-  automatic?: boolean | undefined;
   provider?: string;
   providers?: string[];
   onProvider?: (provider: string) => void;
@@ -305,12 +304,15 @@ type AccountTilesProps = {
   accountUnavailableReason?:
     | ((account: Account) => string | undefined)
     | undefined;
+  excludedAccountKeys?: readonly string[] | undefined;
+  onExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
 } & (
   | { multiple?: false; value: string; onChange: (value: string) => void }
   | { multiple: true; value: string[]; onChange: (value: string[]) => void }
 );
 export function AccountTiles(p: AccountTilesProps) {
-  const automaticName = useId();
+  const excluded = p.excludedAccountKeys;
+  const onExcludedChange = p.onExcludedAccountKeysChange;
   const selected = p.multiple ? p.value[0] : p.value;
   const selectedProvider =
     p.accounts.find((account) => account.id === selected)?.provider || "";
@@ -368,27 +370,13 @@ export function AccountTiles(p: AccountTilesProps) {
         />
       )}
       <div className="setup-accounts">
-        {p.automatic && (
-          <Radio
-            className="setup-account setup-account-automatic"
-            name={automaticName}
-            aria-label="Automatic"
-            label={
-              <span className="setup-automatic-label">
-                <Sparkles aria-hidden="true" />
-                <span>Automatic</span>
-              </span>
-            }
-            checked={!selected}
-            data-selected={!selected || undefined}
-            disabled={p.disabled}
-            onChange={() => select("")}
-          />
-        )}
         {p.accounts
           .filter((account) => account.provider === provider)
           .map((account) => (
-            <div key={account.id}>
+            <div
+              key={account.id}
+              className={excluded ? "setup-account-choice" : undefined}
+            >
               <AccountTile
                 account={account}
                 selected={
@@ -398,11 +386,12 @@ export function AccountTiles(p: AccountTilesProps) {
                 }
                 multiple={p.multiple}
                 readOnly={
-                  !p.multiple &&
-                  p.value === account.id &&
-                  !p.automatic &&
-                  p.accounts.filter((item) => item.provider === provider)
-                    .length === 1
+                  p.selectable === false ||
+                  (!p.multiple &&
+                    p.value === account.id &&
+                    !excluded &&
+                    p.accounts.filter((item) => item.provider === provider)
+                      .length === 1)
                 }
                 disabled={
                   !!p.disabled ||
@@ -411,18 +400,33 @@ export function AccountTiles(p: AccountTilesProps) {
                 }
                 onSelect={() => select(account.id)}
               />
+              {excluded && onExcludedChange && (
+                <Checkbox
+                  className="setup-account-exclusion"
+                  label="Exclude for workers and reviewers"
+                  aria-label={`Exclude ${setupAccountName(account)} from workers and reviewers`}
+                  checked={excluded.includes(account.id)}
+                  disabled={
+                    p.disabled ||
+                    (p.accounts.filter((item) => !excluded.includes(item.id))
+                      .length === 1 &&
+                      !excluded.includes(account.id))
+                  }
+                  onChange={(event) =>
+                    onExcludedChange(
+                      event.currentTarget.checked
+                        ? [...excluded, account.id]
+                        : excluded.filter((key) => key !== account.id),
+                    )
+                  }
+                />
+              )}
               {p.accountUnavailableReason?.(account) && (
                 <small>{p.accountUnavailableReason(account)}</small>
               )}
             </div>
           ))}
       </div>
-      {p.automatic && !selected && (
-        <p className="account-tiles-help">
-          {p.automaticDescription ||
-            "Picks a free account: project order first, then the least busy."}
-        </p>
-      )}
     </div>
   );
 }

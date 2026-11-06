@@ -9711,6 +9711,11 @@ export interface components {
        */
       turnId?: null | string | undefined;
     };
+    /**
+     * Excluded Account Keys
+     * @default []
+     */
+    ChatAccountExclusions: string[];
     ChatEntityDto: {
       id: string;
       kind?: components["schemas"]["ChatKind"] | null | undefined;
@@ -11897,11 +11902,9 @@ export interface components {
        * @default null
        */
       effort?: string | null | undefined;
-      /**
-       * Excluded Account Keys
-       * @default []
-       */
-      excluded_account_keys?: string[] | undefined;
+      excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
       /**
        * Expected Account Key
        * @default default
@@ -12182,6 +12185,9 @@ export interface components {
        * @default null
        */
       effort?: string | null | undefined;
+      excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
       /**
        * Fast Mode
        * @default null
@@ -19928,7 +19934,6 @@ export interface components {
     };
     /** ReviewDefaults */
     ReviewDefaults: {
-      account_key?: string | null | undefined;
       /** Effort */
       effort: string | null;
       /** @description Override Fast mode for native reviews and reviewer tasks. Omission preserves caller inheritance for native reviews and worker-default inheritance for reviewer tasks. */
@@ -19938,7 +19943,6 @@ export interface components {
     };
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
-      accountKey?: string | null | undefined;
       /** Effort */
       effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;
@@ -26998,11 +27002,6 @@ export interface components {
     /** WorkerDefaults */
     WorkerDefaults: {
       /**
-       * Account Key
-       * @default null
-       */
-      account_key?: string | null | undefined;
-      /**
        * Daybreak Enabled
        * @default null
        */
@@ -27021,11 +27020,6 @@ export interface components {
     };
     /** WorkerDefaultsDto */
     WorkerDefaultsDto: {
-      /**
-       * Accountkey
-       * @default null
-       */
-      accountKey?: null | string | undefined;
       /**
        * Cyberaccessprogram
        * @default null
