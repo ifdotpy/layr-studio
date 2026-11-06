@@ -1417,6 +1417,12 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             studio_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
         openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = studio_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
     }
+    // The summary owns this backend-computed field; AgentEntityDto also exposes it
+    // because the web Agent combines summary and detail fields.
+    for name in ["AgentSummaryEntityDto", "AgentEntityDto"] {
+        openapi["components"]["schemas"][name]["properties"]["legacyVmWorkspace"] =
+            studio_json::json!({"type":"boolean"});
+    }
     // AgentResponse is closed. Give it every agent view field, so a projected field cannot fail a committed write.
     let view_fields = openapi["components"]["schemas"]["AgentEntityDto"]["properties"].clone();
     let response_fields = openapi["components"]["schemas"]["AgentResponse"]["properties"]

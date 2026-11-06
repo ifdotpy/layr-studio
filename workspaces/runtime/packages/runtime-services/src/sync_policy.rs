@@ -999,6 +999,7 @@ pub(crate) fn agent_view_documents(
     let raw = agent_volatile::merged_text(connection, id, raw)?;
     let (record, view) = match studio_runtime_store::decode_agent_record(connection, id, &raw) {
         Ok(record) => {
+            let legacy_vm_workspace = crate::workspace_ready::legacy_vm_record(&record);
             let context = crate::sync_entity_context::agent_view_context(
                 connection,
                 &record,
@@ -1024,7 +1025,8 @@ pub(crate) fn agent_view_documents(
                     retained_worktree: retained,
                 }));
             };
-            let summary = studio_runtime_schema::generated::AgentSummaryEntityDto::from(&full);
+            let mut summary = studio_runtime_schema::generated::AgentSummaryEntityDto::from(&full);
+            summary.legacy_vm_workspace = Some(legacy_vm_workspace);
             let detail = studio_runtime_schema::generated::AgentDetailEntityDto::from(&full);
             full.team_counts = None;
             full.has_question = None;

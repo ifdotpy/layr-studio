@@ -3995,6 +3995,7 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
+      legacyVmWorkspace?: boolean | undefined;
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;
@@ -5752,6 +5753,7 @@ export interface components {
        * @default null
        */
       layrStateId?: null | string | undefined;
+      legacyVmWorkspace?: boolean | undefined;
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;
@@ -6179,6 +6181,7 @@ export interface components {
       lastCompletedTurnStatus?: null | string | undefined;
       /** Lastreadat */
       lastReadAt?: null | number | undefined;
+      legacyVmWorkspace?: boolean | undefined;
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;

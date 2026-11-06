@@ -2102,9 +2102,6 @@ function workspaceRustFiles(root: string) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (entry.isDirectory() && SOURCE_SKIP.has(entry.name)) continue;
       const full = path.join(directory, entry.name);
-      const relative = path.relative(root, full).split(path.sep).join("/");
-      if (entry.isDirectory() && relative === "workspaces/runtime/apps/layr")
-        continue;
       if (entry.isDirectory()) visit(full);
       else if (entry.isFile() && entry.name.endsWith(".rs")) files.push(full);
     }
