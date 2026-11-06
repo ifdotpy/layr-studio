@@ -94,9 +94,10 @@ fn liveness_kind(code: crate::liveness::Code) -> Kind {
 /// The kind of a monitor's end, when Studio caused it. A command with an exit
 /// code ended on its own, and an owner's stop is the owner's choice.
 fn monitor_kind(record: &studio_runtime_store::MonitorRecord) -> Option<Kind> {
-    match record.status {
-        MonitorStatus::Lost => Some(Kind::MonitorOutcomeLost),
-        MonitorStatus::Failed if record.exit_code.is_none() => {
+    use studio_runtime_schema::monitor_record::ProcessState;
+    match record.process_state()? {
+        ProcessState::Lost => Some(Kind::MonitorOutcomeLost),
+        ProcessState::Failed { exit: None } => {
             let Some(error) = record
                 .error
                 .as_ref()
@@ -109,12 +110,12 @@ fn monitor_kind(record: &studio_runtime_store::MonitorRecord) -> Option<Kind> {
                 || error.ends_with(&format!(": {MONITOR_OWNER_STOPPED_ERROR}"));
             (!owner_stopped).then_some(Kind::MonitorNotRecorded)
         }
-        MonitorStatus::Approval
-        | MonitorStatus::Starting
-        | MonitorStatus::Running
-        | MonitorStatus::Completed
-        | MonitorStatus::Failed
-        | MonitorStatus::Cancelled => None,
+        ProcessState::Approval
+        | ProcessState::Starting
+        | ProcessState::Running
+        | ProcessState::Completed { .. }
+        | ProcessState::Failed { exit: Some(_) }
+        | ProcessState::Cancelled { .. } => None,
     }
 }
 
@@ -1410,7 +1411,7 @@ mod tests {
                     ("owner-stopped-prefixed", json!({"status":"failed","exitCode":null,"error":stopped})),
                     ("empty-error", json!({"status":"failed","exitCode":null,"error":""})),
                     ("number-error", json!({"status":"failed","exitCode":null,"error":7})),
-                    ("completed", json!({"status":"completed","exitCode":null,"error":"x"})),
+                    ("completed", json!({"status":"completed","exitCode":0,"error":"x"})),
                     ("deleted-owner", json!({"status":"lost","agent":"gone"})),
                     ("missing-owner", json!({"status":"lost","agent":"nobody"})),
                     ("old-lost", json!({"status":"lost","created":old})),

@@ -226,12 +226,17 @@ pub fn settle(
     {
         return Ok(true);
     }
-    use studio_runtime_schema::studio_errors::MonitorStatus;
-    let status = match monitor.status {
-        MonitorStatus::Completed if monitor.exit_code == Some(0) => "passed",
-        MonitorStatus::Lost => "unknown",
-        MonitorStatus::Failed | MonitorStatus::Cancelled | MonitorStatus::Completed => "failed",
-        MonitorStatus::Approval | MonitorStatus::Starting | MonitorStatus::Running => {
+    use studio_runtime_schema::monitor_record::ProcessState;
+    let status = match monitor.process_state() {
+        Some(ProcessState::Completed { exit: 0 }) => "passed",
+        Some(ProcessState::Lost) => "unknown",
+        Some(
+            ProcessState::Failed { .. }
+            | ProcessState::Cancelled { .. }
+            | ProcessState::Completed { .. },
+        )
+        | None => "failed",
+        Some(ProcessState::Approval | ProcessState::Starting | ProcessState::Running) => {
             return Ok(true);
         }
     };

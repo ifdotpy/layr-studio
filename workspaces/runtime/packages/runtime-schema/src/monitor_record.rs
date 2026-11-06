@@ -575,6 +575,59 @@ impl MonitorRecord {
     pub fn status(&self) -> MonitorStatus {
         self.status
     }
+    /// The typed process state. None for a completed record without an exit code,
+    /// which the store's check trigger refuses (`runtime_monitors_completed_exit_*`).
+    #[must_use]
+    pub fn process_state(&self) -> Option<ProcessState> {
+        Some(match self.status {
+            MonitorStatus::Approval => ProcessState::Approval,
+            MonitorStatus::Starting => ProcessState::Starting,
+            MonitorStatus::Running => ProcessState::Running,
+            MonitorStatus::Completed => ProcessState::Completed {
+                exit: self.exit_code?,
+            },
+            MonitorStatus::Failed => ProcessState::Failed {
+                exit: self.exit_code,
+            },
+            MonitorStatus::Cancelled => ProcessState::Cancelled {
+                exit: self.exit_code,
+            },
+            MonitorStatus::Lost => ProcessState::Lost,
+        })
+    }
+}
+
+/// The state of a process that Studio starts and watches for an agent (the Process
+/// entity of the target design; stored as a monitor). A completed process always has
+/// its exit code; a failed or cancelled one has it when the process reported one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessState {
+    Approval,
+    Starting,
+    Running,
+    Completed { exit: i64 },
+    Failed { exit: Option<i64> },
+    Cancelled { exit: Option<i64> },
+    Lost,
+}
+
+impl ProcessState {
+    /// Generated check triggers on `runtime_monitors`: a completed record has an
+    /// integer exit code. Names and SQL come only from this owner.
+    #[must_use]
+    pub fn monitor_check_triggers() -> [(String, String); 2] {
+        ["INSERT", "UPDATE"].map(|event| {
+            let name = format!("runtime_monitors_completed_exit_{}", event.to_lowercase());
+            let sql = format!(
+                "CREATE TRIGGER IF NOT EXISTS {name} BEFORE {event} ON runtime_monitors \
+                 WHEN json_valid(NEW.record) AND json_extract(NEW.record,'$.status')='completed' \
+                 AND json_type(NEW.record,'$.exitCode') IS NOT 'integer' \
+                 BEGIN SELECT RAISE(ABORT,'a completed process needs its exit code'); END"
+            );
+            (name, sql)
+        })
+    }
 }
 pub(crate) fn schema() -> Value {
     schemars::schema_for!(MonitorRecord).to_value()

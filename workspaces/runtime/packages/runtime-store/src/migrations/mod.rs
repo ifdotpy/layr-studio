@@ -97,6 +97,7 @@ mod m2026_11_04_window_read_time;
 mod m2026_11_04_work_read_time;
 mod m2026_11_06_item_hidden_by;
 mod m2026_11_06_one_draft_per_chat;
+mod m2026_11_06_process_exit_check;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1604,6 +1605,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_item_hidden_by::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-process-exit-check",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations without the completed-exit check on runtime_monitors",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_process_exit_check::apply(c.transaction),
     },
 ];
 

@@ -822,7 +822,7 @@ async fn synthetic_store(root: &Path, leads: usize, tasks: usize) -> std::sync::
                 let id = format!("monitor-{index:06}");
                 monitor.execute(params![
                     id,
-                    monitor_fixture(&json!({"id":id,"agent":agent,"status":"completed","created":index as f64}))
+                    monitor_fixture(&json!({"id":id,"agent":agent,"status":"completed","exitCode":0,"created":index as f64}))
                         .to_string()
                 ])?;
                 event.execute(params![format!("event-{index:06}"), agent, index as f64])?;

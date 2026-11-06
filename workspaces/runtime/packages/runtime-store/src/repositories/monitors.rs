@@ -182,7 +182,7 @@ mod tests {
             .await
             .expect("store");
         store.transaction(|tx| {
-            let raw = r#"{"id":"m","agent":"a","epoch":1,"requestId":"r","status":"completed","activityAt":1,"activityGeneration":0,"bytes":0,"command":"","created":1,"cwd":"/","interactive":false,"livenessCommand":"","log":"/log","stallTimeoutSeconds":0,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":1000,"wakeOn":"exit","streamQueue":[{"kind":"exit","cursor":"result:m","code":0,"error":null,"finished":1,"byteLength":0,"operation":{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c"}}]}"#;
+            let raw = r#"{"id":"m","agent":"a","epoch":1,"requestId":"r","status":"completed","exitCode":0,"activityAt":1,"activityGeneration":0,"bytes":0,"command":"","created":1,"cwd":"/","interactive":false,"livenessCommand":"","log":"/log","stallTimeoutSeconds":0,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":1000,"wakeOn":"exit","streamQueue":[{"kind":"exit","cursor":"result:m","code":0,"error":null,"finished":1,"byteLength":0,"operation":{"agent":"a","epoch":1,"accountKey":"default","connectionId":"c"}}]}"#;
             let mut monitor: super::MonitorRecord = studio_json::from_str(raw)?;
             crate::Table::<super::MonitorRecord>::new(tx).put(&monitor)?;
             let sql: String = tx.query_row("SELECT sql FROM sqlite_schema WHERE name=?1", [QUEUED_STREAM_INDEX], |row| row.get(0))?;

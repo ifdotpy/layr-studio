@@ -2622,6 +2622,7 @@
         "agent": "agent",
         "turnId": null,
         "status": "completed",
+        "exitCode": 0,
         "stage": "completed",
         "outcome": "completed"
       },
@@ -2670,6 +2671,7 @@
         "agent": "agent",
         "turnId": "turn",
         "status": "completed",
+        "exitCode": 0,
         "stage": "completed",
         "outcome": "completed"
       },
@@ -2718,6 +2720,7 @@
         "agent": "agent",
         "turnId": "foreign",
         "status": "completed",
+        "exitCode": 0,
         "stage": "completed",
         "outcome": "completed"
       },

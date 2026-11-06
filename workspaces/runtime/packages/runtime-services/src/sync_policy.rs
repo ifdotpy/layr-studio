@@ -3130,6 +3130,7 @@ mod tests {
                         let mut terminal = monitor.clone();
                         terminal.id = format!("terminal-{index}");
                         terminal.status = studio_runtime_schema::studio_errors::MonitorStatus::Completed;
+                        terminal.exit_code.get_or_insert(0);
                         repository::put(tx, &terminal)?;
                     }
                     maintain_monitor_window(tx, &|_, _, _, _| true)?;
@@ -3318,7 +3319,7 @@ mod tests {
                         "INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)",
                         rusqlite::params![
                             id,
-                            json!({"id":id,"agent":agent,"epoch":0,"status":status,"created":created,"requestId":format!("request-{id}"),"activityAt":created,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"})
+                            json!({"id":id,"agent":agent,"epoch":0,"status":status,"exitCode":(status == "completed").then_some(0),"created":created,"requestId":format!("request-{id}"),"activityAt":created,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"})
                                 .to_string()
                         ],
                     )
@@ -3475,7 +3476,7 @@ mod tests {
                     "INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)",
                     rusqlite::params![
                         id,
-                        json!({"id":id,"agent":agent,"epoch":0,"status":"completed","created":10,"requestId":format!("request-{id}"),"activityAt":10,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"})
+                        json!({"id":id,"agent":agent,"epoch":0,"status":"completed","exitCode":0,"created":10,"requestId":format!("request-{id}"),"activityAt":10,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit"})
                             .to_string()
                     ],
                 )
