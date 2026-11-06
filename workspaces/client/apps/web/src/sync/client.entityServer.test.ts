@@ -60,6 +60,9 @@ let origin: string;
 let headers: Record<string, string>;
 let server: ReturnType<typeof spawn>;
 let directory: string;
+let compactServer: ReturnType<typeof spawn>;
+let compactDirectory: string;
+let compact: { origin: string; headers: Record<string, string> };
 let stopProjection: (() => void) | undefined;
 let coldResponse: Response | undefined;
 const coldController = new AbortController();
@@ -101,6 +104,32 @@ beforeAll(async () => {
   } finally {
     lines.close();
   }
+  compactDirectory = await mkdtemp(join(tmpdir(), "studio-entity-compact-"));
+  compactServer = spawn(binary, [compactDirectory, "--entity-small"], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const compactLines = createInterface({ input: compactServer.stdout! });
+  try {
+    const [line] = await Promise.race([
+      once(compactLines, "line", {
+        signal: AbortSignal.timeout(DRAFT_SERVER_READY_TIMEOUT_MS),
+      }),
+      once(compactServer, "exit").then(([code]) => {
+        throw new Error(`Compact entity fixture exited: ${code}`);
+      }),
+    ]);
+    const ready = JSON.parse(line);
+    compact = {
+      origin: `http://127.0.0.1:${ready.port}`,
+      headers: {
+        "content-type": "application/json",
+        "x-canvas-token": "draft-witness",
+        "x-canvas-workspace": ready.workspaceId,
+      },
+    };
+  } finally {
+    compactLines.close();
+  }
   await Promise.all([
     import("./client"),
     import("./entitySequence"),
@@ -123,30 +152,43 @@ afterAll(async () => {
   stopProjection?.();
   coldController.abort();
   try {
-    if (server?.pid && server.exitCode === null && server.signalCode === null) {
-      const exited = once(server, "exit", {
-        signal: AbortSignal.timeout(10_000),
-      });
-      server.stdin?.end();
-      try {
-        await exited;
-      } catch (error) {
-        if (server.exitCode === null && server.signalCode === null) {
-          const killed = once(server, "exit");
-          server.kill("SIGKILL");
-          await killed;
+    for (const process of [server, compactServer]) {
+      if (
+        process?.pid &&
+        process.exitCode === null &&
+        process.signalCode === null
+      ) {
+        const exited = once(process, "exit", {
+          signal: AbortSignal.timeout(10_000),
+        });
+        process.stdin?.end();
+        try {
+          await exited;
+        } catch (error) {
+          if (process.exitCode === null && process.signalCode === null) {
+            const killed = once(process, "exit");
+            process.kill("SIGKILL");
+            await killed;
+          }
+          throw error;
         }
-        throw error;
       }
     }
   } finally {
     if (directory) await rm(directory, { recursive: true, force: true });
+    if (compactDirectory)
+      await rm(compactDirectory, { recursive: true, force: true });
     vi.unstubAllGlobals();
   }
 });
-async function request(path: string, body?: unknown, signal?: AbortSignal) {
-  const response = await fetch(`${origin}${path}`, {
-    headers,
+async function request(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+  target = { origin, headers },
+) {
+  const response = await fetch(`${target.origin}${path}`, {
+    headers: target.headers,
     method: body === undefined ? "GET" : "POST",
     ...(signal ? { signal } : {}),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -249,12 +291,17 @@ it("advances fresh pulls past deleted candidates without skipping live agents", 
     let initialHigh = 0;
     const found = new Set<string>();
     for (let page = 0; page < 20; page++) {
-      const value = await request("/fixture/fresh", {
-        after,
-        initialHigh,
-        limit: page < 3 ? 10 : 500,
-        priorityId: after === 0 ? priorityId : undefined,
-      });
+      const value = await request(
+        "/fixture/fresh",
+        {
+          after,
+          initialHigh,
+          limit: page < 3 ? 10 : 500,
+          priorityId: after === 0 ? priorityId : undefined,
+        },
+        undefined,
+        compact,
+      );
       for (const row of value.documents)
         if (row.collection === "agentSummary") found.add(row.id);
       expect(value.checkpoint).toBeGreaterThan(after);
@@ -274,6 +321,9 @@ it("bounds a fresh HTTP pull through filtered pages and continues later", async 
   for (let page = 0; page < 30; page++) {
     const value = await request(
       `/api/sync/pull?fresh=1&limit=${page === 0 ? 10 : 500}&after=${after}&initialHigh=${initialHigh}`,
+      undefined,
+      undefined,
+      compact,
     );
     expect(value.checkpoint.seq).toBeGreaterThan(after);
     if (page === 0) {
@@ -324,6 +374,9 @@ it("completes a recovery pull only after server pages with no documents", async 
       }
       const value = await request(
         `${path}${options?.query ? `?${new URLSearchParams(query)}` : ""}`,
+        undefined,
+        undefined,
+        compact,
       );
       if (path === "/api/sync/pull") pages.push(value.documents.length);
       return value;

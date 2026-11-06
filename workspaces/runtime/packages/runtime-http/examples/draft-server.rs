@@ -113,20 +113,22 @@ async fn main() {
     let directory = std::path::PathBuf::from(std::env::args_os().nth(1).expect("state directory"));
     let store = Arc::new(RuntimeStore::open(Some(&directory)).await.expect("store"));
     let terminals = std::env::args().any(|arg| arg == "--terminal-live");
-    let entities = std::env::args().any(|arg| arg == "--entity-live");
+    let small_entities = std::env::args().any(|arg| arg == "--entity-small");
+    let entities = small_entities || std::env::args().any(|arg| arg == "--entity-live");
     if entities {
         studio_runtime_services::entity_publication::install(&store)
             .await
             .expect("entity publisher");
-        store.transaction_with(|tx| {
+        store.transaction_with(move |tx| {
             for index in 0..81 {
                 tx.execute("INSERT INTO runtime_plans(id,record) VALUES(?1,'{}')", [format!("invalid-{index}")])?;
             }
-            for index in 0..=studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+            let count = if small_entities { 10 } else { studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS };
+            for index in 0..=count {
                 let id = format!("deleted-{index}");
                 AgentRepository::put(tx, &AgentRecord::from_value(studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"idle","accountKey":"default","name":id,"compactions":0,"deletedAt":1}))?)?;
             }
-            for index in 0..=studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+            for index in 0..=count {
                 let id = format!("older-{index}");
                 AgentRepository::put(tx, &AgentRecord::from_value(studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"idle","accountKey":"default","name":id,"compactions":0}))?)?;
             }
