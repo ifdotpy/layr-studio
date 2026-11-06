@@ -27,6 +27,16 @@ Before the first build or test in a task, read "Build and test speed rules" in d
 Those rules cover starting a layr line, build variables to keep unset, and running the gates.
 Follow them in every task.
 
+Build caches stay warm. Never delete them to free disk space: not the release
+target (`~/.cache/codex-studio/release-target`), and not the layr caches of main
+(`target`, `node_modules`, `.layr-retest`). To free space, delete in this order:
+your own finished lines (`layr line delete -D <line>`, then `layr gc`), old package
+copies, old check runs, old database backups. Delete your line right after its pull
+request merges, and stop your leftover fixture servers when a run is killed. Do not
+start a full gate or a package build with less than 25 GB free on the volume. If
+only a cache can free the space, ask the owner; then delete only `release/incremental`
+and `release/deps` entries older than a few days, never while the release lock is held.
+
 Read README.md and the relevant source before editing. Use the engineering-protocol
 skill for substantive work when it is available. Match checks to the changed scope.
 
