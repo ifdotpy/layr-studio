@@ -41,8 +41,6 @@ pub(super) fn selection(
         | ResourceRef::VoiceResource(_)
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::AuthProgressResource(_)
-        | ResourceRef::VaultReadinessResource(_)
-        | ResourceRef::VaultJobProgressResource(_)
         | ResourceRef::RenameProgressResource(_)
         | ResourceRef::ProcessesResource(_)
         | ResourceRef::ComplaintResource(_)
@@ -66,7 +64,7 @@ async fn read_page(
         .as_ref()
         .ok_or_else(ApiError::internal)?
         .read_async("runtime-http/subscription-entities", move |tx| {
-            studio_runtime_services::work_scope::resume(
+            studio_runtime_services::entity_scope::resume(
                 tx,
                 since,
                 Some(&collections),
@@ -263,14 +261,16 @@ mod tests {
         let unchanged = initial_snapshot(state.clone(), list_ref, before)
             .await
             .expect("unchanged list");
-        assert!(
-            unchanged
-                .entity_changes
-                .flatten()
-                .expect("delta")
-                .documents
-                .is_empty()
-        );
+        // The list view is built at read time, so a detail change sends the same
+        // summary again; detail fields never reach the list.
+        let unchanged = studio_json::to_value(unchanged).expect("typed list");
+        for document in unchanged["entityChanges"]["documents"]
+            .as_array()
+            .expect("delta")
+        {
+            assert!(document["collection"] != "agent" && document["collection"] != "agentDetail");
+            assert!(document["value"].get("lastAnswer").is_none());
+        }
         let entry = initial_snapshot(state.clone(), detail_ref, None)
             .await
             .expect("changed detail");

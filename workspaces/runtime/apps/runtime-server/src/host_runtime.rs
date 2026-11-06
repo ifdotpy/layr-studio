@@ -4,34 +4,33 @@ use crate::account_registry::{
     AccountLaunch, AccountLauncher, AccountRegistry, AccountRegistryConfig, AccountSessionBroker,
     LaunchFuture,
 };
+<<<<<<< head
 #[cfg(unix)]
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 use sha2::{Digest, Sha256};
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use std::{
     collections::BTreeMap,
-    env,
-    io::{BufRead, Read, Write},
     path::{Path, PathBuf},
-    process::Stdio,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use studio_json::{Value, json};
 use studio_runtime_http::HttpState;
 use studio_runtime_process::{
-    BackendId, BackendIdentity, Generation, OperationId, ProviderHandle, ProviderLaunchSpec,
+    BackendId, BackendIdentity, Generation, OperationId, ProviderHandle,
     child_priority::ChildPriority,
     provider_direct::DirectProviderTaskFactory,
     provider_seam::{OpenOptions, ProviderTaskFactory, SessionClock, Shutdown},
     provider_task::SupervisorProviderTaskFactory,
 };
-use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_services::{
     account_driver::{AccountDriver, AccountStatus, ProviderAuthReader},
     account_worker::{WorkerError, preparation::PreparationResources},
     native_runtime::{NativeExecutableLease, NativeRuntime},
-    provider_adapter::{HostLaunch, ProviderKind, ProviderLaunch, adapter, is_executable},
+    provider_adapter::{HostLaunch, ProviderKind, ProviderLaunch, adapter},
     provider_session_task::SessionTaskConfig,
     thread_prepare::{CatalogSnapshot, CatalogSource},
 };
@@ -47,14 +46,6 @@ const _: () = assert!(
         < HOST_RUNTIME_SHUTDOWN_WAIT.as_millis()
 );
 const CLAUDE_BRIDGE_RELATIVE: &str = "workspaces/providers/apps/claude-bridge";
-/// Where `native/linux-vm/build.ts` writes the helper in a source checkout.
-const LINUX_VM_HELPER_RELATIVE: &str =
-    "workspaces/client/apps/desktop/native/linux-vm/studio-linux-vm";
-
-/// Where a source checkout keeps a local build of the file event helper.
-#[cfg(target_os = "macos")]
-const FS_EVENTS_HELPER_RELATIVE: &str = "workspaces/client/apps/desktop/native/studio-fs-events";
-
 /// Installed root shared by host-side runtime components.
 #[derive(Clone, Debug)]
 pub struct InstallRoot(PathBuf);
@@ -62,37 +53,6 @@ pub struct InstallRoot(PathBuf);
 impl InstallRoot {
     pub fn workspace_root(&self) -> &Path {
         &self.0
-    }
-    /// The native Linux VM helper: `CODEX_LINUX_VM_HELPER`, the packaged
-    /// `Resources/studio-linux-vm`, or the build in a source checkout.
-    pub fn linux_vm_helper(&self) -> PathBuf {
-        if let Some(helper) =
-            env::var_os("CODEX_LINUX_VM_HELPER").filter(|helper| !helper.is_empty())
-        {
-            return PathBuf::from(helper);
-        }
-        let packaged = self
-            .0
-            .parent()
-            .map(|resources| resources.join("studio-linux-vm"));
-        match packaged {
-            Some(packaged) if packaged.is_file() => packaged,
-            _ => self.0.join(LINUX_VM_HELPER_RELATIVE),
-        }
-    }
-    /// The file event helper of Mac folder sync (docs/vm-mac-sync.md, "Watcher"): the
-    /// packaged `Resources/studio-fs-events`, or a build in a source checkout. Without
-    /// it, rounds scan every 10 seconds.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn fs_events_helper(&self) -> PathBuf {
-        let packaged = self
-            .0
-            .parent()
-            .map(|resources| resources.join("studio-fs-events"));
-        match packaged {
-            Some(packaged) if packaged.is_file() => packaged,
-            _ => self.0.join(FS_EVENTS_HELPER_RELATIVE),
-        }
     }
     pub fn claude_bridge_dir(&self) -> PathBuf {
         let packaged = self.0.join("scripts/claude_bridge");
@@ -136,8 +96,8 @@ fn resolve_install_root_from_executable(
     }
 
     #[cfg(debug_assertions)]
-    {
-        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    if let Some(manifest) = std::env::var_os("CARGO_MANIFEST_DIR") {
+        let source_root = PathBuf::from(manifest).join("../../../..");
         let source_root =
             studio_runtime_store::path_identity::CanonicalPath::existing(&source_root)
                 .map_err(|_| located())?;
@@ -162,53 +122,6 @@ struct RegistryRuntimeOptions {
     config: AccountRegistryConfig,
     managed_tool_runtime:
         Option<Arc<studio_runtime_services::provider_callbacks::ManagedToolRuntime>>,
-}
-
-type VmLaunchInputs = (
-    String,
-    String,
-    ProviderLaunchSpec,
-    String,
-    Vec<u8>,
-    Option<Value>,
-);
-
-#[derive(Clone, Copy)]
-struct VmCodexRefreshIdentity<'a> {
-    root_request_id: &'a str,
-    source: &'a studio_runtime_store::request_results::AdmittedRequest,
-    account_key: &'a str,
-    previous_account_id: &'a str,
-    actor_id: &'a str,
-    actor_epoch: i64,
-    generation: u64,
-}
-
-enum VmAuthOwner<'a> {
-    Execution {
-        attempt_id: &'a str,
-        source: &'a studio_runtime_store::request_results::AdmittedRequest,
-    },
-    Callback {
-        source: &'a studio_runtime_store::request_results::AdmittedRequest,
-    },
-}
-
-struct VmCodexAuthSource<'a> {
-    account_key: &'a str,
-    account: &'a studio_runtime_services::account_policy::PublicAccount,
-    root_request_id: &'a str,
-    owner: VmAuthOwner<'a>,
-}
-
-struct ClaudeCredentialRequest<'a> {
-    path: &'a Path,
-    host_config: &'a Path,
-    email: &'a str,
-    account_key: &'a str,
-    original_account: &'a studio_runtime_services::account_policy::PublicAccount,
-    claude_bridge_dir: &'a Path,
-    explicit_host_config: bool,
 }
 
 impl HostRuntime {
@@ -240,7 +153,6 @@ impl HostRuntime {
         let install_root = resolve_install_root()?;
         let catalog = state.model_catalog_handle();
         let resource_root = install_root.workspace_root().to_owned();
-        *state = state.clone().with_vault_host_command();
         let mut resources = studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-server/host_runtime",
             move || PreparationResources::bundled_at(String::new(), catalog, resource_root),
@@ -252,148 +164,51 @@ impl HostRuntime {
         if let Some(home) = shared_codex_home {
             resources.shared_home = home.to_string_lossy().into_owned();
         }
-        let vm_guest: Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc> = Arc::new(
-            studio_runtime_services::linux_vm_guest::UnixGuestRpc::for_runtime_state(store.root()),
-        );
-        resources.guest_rpc = Some(Arc::clone(&vm_guest));
-        let vm_state_dir = studio_runtime_services::vault::linux_vm_state_dir(store.root());
-        let program = std::env::current_exe();
-        // VM agents run Mac commands through the guest channel and the Mac
-        // service, which this executable starts in its own session
-        // (docs/host-exec.md).
-        let host_exec =
-            match &program {
-                Ok(program) => Some(studio_runtime_services::host_exec::HostExecRuntime::new(
-                    Arc::clone(&vm_guest),
-                    Arc::new(
-                        studio_runtime_services::host_exec::RustHostExecService::new(
-                            program.clone(),
-                            vm_state_dir.clone(),
-                            studio_runtime_http::backend_build_identity,
-                        )
-                        // Sign-in links of VM chats' Mac commands reach the host bridge.
-                        .with_browser_host(store.root().join(
-                            studio_runtime_services::browser_environment::BROWSER_HOST_FOLDER,
-                        )),
-                    ),
-                )),
-                Err(error) => {
-                    eprintln!("host_exec is unavailable: the executable path is unknown: {error}");
-                    None
-                }
-            };
-        // A created VM starts again when the Mac restarted under it, at startup
-        // and for the first VM chat (docs/linux-vm-workspaces.md, "VM start").
-        #[cfg(unix)]
-        let vm_runtime = program.as_ref().ok().map(|program| {
-            let vm = studio_runtime_services::linux_vm_runtime::VmRuntime::production(
-                vm_state_dir.clone(),
-                install_root.linux_vm_helper(),
-                program.clone(),
-            );
-            if let Some(host_exec) = &host_exec {
-                vm.attach_host_exec(Arc::clone(host_exec));
-            }
-            // The guest follows the installed build (docs/linux-vm-workspaces.md, "Guest updates").
-            match studio_runtime_services::linux_vm_update::GuestPayload::read(
-                install_root.workspace_root(),
-            ) {
-                Ok(Some(payload)) => vm.attach_guest_payload(payload),
-                Ok(None) => {}
-                Err(error) => eprintln!("linux-vm: the guest files are unreadable: {error}"),
-            }
-            vm.attach_chat_notices(Arc::new(
-                studio_runtime_services::linux_vm_runtime::StoreChatNotices::new(store.clone()),
-            ));
-            vm
-        });
-        #[cfg(not(unix))]
-        let vm_runtime = None;
-        #[cfg(target_os = "macos")]
-        if let Some(vm) = vm_runtime.clone() {
+        // Limits of an idle account are read only after its turns. Read them
+        // again once a window resets after the last read.
+        if let Some(session) = state.account_session.clone() {
+            let store = store.clone();
             tokio::spawn(async move {
-                match vm.resume().await {
-                    Ok(outcome) if matches!(outcome.as_str(), "absent" | "stopped" | "running") => {
-                    }
-                    Ok(outcome) => {
-                        eprintln!("linux-vm: automatic start at backend start: {outcome}")
-                    }
-                    Err(error) => {
-                        eprintln!("linux-vm: automatic start at backend start failed: {error}")
-                    }
-                }
-                // The watchdog: a failed guest (a kernel panic) restarts within
-                // the restart limits (docs/linux-vm-workspaces.md, "VM start").
-                let period = std::time::Duration::from_secs(
-                    studio_runtime_services::linux_vm_runtime::WATCHDOG_INTERVAL_SECONDS,
-                );
-                let mut checks =
+                use studio_runtime_services::account_session_runtime::{
+                    LIMITS_RESET_CHECK_SECONDS, limits_reset_passed,
+                };
+                let period = std::time::Duration::from_secs(LIMITS_RESET_CHECK_SECONDS);
+                let mut ticks =
                     tokio::time::interval_at(tokio::time::Instant::now() + period, period);
-                checks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 loop {
-                    checks.tick().await;
-                    // Idle moment of the watchdog: the guest follows the installed build.
-                    match vm.update_guest().await {
-                        Ok(outcome)
-                            if matches!(
-                                outcome.as_str(),
-                                "current" | "none" | "stopped" | "busy" | "deferred" | "no_key"
-                            ) => {}
-                        Ok(outcome) => eprintln!("linux-vm: guest update: {outcome}"),
-                        Err(error) => eprintln!("linux-vm: guest update failed: {error}"),
-                    }
-                    match vm.check().await {
-                        Ok(outcome)
-                            if matches!(
-                                outcome.as_str(),
-                                "absent"
-                                    | "unknown"
-                                    | "stopped"
-                                    | "running"
-                                    | "starting"
-                                    | "unresponsive"
-                                    | "busy"
-                                    | "limited"
-                            ) => {}
-                        Ok(outcome) => eprintln!("linux-vm: watchdog check: {outcome}"),
-                        Err(error) => eprintln!("linux-vm: watchdog check failed: {error}"),
+                    ticks.tick().await;
+                    let accounts = store
+                        .read_async("limits/reset-check", |tx| {
+                            let mut rows = tx.prepare(
+                                "SELECT id FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+                            )?;
+                            let ids = rows
+                                .query_map([], |row| row.get::<_, String>(0))?
+                                .collect::<rusqlite::Result<Vec<_>>>()?;
+                            Ok::<_, studio_runtime_store::StoreError>(ids)
+                        })
+                        .await
+                        .unwrap_or_default();
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+                    for account in accounts {
+                        if session
+                            .limits_snapshot(&account)
+                            .is_ok_and(|snapshot| limits_reset_passed(&snapshot, now))
+                            && let Err(error) = session.refresh_limits(&account).await
+                        {
+                            eprintln!("limits refresh after reset for {account} failed: {error}");
+                        }
                     }
                 }
             });
         }
-        // Mac folder sync of VM projects (docs/vm-mac-sync.md): rounds wait while the VM
-        // does not run.
-        #[cfg(target_os = "macos")]
-        if let Some(vm) = vm_runtime.clone() {
-            let vm_running: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
-                vm.status().is_ok_and(|status| {
-                    status.get("state").and_then(Value::as_str) == Some("running")
-                })
-            });
-            tokio::spawn(studio_runtime_services::mac_sync::schedule::run(
-                vm_state_dir.clone(),
-                Arc::clone(&vm_guest),
-                vm_running,
-                install_root.fs_events_helper(),
-                state.sync_changes_handle(),
-            ));
-        }
-        resources.vm_provider_launch = Some(Arc::new(ServerVmProviderLaunchResolver {
-            accounts: accounts.clone(),
-            account_session: state.account_session.clone(),
-            store: store.clone(),
-            guest: Arc::clone(&vm_guest),
-            claude_bridge_dir: claude_bridge_dir.clone(),
-            vm: vm_runtime,
-        }));
         let resources = resources.with_account_session(state.account_session.clone());
         let preparation_resources = Arc::new(resources.clone());
         if let Some(managed_tool_runtime) = &managed_tool_runtime {
             managed_tool_runtime.set_preparation_resources(Arc::clone(&preparation_resources));
-            managed_tool_runtime.attach_layr_read(Arc::clone(&vm_guest));
-            if let Some(host_exec) = host_exec {
-                managed_tool_runtime.attach_host_exec(host_exec);
-            }
         }
         let callback_runtime = Arc::new(
             studio_runtime_services::callback_runtime::CallbackRuntime::new(
@@ -507,6 +322,7 @@ impl HostRuntime {
     pub fn preparation_resources(&self) -> Option<Arc<PreparationResources>> {
         self.preparation_resources.clone()
     }
+<<<<<<< head
 
     pub fn stop_intake(&self) {
         self.shutdown.cancel();
@@ -1913,112 +1729,73 @@ fn run_vm_claude_refresh_helper(
         return Err(WorkerError::PreparationPending(
             "vm-credentials/refresh-readiness-failed".into(),
         ));
+=======
+
+    pub fn stop_intake(&self) {
+        self.shutdown.cancel();
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
-    let total_deadline = started + CLAUDE_REFRESH_TOTAL_TIMEOUT;
-    loop {
-        let access_is_fresh = match access_is_fresh() {
-            Ok(fresh) => fresh,
-            Err(error) => {
-                stop_vm_claude_refresh_child(&mut *child)?;
-                drop(ready_reader);
-                return Err(error);
-            }
-        };
-        if access_is_fresh {
-            if stdin
-                .write_all(b"done\n")
-                .and_then(|()| stdin.flush())
-                .is_err()
-            {
-                let _stopped = stop_vm_claude_refresh_child(&mut *child);
-                drop(ready_reader);
-                return Err(WorkerError::PreparationPending(
-                    "vm-credentials/refresh-release".into(),
-                ));
-            }
-            drop(stdin);
-            break;
-        }
-        if Instant::now() >= total_deadline {
-            stop_vm_claude_refresh_child(&mut *child)?;
-            drop(ready_reader);
-            return Err(WorkerError::PreparationPending(
-                "vm-credentials/refresh-timeout".into(),
-            ));
-        }
-        let child_status = match child.inner_mut().try_wait() {
-            Ok(status) => status,
-            Err(_) => {
-                let _stopped = stop_vm_claude_refresh_child(&mut *child);
-                drop(ready_reader);
-                return Err(WorkerError::TaskFailed);
-            }
-        };
-        if child_status.is_some() {
-            drop(ready_reader);
-            return Err(WorkerError::PreparationPending(
-                "vm-credentials/refresh-exited-early".into(),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(250));
+
+    pub fn shutdown_handle(&self) -> Shutdown {
+        self.shutdown.clone()
     }
-    loop {
-        let status = match child.inner_mut().try_wait() {
-            Ok(status) => status,
+
+    pub async fn shutdown(self) -> Result<(), WorkerError> {
+        self.shutdown.cancel();
+        match timeout(HOST_RUNTIME_SHUTDOWN_WAIT, self.task).await {
+            Ok(result) => result.map_err(|_| WorkerError::TaskFailed)?,
             Err(_) => {
-                let _stopped = stop_vm_claude_refresh_child(&mut *child);
-                drop(ready_reader);
-                return Err(WorkerError::TaskFailed);
+                eprintln!(
+                    "runtime server detached the account registry task after its {:.0}s shutdown bound",
+                    HOST_RUNTIME_SHUTDOWN_WAIT.as_secs_f64()
+                );
+                Err(WorkerError::TaskFailed)
             }
-        };
-        if let Some(status) = status {
-            if !status.success() {
-                drop(ready_reader);
-                return Err(WorkerError::PreparationRefused(
-                    "vm-credentials/refresh-failed".into(),
-                ));
-            }
-            ready_reader.join().map_err(|_| WorkerError::TaskFailed)?;
-            return Ok(());
         }
-        if Instant::now() >= total_deadline {
-            stop_vm_claude_refresh_child(&mut *child)?;
-            drop(ready_reader);
-            return Err(WorkerError::PreparationPending(
-                "vm-credentials/refresh-timeout".into(),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(25));
     }
 }
 
-#[allow(
-    clippy::disallowed_methods,
-    reason = "runs on blocking_pool through read_vm_claude_credentials"
-)]
-fn stop_vm_claude_refresh_child(child: &mut dyn ChildWrapper) -> Result<(), WorkerError> {
-    if child
-        .inner_mut()
-        .try_wait()
-        .map_err(|_| WorkerError::TaskFailed)?
-        .is_some()
-    {
-        return Ok(());
+/// The HTTP adapter shares the retained account session and committed callback
+/// reply lane used by the account worker registry.
+///
+/// Lifecycle deletion integration hook: in the same transaction that tombstones
+/// the agent and deletes its voice rows, call
+/// `voice::provider::stage_delete_sessions(tx, agent_id)` before row cleanup.
+/// After commit, pass the returned intent's `id` and `sessions` to
+/// `voice::provider::end_deleted_sessions` using this installed voice port.
+fn install_host_voice_port(
+    state: HttpState,
+    store: Arc<RuntimeStore>,
+    callbacks: Arc<studio_runtime_services::callback_runtime::CallbackRuntime>,
+) -> HttpState {
+    match state.account_session.clone() {
+        Some(account_session) => state.with_voice_request_port(Arc::new(
+            studio_runtime_services::voice::account_session::AccountSessionVoicePort::new(
+                store,
+                account_session,
+                callbacks,
+            ),
+        )),
+        None => state,
     }
-    child.start_kill().map_err(|_| WorkerError::TaskFailed)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if child
-            .inner_mut()
-            .try_wait()
-            .map_err(|_| WorkerError::TaskFailed)?
-            .is_some()
-        {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Err(WorkerError::TaskFailed)
+}
+
+struct HostLauncher {
+    factory: SupervisorProviderTaskFactory,
+    supervisor_mode: bool,
+    child_priority: ChildPriority,
+    provider_stderr_log: Option<studio_runtime_process::operational_log::OperationalLog>,
+    accounts: Arc<AccountDriver>,
+    store: Arc<RuntimeStore>,
+    root: PathBuf,
+    native_path: Option<String>,
+    native_runtime: Option<Arc<NativeRuntime>>,
+    session_binaries: Arc<Mutex<BTreeMap<String, crate::provider_ports::SessionExecutables>>>,
+    resources: Arc<PreparationResources>,
+    claude_bridge_dir: PathBuf,
+    publication_sink:
+        Arc<dyn studio_runtime_services::notification_runtime_effects::NotificationPostCommitSink>,
+    environment: BTreeMap<String, String>,
 }
 
 impl AccountLauncher for HostLauncher {
@@ -2188,7 +1965,10 @@ mod install_root_tests {
     #[test]
     fn bridge_matches_install_layout_in_both_modes() {
         let source_checkout = studio_runtime_store::path_identity::CanonicalPath::existing(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."),
+            PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../../.."),
         )
         .unwrap();
         let source_layout = InstallRoot(source_checkout.clone().to_path_buf());
@@ -2231,7 +2011,10 @@ mod install_root_tests {
         assert_eq!(
             resolved.unwrap().workspace_root(),
             studio_runtime_store::path_identity::CanonicalPath::existing(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+                PathBuf::from(
+                    std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR")
+                )
+                .join("../../../..")
             )
             .unwrap()
         );
@@ -2721,8 +2504,6 @@ mod voice_composition_tests {
             claude_account_pin: json!({"provider":studio_runtime_schema::ProviderKind::Codex}),
             account_driver: None,
             account_session: None,
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
         let worker = start_account_worker_with_preparation(
             bridge,
@@ -2791,7 +2572,7 @@ mod voice_composition_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
         let old_root = uuid::Uuid::from_u128((1 << 80) | (7 << 76) | (2 << 62)).to_string();
-        let operation = format!("vm-codex-token-refresh:voice-account:{old_root}");
+        let operation = old_root.clone();
         let identity = RequestIdentity::new(
             "provider-call",
             &["voice-account", "", ""],
@@ -2833,13 +2614,17 @@ mod voice_composition_tests {
                     actor: None,
                     expected_scope: Some(scope),
                     deleted_actor_session: None,
-                    method: studio_runtime_providers::Method::AccountRead,
-                    params: json!({"refreshToken":true}),
+                    method: studio_runtime_providers::Method::AccountLoginStart,
+                    params: json!({"type":"chatgptDeviceCode"}),
                     deadline: std::time::Instant::now() + std::time::Duration::from_secs(2),
                 },
             )
             .await;
-        assert!(matches!(result, Err(AccountSessionError::Expired)));
+        assert!(
+            matches!(result, Err(AccountSessionError::Expired)),
+            "{:?}",
+            result.as_ref().err()
+        );
         assert_eq!(
             factory.request_writes.load(Ordering::SeqCst),
             sent_before_retry
@@ -3274,6 +3059,7 @@ mod voice_composition_tests {
 }
 
 #[cfg(test)]
+<<<<<<< head
 mod codex_vm_auth_tests {
     use super::*;
     use base64::Engine as _;
@@ -3551,6 +3337,8 @@ mod codex_vm_auth_tests {
 }
 
 #[cfg(test)]
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 mod direct_generation_tests {
     use super::*;
 
@@ -3747,6 +3535,7 @@ mod launch_profile_tests {
         assert!(super::selected_account(&write("pending"), "login-fixture").is_err());
     }
 }
+<<<<<<< head
 
 #[cfg(all(test, unix))]
 #[allow(clippy::unwrap_used)]
@@ -4047,3 +3836,5 @@ IFS= read -r release
         );
     }
 }
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31

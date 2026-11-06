@@ -141,7 +141,9 @@ function pageValue(value: unknown, after: number, through: number): Batch {
     if (
       !object(row) ||
       !sequence(row.seq) ||
-      row.seq <= previous ||
+      // Rows built from one server change share its number: the order is non-decreasing.
+      row.seq < previous ||
+      row.seq <= after ||
       row.seq > value.through ||
       typeof row.id !== "string" ||
       typeof row.collection !== "string" ||

@@ -4,23 +4,26 @@
 //! new route without a class.
 
 use studio_runtime_services::principal::CommandClass::{
-    self, ChatControl, Federation, Host, OwnerOnly, Read, Spawn,
+    self, AccountSignIn, ChatControl, Federation, Host, OwnerOnly, Read, Spawn,
 };
+use studio_runtime_services::principal::Scope;
 
 /// `(method, OpenAPI path template, class)` of every non-safe operation.
+/// A device with full access may sign in a provider account of a paired server.
+/// A peer server may not, and pairing, grants, deletion and settings stay owner only.
 const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/accounts/claude/add", OwnerOnly),
-    ("POST", "/api/accounts/claude/login", OwnerOnly),
-    ("POST", "/api/accounts/claude/login/cancel", OwnerOnly),
-    ("POST", "/api/accounts/claude/login/code", OwnerOnly),
+    ("POST", "/api/accounts/claude/login", AccountSignIn),
+    ("POST", "/api/accounts/claude/login/cancel", AccountSignIn),
+    ("POST", "/api/accounts/claude/login/code", AccountSignIn),
     ("POST", "/api/accounts/default", OwnerOnly),
     ("POST", "/api/accounts/default-groups", OwnerOnly),
     ("POST", "/api/accounts/delete", OwnerOnly),
     ("POST", "/api/accounts/disconnect", OwnerOnly),
     ("POST", "/api/accounts/discover", OwnerOnly),
     ("POST", "/api/accounts/group", OwnerOnly),
-    ("POST", "/api/accounts/login", OwnerOnly),
-    ("POST", "/api/accounts/login/cancel", OwnerOnly),
+    ("POST", "/api/accounts/login", AccountSignIn),
+    ("POST", "/api/accounts/login/cancel", AccountSignIn),
     ("POST", "/api/accounts/name", OwnerOnly),
     ("POST", "/api/accounts/reconnect", OwnerOnly),
     ("POST", "/api/accounts/register", OwnerOnly),
@@ -29,7 +32,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/agents", Spawn),
     ("POST", "/api/agents/account", ChatControl),
     ("POST", "/api/agents/account-transfer", ChatControl),
-    ("POST", "/api/agents/move-to-host", Host),
     ("POST", "/api/agents/workspace-mode", Host),
     ("POST", "/api/annotation", ChatControl),
     ("POST", "/api/assets", Host),
@@ -47,7 +49,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/configure", OwnerOnly),
     ("POST", "/api/connection-recovery", ChatControl),
     ("POST", "/api/conversation", ChatControl),
-    ("POST", "/api/conversation/delete", ChatControl),
     ("POST", "/api/costs/interest", ChatControl),
     ("POST", "/api/federation", OwnerOnly),
     ("POST", "/api/federation/v1/message", Federation),
@@ -56,9 +57,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/federation/v1/status", Federation),
     ("POST", "/api/leads", Spawn),
     ("POST", "/api/limits/reset", ChatControl),
-    ("POST", "/api/linux-vm/settings", OwnerOnly),
-    ("POST", "/api/mac-sync/config", OwnerOnly),
-    ("POST", "/api/mac-sync/resolve", OwnerOnly),
     ("POST", "/api/mcp/reconnect", Host),
     ("POST", "/api/monitor/input", Host),
     ("POST", "/api/monitor/restart", Host),
@@ -73,9 +71,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/peer-teams", Spawn),
     ("POST", "/api/processes/action", Host),
     ("POST", "/api/profiles", OwnerOnly),
-    ("POST", "/api/project-secrets/list", Read),
-    ("POST", "/api/project-secrets/remove", Host),
-    ("POST", "/api/project-secrets/set", Host),
     ("POST", "/api/projects", Host),
     ("POST", "/api/projects/delete", Host),
     ("POST", "/api/questions/defer", ChatControl),
@@ -96,11 +91,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/terminals/rename", Host),
     ("POST", "/api/terminals/resize", Host),
     ("POST", "/api/usage-resume", ChatControl),
-    ("POST", "/api/vault/aws-login", OwnerOnly),
-    ("POST", "/api/vault/pull", OwnerOnly),
-    ("POST", "/api/vault/setup", OwnerOnly),
-    ("POST", "/api/vault/setup/facts", OwnerOnly),
-    ("POST", "/api/vault/unlock", OwnerOnly),
     ("POST", "/api/voice/end", ChatControl),
     ("POST", "/api/voice/records", Read),
     ("POST", "/api/voice/start", ChatControl),
@@ -109,6 +99,26 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/web-push/subscriptions", ChatControl),
     ("POST", "/api/work", ChatControl),
 ];
+
+/// Routes that settle a scoped answer of the permission table themselves. The edge
+/// refuses a scoped answer on any other route: without a row check, the handler would
+/// act for the caller on any target.
+const SETTLES: &[(&str, &str, Scope)] = &[
+    // `commands::authorize` checks the target rows.
+    ("POST", "/api/commands", Scope::Descendant),
+    ("POST", "/api/commands", Scope::LinkWorker),
+    ("POST", "/api/commands", Scope::PairedLead),
+    // The edge checks the `parent` of the request against the peer's links
+    // (`middleware::own_link_refusal`).
+    ("POST", "/api/agents", Scope::OwnLink),
+];
+
+/// True when the route `method template` settles `scope` itself.
+pub(crate) fn settles(method: &str, template: &str, scope: Scope) -> bool {
+    SETTLES
+        .iter()
+        .any(|(m, t, s)| *m == method && *t == template && *s == scope)
+}
 
 /// The class of an operation, given its method and OpenAPI path template. A write
 /// without a row has no class; the caller treats it as owner only.
@@ -137,6 +147,32 @@ mod tests {
             missing.is_empty(),
             "classify these routes in route_class.rs: {missing:?}"
         );
+    }
+
+    #[test]
+    fn a_full_device_may_sign_in_a_provider_account_but_not_pair() {
+        use studio_runtime_services::principal::{Access, Grant, Principal, access};
+        let device = Principal::Device {
+            id: "phone".into(),
+            grant: Grant::Full,
+        };
+        for route in [
+            "/api/accounts/login",
+            "/api/accounts/login/cancel",
+            "/api/accounts/claude/login",
+            "/api/accounts/claude/login/code",
+            "/api/accounts/claude/login/cancel",
+        ] {
+            let class = class_of("POST", route).expect("classified");
+            assert_eq!(access(&device, class), Access::Allow, "{route}");
+        }
+        let delete = class_of("POST", "/api/accounts/delete").expect("classified");
+        assert_eq!(access(&device, delete), Access::Deny);
+        let peer = Principal::Peer {
+            server: "peer".into(),
+        };
+        let login = class_of("POST", "/api/accounts/login").expect("classified");
+        assert_eq!(access(&peer, login), Access::Deny);
     }
 
     #[test]

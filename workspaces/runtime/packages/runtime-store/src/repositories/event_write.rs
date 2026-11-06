@@ -4,12 +4,9 @@ use crate::CachedSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_json::Value;
 
-use super::sync_documents::{hash_payload, next_sequence};
-use crate::records::{
-    AgentId, AnnotationRecord, EventMetadataRecord, JsonRecord, QueueEventId, Table,
-};
+use crate::records::{AnnotationRecord, EventMetadataRecord, JsonRecord, QueueEventId, Table};
 use crate::schema::{SchemaRequirements, TableRequirement};
-use crate::{AgentRepository, QueueEvent, StoreError, StoreResult};
+use crate::{QueueEvent, StoreError, StoreResult};
 
 const TABLES: &[TableRequirement] = &[
     TableRequirement {
@@ -171,164 +168,46 @@ impl EventWriteRepository {
         table.put_at(&key, &record)
     }
 
-    /// Keep the renderer projection in step with the scheduler's queued state.
+    /// Mark the agent views after a scheduler status write. The views are built at read
+    /// time from the agent row; the mark makes readers build them again.
     pub fn set_agent_sync_status(
         transaction: &Transaction<'_>,
         agent_id: &str,
-        status: &str,
+        _status: &str,
     ) -> StoreResult<()> {
-        Self::set_agent_sync_fields(transaction, agent_id, Some(status), None, None)
+        Self::mark_agent_fields(transaction, agent_id)
     }
 
-    /// Keep renderer-visible lifecycle fields in step with a scheduler transition.
+    /// Mark the agent views after a scheduler lifecycle transition.
     pub fn set_agent_sync_lifecycle(
         transaction: &Transaction<'_>,
         agent_id: &str,
-        status: &str,
-        in_flight: bool,
-        turn_id: Option<&str>,
+        _status: &str,
+        _in_flight: bool,
+        _turn_id: Option<&str>,
     ) -> StoreResult<()> {
-        Self::set_agent_sync_fields(
-            transaction,
-            agent_id,
-            Some(status),
-            Some((in_flight, turn_id)),
-            None,
-        )
+        Self::mark_agent_fields(transaction, agent_id)
     }
 
-    fn set_agent_sync_fields(
-        transaction: &Transaction<'_>,
-        agent_id: &str,
-        status: Option<&str>,
-        lifecycle: Option<(bool, Option<&str>)>,
-        name: Option<&str>,
-    ) -> StoreResult<()> {
-        let has_agents = transaction.query_row_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_agents')", [], |row| row.get::<_, bool>(0))?;
-        let agent = if has_agents {
-            AgentRepository::get(transaction, &AgentId::from(agent_id))?
-        } else {
-            None
-        };
-        Self::update_agent_sync(transaction, agent_id, |value| {
-            let before = value.clone();
-            if let Some(status) = status {
-                value.insert("status".to_owned(), Value::String(status.to_owned()));
-            }
-            if let Some((in_flight, turn_id)) = lifecycle {
-                value.insert("inFlight".to_owned(), Value::Bool(in_flight));
-                value.insert(
-                    "turnId".to_owned(),
-                    turn_id.map_or(Value::Null, |turn_id| Value::String(turn_id.to_owned())),
-                );
-            }
-            if let Some(name) = name {
-                value.insert("name".to_owned(), Value::String(name.to_owned()));
-                value.insert("naming".to_owned(), Value::String("manual".to_owned()));
-            }
-            if status == Some("queued")
-                && let Some(overview) = value.get_mut("overview").and_then(Value::as_object_mut)
-            {
-                overview.insert("result".into(), Value::String(String::new()));
-                overview.insert("resultTruncated".into(), Value::Bool(false));
-                overview.insert("resultTurnId".into(), Value::Null);
-            }
-            if let Some(agent) = &agent {
-                value.insert("epoch".to_owned(), Value::from(agent.epoch));
-                let fields = agent.value();
-                for key in [
-                    "error",
-                    "nativeFailureHold",
-                    "activity",
-                    "activeTools",
-                    "startAttempt",
-                    "capacityRetry",
-                    "lastCompletedTurn",
-                    "lastCompletedTurnStatus",
-                    "lastCompletedTurnError",
-                    "lastAnswer",
-                    "disconnectRecovery",
-                    "restartRecovery",
-                    "nativeSafetyBuffering",
-                    "nativeStatus",
-                    "nativeTurnError",
-                    "unhandledNotifications",
-                    "lastEvent",
-                    "tail",
-                    "contextUsage",
-                ] {
-                    if let Some(field) = fields.get(key) {
-                        value.insert(key.to_owned(), field.clone());
-                    } else {
-                        value.remove(key);
-                    }
-                }
-                if let Some(in_flight) = agent.in_flight {
-                    value.insert("inFlight".to_owned(), Value::Bool(in_flight));
-                } else {
-                    value.remove("inFlight");
-                }
-                for (key, field) in [
-                    ("turnEpoch", agent.turn_epoch.map(Value::from)),
-                    ("autoWake", agent.auto_wake.map(Value::Bool)),
-                    ("turnId", agent.turn_id.clone().map(Value::String)),
-                ] {
-                    if let Some(field) = field {
-                        value.insert(key.to_owned(), field);
-                    } else {
-                        value.remove(key);
-                    }
-                }
-                if let Some(hold) = &agent.start_outcome_hold {
-                    value.insert("startOutcomeHold".to_owned(), crate::projection_value(hold));
-                } else {
-                    value.remove("startOutcomeHold");
-                }
-            }
-            value != &before
-        })?;
-        // The scheduler's lifecycle fields are the projection of this transition.
-        crate::entity_publication::mark_published("agent", agent_id);
-        Ok(())
-    }
-
-    /// Publish runtime-owned agent fields through the same sequenced projection writer.
-    /// Under the default publication ([`crate::entity_publication`]) the patch is
-    /// provisional: the chat gets a full publication before the commit, which also
-    /// recomputes the derived view fields and creates a missing entity.
+    /// Mark the agent views after a write of runtime-owned agent fields. Under the
+    /// default publication ([`crate::entity_publication`]) the chat also gets a full
+    /// publication before the commit.
     pub fn set_agent_sync_values(
         transaction: &Transaction<'_>,
         agent_id: &str,
-        fields: &[(&str, Value)],
+        _fields: &[(&str, Value)],
     ) -> StoreResult<()> {
         if crate::entity_publication::active() {
             crate::entity_publication::mark_stale("agent", agent_id);
-            let live = transaction
-                .query_row_cached(
-                    "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0)",
-                    [agent_id],
-                    |row| row.get::<_, bool>(0),
-                )?;
-            if !live {
-                return Ok(());
-            }
         }
-        Self::update_agent_sync(transaction, agent_id, |value| {
-            let mut changed = false;
-            for (field, next) in fields {
-                if value.get(*field) != Some(next) {
-                    value.insert((*field).to_owned(), next.clone());
-                    changed = true;
-                }
-            }
-            changed
-        })
+        Self::mark_agent_views(transaction, agent_id)
     }
 
-    fn update_agent_sync(
+    /// Mark the agent views after a title write.
+    pub fn set_agent_sync_name(
         transaction: &Transaction<'_>,
         agent_id: &str,
+<<<<<<< head
         update: impl FnOnce(&mut studio_json::Map<String, Value>) -> bool,
     ) -> StoreResult<()> {
         let old = transaction
@@ -371,16 +250,23 @@ impl EventWriteRepository {
              WHERE collection='agent' AND id=?4 AND deleted=0",
             params![sequence, hash, payload, agent_id],
         )?;
+=======
+        _name: &str,
+    ) -> StoreResult<()> {
+        Self::mark_agent_fields(transaction, agent_id)
+    }
+
+    /// A status, lifecycle or title write: the fields are the projection of this write,
+    /// so the commit needs no full publication of the chat.
+    fn mark_agent_fields(transaction: &Transaction<'_>, agent_id: &str) -> StoreResult<()> {
+        Self::mark_agent_views(transaction, agent_id)?;
+        crate::entity_publication::mark_published("agent", agent_id);
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         Ok(())
     }
 
-    /// Update the renderer's persisted agent title after the agent record write.
-    pub fn set_agent_sync_name(
-        transaction: &Transaction<'_>,
-        agent_id: &str,
-        name: &str,
-    ) -> StoreResult<()> {
-        Self::set_agent_sync_fields(transaction, agent_id, None, None, Some(name))
+    fn mark_agent_views(transaction: &Transaction<'_>, agent_id: &str) -> StoreResult<()> {
+        crate::durable_seq::mark(transaction, crate::durable_seq::AGENT_VIEW_MARK, agent_id)
     }
 }
 
@@ -392,26 +278,16 @@ mod tests {
     use studio_json::json;
 
     #[test]
-    fn agent_projection_status_write_advances_its_sync_revision() {
+    fn agent_sync_writes_mark_the_agent_views_at_a_new_sequence() {
         let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
         connection
             .execute_batch(
                 "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 INSERT INTO sync_entities VALUES('agent','a',1,'old', '{\"collection\":\"agent\",\"id\":\"a\",\"value\":{\"id\":\"a\",\"status\":\"idle\",\"overview\":{\"result\":\"stale\",\"resultTruncated\":true,\"resultTurnId\":\"turn-old\",\"task\":\"keep\"}}}',0);",
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
+                 CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,4);",
             )
-            .expect("projection fixture creates");
-        let transaction = connection.transaction().expect("transaction begins");
-        EventWriteRepository::set_agent_sync_status(&transaction, "a", "queued")
-            .expect("agent projection updates");
-        transaction.commit().expect("transaction commits");
-        let (sequence, payload) = connection
-            .query_row(
-                "SELECT seq,payload FROM sync_entities WHERE collection='agent' AND id='a'",
-                [],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-            )
+<<<<<<< head
             .expect("updated projection exists");
         assert_eq!(sequence, 2);
         assert_eq!(
@@ -539,6 +415,41 @@ mod tests {
                 .expect("updated projection remains JSON")["value"],
             json!({"id":"a","name":"New","naming":"manual","role":"orchestrator"})
         );
+=======
+            .expect("counter fixture creates");
+        let mark = |connection: &Connection| {
+            connection
+                .query_row(
+                    "SELECT seq FROM durable_rows WHERE tbl='agent_views' AND id='a'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("agent views mark exists")
+        };
+        type Write = dyn Fn(&rusqlite::Transaction<'_>) -> Result<(), StoreError>;
+        let writes: [&Write; 4] = [
+            &|tx| EventWriteRepository::set_agent_sync_status(tx, "a", "queued"),
+            &|tx| {
+                EventWriteRepository::set_agent_sync_lifecycle(
+                    tx,
+                    "a",
+                    "running",
+                    true,
+                    Some("turn-1"),
+                )
+            },
+            &|tx| {
+                EventWriteRepository::set_agent_sync_values(tx, "a", &[("lastAnswer", json!(""))])
+            },
+            &|tx| EventWriteRepository::set_agent_sync_name(tx, "a", "New"),
+        ];
+        for (expected, write) in (5..).zip(writes) {
+            let transaction = connection.transaction().expect("transaction begins");
+            write(&transaction).expect("agent views mark");
+            transaction.commit().expect("transaction commits");
+            assert_eq!(mark(&connection), expected);
+        }
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 
     #[test]

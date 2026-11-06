@@ -69,7 +69,6 @@ fn database() -> Connection {
             "CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,account TEXT,epoch INTEGER,thread TEXT,turn TEXT,created REAL,record TEXT);
              CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT,record TEXT);
              CREATE TABLE runtime_execution_inputs(run TEXT,event TEXT,PRIMARY KEY(run,event));
-             CREATE TABLE runtime_completed_turns(id TEXT PRIMARY KEY);
              CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,
                created REAL,epoch INTEGER,turn_id TEXT,error TEXT);
              CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
@@ -77,7 +76,7 @@ fn database() -> Connection {
              CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,
                PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER);
-             CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);",
+             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);",
         )
         .expect("scheduler tables create");
     connection
@@ -1130,65 +1129,6 @@ fn stored_incident_runs_that_share_a_turn_settle_without_an_edit() {
         runs.iter().all(|(_, status)| status == "interrupted"),
         "{runs:?}"
     );
-}
-
-/// An account worker whose supervised host provider outlives it ends only its
-/// VM actors: their sessions belong to the worker. The host turn stays live
-/// for the next worker of the same generation.
-#[test]
-fn a_retained_host_provider_disconnects_only_the_vm_actors() {
-    let mut connection = database();
-    let attempt = |id: &str| {
-        json!({"id": id, "epoch": 0, "accountKey": ACCOUNT, "events": [format!("event-{id}")],
-            "submitted": true, "turnId": "turn", "connectionGeneration": 4, "created": 1.0,
-            "settingsFixed": true, "connectionId": "connection", "threadId": "thread"})
-    };
-    let running = |attempt: Value| {
-        json!({"status": "running", "autoWake": true, "inFlight": true, "turnId": "turn",
-            "error": null, "startAttempt": attempt})
-    };
-    put(&connection, running(attempt("host")));
-    let mut vm = running(attempt("vm"));
-    vm["id"] = json!("vm-agent");
-    vm["rootId"] = json!("vm-agent");
-    vm["executionMode"] = json!("vm");
-    put(&connection, vm);
-    let host = stored(&connection);
-    let interrupted = with(&mut connection, |tx| {
-        SchedulerRepository::disconnect_vm_actors(tx, ACCOUNT, 4, 20.0).expect("disconnect runs")
-    });
-    assert_eq!(interrupted, ["vm-agent"]);
-    assert_eq!(stored(&connection), host);
-    let vm = AgentRepository::get(&connection, &AgentId::from("vm-agent"))
-        .expect("agent reads")
-        .expect("agent exists")
-        .value();
-    assert_eq!(vm["status"], "interrupted");
-    assert_eq!(vm["error"], PROVIDER_DISCONNECTED_TURN_ERROR);
-}
-
-#[test]
-fn a_provider_disconnect_loses_the_session_and_interrupts_the_turn() {
-    let mut connection = database();
-    put(
-        &connection,
-        json!({"status": "running", "autoWake": true, "inFlight": true, "turnId": "turn",
-            "threadId": "thread", "error": null, "executionMode": "vm",
-            "startAttempt": {"id": "a", "epoch": 0, "accountKey": ACCOUNT, "events": ["event-a"],
-                "submitted": true, "turnId": "turn", "connectionGeneration": 4, "created": 1.0,
-                "settingsFixed": true, "connectionId": "connection", "threadId": "thread"}}),
-    );
-    assert!(crate::domain::chat_busy(&connection, "agent").expect("busy before"));
-    with(&mut connection, |tx| {
-        SchedulerRepository::disconnect_vm_actors(tx, ACCOUNT, 4, 20.0).expect("disconnect runs")
-    });
-    assert!(!crate::domain::chat_busy(&connection, "agent").expect("busy after"));
-    let sessions = crate::domain::read_sessions(&connection, "agent").expect("sessions");
-    assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].state, crate::domain::SessionState::Lost);
-    let turns = crate::domain::read_turns(&connection, "agent").expect("turns");
-    assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].state, crate::domain::TurnState::Interrupted);
 }
 
 #[test]

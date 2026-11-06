@@ -456,7 +456,7 @@ impl TranscriptRepository {
             return Err(invalid_record("runtime_items", id));
         }
         let has_fulltext = table_exists(transaction, "runtime_item_fulltext")?;
-        let long = text.chars().count() > text_blobs::TEXT_BLOB_MIN_CHARS;
+        let long = text_blobs::is_long(text);
         if long && !has_fulltext {
             return Err(invalid_record("runtime_item_fulltext", id));
         }
@@ -1405,7 +1405,7 @@ mod tests {
     }
 
     fn long_text() -> String {
-        "long \u{2713} ".repeat(4_000)
+        text_blobs::incompressible_text(40_000)
     }
 
     fn long_record(streaming: bool) -> Value {

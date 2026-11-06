@@ -635,9 +635,13 @@ test("chat pin, rename, archive, restore, delete, mark unread and prefetch use t
       "/api/organization",
       "/api/organization",
       "/api/organization",
-      "/api/conversation/delete",
+      "/api/commands",
     ]);
-    expect(mutations.map((call) => call.body.id)).toEqual([
+    expect(
+      mutations.map((call) =>
+        "target" in call.body ? call.body.target : call.body.id,
+      ),
+    ).toEqual([
       "root-a",
       "root-a",
       "root-a",

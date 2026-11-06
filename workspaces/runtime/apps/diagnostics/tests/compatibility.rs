@@ -75,10 +75,13 @@ fn fixed_response_server(
 
 #[allow(clippy::disallowed_methods)]
 fn command(port: u16) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_codex-diagnostics"))
-        .args(["--port", &port.to_string()])
-        .output()
-        .expect("run Rust diagnostics binary")
+    Command::new(
+        std::env::var_os("CARGO_BIN_EXE_codex-diagnostics")
+            .expect("cargo sets CARGO_BIN_EXE_codex-diagnostics"),
+    )
+    .args(["--port", &port.to_string()])
+    .output()
+    .expect("run Rust diagnostics binary")
 }
 
 #[test]
@@ -106,17 +109,23 @@ fn fixture_output_matches_rust_golden() {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn cli_help_and_errors_use_expected_status_codes() {
-    let help = Command::new(env!("CARGO_BIN_EXE_codex-diagnostics"))
-        .arg("--help")
-        .output()
-        .expect("run help");
+    let help = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_codex-diagnostics")
+            .expect("cargo sets CARGO_BIN_EXE_codex-diagnostics"),
+    )
+    .arg("--help")
+    .output()
+    .expect("run help");
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("--port PORT"));
 
-    let invalid = Command::new(env!("CARGO_BIN_EXE_codex-diagnostics"))
-        .args(["--port", "not-a-number"])
-        .output()
-        .expect("run invalid port");
+    let invalid = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_codex-diagnostics")
+            .expect("cargo sets CARGO_BIN_EXE_codex-diagnostics"),
+    )
+    .args(["--port", "not-a-number"])
+    .output()
+    .expect("run invalid port");
     assert_eq!(invalid.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("invalid int value"));
 }

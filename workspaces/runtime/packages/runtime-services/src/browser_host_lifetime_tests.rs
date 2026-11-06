@@ -1,4 +1,4 @@
-//! The lifetime of a pending sign-in request (docs/vm-browser-bridge.md, "Card lifetime"):
+//! The lifetime of a pending sign-in request:
 //! while its command listens, the request stays open past the request time, up to
 //! `SIGN_IN_OPEN_LIMIT_SECONDS` from its creation.
 

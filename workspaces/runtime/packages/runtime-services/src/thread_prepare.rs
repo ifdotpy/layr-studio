@@ -106,9 +106,6 @@ pub struct Actor {
     /// the native review model is the agent model.
     #[serde(default)]
     pub native_review: bool,
-    /// A VM agent (Python `executionMode == "vm"`): its catalog gets the VM tools.
-    #[serde(default)]
-    pub vm: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,7 +149,7 @@ pub struct GuidanceBundle {
     pub role: String,
     pub thread_config: Map<String, Value>,
     /// Native Chrome setup of a host Codex thread; `None` for an agent without
-    /// one (Claude, VM). Its config overrides are already in `thread_config`.
+    /// one. Its config overrides are already in `thread_config`.
     #[serde(default)]
     pub browser: Option<BrowserGuidance>,
 }
@@ -173,14 +170,12 @@ pub enum WorkspaceReadiness {
     Ready,
     Pending,
     Image,
-    Vm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Refusal {
     ImageWorkspace,
-    VmWorkspace,
     NativeCatalogMutation,
     PortableHistoryImport,
     FrozenImport,
@@ -191,9 +186,10 @@ pub enum Refusal {
     EmptyThreadIdentity,
     PreparationIdentity,
     MalformedCatalog,
+    Blocked(HoldReason),
 }
 
-/// All holds retain queued input. Replan after the documented observation changes.
+/// A temporary condition that prevents thread preparation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HoldReason {
@@ -330,7 +326,6 @@ pub enum Outcome {
     Ready(LoadedIdentity),
     Start(Box<PreparedAttempt>),
     Resume(Box<PreparedAttempt>),
-    Hold(HoldReason),
     Refuse(Refusal),
 }
 
@@ -348,25 +343,6 @@ pub fn session_tool_of(saved: Option<SessionTool>, has_thread: bool) -> SessionT
     })
 }
 
-/// The VM tool set of a VM agent (Python `Runtime.tool_definitions`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VmRole {
-    /// A writer gets `host_exec`.
-    Writer,
-    /// A read-only reviewer gets `layr_read` and no `host_exec`.
-    Reviewer,
-}
-
-impl VmRole {
-    pub fn of(vm: bool, role: Role) -> Option<Self> {
-        vm.then_some(if role == Role::Reviewer {
-            Self::Reviewer
-        } else {
-            Self::Writer
-        })
-    }
-}
-
 /// The actor and root facts that select one agent's tools from a catalog.
 pub struct CatalogFilter<'a> {
     pub provider: ProviderKind,
@@ -375,8 +351,6 @@ pub struct CatalogFilter<'a> {
     pub federation_enabled: bool,
     pub cwd: &'a str,
     pub session_tool: SessionTool,
-    /// `Some` for a VM agent.
-    pub vm: Option<VmRole>,
 }
 
 /// Uses the immutable selected catalog, never a newly discovered live catalog.
@@ -403,7 +377,6 @@ pub fn tool_definitions(s: &Snapshot) -> Result<Vec<ToolDefinition>, Refusal> {
             federation_enabled: s.root.federation_enabled,
             cwd: &s.actor.cwd,
             session_tool: session_tool(s),
-            vm: VmRole::of(s.actor.vm, s.settings.role),
         },
     )
 }
@@ -455,62 +428,9 @@ pub fn filter_tool_definitions(
                 _ => "",
             });
         }
-        if f.vm.is_some() {
-            vm_tool(&mut tool)?;
-        }
         result.push(tool);
     }
-    // Python appends the VM tools after the catalog: `host_exec` for a writer,
-    // `layr_read` for a reviewer.
-    let appended = match f.vm {
-        Some(VmRole::Writer) => crate::host_exec::tool_definition(),
-        Some(VmRole::Reviewer) => crate::layr_read::tool_definition(),
-        None => return Ok(result),
-    };
-    result.push(appended.ok_or(Refusal::MalformedCatalog)?.clone());
     Ok(result)
-}
-
-/// The `orchestration_review` description of a VM agent.
-const VM_REVIEW_DESCRIPTION: &str = "Create a read-only layr reviewer in the VM. target commit.sha is the exact layr state ID. \
-    Use custom.instructions for review instructions. The result wakes the lead.";
-/// The `orchestration_spawn` description of a VM agent.
-const VM_SPAWN_DESCRIPTION: &str = "Delegate a batch to VM agents on separate owned layr lines. \
-    Reviewers receive read-only lines. Each completion wakes you. \
-    base_ref selects a layr state ID. Use cwd within your line. \
-    Omit model and effort to use the review defaults for reviewers and worker defaults for implementers.";
-
-/// Python `Runtime.tool_definitions`: a VM agent delegates to VM agents on
-/// layr lines in the same guest, so `orchestration_spawn` offers only the layr
-/// workspace and the Linux environment, and names no paired server.
-fn vm_tool(tool: &mut ToolDefinition) -> Result<(), Refusal> {
-    match tool.name.as_str() {
-        "orchestration_review" => tool.description = VM_REVIEW_DESCRIPTION.into(),
-        "orchestration_spawn" => {
-            tool.description = VM_SPAWN_DESCRIPTION.into();
-            let properties = tool
-                .input_schema
-                .get_mut("properties")
-                .and_then(Value::as_object_mut)
-                .ok_or(Refusal::MalformedCatalog)?;
-            properties.remove("server");
-            let fields = properties
-                .get_mut("agents")
-                .and_then(|agents| agents.pointer_mut("/items/properties"))
-                .and_then(Value::as_object_mut)
-                .ok_or(Refusal::MalformedCatalog)?;
-            for (field, value) in [("workspace", "layr"), ("environment", "linux")] {
-                fields
-                    .get_mut(field)
-                    .and_then(Value::as_object_mut)
-                    .ok_or(Refusal::MalformedCatalog)?
-                    .insert("enum".into(), json!([value]));
-            }
-            fields.remove("server");
-        }
-        _ => {}
-    }
-    Ok(())
 }
 
 fn refusal(s: &Snapshot) -> Option<Refusal> {
@@ -522,7 +442,6 @@ fn refusal(s: &Snapshot) -> Option<Refusal> {
     }
     match s.workspace {
         WorkspaceReadiness::Image => Some(Refusal::ImageWorkspace),
-        WorkspaceReadiness::Vm => Some(Refusal::VmWorkspace),
         WorkspaceReadiness::Ready | WorkspaceReadiness::Pending => s.unsupported,
     }
 }
@@ -540,16 +459,16 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         return Outcome::Refuse(reason);
     }
     if s.closed || s.actor.deleted {
-        return Outcome::Hold(HoldReason::Inactive);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::Inactive));
     }
     if let Some(reason) = s.admission
         && !(reason == HoldReason::NativeRelease
             && unsubmitted_inspection(s, s.actor.thread_id.as_deref()))
     {
-        return Outcome::Hold(reason);
+        return Outcome::Refuse(Refusal::Blocked(reason));
     }
     if !s.account.available {
-        return Outcome::Hold(HoldReason::ConnectionUnavailable);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::ConnectionUnavailable));
     }
     if s.pending.as_ref().is_some_and(|p| {
         p.agent_id != s.actor.id || p.epoch != s.actor.epoch || p.account_key != s.account.key
@@ -560,10 +479,10 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         .as_ref()
         .is_some_and(|p| p.connection_id == s.account.connection_id)
     {
-        return Outcome::Hold(HoldReason::PreparationPending);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::PreparationPending));
     }
     if s.workspace == WorkspaceReadiness::Pending {
-        return Outcome::Hold(HoldReason::WorkspacePending);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::WorkspacePending));
     }
     let source = s
         .actor
@@ -1187,7 +1106,6 @@ mod archive_finished_catalog_tests {
                 federation_enabled: false,
                 cwd: "",
                 session_tool: SessionTool::Move,
-                vm: None,
             },
         )
         .expect("catalog filter accepts the bundled tools")
@@ -1235,6 +1153,7 @@ mod archive_finished_catalog_tests {
         }
     }
 }
+<<<<<<< head
 
 /// The VM catalog of Python `Runtime.tool_definitions`, which 027f3cfea
 /// deleted: VM agents delegate and review on layr lines in the guest.
@@ -1350,3 +1269,5 @@ mod vm_catalog_tests {
         assert_eq!(host.len() + 1, catalog(Some(VmRole::Reviewer)).len());
     }
 }
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31

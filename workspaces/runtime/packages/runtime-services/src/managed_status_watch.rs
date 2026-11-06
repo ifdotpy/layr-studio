@@ -1890,15 +1890,13 @@ mod tests {
             stored.status,
             studio_runtime_schema::rule_record::RuleStatus::Paused
         );
-        store
-            .test_reader()
-            .expect("read rule sync projection")
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rule' AND id='rule-fixed'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("rule sync projection exists");
+        let connection = store.test_reader().expect("read rule document");
+        assert!(
+            crate::entity_scope::direct_document(&connection, "rule", "rule-fixed")
+                .expect("rule document reads")
+                .is_some(),
+            "the paused rule keeps its document"
+        );
         let resumed_request = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         rules(
             &store,
@@ -2258,8 +2256,8 @@ mod tests {
         store
             .transaction_with(|tx| {
                 tx.execute_batch(
-                    "CREATE TRIGGER fail_rule_documents BEFORE INSERT ON sync_entities \
-                     WHEN NEW.collection='rule' BEGIN SELECT RAISE(ABORT,'rule sync failpoint'); END;",
+                    "CREATE TRIGGER fail_rule_documents BEFORE INSERT ON durable_rows \
+                     WHEN NEW.tbl='runtime_rules' BEGIN SELECT RAISE(ABORT,'rule change failpoint'); END;",
                 )?;
                 Ok::<_, studio_runtime_store::StoreError>(())
             })
@@ -2317,11 +2315,11 @@ mod tests {
                     .expect("count rule rows"),
                 connection
                     .query_row(
-                        "SELECT COUNT(*) FROM sync_entities WHERE collection='rule'",
+                        "SELECT COUNT(*) FROM durable_rows WHERE tbl='runtime_rules'",
                         [],
                         |row| row.get(0),
                     )
-                    .expect("count rule sync rows"),
+                    .expect("count rule change rows"),
             )
         };
         assert_eq!(rule_count, 0);

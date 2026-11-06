@@ -21,15 +21,19 @@ the hosted gate composition.
 
 `just test-fast` runs the [`fast` nextest profile](../.config/nextest.toml), desktop
 recovery and retained-helper boundaries, web API/type witnesses, tooling tests,
+<<<<<<< head
 generated-contract and dependency guards including Cargo bans, and the VM guest Python suite through its
 [runner](../workspaces/runtime/apps/vm-guest/run-guest-suite.mts). The facade uses five
 bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
 independent tooling/provider/desktop checks, and the guest suite. Independent
+=======
+generated-contract and dependency guards including Cargo bans. The facade uses bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
+and independent tooling/provider/desktop checks. Independent
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 checks start immediately; artifact consumers wait only for their preparation. Cargo compilation stays in the Rust lane with four build jobs. WASM is
 generated once; the renderer is built once for the web checks.
 Type checks wait for WASM; web tests wait for the workspace build's debug
-`examples/draft-server`, and the guest waits for its debug supervisor. The gate
-passes both binary paths explicitly. These checks overlap the Rust build or test run. The
+`examples/draft-server`. The gate passes its binary path explicitly. These checks overlap the Rust build or test run. The
 [WASM builder](../workspaces/client/apps/web/scripts/build-client-wasm.ts) requires
 the exact binding generator version pinned by the client-wasm crate and installs
 it in the versioned cache when missing. Cold builds are outside the warm short-tier
@@ -39,7 +43,7 @@ runner-derived, without global serial groups. The short tier starts no browser o
 
 `just test-comprehensive` runs the provider bridge, workspace Clippy, workspace
 Rust nextest with the `ci` profile, web type and unit checks, tooling tests, the
-shared desktop/helper and guest witnesses, and browser smoke. Both local tiers use
+shared desktop/helper witnesses, and browser smoke. Both local tiers use
 the same workspace selection, Cargo features, development/test profiles and target
 directory, excluding the native client, whose coverage runs in `just test-native-ci`
 on the prepared builder. A workspace `cargo build --tests --bins`
@@ -70,7 +74,7 @@ integrated batch.
 Both tiers use Cargo contracts and Rust-owned fixture data. The Python backend,
 its pseudo-package, native operations extension, mypy gate, runner categories,
 server shards, oracle processes, and Python mutation drivers have been removed.
-The guest service and desktop Python helpers are retained and remain independent
+The desktop Python helpers are retained and remain independent
 of the backend. Historical verification reports describe their recorded revision;
 their removed Python commands are not current instructions.
 
@@ -83,6 +87,7 @@ normal,build,dev --workspace --depth 1` and deliberately add the third-party cra
 list. Workspace crates must use the facade. The separate vendored Layr workspace
 is excluded by the root Cargo workspace.
 
+<<<<<<< head
 | Purpose                                               | Command                                  |
 | ----------------------------------------------------- | ---------------------------------------- |
 | Short safety gate                                     | `just test-fast`                         |
@@ -106,24 +111,39 @@ is excluded by the root Cargo workspace.
 | Continuation corpus and store faults, manual heavy    | `just test-rust-usage-resume-corpora`    |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
+=======
+| Purpose                                              | Command                                  |
+| ---------------------------------------------------- | ---------------------------------------- |
+| Short safety gate                                    | `just test-fast`                         |
+| Publication gate                                     | `just test-comprehensive`                |
+| Generated contracts                                  | `just contracts-check`                   |
+| Workspace boundaries                                 | `just boundaries-check`                  |
+| Cargo dependency bans                                | `just deny-bans`                         |
+| Browser smoke                                        | `just test-browser-smoke`                |
+| Layout shifts across UI states, manual               | `just layout-shift-matrix`               |
+| Real entity stream, manual heavy                     | `just test-entity-server-heavy`          |
+| Full browser project, manual heavy                   | `just test-browser` or `just test-heavy` |
+| Multi-server browser recovery, manual heavy          | `just test-browser-multi-server`         |
+| Full deterministic Rust corpora, manual heavy        | `just test-rust-runtime-corpora`         |
+| Full account-worker crash matrix, manual heavy       | `just test-crash-matrix-full`            |
+| Provider-session scheduling diagnostic, manual heavy | `just test-rust-session-fairness`        |
+| Provider child reap timing, manual heavy             | `just test-provider-reap-timing`         |
+| Live handover with real servers, manual              | `just test-live-handover`                |
+| Load-sensitive Rust tests, manual heavy              | `just test-quarantine`                   |
+| Real launcher process probe (lsof), manual           | `just test-real-process-probe`           |
+| Many-agent scenario, manual heavy                    | `just test-rust-many-agents`             |
+| Backend instruction and allocation profiles, manual  | `just bench-gungraun`                    |
+| Continuation corpus and store faults, manual heavy   | `just test-rust-usage-resume-corpora`    |
+| Hidden Rust native WebView scenarios, manual heavy   | `just test-native-webview`               |
+| Hidden Rust native WebView scenarios, manual heavy   | `just test-native-webview`               |
+
+Refresh the captured entity transfer fixture with `just regenerate-entity-server-frames`.
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 
 Eight Rust tests failed only under load and are `#[ignore]` until
 [issue #616](https://github.com/ifdotpy/layr-studio/issues/616) is fixed; `just test-quarantine`
 runs them. Six browser specs left the smoke subset and run only in the full
 browser tier (`just test-browser`, `just test-heavy`) until the same issue is fixed.
-
-The fast guest wrapper tests use an injected executor for ordered results,
-failure counts, and broken-pool cleanup. The actual guest suite remains in the
-fast tier with the default spawn-based process pool. The manual guest runner
-check keeps the real worker aggregation/crash scenarios and suite process
-ownership/cleanup fixtures outside the fast tier.
-
-The fast host_exec witnesses check private token creation, the actual Unix socket,
-authentication, retirement, and startup outcomes without a process-start deadline.
-The manual host_exec check retains the detached CLI startup, build replacement,
-busy-command preservation, and unchanged guest broker scenarios. Its fixture owns
-each service child through a private close channel and keeps failure logs in the
-test output. Production startup deadlines do not change.
 
 Set `STUDIO_STORE_COMPRESS_EVERY_WRITE=1` to run any Rust selection in the
 compress-every-write mode of [`stored_text.rs`](../workspaces/runtime/packages/runtime-store/src/stored_text.rs):
@@ -131,12 +151,33 @@ every writer of a compressed text column then stores the compressed form, so
 the selected tests check that every reader decodes it. For example,
 `STUDIO_STORE_COMPRESS_EVERY_WRITE=1 just test studio-runtime-services notification_dispatch`.
 
+`just layout-shift-matrix` is a manual diagnostic. It drives held agent turns
+through the fixture provider in every layout configuration (sidebar, right
+panel, terminals, draft) on desktop, phone and Duo profiles, with and without
+the on-screen keyboard, and writes `index.html` with the layout-shift score and
+the moved controls of each edge. The browser smoke witness for the same rule is
+`tests/layout/agent-turn-stability.spec.ts`.
+
 Heavy runs are announced and selected by hand. A test that needs repeated runs
 to be trusted must be rewritten or moved to the heavy tier. New tests fit the
 short tier. Load, stress, and contention runs require a separate explicit selection,
 a declared duration and resource budget, and no simultaneous ordinary checks or
 user work on the same machine. The run owner stops every generator on exit.
 Ordinary check evidence collected during a load run is invalid.
+
+`just bench-gungraun` is a manual profiling run, outside both test tiers and
+hosted CI. Install Valgrind and the runner matching the pinned crate with
+`cargo install gungraun-runner --version 0.17.2 --locked`. It runs Callgrind
+and DHAT on disposable fixtures; instruction and allocation counts do not
+measure elapsed time. Other work can run concurrently. The benchmark profile
+includes line tables for `callgrind_annotate` and DHAT output under
+`target/gungraun/`. Pass a benchmark name to the recipe to filter cases. Add a
+`#[library_benchmark]` to the owning crate's `benches/hot_paths.rs` and register
+it in its group; use a `#[bench]` setup expression to keep fixture creation out
+of the measured function. Compare results from the same toolchain and fixtures.
+The services benchmark enables rustix's libc auxiliary-vector reader because
+its direct reader can access an unmapped vDSO address under Valgrind. That is a
+benchmark build difference from the normal Linux backend.
 
 Provider callbacks, preparation, monitor starts, recovery, and request identities
 are covered by the witnesses selected in the facade. Shared limits and filters
@@ -407,7 +448,7 @@ fixtures and the gate supply their explicit binary paths afterward.
 
 `just test-fast-rest` runs the comprehensive remainder without browser smoke.
 `just test-fast-rest-non-rust` consumes prebuilt WASM, a debug supervisor and draft-server and
-runs only the type, web, independent check and guest lanes: no Clippy, WASM builder or Rust
+runs only the type, web, independent check lanes: no Clippy, WASM builder or Rust
 compilation. Hosted CI restores commit- and SHA-256-verified artifacts from the
 workspace build job for this remainder and browser smoke. Standalone browser
 smoke prepares itself; `just test-browser-smoke --prepared` consumes those inputs.
@@ -744,8 +785,8 @@ fast` to inspect selection; `ci` is the comprehensive superset. The migration's
 [recorded parity evidence](../workspaces/tooling/apps/repository-checks/fixtures/gate-selection-parity.json)
 preserves the original 484-ID migration evidence and compares the 526 witnesses
 on the integration baseline, with the explicitly added schema-preparation witness
-bringing the current selection to 527. Every Linux clause matches tests, and the
-selection is a subset of comprehensive.
+bringing that baseline selection to 527. Recheck current selection against the
+comprehensive profile after changing the fast profile.
 Fast Vitest includes belong in the package's `vitest.fast.config.*`, never a
 second facade or package-script file list. Package manifests own
 `codexStudioChecks` mappings.

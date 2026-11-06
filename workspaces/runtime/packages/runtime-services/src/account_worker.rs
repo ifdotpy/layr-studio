@@ -8,7 +8,10 @@ use crate::{
     },
     scheduler::{self, TurnIntent, TurnStart},
 };
+<<<<<<< head
 use rusqlite::OptionalExtension;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     future::Future,
@@ -24,7 +27,6 @@ use studio_runtime_process::{
         Shutdown,
     },
 };
-use studio_runtime_providers::ProviderKind;
 use studio_runtime_providers::{Frame, Method, RequestId, RequestOutcome, ResponseBody};
 use studio_runtime_store::{
     AgentId, AgentRepository, ObservedTable, RuntimeStore, SchedulerRepository, StoreError,
@@ -56,7 +58,6 @@ pub use studio_runtime_schema::persistence::ProviderScope;
 pub use studio_runtime_store::account_state::{ScopeError, current_provider_scope};
 mod submission;
 mod turn_preparation;
-mod vm_reattach;
 
 impl From<rusqlite::Error> for WorkerError {
     fn from(error: rusqlite::Error) -> Self {
@@ -66,7 +67,8 @@ impl From<rusqlite::Error> for WorkerError {
 
 pub const COMMAND_CAPACITY: usize = 16;
 /// Journal and receipt namespace of one VM actor within its owning account.
-pub(crate) fn vm_journal_scope(account: &str, actor: &str) -> String {
+/// Preserves the journal key of historical actor-bound requests.
+pub(crate) fn historical_actor_journal_scope(account: &str, actor: &str) -> String {
     format!("{account}:vm:{actor}")
 }
 /// Canvas tables whose committed changes may alter idle-unload eligibility.
@@ -99,26 +101,6 @@ const STREAM_CAPACITY_RETRY: std::time::Duration = std::time::Duration::from_mil
 // requested. Keep shutdown bounded while allowing ordinary host contention to
 // clear before reporting an unconfirmed stop.
 const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Active VM Claude credential refresh cadence; unit is seconds.
-pub(crate) const VM_CREDENTIAL_REFRESH_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(180);
-
-fn vm_refresh_deadline_after_session_change(
-    had_active_session: bool,
-    has_active_session: bool,
-    has_resolver: bool,
-    current_deadline: Option<tokio::time::Instant>,
-    now: tokio::time::Instant,
-) -> Option<tokio::time::Instant> {
-    if !has_active_session || !has_resolver {
-        None
-    } else if !had_active_session {
-        Some(now)
-    } else {
-        current_deadline
-    }
-}
 
 /// The preparation stages that can block a start without additional evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,12 +183,12 @@ pub enum WorkerError {
     Notification(#[from] crate::notification_dispatch::NotificationDispatchError),
     #[error("{0}")]
     PreparationRefused(String),
-    #[error("VM actor identity changed while journaling")]
-    StaleVmActor,
+    #[error("Actor workspace is unavailable")]
+    UnavailableActor,
     /// Pending on a blocker this preparation cannot name: any agent change may clear it.
     #[error("{0}")]
     PreparationPending(PreparationBlock),
-    /// Pending until the agent's own row changes (its workspace or VM readiness).
+    /// Pending until the agent's own workspace row changes.
     #[error("{0}")]
     PreparationAwaitsAgent(PreparationBlock),
     #[error("provider cleanup is not confirmed: {0}")]
@@ -223,55 +205,6 @@ pub enum WorkerError {
     Capacity,
     #[error("provider callback response is unresolved; recovery required")]
     CallbackUnknown,
-}
-
-fn vm_bootstrap_error(error: crate::linux_vm_provider::GuestProviderError) -> WorkerError {
-    use crate::linux_vm_provider::GuestProviderError as Error;
-    match error {
-        Error::Persistence(error) => WorkerError::Store(error),
-        Error::Outbox(error) => WorkerError::Store(error.into()),
-        Error::RequestResult(error) => WorkerError::Store(error.into()),
-        Error::Json(error) => WorkerError::Store(error.into()),
-        Error::Invalid
-        | Error::Unknown
-        | Error::Refused
-        | Error::InvalidResponse
-        | Error::Guest(_)
-        | Error::Task => WorkerError::CallbackUnknown,
-    }
-}
-
-fn vm_credential_maintenance_error(error: &WorkerError) -> Option<&'static str> {
-    match error {
-        WorkerError::PreparationPending(_) | WorkerError::PreparationAwaitsAgent(_) => {
-            Some("pending")
-        }
-        WorkerError::Expired | WorkerError::PreparationRefused(_) => Some("stale-or-unavailable"),
-        WorkerError::Store(_)
-        | WorkerError::Recovery(_)
-        | WorkerError::Scheduler(_)
-        | WorkerError::Session(_)
-        | WorkerError::Notification(_)
-        | WorkerError::StaleVmActor
-        | WorkerError::CleanupUnconfirmed(_)
-        | WorkerError::AlreadyRunning
-        | WorkerError::Closed
-        | WorkerError::ShutdownTimeout
-        | WorkerError::TaskFailed
-        | WorkerError::Capacity
-        | WorkerError::CallbackUnknown => None,
-    }
-}
-
-fn vm_account_generation_matches(
-    resources: &preparation::PreparationResources,
-    request: &preparation::VmProviderLaunchRequest,
-) -> bool {
-    resources
-        .account_session
-        .as_deref()
-        .and_then(|session| session.current_scope(&request.account_key))
-        .is_some_and(|scope| scope.generation == request.generation)
 }
 
 /// Share one bridge among all account workers of a runtime. Each account
@@ -545,7 +478,6 @@ impl Drop for AccountLease {
 
 pub enum AccountCommand {
     RetainedRequest(Box<retained::RequestCommand>),
-    VmNotification(Box<retained::VmNotificationCommand>),
     CommittedFrame(Box<retained_frame::FrameCommand>),
     JournalBarrier(retained::BarrierCommand),
     ConnectionRecovery {
@@ -793,14 +725,8 @@ pub async fn start_account_worker_with_publication_sink(
     let stream_connection = connection_id.clone();
     bridge
         .worker_run("attach_stream", move |store| async move {
-            store::attach_provider_stream(
-                &store,
-                &stream_account,
-                None,
-                generation.0,
-                &stream_connection,
-            )
-            .await
+            store::attach_provider_stream(&store, &stream_account, generation.0, &stream_connection)
+                .await
         })
         .await?;
     let effect_account = account.clone();
@@ -820,7 +746,6 @@ pub async fn start_account_worker_with_publication_sink(
         })
         .await?;
     let events = std::mem::replace(&mut session.events, mpsc::channel(1).1);
-    let (vm_event_tx, vm_events) = mpsc::channel(COMMAND_CAPACITY);
     let (commands, inbox) = mpsc::channel(COMMAND_CAPACITY);
     let stop = Shutdown::default();
     let scope = crate::recovery_history::ConnectionScope {
@@ -828,7 +753,6 @@ pub async fn start_account_worker_with_publication_sink(
         connection: connection_id.clone(),
         generation: generation.0,
     };
-    let vm_credential_refresh_at = None;
     let idle_state_changes = bridge.idle_state_changes();
     let idle_setting_changes = bridge.idle_setting_changes();
     let idle_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -836,20 +760,12 @@ pub async fn start_account_worker_with_publication_sink(
         resources: Arc::new(resources),
         bridge: bridge.clone(),
         account: account.clone(),
-        vm_credential_refresh_at,
         generation,
         connection_id,
         timeout_ms,
         control: session.control.clone(),
         session,
         events,
-        vm_events,
-        vm_event_tx,
-        vm_sessions: BTreeMap::new(),
-        retired_vm_sessions: BTreeMap::new(),
-        vm_incarnation_counter: 0,
-        resolving_vm_actors: BTreeSet::new(),
-        vm_event_forwarders: Vec::new(),
         request_waiters: BTreeMap::new(),
         browser_skill_roots: None,
         idle_clocks: idle_unload::IdleClocks::default(),
@@ -890,7 +806,6 @@ pub async fn start_account_worker_with_publication_sink(
         capacity_blocked: VecDeque::new(),
         capacity_retry_at: None,
         reported_faults: BTreeSet::new(),
-        vm_notification_waiters: BTreeMap::new(),
         callbacks: BTreeMap::new(),
         callback_receipt_deadlines: BTreeMap::new(),
         managed_callback_cursors: BTreeSet::new(),
@@ -1003,7 +918,7 @@ type ManagedCallbackResult = (
     Option<i64>,
     callback::CallbackHandled,
 );
-/// A callback record held by this worker: provider generation, emitting VM
+/// A callback record held by this worker: provider generation, historical
 /// actor, its epoch and the journal cursor.
 type CallbackKey = (u64, Option<String>, Option<i64>, u64);
 type CallbackCursor = (
@@ -1071,20 +986,12 @@ struct Worker {
     resources: Arc<preparation::PreparationResources>,
     bridge: StoreBridge,
     account: String,
-    vm_credential_refresh_at: Option<tokio::time::Instant>,
     generation: Generation,
     connection_id: String,
     timeout_ms: u64,
     control: SessionControl,
     session: SessionHandle,
     events: mpsc::Receiver<SessionEvent>,
-    vm_events: mpsc::Receiver<VmForwardedMessage>,
-    vm_event_tx: mpsc::Sender<VmForwardedMessage>,
-    vm_sessions: BTreeMap<String, ActorProviderSession>,
-    retired_vm_sessions: BTreeMap<(String, u64), ActorProviderSession>,
-    vm_incarnation_counter: u64,
-    resolving_vm_actors: BTreeSet<String>,
-    vm_event_forwarders: Vec<JoinHandle<()>>,
     /// Replies to requests the worker sends for itself, by operation.
     request_waiters: BTreeMap<String, tokio::sync::oneshot::Sender<RequestOutcome>>,
     /// Skill roots this connection confirmed for `skills/extraRoots/set`;
@@ -1131,9 +1038,8 @@ struct Worker {
     pending: BTreeMap<RequestId, Arc<Pending>>,
     streams: NotificationStreamBuffer,
     flush_at: Option<tokio::time::Instant>,
-    /// Journal entries that wait for a reply to bind them, with their VM
-    /// source and the agent an unbound completion belongs to.
-    deferred: VecDeque<(JournalEntry, Option<VmActorIdentity>, Option<String>)>,
+    /// Journal entries waiting for a reply, with their historical actor source.
+    deferred: VecDeque<(JournalEntry, Option<String>)>,
     /// Journal entries that a full monitor output queue refused, and every
     /// entry that arrived after them, in journal order. While it is not empty
     /// the worker reads no provider event, so the journal order holds.
@@ -1142,8 +1048,6 @@ struct Worker {
     capacity_retry_at: Option<tokio::time::Instant>,
     /// Agents whose isolated data fault this worker already logged.
     reported_faults: BTreeSet<String>,
-    vm_notification_waiters:
-        BTreeMap<(String, u64), tokio::sync::oneshot::Sender<Result<(), retained::PortError>>>,
     effects: VecDeque<Effect>,
     publication_sink: Arc<dyn crate::notification_runtime_effects::NotificationPostCommitSink>,
     publication_retry_at: Option<tokio::time::Instant>,
@@ -1156,7 +1060,7 @@ struct Worker {
     callback_receipt_deadlines: BTreeMap<String, tokio::time::Instant>,
     /// Accepted callback records this worker already started or answers.
     managed_callback_cursors: BTreeSet<CallbackKey>,
-    /// Records of VM actors that have not reattached since this worker started.
+    /// Historical actor records held since this worker started.
     callback_parked: BTreeSet<CallbackKey>,
     /// Whether accepted callback records may be waiting to start: set by a
     /// journal commit, a finished handler or answer, and at startup.
@@ -1168,30 +1072,10 @@ struct Worker {
     managed_callbacks: JoinSet<ManagedCallbackResult>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct VmActorIdentity {
-    actor_id: String,
-    epoch: i64,
-    incarnation: u64,
-}
-
-/// One journal entry that waits for monitor output queue room, with the
-/// arguments of the journal call that refused it.
 struct CapacityBlocked {
     entry: JournalEntry,
-    source: Option<VmActorIdentity>,
     settle: bool,
     park_unbound: bool,
-}
-
-enum VmForwardedMessage {
-    Event {
-        source: VmActorIdentity,
-        event: SessionEvent,
-    },
-    Exit {
-        source: VmActorIdentity,
-    },
 }
 
 enum ServeSignal {
@@ -1199,10 +1083,8 @@ enum ServeSignal {
     Flush,
     PublicationRetry,
     PublicationDrained(Result<Result<store::PublicationPass, WorkerError>, tokio::task::JoinError>),
-    VmCredentialRefresh,
     Command(Option<AccountCommand>),
     Event(Option<SessionEvent>),
-    VmEvent(Option<VmForwardedMessage>),
     ConnectionRecovery,
     ManagedCallback(Option<Result<ManagedCallbackResult, tokio::task::JoinError>>),
     Prepared(Option<Result<Box<turn_preparation::Done>, tokio::task::JoinError>>),
@@ -1215,120 +1097,7 @@ enum ServeSignal {
     CallbackReceiptExpired,
 }
 
-struct ActorProviderSession {
-    session: SessionHandle,
-    epoch: i64,
-    incarnation: u64,
-    control: SessionControl,
-    launch_request: preparation::VmProviderLaunchRequest,
-    bootstrap: Option<Value>,
-    /// Credential-copy proof for one exact, unsubmitted auth continuation attempt.
-    auth_recovery_refresh: Option<Value>,
-}
 impl Worker {
-    async fn handle_vm_message(&mut self, message: VmForwardedMessage) -> Result<(), WorkerError> {
-        match message {
-            VmForwardedMessage::Event { source, event } => self.event_from(event, &source).await,
-            VmForwardedMessage::Exit { source } => {
-                let active = self
-                    .vm_sessions
-                    .get(&source.actor_id)
-                    .is_some_and(|session| {
-                        session.epoch == source.epoch && session.incarnation == source.incarnation
-                    });
-                let retired = self
-                    .retired_vm_sessions
-                    .contains_key(&(source.actor_id.clone(), source.incarnation));
-                if !active && !retired {
-                    return Ok(());
-                }
-
-                // The forwarder sends Exit on the same channel after the event
-                // stream closes. FIFO therefore puts every delivered event ahead
-                // of the joined task's remaining durable evidence.
-                #[cfg(test)]
-                self.bridge
-                    .faults
-                    .mark_shutdown_phase("joining VM actor session");
-                let exit = if active {
-                    self.vm_sessions
-                        .get_mut(&source.actor_id)
-                        .ok_or(WorkerError::StaleVmActor)?
-                        .session
-                        .completion()
-                        .await
-                } else {
-                    self.retired_vm_sessions
-                        .get_mut(&(source.actor_id.clone(), source.incarnation))
-                        .ok_or(WorkerError::StaleVmActor)?
-                        .session
-                        .completion()
-                        .await
-                };
-                #[cfg(test)]
-                self.bridge
-                    .faults
-                    .mark_shutdown_phase("VM actor session joined");
-                if let Some(recovery) = exit
-                    .adapter
-                    .as_ref()
-                    .and_then(|adapter| adapter.recovery_needed.clone())
-                {
-                    let scope = self.journal_scope(Some(&source.actor_id));
-                    self.db("vm_session_recovery", move |store| async move {
-                        store::save_recovery(&store, &scope, &recovery).await
-                    })
-                    .await?;
-                }
-                for event in exit.undelivered {
-                    match self.event_one(event, Some(&source), false).await {
-                        Err(WorkerError::StaleVmActor) => self.retire_vm_actor_if_current(&source),
-                        result => result?,
-                    }
-                }
-                self.event_one(
-                    SessionEvent {
-                        journal: None,
-                        outcomes: exit.outcomes,
-                    },
-                    Some(&source),
-                    false,
-                )
-                .await?;
-
-                // A final GenerationClosed normally retires the actor above.
-                // Keep this recovery fallback for task exits whose final outcome
-                // lane could not be applied; it remains scoped to this actor.
-                if self
-                    .vm_sessions
-                    .get(&source.actor_id)
-                    .is_some_and(|session| {
-                        session.epoch == source.epoch && session.incarnation == source.incarnation
-                    })
-                {
-                    let account = self.account.clone();
-                    let generation = self.generation.0;
-                    let disconnect_actor = source.actor_id.clone();
-                    self.db("vm_actor_disconnected", move |store| async move {
-                        store::disconnect_vm_actor(
-                            &store,
-                            &disconnect_actor,
-                            source.epoch,
-                            &account,
-                            generation,
-                        )
-                        .await
-                    })
-                    .await?;
-                    self.retire_vm_actor(&source.actor_id);
-                }
-                self.retired_vm_sessions
-                    .remove(&(source.actor_id, source.incarnation));
-                Ok(())
-            }
-        }
-    }
-
     async fn run(mut self) -> Result<(), WorkerError> {
         #[cfg(test)]
         self.bridge.faults.mark_shutdown_phase("serving");
@@ -1404,41 +1173,6 @@ impl Worker {
         self.bridge
             .faults
             .mark_shutdown_phase("account session joined");
-        for session in self.vm_sessions.values() {
-            session.control.cancel();
-        }
-        let mut vm_cleanup_error = None;
-        let mut forwarders = std::mem::take(&mut self.vm_event_forwarders);
-        while let Some(mut forwarder) = forwarders.pop() {
-            #[cfg(test)]
-            self.bridge
-                .faults
-                .mark_shutdown_phase("joining VM event forwarder");
-            loop {
-                tokio::select! {
-                    _joined = &mut forwarder => break,
-                    event = self.vm_events.recv() => match event {
-                        Some(event) => {
-                            let closing = self.closing;
-                            self.closing = false;
-                            if let Err(error) = self.handle_vm_message(event).await {
-                                vm_cleanup_error.get_or_insert(error);
-                            }
-                            self.closing = closing;
-                        }
-                        None => break,
-                    }
-                }
-            }
-        }
-        while let Ok(event) = self.vm_events.try_recv() {
-            let closing = self.closing;
-            self.closing = false;
-            if let Err(error) = self.handle_vm_message(event).await {
-                vm_cleanup_error.get_or_insert(error);
-            }
-            self.closing = closing;
-        }
         // Completion has an independent lane. Drain bounded delivered and retained
         // evidence before persisting disconnect; abandoned cursors are never ACKed.
         #[cfg(test)]
@@ -1450,7 +1184,6 @@ impl Worker {
         self.bridge
             .faults
             .mark_shutdown_phase("account state finished");
-        let cleanup = cleanup.and_then(|()| vm_cleanup_error.map_or(Ok(()), Err));
         match cleanup.and(result) {
             Err(WorkerError::Session(SessionTaskError::Closed))
                 if *self.stop.borrow()
@@ -1469,7 +1202,6 @@ impl Worker {
             if self.restart_recovery_started == RestartRecoveryPhase::Pending
                 && self.session.status.borrow().initialization == InitializationStatus::Ready
             {
-                self.restore_existing_vm_sessions().await?;
                 self.restart_recovery_started = RestartRecoveryPhase::Started;
                 let first_pass = restart_recovery::FirstPass {
                     bridge: self.bridge.clone(),
@@ -1557,7 +1289,7 @@ impl Worker {
                     .answer_callback(cursor, generation, frame, actor, epoch)
                     .await
                 {
-                    Err(WorkerError::StaleVmActor) => {
+                    Err(WorkerError::UnavailableActor) => {
                         // No answer can reach the retired actor.
                         self.abandon_callback(cursor, generation, emitter.as_deref(), epoch)
                             .await?;
@@ -1638,12 +1370,10 @@ impl Worker {
             _ = tokio::time::sleep_until(self.flush_at.unwrap_or_else(||tokio::time::Instant::now()+STREAM_CADENCE)), if self.flush_at.is_some() => ServeSignal::Flush,
             _ = tokio::time::sleep_until(self.publication_retry_at.unwrap_or_else(||tokio::time::Instant::now()+STREAM_CADENCE)), if self.publication_retry_at.is_some() && self.publication_drain.is_none() => ServeSignal::PublicationRetry,
             done = async { match self.publication_drain.as_mut() { Some(task) => task.await, None => std::future::pending().await } }, if self.publication_drain.is_some() => ServeSignal::PublicationDrained(done),
-            _ = tokio::time::sleep_until(self.vm_credential_refresh_at.unwrap_or_else(tokio::time::Instant::now)), if self.vm_credential_refresh_at.is_some() && self.session.status.borrow().initialization == InitializationStatus::Ready => ServeSignal::VmCredentialRefresh,
             _ = tokio::time::sleep_until(self.capacity_retry_at.unwrap_or_else(tokio::time::Instant::now)), if self.capacity_retry_at.is_some() => ServeSignal::CapacityRetry,
             _ = tokio::time::sleep_until(self.callback_receipt_deadlines.values().copied().min().unwrap_or_else(tokio::time::Instant::now)), if !self.callback_receipt_deadlines.is_empty() => ServeSignal::CallbackReceiptExpired,
             // Refused entries keep their journal position: read nothing behind them.
             event = self.events.recv(), if self.capacity_blocked.is_empty() => ServeSignal::Event(event),
-            vm_event = self.vm_events.recv(), if self.capacity_blocked.is_empty() => ServeSignal::VmEvent(vm_event),
             _ = self.connection_recovery.join_next(), if !self.connection_recovery.is_empty() => ServeSignal::ConnectionRecovery,
             callback = self.managed_callbacks.join_next(), if !self.managed_callbacks.is_empty() => ServeSignal::ManagedCallback(callback),
             changed = self.session.status.changed() => ServeSignal::SessionStatusChanged(changed.is_ok()),
@@ -1680,14 +1410,11 @@ impl Worker {
             ServeSignal::Flush => self.flush().await?,
             ServeSignal::PublicationRetry => self.start_publication_drain(),
             ServeSignal::PublicationDrained(done) => self.publication_drained(done)?,
-            ServeSignal::VmCredentialRefresh => self.refresh_vm_claude_credentials().await?,
             ServeSignal::Command(Some(command)) => {
                 self.dispatch_command(command).await?;
             }
             ServeSignal::Command(None) | ServeSignal::Event(None) => return Ok(false),
             ServeSignal::Event(Some(event)) => self.event(event).await?,
-            ServeSignal::VmEvent(Some(event)) => self.handle_vm_message(event).await?,
-            ServeSignal::VmEvent(None) => return Ok(false),
             ServeSignal::ConnectionRecovery => {
                 self.connection_recovery_active = ConnectionRecoveryPhase::Idle
             }
@@ -1781,7 +1508,6 @@ impl Worker {
                 }
                 let _sent = reply.send(self.idle_observation());
             }
-            AccountCommand::VmNotification(command) => self.vm_notification(*command).await?,
             AccountCommand::CommittedFrame(command) => self.committed_frame(*command).await?,
             AccountCommand::RetainedRequest(command) => self.retained_request(*command).await?,
             AccountCommand::JournalBarrier(command) => self.retained_barrier(command).await?,
@@ -1939,12 +1665,7 @@ impl Worker {
                 _ = tokio::time::sleep_until(self.flush_at.unwrap_or_else(||tokio::time::Instant::now()+STREAM_CADENCE)), if self.flush_at.is_some() => self.flush().await?,
                 result = &mut future => return result.map_err(Into::into),
                 event = self.events.recv(), if !self.closing => match event { Some(event) => self.event(event).await?, None => { self.closing=true; self.control.cancel(); } },
-                vm_event = self.vm_events.recv(), if !self.closing => match vm_event {
-                    Some(event) => self.handle_vm_message(event).await?,
-                    None => { self.closing=true; self.control.cancel(); }
-                },
                 command = self.inbox.recv(), if !self.closing && self.queued_commands.len() < COMMAND_CAPACITY => match command {
-                    Some(AccountCommand::VmNotification(command)) => self.vm_notification(*command).await?,
                     Some(AccountCommand::RetainedRequest(command)) => Box::pin(self.retained_request(*command)).await?,
                     Some(AccountCommand::CommittedFrame(command)) => Box::pin(self.committed_frame(*command)).await?,
                     Some(AccountCommand::JournalBarrier(command)) => Box::pin(self.retained_barrier(command)).await?,
@@ -1964,13 +1685,8 @@ impl Worker {
             tokio::select! {
                 _ = Shutdown::cancelled(&mut self.stop) => return Err(WorkerError::Closed),
                 output = &mut future => return Ok(output),
-                event = self.vm_events.recv() => match event {
-                    Some(event) => self.handle_vm_message(event).await?,
-                    None => return Err(WorkerError::Closed),
-                },
                 event = self.events.recv() => self.event(event.ok_or(WorkerError::Closed)?).await?,
                 command = self.inbox.recv(), if self.queued_commands.len() < COMMAND_CAPACITY => match command {
-                    Some(AccountCommand::VmNotification(command)) => self.vm_notification(*command).await?,
                     Some(command) => self.queued_commands.push_back(command),
                     None => return Err(WorkerError::Closed),
                 },
@@ -2047,31 +1763,6 @@ impl Worker {
             previous.1.abort();
         }
     }
-    /// Wake a queued agent again after the disk-full recheck interval.
-    fn wait_for_disk_space(
-        &mut self,
-        agent_id: String,
-        epoch: i64,
-        deadline: Option<PreparationDeadline>,
-    ) {
-        let commands = self.commands.clone();
-        let key = agent_id.clone();
-        let task = tokio::spawn(async move {
-            let wait = deadline.map_or(crate::disk_space::RECHECK, |deadline| {
-                crate::disk_space::RECHECK.min(deadline.remaining(now()))
-            });
-            tokio::time::sleep(wait).await;
-            let _closed = commands
-                .send(AccountCommand::Wake { agent_id, epoch })
-                .await;
-        });
-        if let Some(previous) = self
-            .preparation_waits
-            .insert(key, (epoch, task.abort_handle()))
-        {
-            previous.1.abort();
-        }
-    }
     /// A deferred attempt that cannot be resumed still owns its original deadline.
     fn wait_for_deferred_deadline(
         &mut self,
@@ -2137,43 +1828,31 @@ impl Worker {
             previous.1.abort();
         }
     }
-    async fn refresh_vm_claude_credentials(&mut self) -> Result<(), WorkerError> {
-        let actors = self
-            .vm_sessions
-            .values()
-            .map(|session| session.launch_request.clone())
-            .filter(|request| {
-                request.provider == ProviderKind::Claude.key()
-                    && request.account_key == self.account
-            })
-            .collect::<Vec<_>>();
-        let Some(resolver) = self.resources.vm_provider_launch.clone() else {
-            self.vm_credential_refresh_at = None;
-            return Ok(());
-        };
-        if actors.is_empty() {
-            self.vm_credential_refresh_at = None;
-            return Ok(());
-        }
-        self.vm_credential_refresh_at =
-            Some(tokio::time::Instant::now() + VM_CREDENTIAL_REFRESH_INTERVAL);
-        // The host resolver reads credentials once and fans the result out
-        // to the active actor profiles without restarting their sessions.
-        match self
-            .drive(resolver.refresh_claude_credentials(actors.clone()))
-            .await
+    /// Wake the agent after the recheck interval; its preparation checks free space again.
+    fn wait_for_disk_recheck(&mut self, agent_id: String, epoch: i64) {
+        let commands = self.commands.clone();
+        let key = agent_id.clone();
+        let task = tokio::spawn(async move {
+            let task_id = tokio::task::id();
+            tokio::time::sleep(crate::disk_space::RECHECK).await;
+            let _closed = commands
+                .send(AccountCommand::PreparationWaitFinished {
+                    agent_id: agent_id.clone(),
+                    task_id,
+                })
+                .await;
+            let _closed = commands
+                .send(AccountCommand::Wake { agent_id, epoch })
+                .await;
+        });
+        if let Some((_, previous)) = self
+            .preparation_waits
+            .insert(key, (epoch, task.abort_handle()))
         {
-            Ok(()) => {}
-            Err(error) => match vm_credential_maintenance_error(&error) {
-                Some(class) => eprintln!(
-                    "VM Claude credential maintenance deferred; class={class}; actors={}",
-                    actors.len()
-                ),
-                None => return Err(error),
-            },
+            previous.abort();
         }
-        Ok(())
     }
+
     /// A pending step registers its wake; a settled (refused) step is final.
     fn preparation_ready<T>(
         &mut self,
@@ -2449,9 +2128,7 @@ impl Worker {
                             Some(prepared),
                             receipt_checked,
                         );
-                        // A host thread request with browser guidance needs the
-                        // skill root registered on this connection first; VM
-                        // and Claude agents get no browser guidance.
+                        // Register browser guidance on the connection before the thread request.
                         if let Some(browser) = commit
                             .context
                             .thread
@@ -2476,18 +2153,15 @@ impl Worker {
                 turn,
                 prepared,
             )) => Box::pin(self.steer(*intent, turn, *prepared)).await?,
-            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskFull(
-                epoch,
-                deadline,
-            )) => {
-                self.wait_for_disk_space(agent_id.clone(), epoch, deadline);
-            }
             turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::Deferred(
                 epoch,
                 attempt,
                 deadline,
             )) => {
                 self.wait_for_deferred_deadline(agent_id.clone(), epoch, attempt, deadline);
+            }
+            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskWait(epoch)) => {
+                self.wait_for_disk_recheck(agent_id.clone(), epoch);
             }
             turn_preparation::Outcome::Unclaimed(
                 turn_preparation::Unclaimed::Nothing | turn_preparation::Unclaimed::NativeReview,
@@ -2554,7 +2228,6 @@ impl Worker {
             bridge: self.bridge.clone(),
             account: self.account.clone(),
             connection_id: self.connection_id.clone(),
-            generation: self.generation.0,
             timeout_ms: self.timeout_ms,
             control: self.control.clone(),
             id: RequestId::String(operation.clone()),
@@ -2573,91 +2246,14 @@ impl Worker {
             effect: None,
         }
     }
-    /// Finish a commit on the worker: a VM actor first opens its own session
-    /// and commits on it here; every committed request is then written.
+    /// Write each committed request.
     async fn committed(&mut self, committed: submission::Committed) -> Result<(), WorkerError> {
         let ready = match committed {
             submission::Committed::Nothing => return Ok(()),
             submission::Committed::Retry(agent, epoch) => return self.wake(agent, epoch).await,
-            submission::Committed::Ready(ready) => Some(ready),
-            // Boxed: the VM path stays out of this future, which every
-            // submission polls on the worker's stack.
-            submission::Committed::Vm(commit, launch) => {
-                Box::pin(self.committed_vm(*commit, *launch)).await?
-            }
+            submission::Committed::Ready(ready) => ready,
         };
-        match ready {
-            Some(ready) => Box::pin(self.write(*ready)).await,
-            None => Ok(()),
-        }
-    }
-    /// Open the VM actor's session and finish its commit; the request to
-    /// write, if any.
-    async fn committed_vm(
-        &mut self,
-        commit: submission::Commit,
-        launch: Result<Option<preparation::VmProviderLaunchRequest>, WorkerError>,
-    ) -> Result<Option<Box<submission::Ready>>, WorkerError> {
-        let method = commit.context.method;
-        let actor_session = match self
-            .ensure_vm_session(launch, &commit.context.intent, method)
-            .await
-        {
-            Ok(session) => session,
-            Err(error @ WorkerError::PreparationPending(_)) if method != Method::TurnInterrupt => {
-                let intent = commit.context.intent.clone();
-                let blocked_intent = intent.clone();
-                let resources = self.resources.clone();
-                let since = self.bridge.agent_wakes.sequence();
-                let step = self
-                    .db("vm-session-auth-pending", move |store| async move {
-                        store::preparation_step(&store, &resources, &blocked_intent, async move {
-                            Err::<(), WorkerError>(error)
-                        })
-                        .await
-                    })
-                    .await?;
-                let _ready = self.preparation_ready(step, &intent, since);
-                return Ok(None);
-            }
-            Err(WorkerError::PreparationRefused(reason)) if method != Method::TurnInterrupt => {
-                let blocked_intent = commit.context.intent.clone();
-                let resources = self.resources.clone();
-                let _settled = self
-                    .db("vm-session-identity-blocked", move |store| async move {
-                        store::preparation_step(&store, &resources, &blocked_intent, async move {
-                            Err::<(), WorkerError>(WorkerError::PreparationRefused(reason))
-                        })
-                        .await
-                    })
-                    .await?;
-                return Ok(None);
-            }
-            // Stop already committed the actor's new epoch and disabled
-            // wake. A stale provider session must not receive an interrupt
-            // under the replacement identity; retain the existing receipt
-            // state for recovery instead of failing the account worker.
-            Err(WorkerError::PreparationRefused(_)) => return Ok(None),
-            Err(WorkerError::StaleVmActor) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let control = actor_session
-            .as_deref()
-            .and_then(|agent| {
-                self.vm_sessions
-                    .get(agent)
-                    .map(|session| session.control.clone())
-            })
-            .unwrap_or_else(|| self.control.clone());
-        let vm = actor_session.is_some();
-        Ok(
-            match Box::pin(self.drive(commit.finish(control, vm))).await? {
-                submission::Committed::Ready(ready) => Some(ready),
-                submission::Committed::Nothing
-                | submission::Committed::Retry(..)
-                | submission::Committed::Vm(..) => None,
-            },
-        )
+        Box::pin(self.write(*ready)).await
     }
     /// The only serialized step of a submission: the provider write of a
     /// request whose FULL submitted commit has already returned.
@@ -2667,7 +2263,6 @@ impl Worker {
             context,
             prepared,
             control,
-            vm,
         } = ready;
         let method = context.method;
         if self.closing {
@@ -2698,7 +2293,6 @@ impl Worker {
         .await
         {
             Ok(_ticket) => {}
-            Err(WorkerError::Session(SessionTaskError::Closed)) if vm => {}
             Err(error) => {
                 // Only the session's explicit pre-admission rejection proves NotSent.
                 // A failure while draining unrelated evidence may follow an enqueued write.
@@ -2871,261 +2465,25 @@ impl Worker {
         Ok(())
     }
 
-    /// Open a VM provider session for the durable actor at the turn boundary.
-    /// The launch resolver is host-owned because it reads the account profile,
-    /// guest provider configuration, and the minimal credential copy.
-    async fn ensure_vm_session(
-        &mut self,
-        launch: Result<Option<preparation::VmProviderLaunchRequest>, WorkerError>,
-        intent: &TurnIntent,
-        method: Method,
-    ) -> Result<Option<String>, WorkerError> {
-        let Some(request) = launch? else {
-            return Ok(None);
-        };
-        let existing_session = self.vm_sessions.contains_key(&request.agent_id);
-        if let Some(session) = self.vm_sessions.get(&request.agent_id) {
-            if session.launch_request != request {
-                return Err(WorkerError::PreparationRefused(
-                    "vm-agent/session-identity-changed".into(),
-                ));
-            }
-        } else {
-            let resolver = self.resources.vm_provider_launch.clone().ok_or_else(|| {
-                WorkerError::PreparationPending(crate::account_worker::PreparationBlock::new(
-                    PreparationWaitReason::ProviderSession,
-                    "provider-session/vm-launch-resolver",
-                ))
-            })?;
-            let guest = self.resources.guest_rpc.clone().ok_or_else(|| {
-                WorkerError::PreparationPending(crate::account_worker::PreparationBlock::new(
-                    PreparationWaitReason::ProviderSession,
-                    "provider-session/vm-guest-unavailable",
-                ))
-            })?;
-            self.resolving_vm_actors.insert(request.agent_id.clone());
-            let resolved = self.drive(resolver.resolve(request.clone())).await;
-            self.resolving_vm_actors.remove(&request.agent_id);
-            let resolved = resolved?;
-            let actor = request.agent_id.clone();
-            let expected = request.clone();
-            self.db("vm_launch_revalidate", move |store| async move {
-                store
-                    .read_async("runtime-services/account_worker_read", move |connection| {
-                        if !crate::linux_vm_provider::vm_actor_matches(
-                            connection,
-                            &actor,
-                            expected.epoch,
-                            &expected.account_key,
-                            Some(&expected.provider),
-                        )? {
-                            return Err(WorkerError::PreparationRefused(
-                                "vm-agent/identity-changed".into(),
-                            ));
-                        }
-                        Ok(())
-                    })
-                    .await
-            })
-            .await?;
-            let recovery_agent = request.agent_id.clone();
-            let recovery_account = self.account.clone();
-            let generation = self.generation.0;
-            let recovered = self
-                .db("vm_actor_recovery", move |store| async move {
-                    store
-                        .read_async("runtime-services/account_worker_read", move |connection| {
-                            store::recover_vm_actor_requests(
-                                connection,
-                                &recovery_account,
-                                &recovery_agent,
-                                generation,
-                            )
-                        })
-                        .await
-                })
-                .await?;
-            let factory = Arc::new(crate::linux_vm_provider::GuestProviderTaskFactory::new(
-                Arc::clone(&self.bridge.store),
-                guest,
-                crate::linux_vm_provider::GuestProviderIdentity {
-                    agent_id: request.agent_id.clone(),
-                    epoch: request.epoch,
-                    generation: request.generation,
-                    account_key: request.account_key.clone(),
-                    provider: resolved.provider.clone(),
-                },
-                resolved.profile.clone(),
-            ));
-            let generation = self.generation;
-            let clock = studio_runtime_process::provider_seam::SessionClock::default();
-            let session = SessionHandle::open(
-                factory,
-                ProviderHandle::for_account(&request.agent_id),
-                OpenOptions {
-                    clock: clock.clone(),
-                    launch: resolved.launch,
-                    expected_generation: Some(generation),
-                },
-                SessionTaskConfig {
-                    initialize_params: studio_runtime_providers::initialize_params(
-                        studio_runtime_providers::ClientName::AccountSession,
-                    ),
-                    generation,
-                    wire: resolved
-                        .provider
-                        .parse::<studio_runtime_providers::ProviderKind>()
-                        .map_err(|_| {
-                            WorkerError::PreparationRefused(
-                                "provider-session/unsupported-provider".into(),
-                            )
-                        })?
-                        .wire(),
-                    timeout_ms: self.timeout_ms,
-                    initialize_operation: OperationId(format!(
-                        "vm:{}:initialize:{}:{}",
-                        request.agent_id, request.epoch, generation.0
-                    )),
-                    request_id_prefix: None,
-                    recovered: recovered
-                        .iter()
-                        .map(|(_, request)| request.clone())
-                        .collect(),
-                },
-            )
-            .await?;
-            for (context, request) in recovered {
-                self.pending
-                    .insert(request.ticket.id.clone(), Arc::new(context));
-            }
-            let stream_account = self.account.clone();
-            let stream_actor = request.agent_id.clone();
-            let stream_connection = self.connection_id.clone();
-            self.db("vm_stream_attach", move |store| async move {
-                store::attach_provider_stream(
-                    &store,
-                    &stream_account,
-                    Some(&stream_actor),
-                    generation.0,
-                    &stream_connection,
-                )
-                .await
-            })
-            .await?;
-            self.install_vm_session(request.clone(), session, resolved.bootstrap, false)?;
-        }
-        let mut status = self
-            .vm_sessions
-            .get(&request.agent_id)
-            .ok_or(WorkerError::Closed)?
-            .session
-            .status
-            .clone();
-        let actor_incarnation = self
-            .vm_sessions
-            .get(&request.agent_id)
-            .map(|session| session.incarnation)
-            .ok_or(WorkerError::StaleVmActor)?;
-        while status.borrow().initialization != InitializationStatus::Ready {
-            tokio::select! {
-                _ = Shutdown::cancelled(&mut self.stop) => return Err(WorkerError::Closed),
-                changed = status.changed() => {
-                    if changed.is_err() {
-                        while self.vm_sessions.get(&request.agent_id).is_some_and(|session| {
-                            session.epoch == request.epoch
-                                && session.incarnation == actor_incarnation
-                        }) {
-                            let event = self.vm_events.recv().await.ok_or(WorkerError::Closed)?;
-                            self.handle_vm_message(event).await?;
-                        }
-                        return Err(WorkerError::StaleVmActor);
-                    }
-                },
-                event = self.vm_events.recv() => match event {
-                    Some(event) => self.handle_vm_message(event).await?,
-                    None => return Err(WorkerError::Closed),
-                },
-                command = self.inbox.recv(), if self.queued_commands.len() < COMMAND_CAPACITY => match command {
-                    Some(AccountCommand::VmNotification(command)) => self.vm_notification(*command).await?,
-                    Some(command) => self.queued_commands.push_back(command),
-                    None => return Err(WorkerError::Closed),
-                },
-            }
-        }
-        if existing_session && request.provider == "claude" && method != Method::TurnInterrupt {
-            self.refresh_vm_auth_recovery(&request, intent).await?;
-        }
-        let bootstrap = self
-            .vm_sessions
-            .get(&request.agent_id)
-            .and_then(|session| session.bootstrap.clone());
-        if let Some(payload) = bootstrap {
-            self.bootstrap_vm_provider(&request, payload).await?;
-            if let Some(session) = self.vm_sessions.get_mut(&request.agent_id) {
-                session.bootstrap = None;
-            }
-        }
-        Ok(Some(request.agent_id))
-    }
-
-    /// An auth continuation on an existing process must not use its old guest copy.
-    /// Reader reattach and ordinary turn preparation do not enter this refresh lane.
-    async fn refresh_vm_auth_recovery(
-        &mut self,
-        request: &preparation::VmProviderLaunchRequest,
-        intent: &TurnIntent,
-    ) -> Result<(), WorkerError> {
-        let Some(proof) = self.vm_auth_recovery_binding(request, intent).await? else {
-            return Ok(());
-        };
-        let session = self
-            .vm_sessions
-            .get(&request.agent_id)
-            .ok_or(WorkerError::StaleVmActor)?;
-        let incarnation = session.incarnation;
-        if session.launch_request != *request
-            || session.session.status.borrow().initialization != InitializationStatus::Ready
-        {
-            return Err(WorkerError::StaleVmActor);
-        }
-        if session.auth_recovery_refresh.as_ref() == Some(&proof) {
+    /// Register the Chrome skill root with this Codex connection before a
+    /// thread request (Python `codex_browser.ensure_skill`). The roots are
+    /// process-wide in the app-server, so one confirmed reply covers every
+    /// later thread of this connection. Setting the same roots again is
+    /// idempotent: an error or an unknown outcome leaves them unconfirmed, and
+    /// the next thread request sends them again. A failed registration does
+    /// not hold the thread request; text work continues without the skill.
+    async fn ensure_browser_skill(&mut self, roots: Vec<String>) -> Result<(), WorkerError> {
+        if self.browser_skill_roots.as_ref() == Some(&roots) {
             return Ok(());
         }
-        let resolver = self.resources.vm_provider_launch.clone().ok_or_else(|| {
-            WorkerError::PreparationPending(PreparationBlock::new(
-                PreparationWaitReason::ProviderSession,
-                "provider-session/vm-launch-resolver",
-            ))
-        })?;
-        match self
-            .drive(resolver.refresh_claude_credentials(vec![request.clone()]))
-            .await
-        {
-            Ok(()) => {}
-            Err(WorkerError::PreparationRefused(reason)) => {
-                return Err(WorkerError::PreparationPending(PreparationBlock::new(
-                    PreparationWaitReason::ProviderSession,
-                    reason,
-                )));
-            }
-            result => result?,
-        }
+        #[cfg(test)]
         if self
-            .vm_auth_recovery_binding(request, intent)
-            .await?
-            .as_ref()
-            != Some(&proof)
+            .bridge
+            .faults
+            .hold_browser_skill
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
-            return Err(WorkerError::StaleVmActor);
-        }
-        let session = self
-            .vm_sessions
-            .get_mut(&request.agent_id)
-            .ok_or(WorkerError::StaleVmActor)?;
-        if session.incarnation != incarnation
-            || session.launch_request != *request
-            || session.session.status.borrow().initialization != InitializationStatus::Ready
-        {
+<<<<<<< head
             return Err(WorkerError::StaleVmActor);
         }
         session.auth_recovery_refresh = Some(proof);
@@ -3439,6 +2797,8 @@ impl Worker {
             .hold_browser_skill
             .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             self.bridge.faults.browser_skill_held.notify_one();
             self.bridge.faults.release_browser_skill.notified().await;
         }
@@ -3590,80 +2950,22 @@ impl Worker {
                         break;
                     }
                 }
-                self.journal_batch(entries, None, true).await?;
+                self.journal_batch(entries, true).await?;
                 self.retry_deferred(true, false).await?;
                 self.complete_retained().await?;
             } else {
-                self.event_one(event, None, true).await?;
+                self.event_one(event, true).await?;
             }
         }
         Ok(())
     }
 
-    async fn event_from(
-        &mut self,
-        event: SessionEvent,
-        source: &VmActorIdentity,
-    ) -> Result<(), WorkerError> {
-        let Some(session) = self.vm_sessions.get(&source.actor_id) else {
-            return Ok(());
-        };
-        if session.epoch != source.epoch || session.incarnation != source.incarnation {
-            return Ok(());
-        }
-        match self.event_one(event, Some(source), true).await {
-            Err(WorkerError::StaleVmActor) => {
-                self.retire_vm_actor_if_current(source);
-                Ok(())
-            }
-            result => result,
-        }
-    }
-
-    async fn event_one(
-        &mut self,
-        event: SessionEvent,
-        source: Option<&VmActorIdentity>,
-        settle: bool,
-    ) -> Result<(), WorkerError> {
-        let actor_id = source.map(|source| source.actor_id.as_str());
-        let actor_epoch = source.map(|source| source.epoch);
+    async fn event_one(&mut self, event: SessionEvent, settle: bool) -> Result<(), WorkerError> {
+        let actor_id: Option<&str> = None;
         let reclassify = !event.outcomes.is_empty();
         let outcome_count = event.outcomes.len();
         let mut merged = None;
         for (index, outcome) in event.outcomes.into_iter().enumerate() {
-            if actor_id.is_some() && matches!(&outcome, SessionOutcome::GenerationClosed { .. }) {
-                let source_is_current = source.is_some_and(|source| {
-                    self.vm_sessions
-                        .get(&source.actor_id)
-                        .is_some_and(|session| {
-                            session.epoch == source.epoch
-                                && session.incarnation == source.incarnation
-                        })
-                });
-                let replacement_is_active = source.is_some_and(|source| {
-                    self.vm_sessions.contains_key(&source.actor_id) && !source_is_current
-                });
-                if !replacement_is_active && let Some(source) = source {
-                    let actor = source.actor_id.clone();
-                    let account = self.account.clone();
-                    // Scheduler attempts are fenced by the account worker
-                    // generation. The VM guest's generation is local to its
-                    // retained provider handle and must not be used as that
-                    // durable attempt identity.
-                    let epoch = source.epoch;
-                    let generation = self.generation.0;
-                    self.db("vm_actor_disconnected", move |store| async move {
-                        store::disconnect_vm_actor(&store, &actor, epoch, &account, generation)
-                            .await
-                    })
-                    .await?;
-                }
-                if source_is_current && let Some(source) = source {
-                    self.retire_vm_actor_if_current(source);
-                }
-                continue;
-            }
             if let SessionOutcome::Resolved { ticket, outcome } = &outcome {
                 let operation = store::id_string(&ticket.id);
                 if let Some(waiter) = self.request_waiters.remove(&operation) {
@@ -3727,21 +3029,6 @@ impl Worker {
                 SessionOutcome::GenerationClosed { .. } => None,
             };
             let pending = ticket.and_then(|t| self.pending.get(&t.id)).cloned();
-            if let Some(actor) = actor_id {
-                match (ticket, pending.as_ref()) {
-                    (Some(_), Some(pending))
-                        if pending.intent.agent_id == actor
-                            && Some(pending.intent.epoch) == actor_epoch
-                            && pending.intent.account_key == self.account => {}
-                    (Some(_), None) => continue,
-                    (None, _) => continue,
-                    _ => {
-                        return Err(WorkerError::PreparationRefused(
-                            "account-worker/vm-notification-actor-changed".into(),
-                        ));
-                    }
-                }
-            }
             let id = ticket.map(|t| t.id.clone());
             // Pending bookkeeping and transport request IDs can change when a
             // journal lane retires a ticket. Keep the crash witness stable.
@@ -3816,7 +3103,7 @@ impl Worker {
             self.settled_outcome(settled, id, actor_id);
         }
         if let Some(entry) = event.journal {
-            self.journal_batch_with(vec![entry], source, settle, merged, false)
+            self.journal_batch_with(vec![entry], settle, merged, false)
                 .await?;
         }
         self.retry_deferred(settle, reclassify).await?;
@@ -3836,37 +3123,18 @@ impl Worker {
                 && self
                     .deferred
                     .iter()
-                    .all(|(entry, _, agent)| !self.unbindable(entry, agent.as_deref()))
+                    .all(|(entry, agent)| !self.unbindable(entry, agent.as_deref()))
             {
                 return Ok(());
             }
             reclassify = false;
             for _ in 0..self.deferred.len() {
-                let Some((entry, deferred_source, agent)) = self.deferred.pop_front() else {
+                let Some((entry, agent)) = self.deferred.pop_front() else {
                     continue;
                 };
-                if let Some(source) = deferred_source.as_ref() {
-                    let Some(session) = self.vm_sessions.get(&source.actor_id) else {
-                        continue;
-                    };
-                    if session.epoch != source.epoch || session.incarnation != source.incarnation {
-                        continue;
-                    }
-                }
                 let park = self.unbindable(&entry, agent.as_deref());
-                match self
-                    .journal_batch_with(vec![entry], deferred_source.as_ref(), settle, None, park)
-                    .await
-                {
-                    Err(WorkerError::StaleVmActor) => {
-                        if let Some(source) = deferred_source.as_ref() {
-                            self.retire_vm_actor_if_current(source);
-                        }
-                    }
-                    result => {
-                        result?;
-                    }
-                }
+                self.journal_batch_with(vec![entry], settle, None, park)
+                    .await?;
             }
         }
     }
@@ -3906,7 +3174,7 @@ impl Worker {
             effect,
             loaded,
         } = settled;
-        // A VM actor's thread lives in its own session, not this connection.
+        // Historical actor threads belong to their original session.
         if actor_id.is_none()
             && let Some(loaded) = loaded
         {
@@ -3919,141 +3187,19 @@ impl Worker {
             self.push(effect);
         }
     }
-    fn retire_vm_actor(&mut self, actor_id: &str) {
-        let had_active_claude_vm = self.has_active_claude_vm_sessions();
-        if let Some(session) = self.vm_sessions.remove(actor_id) {
-            session.control.cancel();
-            let key = (actor_id.to_owned(), session.incarnation);
-            self.retired_vm_sessions.insert(key, session);
-        }
-        self.vm_credential_refresh_at = vm_refresh_deadline_after_session_change(
-            had_active_claude_vm,
-            self.has_active_claude_vm_sessions(),
-            self.resources.vm_provider_launch.is_some(),
-            self.vm_credential_refresh_at,
-            tokio::time::Instant::now(),
-        );
-        let stale_waiters: Vec<_> = self
-            .vm_notification_waiters
-            .keys()
-            .filter(|(actor, _)| actor == actor_id)
-            .cloned()
-            .collect();
-        for key in stale_waiters {
-            if let Some(waiter) = self.vm_notification_waiters.remove(&key) {
-                let _sent = waiter.send(Err(retained::PortError::Unknown));
-            }
-        }
-        self.deferred.retain(|(_, source, _)| {
-            source
-                .as_ref()
-                .is_none_or(|source| source.actor_id != actor_id)
-        });
-        self.capacity_blocked.retain(|blocked| {
-            blocked
-                .source
-                .as_ref()
-                .is_none_or(|source| source.actor_id != actor_id)
-        });
-        if self.capacity_blocked.is_empty() {
-            self.capacity_retry_at = None;
-        }
-    }
 
-    fn has_active_claude_vm_sessions(&self) -> bool {
-        self.vm_sessions.values().any(|session| {
-            session.launch_request.provider == ProviderKind::Claude.key()
-                && session.launch_request.account_key == self.account
-        })
-    }
-
-    fn retire_vm_actor_if_current(&mut self, source: &VmActorIdentity) {
-        if self
-            .vm_sessions
-            .get(&source.actor_id)
-            .is_some_and(|session| {
-                session.epoch == source.epoch && session.incarnation == source.incarnation
-            })
-        {
-            self.retire_vm_actor(&source.actor_id);
-        }
-    }
-
-    fn current_vm_source(&self, actor_id: &str, epoch: i64) -> Option<VmActorIdentity> {
-        self.vm_sessions.get(actor_id).and_then(|session| {
-            (session.epoch == epoch).then(|| VmActorIdentity {
-                actor_id: actor_id.to_owned(),
-                epoch,
-                incarnation: session.incarnation,
-            })
-        })
-    }
-
-    fn stale_vm_actor(&mut self, _actor_id: Option<&str>) -> WorkerError {
-        WorkerError::StaleVmActor
-    }
-
-    async fn retire_closed_vm_actor(
-        &mut self,
-        actor_id: &str,
-        source_epoch: Option<i64>,
-    ) -> Result<(), WorkerError> {
-        if let Some(source) = source_epoch.and_then(|epoch| self.current_vm_source(actor_id, epoch))
-        {
-            let account = self.account.clone();
-            let generation = self.generation.0;
-            let actor = source.actor_id.clone();
-            self.db("vm_actor_disconnected", move |store| async move {
-                store::disconnect_vm_actor(&store, &actor, source.epoch, &account, generation).await
-            })
-            .await?;
-            self.retire_vm_actor_if_current(&source);
-        }
-        Ok(())
-    }
-
-    fn control_for_actor(&self, actor_id: Option<&str>) -> Result<SessionControl, WorkerError> {
-        match actor_id {
-            Some(actor) => self
-                .vm_sessions
-                .get(actor)
-                .map(|session| session.control.clone())
-                .ok_or(WorkerError::Closed),
-            None => Ok(self.control.clone()),
-        }
-    }
-    fn control_status(&self, actor_id: Option<&str>) -> Result<InitializationStatus, WorkerError> {
-        match actor_id {
-            Some(actor) => self
-                .vm_sessions
-                .get(actor)
-                .map(|session| session.session.status.borrow().initialization)
-                .ok_or(WorkerError::Closed),
-            None => Ok(self.session.status.borrow().initialization),
-        }
-    }
     fn journal_scope(&self, actor_id: Option<&str>) -> String {
         actor_id.map_or_else(
             || self.account.clone(),
-            |actor| vm_journal_scope(&self.account, actor),
+            |actor| historical_actor_journal_scope(&self.account, actor),
         )
-    }
-    async fn journal_with_policy(
-        &mut self,
-        entry: JournalEntry,
-        source: &VmActorIdentity,
-        settle: bool,
-    ) -> Result<bool, WorkerError> {
-        self.journal_batch(vec![entry], Some(source), settle).await
     }
     async fn journal_batch(
         &mut self,
         entries: Vec<JournalEntry>,
-        source: Option<&VmActorIdentity>,
         settle: bool,
     ) -> Result<bool, WorkerError> {
-        self.journal_batch_with(entries, source, settle, None, false)
-            .await
+        self.journal_batch_with(entries, settle, None, false).await
     }
     /// Journal `entries` in one transaction that first settles `outcome`, the
     /// request outcome their reply carries, with its pending request id.
@@ -4061,7 +3207,6 @@ impl Worker {
     async fn journal_batch_with(
         &mut self,
         mut entries: Vec<JournalEntry>,
-        source: Option<&VmActorIdentity>,
         settle: bool,
         outcome: Option<Box<(store::OutcomeStep, Option<RequestId>)>>,
         park_unbound: bool,
@@ -4072,7 +3217,6 @@ impl Worker {
             self.capacity_blocked
                 .extend(entries.drain(..).map(|entry| CapacityBlocked {
                     entry,
-                    source: source.cloned(),
                     settle,
                     park_unbound,
                 }));
@@ -4088,25 +3232,14 @@ impl Worker {
             .journal_transactions
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let account = self.account.clone();
-        let actor_id = source.map(|source| source.actor_id.as_str());
-        let actor_epoch = source.map(|source| source.epoch);
-        let journal_scope = self.journal_scope(actor_id);
+        let journal_scope = self.account.clone();
         let streams = std::mem::take(&mut self.streams);
         let delivered = std::mem::take(&mut self.delivered_publications);
         let claude_account_pin = self.resources.claude_account_pin.clone();
-        let expected_vm_actor = actor_id
-            .zip(actor_epoch)
-            .map(|(actor, epoch)| (actor.to_owned(), epoch));
         let native_source = Some(crate::notification_dispatch::NativeProcessSource {
             account: self.account.clone(),
-            connection: source
-                .map(|source| format!("vm-guest:{}", source.actor_id))
-                .unwrap_or_else(|| self.connection_id.clone()),
-            generation: if source.is_some() {
-                None
-            } else {
-                Some(self.generation.0)
-            },
+            connection: self.connection_id.clone(),
+            generation: Some(self.generation.0),
             provider: studio_runtime_providers::ProviderKind::of_record(&claude_account_pin)
                 .map_err(|_| {
                     WorkerError::PreparationRefused("provider-session/unsupported-provider".into())
@@ -4126,7 +3259,7 @@ impl Worker {
         let seed_scope = journal_scope.clone();
         let (previous, committed) = self
             .db("journal", move |store| async move {
-                if acknowledged > 0 && expected_vm_actor.is_none() {
+                if acknowledged > 0 {
                     let read_scope = seed_scope.clone();
                     let behind = store
                         .read_async("runtime-services/journal_seed_ack", move |tx| {
@@ -4150,9 +3283,7 @@ impl Worker {
                     &streams,
                     entries,
                     &claude_account_pin,
-                    expected_vm_actor
-                        .as_ref()
-                        .map(|(actor, epoch)| (actor.as_str(), *epoch)),
+                    None,
                     native_source,
                     delivered,
                     outcome,
@@ -4177,21 +3308,20 @@ impl Worker {
             fault.report(&self.account, &mut self.reported_faults);
         }
         if let Some(settled) = settled {
-            self.settled_outcome(settled, outcome_id.flatten(), actor_id);
+            self.settled_outcome(settled, outcome_id.flatten(), None);
         }
         let had_deferred = !deferred.is_empty();
         let mut deferred_agent = deferred_agent;
         self.deferred.extend(
             deferred
                 .into_iter()
-                .map(|entry| (entry, source.cloned(), deferred_agent.take())),
+                .map(|entry| (entry, deferred_agent.take())),
         );
         let had_refused = !refused.is_empty();
         if had_refused {
             self.capacity_blocked
                 .extend(refused.into_iter().map(|entry| CapacityBlocked {
                     entry,
-                    source: source.cloned(),
                     settle,
                     park_unbound,
                 }));
@@ -4212,7 +3342,6 @@ impl Worker {
         self.arm_flush();
         self.schedule_publication_drain()?;
         let committed_any = !committed.is_empty() || !parked.is_empty();
-        let mut cursors = Vec::with_capacity(committed.len());
         let mut settle_cursors = Vec::with_capacity(committed.len());
         for (index, (entry, effect)) in committed.into_iter().enumerate() {
             #[cfg(not(test))]
@@ -4230,28 +3359,16 @@ impl Worker {
                 return Err(WorkerError::TaskFailed);
             }
             let cursor = entry.cursor;
-            cursors.push(cursor);
-            self.journal_committed(entry, effect, source).await?;
+            self.journal_committed(entry, effect).await?;
             settle_cursors.push(cursor);
         }
         // A parked entry has no in-memory effects; it settles with the batch.
         if !parked.is_empty() {
-            cursors.extend(parked.iter().map(|entry| entry.cursor));
             settle_cursors.extend(parked.iter().map(|entry| entry.cursor));
             settle_cursors.sort_unstable();
         }
         if settle && !self.closing && !settle_cursors.is_empty() {
-            self.settle_journal(settle_cursors, source).await?;
-        }
-        if let Some(actor_id) = actor_id {
-            for cursor in cursors {
-                if let Some(reply) = self
-                    .vm_notification_waiters
-                    .remove(&(actor_id.to_owned(), cursor.0))
-                {
-                    let _sent = reply.send(Ok(()));
-                }
-            }
+            self.settle_journal(settle_cursors).await?;
         }
         Ok(committed_any && !had_deferred && !had_refused)
     }
@@ -4262,47 +3379,22 @@ impl Worker {
         let mut queue = std::mem::take(&mut self.capacity_blocked);
         while let Some(CapacityBlocked {
             entry,
-            source,
             settle,
             park_unbound,
         }) = queue.pop_front()
         {
             let mut entries = vec![entry];
             while entries.len() < JOURNAL_BATCH_MAX_EVENTS
-                && queue.front().is_some_and(|next| {
-                    next.source == source
-                        && next.settle == settle
-                        && next.park_unbound == park_unbound
-                })
+                && queue
+                    .front()
+                    .is_some_and(|next| next.settle == settle && next.park_unbound == park_unbound)
             {
                 if let Some(next) = queue.pop_front() {
                     entries.push(next.entry);
                 }
             }
-            // A retired VM actor's entries are dropped, as `retry_deferred` does.
-            if let Some(source) = source.as_ref()
-                && !self
-                    .vm_sessions
-                    .get(&source.actor_id)
-                    .is_some_and(|session| {
-                        session.epoch == source.epoch && session.incarnation == source.incarnation
-                    })
-            {
-                continue;
-            }
-            match self
-                .journal_batch_with(entries, source.as_ref(), settle, None, park_unbound)
-                .await
-            {
-                Err(WorkerError::StaleVmActor) => {
-                    if let Some(source) = source.as_ref() {
-                        self.retire_vm_actor_if_current(source);
-                    }
-                }
-                result => {
-                    result?;
-                }
-            }
+            self.journal_batch_with(entries, settle, None, park_unbound)
+                .await?;
             if !self.capacity_blocked.is_empty() {
                 self.capacity_blocked.extend(queue);
                 return Ok(());
@@ -4316,40 +3408,10 @@ impl Worker {
     async fn settle_journal(
         &mut self,
         cursors: Vec<studio_runtime_process::EventCursor>,
-        source: Option<&VmActorIdentity>,
     ) -> Result<(), WorkerError> {
-        let actor_id = source.map(|source| source.actor_id.as_str());
-        let actor_epoch = source.map(|source| source.epoch);
-        let actor_incarnation = source.map(|source| source.incarnation);
-        if let Some(actor) = actor_id
-            && !self.vm_sessions.get(actor).is_some_and(|session| {
-                Some(session.epoch) == actor_epoch && Some(session.incarnation) == actor_incarnation
-            })
-        {
-            return Err(WorkerError::StaleVmActor);
-        }
-        let control = match self.control_for_actor(actor_id) {
-            Ok(control) => control,
-            Err(WorkerError::Closed) if actor_id.is_some() => {
-                if let Some(actor) = actor_id {
-                    self.retire_vm_actor(actor);
-                }
-                return Err(self.stale_vm_actor(actor_id));
-            }
-            Err(error) => return Err(error),
-        };
-        if let Err(error) = control.settled_all(cursors).await {
-            if actor_id.is_some() && matches!(error, SessionTaskError::Closed) {
-                if let Some(actor) = actor_id {
-                    self.retire_closed_vm_actor(actor, actor_epoch).await?;
-                }
-                return Err(self.stale_vm_actor(actor_id));
-            }
-            if actor_id.is_some() {
-                return Err(error.into());
-            }
+        if self.control.settled_all(cursors).await.is_err() {
             self.closing = true;
-            control.cancel();
+            self.control.cancel();
         }
         Ok(())
     }
@@ -4368,7 +3430,12 @@ impl Worker {
         )
         .await;
         match result {
-            Ok(Ok(changed)) if !changed.is_empty() => self.bridge.event_wake().notify_one(),
+            Ok(Ok(changed)) if !changed.is_empty() => {
+                self.bridge.event_wake().notify_one();
+                if changed.iter().any(|receipt| receipt["status"] == "ready") {
+                    self.sign_in_proof().await;
+                }
+            }
             Ok(Ok(_)) => {}
             Ok(Err(error)) => crate::diagnostics::log_stderr(format_args!(
                 "account {} sign-in completion was not applied: {error}",
@@ -4381,17 +3448,35 @@ impl Worker {
         }
     }
 
+    /// Make the auth waits of this account due now after a successful sign-in,
+    /// so their chats do not wait for the auth backoff timer.
+    async fn sign_in_proof(&self) {
+        let account = self.account.clone();
+        let result = self
+            .bridge
+            .store
+            .transaction_with(move |tx| {
+                crate::continuation_runtime::stage_sign_in_proof(tx, &account, now())
+            })
+            .await;
+        match result {
+            Ok(true) => self.bridge.continuation_wake().notify_one(),
+            Ok(false) => {}
+            Err(error) => crate::diagnostics::log_stderr(format_args!(
+                "account {} sign-in did not wake its auth waits: {error}",
+                self.account
+            )),
+        }
+    }
+
     /// Apply one committed entry's in-memory effects. Every cursor settles
     /// with its batch; a provider request owes its answer through its record.
     async fn journal_committed(
         &mut self,
         entry: JournalEntry,
         effect: Option<Effect>,
-        source: Option<&VmActorIdentity>,
     ) -> Result<(), WorkerError> {
-        if source.is_none()
-            && let JournalPayload::Frame(Frame::Notification(notification)) = &entry.payload
-        {
+        if let JournalPayload::Frame(Frame::Notification(notification)) = &entry.payload {
             self.idle_provider_notification(
                 notification.method.as_str(),
                 notification.params.as_ref(),
@@ -4476,13 +3561,7 @@ impl Worker {
                 break;
             }
             let actor = record.actor.clone();
-            let epoch = record.epoch.or_else(|| {
-                actor.as_ref().and_then(|actor| {
-                    self.vm_sessions
-                        .get(actor)
-                        .map(|session| session.launch_request.epoch)
-                })
-            });
+            let epoch = record.epoch;
             let key = (record.generation, actor.clone(), epoch, record.cursor);
             if self.managed_callback_cursors.contains(&key) {
                 continue;
@@ -4505,28 +3584,10 @@ impl Worker {
                     .await?;
                 continue;
             }
-            if let Some(actor_id) = actor.as_deref() {
-                match self.vm_sessions.get(actor_id).map(|session| session.epoch) {
-                    Some(session_epoch) if Some(session_epoch) == epoch => {}
-                    Some(_) => {
-                        // A newer epoch of the actor runs; this one is gone.
-                        self.abandon_callback(cursor, origin, actor.as_deref(), epoch)
-                            .await?;
-                        continue;
-                    }
-                    None => {
-                        // The guest provider outlives a server restart and the
-                        // actor reattaches later. Wait for it unless its row
-                        // proves this epoch is gone.
-                        if self.vm_actor_epoch_gone(actor_id, epoch).await? {
-                            self.abandon_callback(cursor, origin, actor.as_deref(), epoch)
-                                .await?;
-                        } else {
-                            self.callback_parked.insert(key);
-                        }
-                        continue;
-                    }
-                }
+            if actor.is_some() {
+                self.abandon_callback(cursor, origin, actor.as_deref(), epoch)
+                    .await?;
+                continue;
             }
             if record.submitted.is_some() {
                 let status = self.session.status.borrow().clone();
@@ -4554,30 +3615,6 @@ impl Worker {
         }
         Ok(())
     }
-    /// Whether the stored VM actor row proves `epoch` of `actor` is gone.
-    async fn vm_actor_epoch_gone(
-        &mut self,
-        actor: &str,
-        epoch: Option<i64>,
-    ) -> Result<bool, WorkerError> {
-        let (Some(epoch), account) = (epoch, self.account.clone()) else {
-            return Ok(false);
-        };
-        let actor = actor.to_owned();
-        let matches = self
-            .db("callback_actor_epoch", move |store| async move {
-                store
-                    .read_async("runtime-services/account_worker_read", move |connection| {
-                        crate::linux_vm_provider::vm_actor_matches(
-                            connection, &actor, epoch, &account, None,
-                        )
-                        .map_err(WorkerError::from)
-                    })
-                    .await
-            })
-            .await?;
-        Ok(!matches)
-    }
     /// Run the handler of one accepted request, or queue its fixed answer.
     fn start_callback(&mut self, record: callback_record::Accepted) -> Result<(), WorkerError> {
         let cursor = studio_runtime_process::EventCursor(record.cursor);
@@ -4585,9 +3622,6 @@ impl Worker {
         let frame = record.frame()?;
         let actor = record.actor;
         let actor_epoch = record.epoch;
-        let source = record
-            .source_admission
-            .map(|token| (record.root_request_id, token));
         if let Frame::Request(request) = &frame
             && request.method.as_str() == "item/tool/call"
         {
@@ -4653,9 +3687,7 @@ impl Worker {
                 (cursor, origin, actor, actor_epoch, response.into())
             });
         } else if actor.is_none() && callback::is_native_request(&frame) {
-            // A native approval or question waits for the user as a card. VM
-            // actor requests keep the unsupported answer: the card answer path
-            // writes only to the account session.
+            // Native approvals and questions wait for the user as a card.
             let account = self.account.clone();
             let generation = self.generation.0;
             let now = crate::event_write::unix_time().map_err(|_| WorkerError::TaskFailed)?;
@@ -4664,23 +3696,6 @@ impl Worker {
                 let handled =
                     callback::native_response(&store, &account, generation, &frame, now).await;
                 (cursor, origin, actor, actor_epoch, handled)
-            });
-        } else if callback::is_vm_codex_refresh_request(&frame) {
-            let account = self.account.clone();
-            let generation = self.generation.0;
-            let resolver = self.resources.vm_provider_launch.clone();
-            self.managed_callbacks.spawn(async move {
-                let response = callback::vm_codex_refresh_response(
-                    &account,
-                    actor.as_deref(),
-                    actor_epoch,
-                    generation,
-                    &frame,
-                    resolver,
-                    source,
-                )
-                .await;
-                (cursor, origin, actor, actor_epoch, response.into())
             });
         } else if let Some(response) = callback::response(&frame) {
             self.push(Effect::Callback(
@@ -4693,73 +3708,9 @@ impl Worker {
         }
         Ok(())
     }
-    async fn vm_notification(
-        &mut self,
-        command: retained::VmNotificationCommand,
-    ) -> Result<(), WorkerError> {
-        let retained::VmNotificationCommand {
-            scope,
-            agent_id,
-            epoch,
-            sequence,
-            frame,
-            reply,
-        } = command;
-        if scope.account != self.account
-            || scope.connection != self.connection_id
-            || scope.generation != self.generation.0
-            || sequence == 0
-            || epoch < 0
-        {
-            let _sent = reply.send(Err(retained::PortError::Identity));
-            return Ok(());
-        }
-        let Some(source) = self
-            .vm_sessions
-            .get(&agent_id)
-            .filter(|session| session.epoch == epoch)
-            .map(|session| VmActorIdentity {
-                actor_id: agent_id.clone(),
-                epoch,
-                incarnation: session.incarnation,
-            })
-        else {
-            let _sent = reply.send(Err(retained::PortError::Unknown));
-            return Ok(());
-        };
-        let entry = JournalEntry {
-            received_at_ms: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|_| WorkerError::TaskFailed)?
-                .as_millis()
-                .try_into()
-                .map_err(|_| WorkerError::TaskFailed)?,
-            cursor: studio_runtime_process::EventCursor(sequence),
-            generation: self.generation,
-            payload: JournalPayload::Frame(frame),
-        };
-        let key = (agent_id.clone(), sequence);
-        match self.journal_with_policy(entry, &source, false).await {
-            Ok(true) => {
-                let _sent = reply.send(Ok(()));
-            }
-            Ok(false) => {
-                if let std::collections::btree_map::Entry::Vacant(entry) =
-                    self.vm_notification_waiters.entry(key)
-                {
-                    entry.insert(reply);
-                } else {
-                    let _sent = reply.send(Err(retained::PortError::Capacity));
-                }
-            }
-            Err(_) => {
-                let _sent = reply.send(Err(retained::PortError::Unknown));
-            }
-        }
-        Ok(())
-    }
+
     /// Retire the record of a provider request that can no longer be answered:
-    /// its generation exited, or the VM actor that relayed it is gone. A reply
+    /// its generation exited, or its historical actor is gone. A reply
     /// written now would reach the generation's successor under a request id
     /// that process never issued.
     async fn abandon_callback(
@@ -4845,123 +3796,36 @@ impl Worker {
                 .abandon_callback(cursor, origin, actor_id.as_deref(), actor_epoch)
                 .await;
         }
-        if let Some(actor) = actor_id.as_deref() {
-            #[cfg(test)]
-            self.bridge
-                .faults
-                .mark_callback_phase("validating callback actor identity");
-            let Some(expected) = self
-                .vm_sessions
-                .get(actor)
-                .filter(|session| Some(session.epoch) == actor_epoch)
-                .map(|session| session.launch_request.clone())
-            else {
-                return Err(WorkerError::StaleVmActor);
-            };
-            if expected.epoch != actor_epoch.unwrap_or(-1)
-                || expected.account_key != self.account
-                || expected.generation != self.generation.0
-                || !vm_account_generation_matches(&self.resources, &expected)
-            {
-                if let Some(source) =
-                    actor_epoch.and_then(|epoch| self.current_vm_source(actor, epoch))
-                {
-                    self.retire_vm_actor_if_current(&source);
-                }
-                return Err(WorkerError::StaleVmActor);
-            }
-            let actor = actor.to_owned();
-            let account = expected.account_key.clone();
-            let epoch = expected.epoch;
-            let provider = expected.provider.clone();
-            if !self
-                .db("vm_callback_revalidate", move |store| async move {
-                    store
-                        .read_async("runtime-services/account_worker_read", move |connection| {
-                            crate::linux_vm_provider::vm_actor_matches(
-                                connection,
-                                &actor,
-                                epoch,
-                                &account,
-                                Some(&provider),
-                            )
-                            .map_err(WorkerError::from)
-                        })
-                        .await
-                })
-                .await?
-            {
-                if let Some(actor) = actor_id
-                    && let Some(source) =
-                        actor_epoch.and_then(|epoch| self.current_vm_source(&actor, epoch))
-                {
-                    self.retire_vm_actor_if_current(&source);
-                }
-                return Err(WorkerError::StaleVmActor);
-            }
+        if actor_id.is_some() {
+            return Err(WorkerError::UnavailableActor);
         }
         loop {
-            let status = match self.control_status(actor_id.as_deref()) {
-                Ok(status) => status,
-                Err(WorkerError::Closed) if actor_id.is_some() => {
-                    return Err(self.stale_vm_actor(actor_id.as_deref()));
-                }
-                Err(error) => return Err(error),
-            };
+            let status = self.session.status.borrow().initialization;
             if status == InitializationStatus::Ready {
                 break;
             }
             tokio::select! { biased;
                 _ = Shutdown::cancelled(&mut self.stop) => { self.closing = true; return Ok(()); },
-                event = self.events.recv(), if actor_id.is_none() => { self.event(event.ok_or(WorkerError::Closed)?).await?; },
-                event = self.vm_events.recv(), if actor_id.is_some() => {
-                    match event { Some(event) => self.handle_vm_message(event).await?, None => return Err(WorkerError::Closed) }
-                },
+                event = self.events.recv() => { self.event(event.ok_or(WorkerError::Closed)?).await?; },
                 command = self.inbox.recv(), if self.queued_commands.len() < COMMAND_CAPACITY => match command {
-                    Some(AccountCommand::VmNotification(command)) => self.vm_notification(*command).await?,
                     Some(command) => self.queued_commands.push_back(command),
                     None => return Err(WorkerError::Closed),
                 },
             }
         }
-        let control = match self.control_for_actor(actor_id.as_deref()) {
-            Ok(control) => control,
-            Err(WorkerError::Closed) if actor_id.is_some() => {
-                return Err(self.stale_vm_actor(actor_id.as_deref()));
-            }
-            Err(error) => return Err(error),
-        };
+        let control = self.control.clone();
         let operation = callback_record::operation(
             &self.journal_scope(actor_id.as_deref()),
             self.generation.0,
             cursor.0,
         );
-        let prepared = match control.prepare_callback_reply(OperationId(operation.clone()), &frame)
-        {
-            Ok(prepared) => prepared,
-            Err(SessionTaskError::Closed) if actor_id.is_some() => {
-                if let Some(actor) = actor_id.as_deref() {
-                    self.retire_closed_vm_actor(actor, actor_epoch).await?;
-                }
-                return Err(self.stale_vm_actor(actor_id.as_deref()));
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let prepared = control.prepare_callback_reply(OperationId(operation.clone()), &frame)?;
         let key = operation.clone();
-        let saved_reply = if actor_id.is_none() {
-            Some(callback_record::SavedReply::new(
-                &frame,
-                &self.session.status.borrow(),
-            )?)
-        } else {
-            None
-        };
-        let submission = saved_reply.clone().map(|saved| {
-            (
-                saved,
-                self.session.status.borrow().supervisor_write_deduplication,
-            )
-        });
+        let saved_reply = callback_record::SavedReply::new(&frame, &self.session.status.borrow())?;
+        let submission = Some((
+            saved_reply.clone(),
+            self.session.status.borrow().supervisor_write_deduplication,
+        ));
         let no_write = self
             .db("callback_admission", move |store| async move {
                 callback_record::admit_reply(&store, &key, submission).await
@@ -4976,81 +3840,7 @@ impl Worker {
             ));
             return Ok(());
         }
-        // A callback may have waited while this actor was resolving. Fence it
-        // again immediately before the provider response can leave the host.
-        if let Some(actor) = actor_id.as_deref() {
-            #[cfg(test)]
-            self.bridge
-                .faults
-                .mark_callback_phase("checking final callback generation fence");
-            let Some(expected) = self
-                .vm_sessions
-                .get(actor)
-                .filter(|session| Some(session.epoch) == actor_epoch)
-                .map(|session| session.launch_request.clone())
-            else {
-                return Err(WorkerError::StaleVmActor);
-            };
-            if expected.generation != self.generation.0
-                || !vm_account_generation_matches(&self.resources, &expected)
-            {
-                #[cfg(test)]
-                self.bridge
-                    .faults
-                    .mark_callback_phase("retiring stale callback actor");
-                if let Some(source) =
-                    actor_epoch.and_then(|epoch| self.current_vm_source(actor, epoch))
-                {
-                    self.retire_vm_actor_if_current(&source);
-                }
-                #[cfg(test)]
-                self.bridge
-                    .faults
-                    .mark_callback_phase("stale callback actor retired");
-                return Err(WorkerError::StaleVmActor);
-            }
-            let actor = actor.to_owned();
-            let revalidated = self
-                .db("vm_callback_submit_revalidate", move |store| async move {
-                    store
-                        .read_async("runtime-services/account_worker_read", move |connection| {
-                            if !crate::linux_vm_provider::vm_actor_matches(
-                                connection,
-                                &actor,
-                                expected.epoch,
-                                &expected.account_key,
-                                Some(&expected.provider),
-                            )? {
-                                return Err(WorkerError::PreparationRefused(
-                                    "account-worker/vm-notification-actor-changed".into(),
-                                ));
-                            }
-                            Ok(())
-                        })
-                        .await
-                })
-                .await;
-            match revalidated {
-                Ok(()) => {}
-                Err(WorkerError::PreparationRefused(reason))
-                    if reason == "account-worker/vm-notification-actor-changed" =>
-                {
-                    if let Some(actor) = actor_id
-                        && let Some(source) =
-                            actor_epoch.and_then(|epoch| self.current_vm_source(&actor, epoch))
-                    {
-                        self.retire_vm_actor_if_current(&source);
-                    }
-                    return Err(WorkerError::StaleVmActor);
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        let is_vm_actor = actor_id.is_some();
-        if saved_reply
-            .as_ref()
-            .is_some_and(|saved| !saved.same_connection(&self.session.status.borrow()))
-        {
+        if !saved_reply.same_connection(&self.session.status.borrow()) {
             let operation = operation.clone();
             self.db("callback_connection_changed", move |store| async move {
                 callback_record::written(&store, &operation, WriteOutcome::Unknown).await
@@ -5073,13 +3863,6 @@ impl Worker {
             .await;
         if let Err(error) = admission {
             self.callback_receipt_deadlines.remove(&operation);
-            if is_vm_actor && matches!(error, WorkerError::Session(SessionTaskError::Closed)) {
-                self.callbacks.remove(&operation);
-                if let Some(actor) = actor_id.as_deref() {
-                    self.retire_closed_vm_actor(actor, actor_epoch).await?;
-                }
-                return Err(self.stale_vm_actor(actor_id.as_deref()));
-            }
             if definite_rejection(&error) {
                 self.callbacks.remove(&operation);
                 let identity = operation.clone();
@@ -5089,7 +3872,7 @@ impl Worker {
                 .await?;
             } else if matches!(error, WorkerError::CallbackUnknown) {
                 let operation = operation.clone();
-                let status = (!is_vm_actor).then(|| self.session.status.borrow().clone());
+                let status = Some(self.session.status.borrow().clone());
                 self.db("callback_admission_expired", move |store| async move {
                     callback_record::expired(&store, &operation, status).await
                 })
@@ -5238,7 +4021,7 @@ impl Worker {
                         .answer_callback(cursor, generation, response, actor, epoch)
                         .await
                     {
-                        Err(WorkerError::StaleVmActor) => {}
+                        Err(WorkerError::UnavailableActor) => {}
                         result => result?,
                     }
                 }
@@ -5307,9 +4090,6 @@ impl Worker {
             Ok(())
         }
         .await;
-        for (_, reply) in std::mem::take(&mut self.vm_notification_waiters) {
-            let _sent = reply.send(Err(retained::PortError::Unknown));
-        }
         let drain = if drain.is_ok() {
             self.flush().await
         } else {
@@ -5399,7 +4179,7 @@ fn invalid_agent_record_details(error: &WorkerError) -> Option<(&str, &str, &str
         | WorkerError::Session(_)
         | WorkerError::Notification(_)
         | WorkerError::PreparationRefused(_)
-        | WorkerError::StaleVmActor
+        | WorkerError::UnavailableActor
         | WorkerError::PreparationPending(_)
         | WorkerError::PreparationAwaitsAgent(_)
         | WorkerError::CleanupUnconfirmed(_)

@@ -8,9 +8,8 @@ use axum::{Extension, Json, extract::State, http::StatusCode};
 use std::sync::Arc;
 use studio_json::Value;
 use studio_runtime_services::{
-    agent_lifecycle_runtime::{self, LifecyclePorts},
-    agent_management::{Action, ManagementError},
-    agent_management_store,
+    agent_lifecycle_runtime::LifecyclePorts,
+    agent_management::ManagementError,
     message_admission::MessageAdmission,
     native_action_ports,
     native_actions::{self, Admission, NativeError},
@@ -21,94 +20,32 @@ use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
 pub(crate) fn routes() -> RouteGroup {
-    RouteGroup::new(vec![
-        post("/api/action", OperationStatus::Implemented, native_action),
-        post(
-            "/api/conversation/delete",
-            OperationStatus::Implemented,
-            delete,
-        ),
-    ])
+    RouteGroup::new(vec![post(
+        "/api/action",
+        OperationStatus::Implemented,
+        native_action,
+    )])
 }
-
-async fn delete(
-    State(state): State<HttpState>,
-    ports: Option<Extension<Arc<dyn LifecyclePorts>>>,
-    ApiJson(body): ApiJson<generated::IdRequest>,
-) -> Result<Json<generated::DeletedResponse>, ApiError> {
-    dispatch::<generated::DeletedResponse>(
-        state,
-        Action::Delete {
-            target: body.id.as_str().to_owned(),
-        },
-        ports.map(|Extension(ports)| ports),
-    )
-    .await
-}
-
-type NativeActionPorts = (
-    Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>,
-    Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
-);
 
 pub(super) fn native_action_provider(
-    store: &RuntimeStore,
     agent: &AgentRecord,
     host_port: Option<
         Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>,
     >,
-    configured_guest: Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
-) -> Result<NativeActionPorts, ApiError> {
-    if agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        return host_port
-            .map(|port| (port, configured_guest))
-            .ok_or_else(|| {
-                ApiError::new(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "Not implemented: requires provider-session/native-request",
-                )
-            });
+) -> Result<Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>, ApiError>
+{
+    if agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
+        return Err(ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "The workspace is unavailable",
+        ));
     }
-    #[cfg(unix)]
-    let guest = configured_guest.unwrap_or_else(|| {
-        Arc::new(studio_runtime_services::linux_vm_guest::UnixGuestRpc::new(
-            vm_guest_state_dir(
-                store.state_dir(),
-                std::env::var_os("CODEX_LINUX_VM_STATE_DIR").map(std::path::PathBuf::from),
-            ),
-        ))
-    });
-    #[cfg(not(unix))]
-    let guest = configured_guest.ok_or_else(|| {
+    host_port.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
-            "Not implemented: requires workspace-state/vm-guest",
+            "Not implemented: requires provider-session/native-request",
         )
-    })?;
-    let account = agent.account_key.as_str();
-    let epoch = u64::try_from(agent.epoch).map_err(|_| ApiError::internal())?;
-    let notification_sink = host_port.clone().ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_IMPLEMENTED,
-            "Not implemented: requires account-worker/vm-notification",
-        )
-    })?;
-    let provider = super::vm_native_provider::VmNativeProvider::new(
-        Arc::clone(&guest),
-        notification_sink,
-        account,
-        agent.id.0.as_str(),
-        epoch,
-    );
-    Ok((Arc::new(provider), Some(guest)))
-}
-
-#[cfg(unix)]
-fn vm_guest_state_dir(
-    runtime_state_dir: &std::path::Path,
-    configured: Option<std::path::PathBuf>,
-) -> std::path::PathBuf {
-    configured.unwrap_or_else(|| runtime_state_dir.join("linux-vm"))
+    })
 }
 
 async fn native_action(
@@ -183,6 +120,7 @@ async fn run_native_action(
         studio_runtime_schema::usage_limits::UsageLimitsResponse,
     )>,
 ) -> Result<Json<Value>, ApiError> {
+<<<<<<< head
     let value = studio_json::to_value(body).map_err(|_| ApiError::internal())?;
     let Some(action) = value.get("action").and_then(Value::as_str) else {
         let port = state.account_session.clone().ok_or_else(|| {
@@ -198,98 +136,102 @@ async fn run_native_action(
             .clone()
             .map(|Extension(resources)| resources)
             .ok_or_else(|| {
+=======
+    let agent = body.id.as_str().to_owned();
+    let action = match body.action {
+        generated::NativeActionRequestAction::SafetyActionRequest(data) => {
+            let port = state.account_session.clone().ok_or_else(|| {
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                 ApiError::new(
                     StatusCode::NOT_IMPLEMENTED,
-                    "Not implemented: requires native-action/preparation-and-settings",
+                    "Not implemented: requires provider-session/native-request",
                 )
             })?;
-        let agent = value["id"].as_str().unwrap_or_default().to_owned();
-        let data = value.get("action").cloned().unwrap_or(Value::Null);
-        let safety_action = data["safety"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Choose wait, retry or cancel"))?
-            .to_owned();
-        if !matches!(safety_action.as_str(), "wait" | "retry" | "cancel") {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "Choose wait, retry or cancel",
-            ));
-        }
-        let turn_id = data["turnId"]
-            .as_str()
-            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A turn ID is required"))?
-            .to_owned();
-        let read_agent = agent.clone();
-        let (account, epoch) = store
-            .read_async("runtime-http/routes/agent_management", move |tx| {
-                let record = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?
-                    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Agent not found"))?;
-                let account = record.account_key.as_str().to_owned();
-                Ok::<_, ApiError>((account, record.epoch))
-            })
-            .await?;
-        let actor = studio_runtime_services::account_worker::retained::RequestActor {
-            agent: agent.clone(),
-            epoch,
-        };
-        let account_driver = account_driver.ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_IMPLEMENTED,
-                "Not implemented: requires account-driver/provider-home",
+            let store = state.store.clone().ok_or_else(ApiError::internal)?;
+            let account_driver = state.account_driver.clone();
+            let lifecycle = lifecycle.map(|Extension(ports)| ports);
+            let resources = preparation
+                .clone()
+                .map(|Extension(resources)| resources)
+                .ok_or_else(|| {
+                    ApiError::new(
+                        StatusCode::NOT_IMPLEMENTED,
+                        "Not implemented: requires native-action/preparation-and-settings",
+                    )
+                })?;
+            let safety_action = data.safety.as_str();
+            let turn_id = data.turn_id.as_str();
+            let read_agent = agent.clone();
+            let (account, epoch) = store
+                .read_async("runtime-http/routes/agent_management", move |tx| {
+                    let record = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?
+                        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Agent not found"))?;
+                    let account = record.account_key.as_str().to_owned();
+                    Ok::<_, ApiError>((account, record.epoch))
+                })
+                .await?;
+            let actor = studio_runtime_services::account_worker::retained::RequestActor {
+                agent: agent.clone(),
+                epoch,
+            };
+            let account_driver = account_driver.ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "Not implemented: requires account-driver/provider-home",
+                )
+            })?;
+            let accounts = account_driver
+                .snapshot()
+                .map_err(|_| ApiError::internal())?;
+            let provider_home = accounts
+                .accounts
+                .iter()
+                .find(|row| row.id.as_str() == Some(account.as_str()))
+                .and_then(|row| row.home.as_str())
+                .ok_or_else(ApiError::internal)?;
+            let mut resources = resources.as_ref().clone();
+            resources.account_home = provider_home.to_owned();
+            let resources = Arc::new(resources);
+            let result = studio_runtime_services::safety_buffering::execute_action(
+                store,
+                port.as_ref(),
+                &resources,
+                lifecycle,
+                studio_runtime_services::safety_buffering::SafetyAction {
+                    agent_id: &agent,
+                    actor,
+                    turn_id,
+                    choice: safety_action,
+                },
             )
-        })?;
-        let accounts = account_driver
-            .snapshot()
-            .map_err(|_| ApiError::internal())?;
-        let provider_home = accounts
-            .accounts
-            .iter()
-            .find(|row| row.id.as_str() == Some(account.as_str()))
-            .and_then(|row| row.home.as_str())
-            .ok_or_else(ApiError::internal)?;
-        let mut resources = resources.as_ref().clone();
-        resources.account_home = provider_home.to_owned();
-        let resources = Arc::new(resources);
-        let result = studio_runtime_services::safety_buffering::execute_action(
-            store,
-            port.as_ref(),
-            &resources,
-            lifecycle,
-            studio_runtime_services::safety_buffering::SafetyAction {
-                agent_id: &agent,
-                actor,
-                turn_id: &turn_id,
-                choice: &safety_action,
-            },
-        )
-        .await
-        .map_err(safety_error)?;
-        return Ok(Json(result));
-    };
-    let action = match action {
-        "compact" => native_actions::Action::Compact,
-        "review" => native_actions::Action::Review,
-        _ => {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "Choose compact or review",
-            ));
+            .await
+            .map_err(safety_error)?;
+            return Ok(Json(result));
         }
+        generated::NativeActionRequestAction::NativeAction(action) => match action {
+            generated::NativeAction::Compact => native_actions::Action::Compact,
+            generated::NativeAction::Review => native_actions::Action::Review,
+        },
     };
-    let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
+    let Some(request_id) = body.request_id.flatten() else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "Reload Studio before Review or Compact. This client has no durable action request ID.",
         ));
     };
+<<<<<<< head
     let context = value
         .get("context")
         .filter(|value| !value.is_null())
         .cloned()
         .unwrap_or_else(|| studio_json::json!({}));
+=======
+    let context = studio_json::to_value(body.context.flatten().unwrap_or_default())
+        .map_err(|_| ApiError::internal())?;
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     let request = native_actions::Request {
-        request_id: request_id.to_owned(),
-        agent: value["id"].as_str().unwrap_or_default().to_owned(),
+        request_id: request_id.as_str().to_owned(),
+        agent,
         action,
         context,
     };
@@ -347,7 +289,6 @@ async fn run_native_action(
     let execute_store = Arc::clone(&store);
     let execute_request = request.clone();
     let account_driver = state.account_driver.clone();
-    let guest = state.browser_answer_guest.clone();
     let admission_override = state.message_admission.clone();
     let read_agent = request.agent.clone();
     let use_prepared = admission_override.is_some();
@@ -377,7 +318,7 @@ async fn run_native_action(
         })
         .await?;
     let prepared = prepared.prepare().await.map_err(|_| ApiError::internal())?;
-    let (provider, guest) = native_action_provider(&store, &agent, host_port, guest)?;
+    let provider = native_action_provider(&agent, host_port)?;
     let admission: Arc<dyn MessageAdmission> =
         admission_override.unwrap_or_else(|| Arc::from(prepared));
     let bridge: Arc<dyn Admission> =
@@ -398,7 +339,6 @@ async fn run_native_action(
         account_driver,
         repair,
         preparation: resources,
-        guest,
     };
     let now = unix_time();
     let result = native_actions::execute_provider_prepared(
@@ -433,7 +373,6 @@ struct NativeActionPreparationRun {
     account_driver: Option<Arc<studio_runtime_services::account_driver::AccountDriver>>,
     repair: Option<Arc<dyn NativeContextRepairPort>>,
     preparation: Arc<studio_runtime_services::account_worker::preparation::PreparationResources>,
-    guest: Option<Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>>,
 }
 impl NativeActionPreparationRun {
     async fn agent(
@@ -475,16 +414,8 @@ impl NativeActionPreparationRun {
     }
 
     fn provider_home(&self, agent: &AgentRecord) -> native_actions::Result<std::path::PathBuf> {
-        if let Some(home) = self.host_provider_home(agent)? {
-            return Ok(home);
-        }
-        agent
-            .extra
-            .get("layrHome")
-            .and_then(Value::as_str)
-            .filter(|home| !home.is_empty())
-            .map(std::path::PathBuf::from)
-            .ok_or(NativeError::Unavailable("workspace-state/vm-home"))
+        self.host_provider_home(agent)?
+            .ok_or(NativeError::Unavailable("workspace-state/unavailable"))
     }
 
     async fn repair_before_reserve(
@@ -510,42 +441,6 @@ impl NativeActionPreparationRun {
             .await?;
         Ok(())
     }
-
-    async fn prepare_vm_workspace(
-        &self,
-        request: &native_actions::Request,
-        ticket: &studio_runtime_services::workspace_operations::ProviderTicket,
-    ) -> native_actions::Result<()> {
-        let agent = self.agent(request).await?;
-        if agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) {
-            return Ok(());
-        }
-        let guest = self
-            .guest
-            .clone()
-            .ok_or(NativeError::Unavailable("workspace-state/vm-workspace"))?;
-        if agent.is_lead == Some(true) {
-            studio_runtime_services::vm_preparation::prepare_lead(
-                self.store.as_ref(),
-                guest,
-                &request.agent,
-                &ticket.operation,
-                &request.request_id,
-                ticket.epoch,
-            )
-            .await
-        } else {
-            studio_runtime_services::vm_preparation::prepare_child(
-                self.store.as_ref(),
-                guest,
-                &request.agent,
-                &ticket.operation,
-                &request.request_id,
-                ticket.epoch,
-            )
-            .await
-        }
-    }
 }
 impl native_actions::Preparation for NativeActionPreparationRun {
     fn before_reserve<'a>(
@@ -570,9 +465,6 @@ impl native_actions::Preparation for NativeActionPreparationRun {
             let preparation = self.clone();
             let request_for_prepare = request.clone();
             let ticket_for_prepare = ticket.clone();
-            preparation
-                .prepare_vm_workspace(&request_for_prepare, &ticket_for_prepare)
-                .await?;
             let provider_home = preparation.provider_home(&preparation.agent(request).await?)?;
             let mut resources = preparation.preparation.as_ref().clone();
             resources.account_home = provider_home.to_string_lossy().into_owned();
@@ -677,26 +569,6 @@ fn unix_time() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |duration| duration.as_secs_f64())
 }
-pub(super) async fn dispatch<T: serde::de::DeserializeOwned + serde::Serialize + Send + 'static>(
-    state: HttpState,
-    action: Action,
-    ports: Option<Arc<dyn LifecyclePorts>>,
-) -> Result<Json<T>, ApiError> {
-    let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| ApiError::internal())?
-        .as_secs_f64();
-    let result = match ports {
-        Some(ports) => {
-            agent_lifecycle_runtime::execute(Arc::clone(&store), &action, now, ports).await
-        }
-        None => agent_management_store::execute(Arc::clone(&store), &action, now, None).await,
-    }
-    .map_err(management_error)?;
-    super::generated_json::<T>(result).map(Json)
-}
-
 pub(super) fn management_error(error: ManagementError) -> ApiError {
     match error {
         ManagementError::Expired => ApiError::new(StatusCode::GONE, error.to_string()),
@@ -774,10 +646,11 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
 #[allow(clippy::disallowed_methods)]
 mod native_review_preflight_tests {
     use super::*;
+<<<<<<< head
     use base64::Engine;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     use std::{
-        fs::File,
-        io::Read,
         path::Path,
         sync::{
             Arc,
@@ -785,7 +658,10 @@ mod native_review_preflight_tests {
         },
     };
     use studio_json::json;
+<<<<<<< head
     use studio_runtime_services::vm_preparation;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     use studio_runtime_services::{
         account_session_runtime::{
             AccountSessionError, AccountSessionPort, ConnectionScope, ProviderRequest,
@@ -824,6 +700,140 @@ mod native_review_preflight_tests {
                 Ok(Value::Null)
             })
         }
+    }
+
+    #[tokio::test]
+    async fn native_action_http_wire_and_replay_equivalence() {
+        use axum::{body::Body, http::Request, routing::post};
+        use studio_runtime_schema::persistence::RequestIdentity;
+        use studio_runtime_store::request_results::{Admission, RequestResults, ResultEnvelope};
+        use tower::ServiceExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let agent = AgentRecord::from_value(json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "provider":"codex", "accountKey":"default",
+            "idleCompactionEpisode": {"id":"reserved", "cache":{"requestId":"cache", "ttl":"1h", "warm":true,
+                "lastActivityAt":1.0, "contextTokens":1, "prefix":"prefix"}, "fireAt":2.0, "expiresAt":3.0,
+                "identity":{}, "prefixInputs":[], "attempt":{}}
+        })).unwrap();
+        let root = RequestIdentity::issue_root();
+        let identity = RequestIdentity::new("native-action", &[], &root, &[]).unwrap();
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &agent)?;
+                let signature = studio_runtime_store::python_json_with_separators(
+                    &json!({"agent":"agent","action":"compact","context":{}}),
+                    ",",
+                    ":",
+                );
+                let Admission::Fresh(admitted) =
+                    RequestResults::admit(tx, &identity, &signature, (unix_time() * 1000.0) as i64)
+                        .unwrap()
+                else {
+                    panic!("fresh")
+                };
+                RequestResults::settle(
+                    tx,
+                    &admitted,
+                    &ResultEnvelope {
+                        actor: Some("agent".into()),
+                        reply: json!({"result":"saved"}),
+                        references: vec![],
+                    },
+                )
+                .unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let state = HttpState::new(
+            "token".into(),
+            "fixture".into(),
+            directory.path().display().to_string(),
+            49172,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let app = axum::Router::new()
+            .route("/api/action", post(native_action))
+            .with_state(state);
+        async fn send(app: &axum::Router, body: Value) -> (StatusCode, String) {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/action")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (status, String::from_utf8(bytes.to_vec()).unwrap())
+        }
+        let invalid = (
+            StatusCode::BAD_REQUEST,
+            "{\"error\":\"Invalid request\",\"location\":[\"body\",\"action\"]}".to_owned(),
+        );
+        for action in [
+            json!("other"),
+            json!({"safety":"other","turnId":"t"}),
+            json!({"safety":"wait"}),
+            json!({"safety":"wait","turnId":null}),
+            json!({"safety":"wait","turnId":1}),
+            json!({"safety":"wait","turnId":""}),
+            json!({"safety":"wait","turnId":"é".repeat(201)}),
+        ] {
+            assert_eq!(
+                send(&app, json!({"id":"agent","action":action})).await,
+                invalid
+            );
+        }
+        for n in [1, 200] {
+            assert_eq!(
+                send(
+                    &app,
+                    json!({"id":"agent","action":{"safety":"wait","turnId":"é".repeat(n)}})
+                )
+                .await,
+                (
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{\"error\":\"Not implemented: requires provider-session/native-request\"}"
+                        .into()
+                )
+            );
+        }
+        for body in [
+            json!({"id":"agent","action":"compact"}),
+            json!({"id":"agent","action":"compact","request_id":null}),
+        ] {
+            assert_eq!(send(&app,body).await, (StatusCode::BAD_REQUEST,"{\"error\":\"Reload Studio before Review or Compact. This client has no durable action request ID.\"}".into()));
+        }
+        assert_eq!(
+            send(
+                &app,
+                json!({"id":"agent","action":"compact","request_id":"reserved"})
+            )
+            .await,
+            (
+                StatusCode::BAD_REQUEST,
+                "{\"error\":\"This request ID is reserved for idle compaction.\"}".into()
+            )
+        );
+        let body = json!({"id":"agent","action":"compact","request_id":root});
+        let expected = (StatusCode::OK, "{\"result\":\"saved\"}".into());
+        assert_eq!(send(&app, body.clone()).await, expected);
+        assert_eq!(send(&app, body).await, expected);
+        let read = store.test_reader().unwrap();
+        let count: i64 = read
+            .query_row("SELECT COUNT(*) FROM request_results", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
@@ -872,10 +882,54 @@ mod native_review_preflight_tests {
             .unwrap_err();
             assert!(error.message().contains(expected), "{}", error.message());
         }
+        for action in ["compact", "review"] {
+            for request_id in [None, Some(Value::Null)] {
+                let mut body = json!({"id":"agent", "action":action, "context":null});
+                if let Some(request_id) = request_id {
+                    body["request_id"] = request_id;
+                }
+                let body = studio_json::from_value(body).unwrap();
+                let error = Box::pin(native_action(
+                    State(state.clone()),
+                    None,
+                    None,
+                    None,
+                    ApiJson(body),
+                ))
+                .await
+                .unwrap_err();
+                assert!(error.message().contains("no durable action request ID"));
+            }
+        }
+        for safety in [
+            generated::SafetyAction::Wait,
+            generated::SafetyAction::Retry,
+            generated::SafetyAction::Cancel,
+        ] {
+            let body = generated::NativeActionRequest::new(
+                generated::NativeActionRequestAction::SafetyActionRequest(
+                    generated::SafetyActionRequest {
+                        safety,
+                        turn_id: "turn".to_owned().try_into().unwrap(),
+                    },
+                ),
+                "agent".to_owned().try_into().unwrap(),
+            );
+            let error = Box::pin(native_action(
+                State(state.clone()),
+                None,
+                None,
+                None,
+                ApiJson(body),
+            ))
+            .await
+            .unwrap_err();
+            assert!(error.message().contains("provider-session/native-request"));
+        }
     }
 
     #[tokio::test]
-    async fn remote_origin_and_vm_review_preflight_use_the_provider_home_owner() {
+    async fn remote_origin_review_preflight_uses_the_provider_home_owner() {
         let directory = tempfile::tempdir().expect("isolated store directory");
         let store = Arc::new(
             RuntimeStore::open(Some(directory.path()))
@@ -917,9 +971,13 @@ mod native_review_preflight_tests {
                 .expect("count receipts")
         };
 
-        let root =
-            CanonicalPath::existing(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .expect("repository root");
+        let root = CanonicalPath::existing(
+            Path::new(
+                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../../.."),
+        )
+        .expect("repository root");
         let resources = PreparationResources::bundled_at(
             String::new(),
             ModelCatalogService::new(),
@@ -934,7 +992,6 @@ mod native_review_preflight_tests {
             account_driver: None,
             repair: Some(repair.clone()),
             preparation: Arc::new(resources),
-            guest: Some(Arc::new(GuestSpy::new(json!({})))),
         };
         let request = native_actions::Request {
             request_id: "review-request".into(),
@@ -962,33 +1019,6 @@ mod native_review_preflight_tests {
         ));
         assert_eq!(repair.0.load(Ordering::SeqCst), 0);
         assert_eq!(provider.0.load(Ordering::SeqCst), 0);
-        let mut vm_value = original.value();
-        vm_value["executionMode"] = json!("vm");
-        vm_value["layrHome"] = json!("/guest/provider-home");
-        let vm_agent = AgentRecord::from_value(vm_value).expect("valid VM agent record");
-        let vm_agent_for_write = vm_agent.clone();
-        store
-            .transaction(move |tx| AgentRepository::put(tx, &vm_agent_for_write))
-            .await
-            .expect("save VM agent");
-        let vm_result = native_actions::Preparation::before_reserve(
-            &preparation,
-            store.as_ref(),
-            provider.as_ref(),
-            &request,
-            &scope,
-        )
-        .await;
-        assert!(vm_result.is_ok());
-        assert_eq!(
-            preparation
-                .provider_home(&preparation.agent(&request).await.expect("stored VM agent"))
-                .expect("VM provider home comes from layr")
-                .as_path(),
-            Path::new("/guest/provider-home")
-        );
-        assert_eq!(repair.0.load(Ordering::SeqCst), 0);
-        assert_eq!(provider.0.load(Ordering::SeqCst), 0);
         let connection = store.test_reader().expect("read unchanged store");
         let after_agent = AgentRepository::get(&connection, &original.id)
             .expect("read unchanged agent")
@@ -1002,9 +1032,10 @@ mod native_review_preflight_tests {
             )
             .expect("count unchanged receipts");
         assert_eq!(before_agent["remoteOrigin"], true);
-        assert_eq!(after_agent, vm_agent.value());
+        assert_eq!(after_agent, original.value());
         assert_eq!(after_receipts, before_receipts);
     }
+<<<<<<< head
 
     struct GuestSpy {
         calls: std::sync::Mutex<Vec<(String, Value, Option<String>)>>,
@@ -1602,4 +1633,6 @@ mod native_review_preflight_tests {
             "unknown"
         );
     }
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 }

@@ -1,20 +1,17 @@
-//! `layr_read`: one read-only layr command of a VM reviewer, run in the guest
-//! as the reviewer's own Linux user (`layr.exec`), so layr applies the
-//! reviewer's role and the project's deny rules (docs/vm-layr.md).
+//! Read-only Layr commands for native reviewers.
 
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::OnceLock;
 
+<<<<<<< head
 use base64::Engine;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use studio_json::{Value, json};
 
-use crate::linux_vm_guest::{GuestError, GuestRpc};
 use crate::managed_host_tools::{Actor, DispatchedOperation, OperationResult};
 
 /// The tool name.
 pub(crate) const TOOL: &str = "layr_read";
-/// The dependency that `layr_read` names until the host attaches the guest channel.
-pub(crate) const DEPENDENCY: &str = "layr-read/vm-guest";
 /// The layr commands that a reviewer may run, after optional `--line <line>` pairs.
 pub(crate) const COMMANDS: [&str; 9] = [
     "blame",
@@ -31,14 +28,10 @@ pub(crate) const COMMANDS: [&str; 9] = [
 const MAX_ARGUMENTS: usize = 64;
 /// Longest argument, in characters.
 const MAX_ARGUMENT_CHARS: usize = 4096;
-/// Guest request ID prefix of one exact tool request.
+/// Request ID prefix of one exact tool request.
 const REQUEST_ID_PREFIX: &str = "layr-read:";
-/// Guest wait of `layr.exec`, in seconds: the guest command runs for at most 300 seconds.
-const GUEST_WAIT_SECONDS: u64 = 330;
 
-const REFUSAL: &str = "layr_read is for VM reviewers";
-
-/// The tool definition that VM reviewers get.
+/// The tool definition for reviewers.
 pub(crate) fn tool_definition() -> Option<&'static crate::thread_prepare::ToolDefinition> {
     static DEFINITION: OnceLock<Option<crate::thread_prepare::ToolDefinition>> = OnceLock::new();
     DEFINITION
@@ -115,95 +108,6 @@ pub(crate) fn identity(actor_id: &str, request_id: &str) -> String {
     )
 }
 
-fn decoded(result: &Value, field: &str) -> String {
-    let text = result
-        .get(field)
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(text)
-        .unwrap_or_default();
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-
-fn error_text(error: &GuestError) -> String {
-    match error {
-        GuestError::Rejected { code, detail, .. } => {
-            let text = [code.as_deref(), detail.as_deref()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(": ");
-            format!("VM guest layr.exec: {text}")
-        }
-        error @ GuestError::InvalidRequest
-        | error @ GuestError::Identity
-        | error @ GuestError::SpacePreflight { .. }
-        | error @ GuestError::Transport { .. }
-        | error @ GuestError::Protocol { .. }
-        | error @ GuestError::FrameCallback { .. } => format!("VM guest layr.exec failed: {error}"),
-    }
-}
-
-/// Run one `layr_read` call after the claim of tool request `request_id` committed.
-pub(crate) async fn run(
-    actor: &Actor,
-    args: &Value,
-    request_id: &str,
-    guest: Arc<dyn GuestRpc>,
-) -> DispatchedOperation {
-    let record = actor.record();
-    let reviewer = record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        && record.role.value().copied()
-            == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
-        && record.layr_ready == Some(true);
-    if !reviewer {
-        return crate::host_exec::refused(REFUSAL.into());
-    }
-    let argv = match command(args) {
-        Ok(argv) => argv,
-        Err(message) => return crate::host_exec::refused(message),
-    };
-    let mut layr = vec!["layr".to_owned()];
-    layr.extend(argv);
-    let params = json!({"agentId": record.id.0, "argv": layr});
-    let identity = identity(&record.id.0, request_id);
-    let outcome = crate::host_exec::on_guest_thread(move || {
-        guest.call(
-            "layr.exec",
-            &params,
-            Some(&identity),
-            Duration::from_secs(GUEST_WAIT_SECONDS),
-        )
-    })
-    .await
-    .and_then(|outcome| outcome);
-    match outcome {
-        Ok(result @ Value::Object(_)) => {
-            let mut value = json!({
-                "exitCode": result.get("exitCode").cloned().unwrap_or(Value::Null),
-                "stdout": decoded(&result, "stdout"),
-                "stderr": decoded(&result, "stderr"),
-            });
-            if let Some(reason) = result
-                .get("reason")
-                .filter(|reason| studio_runtime_store::truthy(Some(reason)))
-            {
-                value["reason"] = reason.clone();
-            }
-            DispatchedOperation::Applied(OperationResult::reply(&value))
-        }
-        Ok(_) => crate::host_exec::unknown("The layr command has no proven result.".into()),
-        // Nothing reached the guest: a connection or request check failed first.
-        Err(error) if !error.uncertain() && !matches!(error, GuestError::Rejected { .. }) => {
-            crate::host_exec::refused(error_text(&error))
-        }
-        // The guest answered with an explicit error, or its answer was lost.
-        // The same request identity finds the first outcome.
-        Err(error) => crate::host_exec::unknown(error_text(&error)),
-    }
-}
-
 #[cfg(test)]
 mod tests;
 
@@ -216,11 +120,11 @@ pub(crate) async fn run_native(
 ) -> DispatchedOperation {
     let record = actor.record().value();
     if record["role"] != "reviewer" || record["layrReady"] != true {
-        return crate::host_exec::refused("layr_read requires a ready Layr reviewer".into());
+        return refused("layr_read requires a ready Layr reviewer");
     }
     let argv = match native_command(args) {
         Ok(argv) => argv,
-        Err(error) => return crate::host_exec::refused(error),
+        Err(error) => return refused(&error),
     };
     let state_dir = store.root().to_owned();
     let request_id = identity(actor.record().id.0.as_str(), request_id);
@@ -248,10 +152,10 @@ pub(crate) async fn run_native(
     match outcome {
         Ok(Ok(value)) => DispatchedOperation::Applied(OperationResult::reply(&value)),
         Ok(Err(error @ crate::layr_native::NativeLayrError::Refused(_))) => {
-            crate::host_exec::refused(error.to_string())
+            refused(&error.to_string())
         }
-        Ok(Err(error)) => crate::host_exec::unknown(error.to_string()),
-        Err(_) => crate::host_exec::unknown("Native Layr read worker failed".into()),
+        Ok(Err(error)) => unknown(&error.to_string()),
+        Err(_) => unknown("Native Layr read worker failed"),
     }
 }
 
@@ -280,4 +184,12 @@ fn native_command(args: &Value) -> Result<Vec<String>, String> {
         .filter_map(Value::as_str)
         .map(str::to_owned)
         .collect())
+}
+
+fn refused(message: &str) -> DispatchedOperation {
+    DispatchedOperation::NotSent(OperationResult::reply(&message))
+}
+
+fn unknown(message: &str) -> DispatchedOperation {
+    DispatchedOperation::Unknown(OperationResult::reply(&message))
 }

@@ -2,11 +2,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import VaultSetup from "../../src/components/sidebar/VaultSetup.tsx";
 import ClaudeSignIn from "../../src/components/ClaudeSignIn.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
-import type { ApiPostPath, PostInput, PostResult } from "../../src/apiTypes.ts";
 import type {
   ResourceProgress,
   ResourceRef,
@@ -52,50 +50,12 @@ const api = {
   stableRequestId: () => "",
   clearStableRequestId: () => {},
 };
-const flow = new URL(location.href).searchParams.get("flow");
-// Responses are made by this fixture or the spec's typed route handler.
-function fixtureReply<P extends ApiPostPath>(value: unknown): PostResult<P> {
-  return value as PostResult<P>;
-}
-const backend = {
-  post: async <P extends ApiPostPath>(
-    path: P,
-    body: PostInput<P>,
-  ): Promise<PostResult<P>> => {
-    if (path !== "/api/vault/setup/facts") {
-      reads.jobs++;
-      const response = await fetch(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      return fixtureReply<P>(await response.json());
-    }
-    reads.facts++;
-    return fixtureReply<P>({
-      prefix: "project-one",
-      keys: flow === "vault-job",
-      site: "https://desk.example",
-      region: "eu-west-1",
-      profiles:
-        flow === "vault-job" ? [{ name: "fixture", signedIn: true }] : [],
-    });
-  },
-};
 // This one-off fixture omits unused service adapters and API methods.
 const services: Partial<Record<keyof ServerServices, unknown>> = {
   owner: { id: "local", origin: location.origin },
   api,
   resources,
-  fileDialogs: {
-    showVaultKeys: async () => {},
-    canShowVaultKeys: () => true,
-  },
 };
-// These one-off fixtures omit the unused vault state and account home/source fields.
-const entry = { vault: { projectId: "p1" } } as React.ComponentProps<
-  typeof VaultSetup
->["entry"];
 const account = {
   id: "claude-one",
   label: "Claude",
@@ -116,26 +76,14 @@ window.progress = progress;
 createRoot(fixtureElement("root")).render(
   <MantineProvider>
     <ServerServicesProvider services={services as ServerServices}>
-      {flow !== "auth" ? (
-        <VaultSetup
-          entry={entry}
-          name="Project"
-          backend={backend}
-          onClose={() => {}}
-          onDone={() => {
-            window.ready = true;
-          }}
-        />
-      ) : (
-        <ClaudeSignIn
-          account={account}
-          scope="fixture"
-          onClose={() => {}}
-          onReady={() => {
-            window.ready = true;
-          }}
-        />
-      )}
+      <ClaudeSignIn
+        account={account}
+        scope="fixture"
+        onClose={() => {}}
+        onReady={() => {
+          window.ready = true;
+        }}
+      />
     </ServerServicesProvider>
   </MantineProvider>,
 );

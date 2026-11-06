@@ -35,12 +35,16 @@ tower-http = { workspace = true, features = ["compression-br"] }
 tracing = "=0.1.44"
 uuid = { workspace = true, features = ["serde", "v4"] }
 
+<<<<<<< head
 [build-dependencies]
 openapi-to-rust = { version = "=0.22.0", default-features = false }
 studio-json = { path = "../json" }
 studio-runtime-schema = { path = "../runtime-schema" }
 
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 [dev-dependencies]
+gungraun = "=0.17.2"
 studio-test-deps = { path = "../test-deps" }
 studio-runtime-services = { path = "../runtime-services", features = ["test-support"] }
 studio-runtime-store = { path = "../runtime-store", features = ["test-support"] }
@@ -54,3 +58,11 @@ workspace = true
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[[bench]]
+name = "hot_paths"
+harness = false
+required-features = ["bench-support"]
+
+[features]
+bench-support = []

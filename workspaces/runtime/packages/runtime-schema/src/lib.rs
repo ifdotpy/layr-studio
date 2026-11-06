@@ -1,6 +1,15 @@
 //! Compiled persisted-state validators and the Rust owners of the shared
 //! runtime contracts (`contracts` renders their copies in other languages).
 
+extern crate self as studio_runtime_schema;
+
+pub mod ingress_pattern;
+pub mod non_null;
+#[allow(clippy::all, clippy::option_option, clippy::struct_excessive_bools)]
+pub mod generated {
+    include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
+}
+
 pub mod account_destination;
 pub mod account_key;
 pub mod account_registry;
@@ -41,6 +50,7 @@ pub mod idle_compaction;
 pub mod json_compat;
 pub mod json_object;
 pub mod layr_evidence;
+pub mod layr_progress;
 pub mod limit_reset_request;
 pub mod model_catalog;
 pub mod monitor_record;
@@ -842,7 +852,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "SubscriptionCursor",
         "SubscriptionReplyKind",
         "ResourceProgressEvent",
-        "VaultPullOutcome",
         "ResourceEntityTransferEvent",
         "EntityChangeBatch",
         "RoomEntityDto",

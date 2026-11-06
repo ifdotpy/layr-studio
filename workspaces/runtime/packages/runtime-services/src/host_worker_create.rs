@@ -956,6 +956,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< head
     fn vm_worker_rechecks_guest_cwd_and_host_project_path_separately() {
         let mut fixture = worker_draft_fixture("Implement", "Inspect the project");
         let host_project = tempdir().expect("host project directory");
@@ -1086,6 +1087,8 @@ mod tests {
     }
 
     #[test]
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     fn rust_trim_keeps_python_strip_only_edge_controls() {
         let value = "\u{1c}edge\u{1c}";
         let fixture = worker_draft_fixture(value, value);

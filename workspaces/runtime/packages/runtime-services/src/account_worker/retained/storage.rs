@@ -85,13 +85,17 @@ fn monitor_account_sql(agent_param: usize) -> String {
     )
 }
 
-/// Whether `agent` runs its provider in a VM. Only such an actor has its own
-/// session and journal lane. Every other authorized actor's request is sent
-/// and answered on the host session.
+/// Identify legacy VM workspaces that cannot use the host provider session.
 pub fn vm_actor(connection: &rusqlite::Connection, agent: &str) -> Result<bool, WorkerError> {
     let record = AgentRepository::get(connection, &AgentId::from(agent))?;
     Ok(record.is_some_and(|record| {
-        record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+        let value = record.value();
+        crate::workspace_ready::vm_workspace_unsupported(
+            value["executionMode"].as_str(),
+            value["workspaceMode"].as_str(),
+            record.layr_ready == Some(true),
+            value["layrLine"].as_str().is_some(),
+        )
     }))
 }
 
@@ -134,16 +138,11 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
                     &transfer.thread_id,
                     &call.params,
                 )
+                // `valid_source_preflight_params` above owns the allowed source methods.
                 && call.operation.starts_with(&format!(
                     "transfer:{}:{}:",
                     transfer.transfer_id, transfer.member
-                ))
-                && matches!(
-                    call.method,
-                    Method::ThreadQueueList
-                        | Method::ThreadBackgroundTerminalsList
-                        | Method::ThreadUnsubscribe
-                ));
+                )));
         }
         return Ok(super::valid_actorless_request_shape(
             call.method,
@@ -761,7 +760,7 @@ pub(super) fn reserve(
     };
     let stream = actor_id.map_or_else(
         || call.scope.account.clone(),
-        |actor| super::super::vm_journal_scope(&call.scope.account, actor),
+        |actor| super::super::historical_actor_journal_scope(&call.scope.account, actor),
     );
     let row = OutboxRow {
         id: call.key(),
@@ -1573,6 +1572,50 @@ mod replay_identity_tests {
         let mut other = call;
         other.scope.generation += 1;
         assert!(!thread_started_for_actor(&tx, &other, "thread-1").expect("different generation"));
+    }
+
+    #[tokio::test]
+    async fn transfer_source_authorizes_a_claude_session_export() {
+        let root = tempfile::tempdir().expect("root");
+        let store = database(root.path()).await;
+        let cwd = store.root().to_path_buf();
+        store
+            .transaction(move |tx| {
+                let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
+                    "id":"m","rootId":"m","epoch":1,"status":"idle","isLead":true,
+                    "accountKey":"default","provider":"claude","model":"default",
+                    "threadId":"thread-1","cwd":cwd}))?;
+                AgentRepository::put(tx, &agent)?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .expect("agent");
+        let transfer = "5a300f72-4ea6-4d30-8a0e-9b2c13c42281";
+        crate::account_transfer_driver::request(
+            &store, transfer, "m", "target", "team", "claude", 10.0,
+        )
+        .await
+        .expect("transfer");
+        store
+            .transaction(move |tx| {
+                let mut request = call();
+                request.actor = None;
+                request.transfer = Some(super::super::TransferAuthorization {
+                    transfer_id: transfer.into(),
+                    member: "m".into(),
+                    source_account: "default".into(),
+                    thread_id: "thread-1".into(),
+                });
+                request.method = Method::ClaudeMoveExport;
+                request.operation = format!("transfer:{transfer}:m:move-export");
+                request.params = json!({"threadId":"thread-1"});
+                assert!(authorize(tx, &request).expect("export"));
+                request.method = Method::ThreadFork;
+                assert!(!authorize(tx, &request).expect("fork"));
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .expect("transfer source authorization");
     }
 
     #[tokio::test]

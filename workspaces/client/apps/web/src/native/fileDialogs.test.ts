@@ -67,22 +67,6 @@ it("reveals a local path through native IPC and refuses a remote view", async ()
   expect(remote.invoke).not.toHaveBeenCalled();
 });
 
-it("opens vault keys locally and rejects a remote view before IPC", async () => {
-  const local = await setup();
-  expect(local.api.canShowVaultKeys()).toBe(true);
-  await local.api.showVaultKeys("project_1");
-  expect(required(local.invoke.mock.calls[0])[1].request).toMatchObject({
-    method: "desktop.showVaultKeys",
-    params: { value: "project_1" },
-  });
-  const remote = await setup(true);
-  expect(remote.api.canShowVaultKeys()).toBe(false);
-  await expect(remote.api.showVaultKeys("project_1")).rejects.toThrow(
-    "unavailable",
-  );
-  expect(remote.invoke).not.toHaveBeenCalled();
-});
-
 it("keeps local file privileges with the owner when both servers share one window", async () => {
   const { api, invoke } = await setup();
   const local = api.createFileDialogs("local");
@@ -92,14 +76,10 @@ it("keeps local file privileges with the owner when both servers share one windo
   expect(remote.canPickDirectory()).toBe(false);
   expect(remote.canPickFiles()).toBe(false);
   expect(remote.canRevealPath()).toBe(false);
-  expect(remote.canShowVaultKeys()).toBe(false);
   await local.pickDirectory();
   await expect(delayedRemoteReveal()).rejects.toThrow("unavailable");
   await expect(remote.pickDirectory()).rejects.toThrow("unavailable");
   await expect(remote.pickFiles()).rejects.toThrow("unavailable");
-  await expect(remote.showVaultKeys("remote-project")).rejects.toThrow(
-    "unavailable",
-  );
   expect(invoke).toHaveBeenCalledTimes(1);
 });
 

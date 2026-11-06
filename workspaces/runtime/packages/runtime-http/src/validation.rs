@@ -79,7 +79,6 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/claude/file-backups"),
     ("POST", "/api/profiles"),
     ("POST", "/api/complaints"),
-    ("POST", "/api/linux-vm/settings"),
     ("POST", "/api/accounts/login"),
     ("POST", "/api/browser/forward"),
     ("POST", "/api/questions/defer"),
@@ -121,16 +120,6 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/checkpoint/restore"),
     ("POST", "/api/checkpoint"),
     ("POST", "/api/voice/records"),
-    ("POST", "/api/project-secrets/list"),
-    ("POST", "/api/project-secrets/set"),
-    ("POST", "/api/project-secrets/remove"),
-    ("POST", "/api/vault/aws-login"),
-    ("POST", "/api/vault/pull"),
-    ("POST", "/api/vault/setup/facts"),
-    ("POST", "/api/vault/setup"),
-    ("POST", "/api/vault/unlock"),
-    ("POST", "/api/mac-sync/config"),
-    ("POST", "/api/mac-sync/resolve"),
     ("POST", "/api/projects/delete"),
     ("POST", "/api/accounts/claude/add"),
     ("POST", "/api/accounts/claude/login"),
@@ -1686,7 +1675,11 @@ mod tests {
         .expect("request schemas compile");
 
         let magic_key: Value = crate::json_body::parse_bounded(
-            br#"{"prompt":"x","concurrency":{"$serde_json::private::Number":"1"}}"#,
+            format!(
+                r#"{{"prompt":"x","concurrency":{{"{}":"1"}}}}"#,
+                studio_json::NUMBER_TOKEN
+            )
+            .as_bytes(),
             1024,
         )
         .expect("magic key is valid JSON");
@@ -1705,7 +1698,7 @@ mod tests {
         );
 
         let object: Value = crate::json_body::parse_bounded(
-            br#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{"answers":{"$serde_json::private::Number":"1"}}}"#,
+            format!(r#"{{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{{"answers":{{"{}":"1"}}}}}}"#, studio_json::NUMBER_TOKEN).as_bytes(),
             1024,
         )
         .expect("magic key object parses");
@@ -1722,10 +1715,7 @@ mod tests {
                 .is_ok(),
             "the same key remains ordinary object data where objects are allowed"
         );
-        assert_eq!(
-            object["body"]["answers"]["$serde_json::private::Number"],
-            "1"
-        );
+        assert_eq!(object["body"]["answers"][studio_json::NUMBER_TOKEN], "1");
 
         let almost_integer: Value =
             studio_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)

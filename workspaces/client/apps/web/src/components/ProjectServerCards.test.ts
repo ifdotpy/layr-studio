@@ -26,7 +26,6 @@ describe("new chat actions", () => {
               id: "local",
               label: "This computer",
               system: "Darwin",
-              hasStudioVm: true,
             },
           ],
           onChoose: () => {},
@@ -40,7 +39,7 @@ describe("new chat actions", () => {
     expect(
       markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
     ).toContain('disabled=""');
-    expect(markup).toContain("Layr VM");
+    expect(markup).not.toContain("Layr VM");
     expect(markup).toContain("WT");
     expect(markup).toContain('aria-label="Agent role" role="radiogroup"');
     expect(markup).toMatch(/<input[^>]*type="radio"[^>]*value="worker"/);
@@ -71,7 +70,6 @@ it("allows a store override when the default store is unavailable", () => {
             id: "linux",
             label: "Linux",
             system: "Linux",
-            hasStudioVm: false,
             nativeLayr: {
               status: "notReady",
               reason: "A btrfs store is required.",
@@ -110,7 +108,6 @@ it("shows the server's install message on the disabled Layr option", () => {
             id: "local",
             label: "Server",
             system: "Darwin",
-            hasStudioVm: false,
             nativeLayr: { status: "notInstalled" },
             nativeLayrMessage: "Install layr",
             defaultWorkspaceMode: ChatWorkspaceMode.worktree,
@@ -140,7 +137,6 @@ it("selects the server's default when Layr is ready", () => {
             id: "local",
             label: "Server",
             system: "Linux",
-            hasStudioVm: false,
             nativeLayr: { status: "ready" },
             defaultWorkspaceMode: ChatWorkspaceMode["layr-native"],
           },

@@ -339,18 +339,40 @@ async fn answered_approval_retires_card_and_replays_without_another_start() {
         let selected = id.clone();
         store.transaction(move |tx| {
             tx.execute("UPDATE runtime_monitors SET record=json_remove(json_set(record,'$.status','approval'),'$.operation') WHERE id=?1", [&selected])?;
+<<<<<<< head
             let request = pending_approval(tx, &selected);
             studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", "approval", studio_json::to_value(&request)?, false)?;
+=======
+            pending_approval(tx, &selected);
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             Ok(())
         }).await.expect("pending approval");
-        let pending_seq: i64 = store.test_reader().expect("reader").query_row("SELECT seq FROM sync_entities WHERE collection='request' AND id='approval' AND deleted=0", [], |row| row.get(0)).expect("pending card");
+        let pending_seq = studio_runtime_services::entity_scope::direct_document(
+            &store.test_reader().expect("reader"),
+            "request",
+            "approval",
+        )
+        .expect("read")
+        .expect("pending card")
+        .sequence;
         let data = json!({"decision":decision});
         let answer = monitor_runtime::answer_approval(&store, "approval", &data, 2001.0, true)
             .await
             .expect("answer")
             .expect("monitor approval");
         assert_eq!(answer.accepted, decision == "accept");
-        let (seq, deleted): (i64, bool) = store.test_reader().expect("reader").query_row("SELECT seq,deleted FROM sync_entities WHERE collection='request' AND id='approval'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("card update");
+        let reader = store.test_reader().expect("reader");
+        let deleted =
+            studio_runtime_services::entity_scope::direct_document(&reader, "request", "approval")
+                .expect("read")
+                .is_none();
+        let seq: i64 = reader
+            .query_row(
+                "SELECT seq FROM durable_rows WHERE tbl='approvals' AND id='approval'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("card update");
         assert!(deleted, "answered card must be removed from sync");
         assert!(seq > pending_seq, "removal must reach existing subscribers");
         let starts = studio_runtime_services::monitor_driver::pending_start_ids(&store)
@@ -379,7 +401,7 @@ async fn answered_approval_retires_card_and_replays_without_another_start() {
             .test_reader()
             .expect("reader")
             .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='request' AND id='approval'",
+                "SELECT seq FROM durable_rows WHERE tbl='approvals' AND id='approval'",
                 [],
                 |row| row.get(0),
             )

@@ -1,0 +1,5 @@
+/* Paths read as code. */
+.directory-field-input {
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-code);
+}

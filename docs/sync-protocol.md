@@ -203,15 +203,39 @@ tombstones above it, or a snapshot when the cursor is absent, in the future, or 
 `durable_floor.floor`. The floor is the highest `seq` of a pruned tombstone.
 Tombstones live `TOMBSTONE_RETENTION_SECONDS` (90 days); a delete prunes older ones.
 
-`durable_view_log` mirrors, without payload, the `sync_entities` rows of the derived
-view collections (`VIEW_COLLECTIONS`: agent, agentSummary, agentDetail, retainedWorktree,
-questionHistory, request, work, workDetail, workResult, workDecision, workRelease).
-`view_changes_since(cursor)` lists the view ids that changed after a cursor. A parity
-test compares it with the published views.
-
-Status: the source, the shared cursor space and the view log exist. The stream still
-reads `sync_entities`, and entity publication still writes it. Old `sync_entities` rows
-are deleted by a later migration.
+Status: every entity reader (stream, scoped subscription, REST pull, mutation reply)
+reads through [`entity_scope`](../workspaces/runtime/packages/runtime-services/src/entity_scope.rs).
+It builds the work documents (`WORK_COLLECTIONS`: work, workDetail, workResult,
+workDecision, workRelease) from `runtime_work`, its history tables and `durable_rows` at
+read time. They have no copy in `sync_entities`; migration `2026-11-04-work-read-time`
+deleted the old copies. The direct collections (`DIRECT_COLLECTIONS`) have one document
+per row of a main table: `plan` (`runtime_plans`), `annotation` (`runtime_annotations`),
+`rule` (`runtime_rules`), `request` and `questionHistory` (`approvals`), `complaint`
+(`runtime_complaints`, with the current names of its author and lead) and `edge`
+(chat rows of `graph_edges`). A `chat` document reads its group, its member edges and
+its messages; their writers mark the chat (`durable_rows` table `chat_views`), so a
+member change or a new message refreshes it. Migration `2026-11-04-chat-read-time`
+numbered these rows, marked every chat and deleted the copies. The task and monitor windows
+(`WINDOW_COLLECTIONS`) keep only their members in `durable_rows` (`task_window`,
+`monitor_window`); the writer that owns the window rule joins and leaves members, and a
+member's document is built from `runtime_tasks` or `runtime_monitors` at read time. A
+change of a member row or of its membership is sent at the later number; a member that
+left is a delete. `task_window_state` keeps the owner, created time and running state the
+task window compares. A task that moves to another agent resets the scoped readers of
+both owners. Migration `2026-11-04-window-read-time` moved the members of the copies. They are built
+at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
+their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
+agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that
+changes a view without a change of the agent row (team counts, attention, command
+progress, account state) writes a mark: a `durable_rows` entry with table `agent_views`
+and no payload. A view takes the higher number of the agent row and its mark. Team
+visibility of agent-scoped documents reads `root_id` of `runtime_agents`; the agent row
+triggers move the team fence. Migration `2026-11-04-agent-views-read-time` deleted the
+copies and the view log. An approval that is not open (or not a question) is a delete in a delta and
+absent from a snapshot. An update that leaves a record-only row unchanged takes no new
+number. A document built from one main-table change carries that row's number, so
+several documents can share a number; a page is cut only between numbers. The other
+collections still come from `sync_entities`.
 
 ### Transcript pages at read time
 
@@ -240,8 +264,8 @@ snapshots. They are not subscribed. A client that opens one of them already has 
 
 The renderer reads chats and cards only from their `sync_entities` rows, and a
 pull does not rebuild a complete projection. Every writer transaction therefore
-publishes the `runtime_agents`, `runtime_requests`, and `runtime_work` rows it changed before it
-commits. The [store journal](../workspaces/runtime/packages/runtime-store/src/entity_publication.rs)
+publishes the views of the `runtime_agents` and `approvals` rows it changed before it
+commits. A changed `runtime_work` row refreshes only its owner agent's views. The [store journal](../workspaces/runtime/packages/runtime-store/src/entity_publication.rs)
 records each changed row, and the services publisher projects it through
 `sync_policy::publish_entity_changes`. A write path needs no publish call of its
 own. A path that publishes after its last write is not published twice.
@@ -256,11 +280,9 @@ The assignment Tasks view subscribes to its team's existing `work` resource
 and the root agent's detail for `taskDefaultGate`. Its scoped `workDetail` metadata
 and `workResult`, `workDecision`, and `workRelease` history records reconstruct the
 canonical OpenAPI `WorkItem`. The global `work` summary excludes histories.
-Unchanged history records keep their durable sequences, and unrelated cached
-updates do not notify the Tasks consumer. The source transaction compares its
-old and new history fields and publishes only changed indices; metadata writes
-do not enumerate or serialize history entries. Existing databases seed these
-projections once when the publisher starts, before accepting subscriptions.
+Each history record is a row of its history table with its own change number, so an
+unchanged record keeps its number. A change of the owner agent, its execution run or a
+dependency gives the affected `workDetail` documents the number of that change.
 Visible single-agent detail observers select that entity before decoding rows.
 Task actions retain their existing
 request identities and receive their resulting view through the stream.
@@ -278,13 +300,6 @@ focused completed result records its read receipt; its confirmed mutation
 response does not cause another session or projection read. An empty local
 sidebar order never creates a migration write; existing pending requests and
 nonempty legacy user preferences retain their original migration lifecycle.
-
-Vault setup, AWS sign-in, and pull receipts use the transient
-`vault-job-progress` resource, scoped by job kind and request identity. The
-subscription baseline and later changes carry the in-memory receipt itself;
-sign-in codes and URLs never enter the entity stores. The start action retains
-its request identity for one bounded lost-response recovery. Terminal receipts
-release the subscription.
 
 Rename completion uses the agent entity for its title and the transient
 `rename-progress` resource for the exact request's receipt, including failure.
@@ -349,8 +364,11 @@ revision, no `Last-Event-ID`, and no replay.
 - Fields (`ResourceLiveDeltaEvent` in OpenAPI): `agentId`, `itemId` (the durable
   transcript item id), `offset` (item text length in Unicode scalars before `text`),
   and `text`.
-- Each stream has a bounded receiver (256 deltas). A slow stream skips the deltas it
-  missed. The durable item carries that text; a lost delta is harmless.
+- Each stream has a bounded queue (256 events, `LIVE_DELTA_CAPACITY`). Queued deltas
+  that continue each other are sent as one delta. A full queue is merged: the runs of
+  each item join and equal progress events become one. The stream stays open. Only a
+  queue that is still full after the merge drops its oldest event; the durable item
+  carries that text.
 - The renderer keeps live text in memory only. It shows `durable.slice(0, offset)` plus
   the live run while the durable item is shorter than the run and at least `offset`
   long. The durable item wins when it is at least as long. A gap in `offset` starts a

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use studio_json::{Value, json};
 use studio_runtime_services::portable_history::{
     ArchiveDescriptor, ExportInput, NativeHistory, PortableHistoryError, export_history,
-    history_context, validate_history,
+    history_context, validate_history, write_readable_transcript,
 };
 use studio_runtime_store::RuntimeStore;
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -376,6 +376,38 @@ async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
         .await
         .expect("published winner is retry safe");
     assert_eq!(retry, descriptor);
+}
+
+#[test]
+fn readable_transcript_keeps_the_whole_studio_history_beyond_the_excerpt() {
+    let root = isolated_test_root();
+    let case = frozen_archives(root.path())
+        .into_iter()
+        .find(|case| case.name == "fulltext-and-context-bound")
+        .expect("long Studio item fixture");
+    let descriptor =
+        ArchiveDescriptor::from_value(case.descriptor.to_value().expect("descriptor JSON"))
+            .expect("Python descriptor");
+    // The bounded excerpt drops the first lines of the 25013-character item.
+    assert!(!case.context.contains("older 😀 line"));
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("workspace directory");
+    let path = write_readable_transcript(case.root.as_path(), &descriptor, &workspace)
+        .expect("transcript file is written");
+    assert!(path.starts_with(workspace.join(".studio-history")));
+    let text = std::fs::read_to_string(&path).expect("transcript text");
+    assert!(text.starts_with("assistant: older 😀 line\n"));
+    assert!(text.len() > 25_000, "the full item text is kept");
+    assert!(
+        std::fs::metadata(&path)
+            .expect("transcript metadata")
+            .permissions()
+            .readonly(),
+        "the transcript is read-only"
+    );
+    let again = write_readable_transcript(case.root.as_path(), &descriptor, &workspace)
+        .expect("a retry replaces the same transcript");
+    assert_eq!(again, path);
 }
 
 fn isolated_test_root() -> tempfile::TempDir {

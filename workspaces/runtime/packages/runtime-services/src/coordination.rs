@@ -139,9 +139,7 @@ pub fn create_chat(
     for member in members {
         let edge_id = CoordinationRepository::edge_id(&member, id);
         CoordinationRepository::put_edge(transaction, &edge_id, &member, id)?;
-        CoordinationRepository::edge_projection(transaction, &edge_id, &member, id, false)?;
     }
-    CoordinationRepository::chat_projection(transaction, id, false)?;
     Ok(json!({"id":id}))
 }
 
@@ -168,7 +166,6 @@ pub fn connect_chat(
     } else {
         CoordinationRepository::remove_edge(transaction, &edge_id)?;
     }
-    CoordinationRepository::edge_projection(transaction, &edge_id, source, target, !connected)?;
     Ok(json!({"id":edge_id,"connected":connected}))
 }
 
@@ -383,6 +380,22 @@ fn post_managed_message(
     let blockers = admission.workspace(transaction, &agent)?;
 
     // A manual send wakes a stopped agent in the same transaction as the event.
+    if matches!(
+        agent.native_failure_hold.value(),
+        Some(studio_runtime_store::NativeFailureHold::Terminal { .. })
+    ) {
+        return Err(CoordinationError::InvalidRequest(
+            "This agent cannot resume. Copy the input into a new agent or message.",
+        ));
+    }
+    if matches!(&agent.start_outcome_hold,
+        Some(studio_runtime_store::StoredStartOutcomeHold::Known(studio_runtime_store::StartOutcomeHold::Held { reason: Some(reason), .. }))
+            if reason == studio_runtime_store::SchedulerRepository::UNCLEAN_START_HOLD)
+    {
+        agent.start_outcome_hold = None;
+        agent.start_wait = None;
+        agent.start_attempt = None;
+    }
     agent.auto_wake = Some(true);
     agent.error = studio_runtime_schema::queue_command::Field::Null;
     agent.clear_native_failure_hold();
@@ -613,6 +626,14 @@ fn send_followup_inner(
             }),
             event_inserted: false,
         });
+    }
+    if matches!(
+        recipient.native_failure_hold.value(),
+        Some(studio_runtime_store::NativeFailureHold::Terminal { .. })
+    ) {
+        return Err(CoordinationError::InvalidRequest(
+            "This agent cannot resume. Copy the input into a new agent or message.",
+        ));
     }
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
@@ -870,7 +891,6 @@ pub fn post_message(
             .map_err(|_| CoordinationError::InvalidRequest("Invalid message delivery state"))?,
     };
     CoordinationRepository::put_message(transaction, &message)?;
-    CoordinationRepository::chat_projection(transaction, input.room, false)?;
     Ok(message_receipt(validated_message(message)?, true))
 }
 
@@ -1157,7 +1177,7 @@ mod tests {
              CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
              CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
-             CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")
+             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE IF NOT EXISTS agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT);  CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")
         ).expect("coordination schema creates");
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
@@ -1171,35 +1191,6 @@ mod tests {
                     [id, record.as_str()],
                 )
                 .expect("agent inserts");
-        }
-        connection
-    }
-
-    fn database_at(path: &std::path::Path) -> Connection {
-        let connection = Connection::open(path).expect("durable test database opens");
-        connection.execute_batch(
-            &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,members TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS graph_edges(id TEXT PRIMARY KEY,source TEXT NOT NULL,target TEXT NOT NULL,kind TEXT NOT NULL,UNIQUE(source,target,kind));
-             CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,room TEXT NOT NULL,author TEXT NOT NULL,text TEXT NOT NULL,at REAL NOT NULL,deliveries TEXT NOT NULL);
-             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,created REAL,epoch INTEGER,turn_id TEXT,error TEXT);
-             CREATE TABLE IF NOT EXISTS runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
-             CREATE TABLE IF NOT EXISTS sync_documents(seq INTEGER PRIMARY KEY,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
-             CREATE TABLE IF NOT EXISTS durable_rows(seq INTEGER); CREATE TABLE IF NOT EXISTS sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT OR IGNORE INTO sync_generation VALUES(1,0);")
-        ).expect("durable test schema creates");
-        connection
-            .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
-            .expect("volatile agent table creates");
-        studio_runtime_store::receipt_schema::create(&connection).expect("request results schema");
-        for (id, root) in [("lead", "lead"), ("worker", "lead")] {
-            let record = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":root,"epoch":0,"status":if id == "lead" {"running"} else {"idle"},"autoWake":id == "lead","inFlight":id == "lead"}).to_string();
-            connection
-                .execute(
-                    "INSERT OR IGNORE INTO runtime_agents(id,record) VALUES(?1,?2)",
-                    [id, record.as_str()],
-                )
-                .expect("durable test agent inserts");
         }
         connection
     }
@@ -1311,6 +1302,124 @@ mod tests {
             },
             &AllowAdmission,
         )
+    }
+
+    #[test]
+    fn new_message_releases_unclean_start_without_replaying_old_input() {
+        let mut connection = database();
+        let mut agent = studio_runtime_store::AgentRepository::get(&connection, &"lead".into())
+            .unwrap()
+            .unwrap();
+        agent.start_outcome_hold = Some(studio_runtime_store::StoredStartOutcomeHold::Known(
+            studio_runtime_store::StartOutcomeHold::Held {
+                operation_id: None,
+                connection_generation: None,
+                reason: Some(studio_runtime_store::SchedulerRepository::UNCLEAN_START_HOLD.into()),
+                attempt_id: Some("old-attempt".into()),
+                extra: Default::default(),
+            },
+        ));
+        agent.start_wait =
+            Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: 0 });
+        studio_runtime_store::AgentRepository::put(&connection, &agent).unwrap();
+        connection.execute("INSERT INTO runtime_events VALUES('old','lead','user','old input','uncertain',1,0,NULL,NULL)", []).unwrap();
+        let tx = connection.transaction().unwrap();
+        let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        post_lead(&tx, &id, "new input").unwrap();
+        let saved = studio_runtime_store::AgentRepository::get(&tx, &"lead".into())
+            .unwrap()
+            .unwrap();
+        assert!(saved.start_outcome_hold.is_none());
+        assert!(saved.start_wait.is_none());
+        let old: String = tx
+            .query_row(
+                "SELECT status FROM runtime_events WHERE id='old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old, "uncertain");
+    }
+
+    #[test]
+    fn terminal_fault_rejects_new_message_and_preserves_reserved_input() {
+        let mut connection = database();
+        let mut agent = studio_runtime_store::AgentRepository::get(&connection, &"lead".into())
+            .unwrap()
+            .unwrap();
+        agent.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_store::NativeFailureHold::Terminal {
+                terminal_fault: studio_runtime_store::TerminalFault::InvalidAttempt,
+            },
+        );
+        studio_runtime_store::AgentRepository::put(&connection, &agent).unwrap();
+        connection.execute("INSERT INTO runtime_events VALUES('old','lead','user','old input','reserved',1,0,NULL,NULL)", []).unwrap();
+        let tx = connection.transaction().unwrap();
+        let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        assert!(post_lead(&tx, &id, "new input").is_err());
+        let saved = studio_runtime_store::AgentRepository::get(&tx, &"lead".into())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            saved.native_failure_hold.value(),
+            Some(studio_runtime_store::NativeFailureHold::Terminal { .. })
+        ));
+        let (status, text): (String, String) = tx
+            .query_row(
+                "SELECT status,text FROM runtime_events WHERE id='old'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((status.as_str(), text.as_str()), ("reserved", "old input"));
+        let new_count: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM runtime_events WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_count, 0);
+    }
+
+    #[test]
+    fn terminal_fault_rejects_agent_followup() {
+        let mut connection = database();
+        let mut sender = studio_runtime_store::AgentRepository::get(&connection, &"lead".into())
+            .unwrap()
+            .unwrap();
+        sender.auto_wake = Some(true);
+        studio_runtime_store::AgentRepository::put(&connection, &sender).unwrap();
+        let mut recipient =
+            studio_runtime_store::AgentRepository::get(&connection, &"worker".into())
+                .unwrap()
+                .unwrap();
+        recipient.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_store::NativeFailureHold::Terminal {
+                terminal_fault: studio_runtime_store::TerminalFault::InvalidAttempt,
+            },
+        );
+        studio_runtime_store::AgentRepository::put(&connection, &recipient).unwrap();
+        let tx = connection.transaction().unwrap();
+        let result = super::send_followup(
+            &tx,
+            super::AgentFollowup {
+                sender_id: "lead",
+                sender_epoch: 0,
+                recipient_id: "worker",
+                id: "followup",
+                text: "new input",
+                delivery: DeliveryMoment::CurrentTurn,
+                now: 1.0,
+            },
+            &AllowAdmission,
+        );
+        assert!(result.is_err());
+        let saved = studio_runtime_store::AgentRepository::get(&tx, &"worker".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.native_failure_hold, recipient.native_failure_hold);
+        assert_eq!(count(&tx, "runtime_events"), 0);
     }
 
     #[test]
@@ -1573,6 +1682,7 @@ mod tests {
         assert_eq!(count(&connection, "runtime_events"), 1);
     }
 
+<<<<<<< head
     #[cfg(unix)]
     #[test]
     fn mac_handoff_survives_p03_precommit_and_postcommit_restarts() {
@@ -1708,6 +1818,8 @@ mod tests {
         }
     }
 
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     #[test]
     fn chat_write_is_idempotent_and_conflicts_leave_no_rows() {
         let mut connection = database();
@@ -1739,7 +1851,11 @@ mod tests {
         ));
         assert_eq!(count(&connection, "groups"), 1);
         assert_eq!(count(&connection, "graph_edges"), 2);
-        assert_eq!(count(&connection, "sync_entities"), 3);
+        assert_eq!(count(&connection, "sync_entities"), 0);
+        assert_eq!(
+            chat(&connection, id).expect("chat document")["value"]["members"],
+            json!(["lead", "worker"])
+        );
     }
 
     #[test]
@@ -1757,7 +1873,10 @@ mod tests {
         ));
         drop(transaction);
         assert_eq!(count(&connection, "graph_edges"), 1);
-        assert_eq!(count(&connection, "sync_entities"), 2);
+        assert_eq!(
+            chat(&connection, id).expect("chat document")["value"]["members"],
+            json!(["lead"])
+        );
     }
 
     #[test]
@@ -1821,7 +1940,7 @@ mod tests {
                 ))
         ));
         assert_eq!(count(&connection, "messages"), 1);
-        assert_eq!(count(&connection, "sync_entities"), 3);
+        assert_eq!(count(&connection, "sync_entities"), 0);
     }
 
     #[test]
@@ -2109,6 +2228,7 @@ mod tests {
         );
         assert!(!receipt.deliveries.contains_key("user"));
         transaction.commit().expect("message commits");
+<<<<<<< head
         let payload: String = connection
             .query_row(
                 "SELECT payload FROM sync_entities WHERE collection='chat' AND id=?1",
@@ -2118,6 +2238,9 @@ mod tests {
             .expect("chat projection reads");
         let payload: studio_json::Value =
             studio_json::from_str(&payload).expect("projection parses");
+=======
+        let payload = chat(&connection, room).expect("chat document");
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         assert_eq!(
             payload["value"]["tail"]
                 .as_str()
@@ -2168,11 +2291,11 @@ mod tests {
     }
 
     #[test]
-    fn late_chat_projection_failure_rolls_back_group_edges_and_sync_rows() {
+    fn late_chat_mark_failure_rolls_back_group_edges_and_marks() {
         let mut connection = database();
         connection.execute_batch(
-            "CREATE TRIGGER fail_chat_projection BEFORE INSERT ON sync_entities
-             WHEN NEW.collection='chat' BEGIN SELECT RAISE(ABORT,'injected chat projection failure'); END;",
+            "CREATE TRIGGER fail_chat_mark BEFORE INSERT ON durable_rows
+             WHEN NEW.tbl='chat_views' BEGIN SELECT RAISE(ABORT,'injected chat mark failure'); END;",
         ).expect("failure trigger creates");
         let transaction = connection.transaction().expect("transaction starts");
         let result = create_chat(
@@ -2185,45 +2308,48 @@ mod tests {
         drop(transaction);
         assert_eq!(count(&connection, "groups"), 0);
         assert_eq!(count(&connection, "graph_edges"), 0);
-        assert_eq!(count(&connection, "sync_entities"), 0);
+        assert_eq!(count(&connection, "durable_rows"), 0);
         assert_eq!(count(&connection, "sync_documents"), 0);
     }
 
+    /// The `chat` document of a chat, as a reader builds it.
+    fn chat(connection: &Connection, id: &str) -> Option<studio_json::Value> {
+        crate::entity_scope::direct_document(connection, "chat", id)
+            .expect("chat reads")
+            .and_then(|row| row.payload)
+            .map(|payload| studio_json::from_str(&payload).expect("chat JSON"))
+    }
+
     #[test]
-    fn connection_changes_publish_only_edge_projection() {
+    fn connection_changes_refresh_the_chat_members() {
         let mut connection = database();
         let room = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
         let transaction = connection.transaction().expect("transaction starts");
         create_chat(&transaction, room, "Team", &["lead".to_owned()]).expect("chat creates");
         transaction.commit().expect("chat commits");
-        let chat_sequence: i64 = connection
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat sequence reads");
+        let sequence = |connection: &Connection| {
+            crate::entity_scope::direct_document(connection, "chat", room)
+                .expect("chat reads")
+                .expect("chat document")
+                .sequence
+        };
+        let created = sequence(&connection);
         let transaction = connection.transaction().expect("transaction starts");
         connect_chat(&transaction, "worker", room, true).expect("edge connects");
         transaction.commit().expect("edge commits");
-        let after_connect: i64 = connection
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat sequence reads");
-        assert_eq!(chat_sequence, after_connect);
+        assert!(sequence(&connection) > created);
+        assert_eq!(
+            chat(&connection, room).expect("chat")["value"]["members"],
+            json!(["lead", "worker"])
+        );
+        let connected = sequence(&connection);
         let transaction = connection.transaction().expect("transaction starts");
         connect_chat(&transaction, "worker", room, false).expect("edge disconnects");
         transaction.commit().expect("edge removal commits");
-        let after_disconnect: i64 = connection
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='chat' AND id=?1",
-                [room],
-                |row| row.get(0),
-            )
-            .expect("chat sequence reads");
-        assert_eq!(chat_sequence, after_disconnect);
+        assert!(sequence(&connection) > connected);
+        assert_eq!(
+            chat(&connection, room).expect("chat")["value"]["members"],
+            json!(["lead"])
+        );
     }
 }

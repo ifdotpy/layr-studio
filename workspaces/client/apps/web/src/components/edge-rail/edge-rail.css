@@ -16,6 +16,8 @@
   display: none;
 }
 
+/* Rail buttons are quiet discs: a surface with the hairline ring, a muted
+   icon, and the text color when pressed or when their pane is open. */
 .edge-rail .edge-rail-button {
   position: relative;
   flex: 0 0 var(--edge-rail-target);
@@ -23,9 +25,33 @@
   height: var(--edge-rail-target);
   min-width: var(--edge-rail-target);
   min-height: var(--edge-rail-target);
+  overflow: visible;
+  border: 0;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--raised) 75%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--surface);
+  box-shadow: var(--studio-shadow-sm);
+  color: var(--muted);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+.edge-rail .edge-rail-button:hover,
+.edge-rail .edge-rail-button[aria-expanded="true"] {
+  color: var(--text);
+}
+.edge-rail .edge-rail-button:active:not(:disabled) {
+  background: var(--raised);
+  transform: scale(0.94);
+}
+.edge-rail .edge-rail-button[aria-expanded="true"] {
+  box-shadow:
+    var(--studio-shadow-sm),
+    inset 0 0 0 var(--studio-border-width) var(--line-strong);
+}
+.edge-rail .edge-rail-button:disabled {
+  background: var(--surface);
+  color: color-mix(in srgb, var(--muted) 50%, transparent);
 }
 
 /* Items sit inside the dropdown padding; their corners stay concentric. */
@@ -39,23 +65,36 @@
   );
 }
 
+/* The menu focuses its first item on open. After a tap that focus is not
+   visible, so the item stays plain; a keyboard open still highlights it. */
+.edge-rail-menu
+  .mantine-Menu-item:focus:not(:focus-visible, :hover, [data-menu-active]) {
+  background-color: transparent;
+}
+
 .edge-rail .edge-rail-button:focus-visible {
-  outline: 2px solid var(--mantine-primary-color-filled);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
+/* The attention count: an answer-colored pill on the disc's corner, cut out
+   from the page by a ring so the disc edge never clips it. */
 .edge-rail-badge {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  max-width: 100%;
-  overflow: hidden;
-  border-radius: 4px;
-  background: var(--mantine-color-body);
-  color: var(--mantine-color-text);
-  font-size: 10px;
-  line-height: 1.2;
-  padding: 1px 3px;
+  top: -0.125rem;
+  right: -0.125rem;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.3125rem;
+  border-radius: var(--studio-radius-pill);
+  background: var(--studio-state-answer);
+  box-shadow: 0 0 0 0.125rem var(--studio-page);
+  color: var(--studio-page);
+  font-size: var(--studio-text-meta);
+  font-weight: var(--studio-weight-strong);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.125rem;
+  text-align: center;
   pointer-events: none;
 }
 

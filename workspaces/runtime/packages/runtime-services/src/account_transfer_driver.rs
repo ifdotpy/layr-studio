@@ -33,7 +33,7 @@ pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Op
     Some(summary.id.as_str())
 }
 
-pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
+pub fn load(tx: &rusqlite::Connection, id: &str) -> Result<Snapshot, TransferError> {
     if !Repository::available(tx)? {
         return Err(TransferError::Requires(
             "store-bootstrap/account-transfer-schema",
@@ -781,6 +781,12 @@ fn admit_mutation(
     Ok(())
 }
 
+/// Source calls that the retained worker stores need a durable request identity;
+/// a read with no stored receipt goes without one.
+pub(crate) fn source_call_needs_admission(method: &str) -> bool {
+    matches!(method, "thread/unsubscribe" | "claude/moveExport")
+}
+
 pub(crate) async fn provider_admission(
     store: &RuntimeStore,
     transfer: &str,
@@ -869,7 +875,7 @@ pub(crate) async fn provider_read_intent(
                 .map(|saved| inline_reply(&root, saved))
                 .transpose()?;
             let mut decision = snapshot.typed_provider_read_intent(&agent, &next)?;
-            if method == "thread/unsubscribe" {
+            if source_call_needs_admission(&method) {
                 if member
                     .provider_read_intents
                     .value()
@@ -1060,7 +1066,9 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
     {
         let table = "runtime_tasks";
         let sql = format!(
-            "SELECT EXISTS(SELECT 1 FROM {table} WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('running','starting','approval','pending','unknown'))"
+            // A tool item left open by a turn that already ended belongs to no live work.
+            "SELECT EXISTS(SELECT 1 FROM {table} WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('running','starting','approval','pending','unknown')
+             AND NOT EXISTS(SELECT 1 FROM turns WHERE chat=?1 AND provider_turn=json_extract({table}.record,'$.turnId') AND state IN ('completed','failed','interrupted')))"
         );
         let busy: bool = tx
             .query_row(&sql, [agent], |r| r.get(0))
@@ -1087,7 +1095,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
                 | crate::account_worker::WorkerError::Session(_)
                 | crate::account_worker::WorkerError::Notification(_)
                 | crate::account_worker::WorkerError::PreparationRefused(_)
-                | crate::account_worker::WorkerError::StaleVmActor
+                | crate::account_worker::WorkerError::UnavailableActor
                 | crate::account_worker::WorkerError::PreparationPending(_)
                 | crate::account_worker::WorkerError::PreparationAwaitsAgent(_)
                 | crate::account_worker::WorkerError::CleanupUnconfirmed(_)
@@ -1119,7 +1127,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
 /// are prepared outside the writer transaction from these checked records.
 pub struct TransferPreparation {
     operation: TransferRecord,
-    agent: studio_runtime_store::AgentRecord,
+    agent: Box<studio_runtime_store::AgentRecord>,
 }
 impl TransferPreparation {
     pub fn operation(&self) -> &TransferRecord {
@@ -1195,7 +1203,7 @@ pub async fn execute_member(
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
                 operation: decision.operation.clone(),
-                agent: snapshot.agent(&transaction_agent_id)?.clone(),
+                agent: Box::new(snapshot.agent(&transaction_agent_id)?.clone()),
             };
             persist(tx, decision, now)?;
             Ok::<_, TransferError>(Ok(input))
@@ -1224,9 +1232,10 @@ pub async fn execute_member(
         }
         Err(error) => Err(error),
     };
-    if result.is_err() {
+    if let Err(error) = &result {
         let operation_id = operation.to_owned();
         let failed_agent = agent_id.clone();
+        let reason = crate::account_transfer::public_preparation_reason(error);
         store
             .transaction_with_error(move |tx| {
                 let snapshot = load(tx, &operation_id)?;
@@ -1234,6 +1243,7 @@ pub async fn execute_member(
                     tx,
                     snapshot.typed_preparation_failed(
                         &failed_agent,
+                        &reason,
                         input
                             .operation
                             .members
@@ -1338,6 +1348,36 @@ mod request_tests {
         run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
             .expect("a dead epoch approval cannot hold the chat");
         add_unknown_approval(&store, "live", 1);
+        assert!(
+            run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_running_task_of_a_completed_turn_does_not_block_a_transfer() {
+        let (_root, store) = store_with_agents();
+        let seed = |task: &'static str, turn: &'static str, ended: bool| {
+            run_async(store.transaction(move |tx| {
+                if ended {
+                    tx.execute(
+                        "INSERT INTO turns(id,chat,state,provider_turn) VALUES(?1,'lead','completed',?2)",
+                        rusqlite::params![format!("row-{turn}"), turn],
+                    )?;
+                }
+                tx.execute(
+                    "INSERT INTO runtime_tasks(id,record) VALUES(?1,json_object('id',?1,'agent','lead','status','running','turnId',?2))",
+                    rusqlite::params![task, turn],
+                )?;
+                Ok(())
+            }))
+            .expect("seed task");
+        };
+        // A tool item that was never closed before its turn completed.
+        seed("stale", "turn-done", true);
+        run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+            .expect("a task of a completed turn cannot hold the chat");
+        seed("live", "turn-live", false);
         assert!(
             run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
                 .is_err()
@@ -1737,6 +1777,16 @@ mod request_tests {
             }
         }
         let (_root, store) = store_with_agents();
+        let executor = NoNative;
+        let future = execute_member(&store, &executor, "transfer", "lead", 2.0);
+        let limit: usize = include_str!("../../../clippy.toml")
+            .lines()
+            .find_map(|line| line.strip_prefix("future-size-threshold = "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(std::mem::size_of_val(&future) <= limit);
+        drop(future);
         run_async(store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",[crate::monitor_policy::complete_test_monitor(json!({"id":"watch","agent":"lead","epoch":1,"status":"running","operation":{"agent":"lead","epoch":1,"accountKey":"source","connectionId":"original"}})).to_string()])?;
             Ok(())
@@ -1768,6 +1818,65 @@ mod request_tests {
             before, after,
             "the same blocker changes no revision or timestamp"
         );
+    }
+
+    #[test]
+    fn preparation_refusal_is_visible_and_can_be_cancelled() {
+        struct Refusing(std::sync::atomic::AtomicUsize);
+        impl TransferTransport for Refusing {
+            fn send<'a>(
+                &'a self,
+                _: &'a Ticket,
+                _: &'a crate::account_session_runtime::ConnectionScope,
+                _: &'a str,
+                _: &'a Value,
+            ) -> TransferFuture<'a, Result<TransferDispatch, TransferError>> {
+                Box::pin(async { panic!("no native request should be sent") })
+            }
+        }
+        impl TransferExecutor for Refusing {
+            fn available(&self) -> Result<(), TransferError> {
+                Ok(())
+            }
+            fn prepare<'a>(
+                &'a self,
+                _: &'a TransferPreparation,
+            ) -> TransferFuture<'a, Result<PreparedTransfer, TransferError>> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async {
+                    Err(
+                        crate::account_session_runtime::AccountSessionError::Refused(
+                            "Finish the Claude turn and background tasks before a move",
+                        )
+                        .into(),
+                    )
+                })
+            }
+        }
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4a002";
+        let executor = Refusing(std::sync::atomic::AtomicUsize::new(0));
+        request(&store, id, "lead", "target", "team", "codex", 1.0).unwrap();
+        run_async(execute_member(&store, &executor, id, "lead", 2.0)).unwrap_err();
+        let operation = Repository::get(&store.test_reader().unwrap(), id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation["members"]["lead"]["phase"], "blocked");
+        assert_eq!(
+            operation["members"]["lead"]["error"],
+            "Finish the Claude turn and background tasks before a move"
+        );
+        let retried = run_async(action(&store, id, Action::Retry, 3.0)).unwrap();
+        assert_eq!(retried["members"]["lead"]["phase"], "lazy");
+        run_async(execute_member(&store, &executor, id, "lead", 4.0)).unwrap_err();
+        assert_eq!(executor.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let cancelled = run_async(action(&store, id, Action::Cancel, 5.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let lead = stored(&store, "lead");
+        assert_eq!(lead["accountKey"], "source");
+        assert!(lead.get("accountTransferId").is_none_or(Value::is_null));
+        let lead = AgentRecord::from_value(lead).unwrap();
+        crate::account_transfer::before_start(&lead).expect("cancel releases admission");
     }
 
     #[test]

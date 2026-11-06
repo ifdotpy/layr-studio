@@ -65,7 +65,7 @@ Write everything in this repository in English: code, comments, commit messages,
 pull requests, issues, and documentation.
 
 Product UI copy and visual labels must be platform-neutral. Refer to the device,
-server, project folder, virtual machine, file manager, or secure storage instead
+server, project folder, file manager, or secure storage instead
 of naming an operating system or platform brand. This includes status and error
 messages supplied by the runtime. Preserve capability checks and technical API
 identifiers; explain an unavailable capability without implying platform support.
@@ -94,7 +94,7 @@ and selection owner.
 Commit subjects and pull request titles follow Conventional Commits:
 `type(scope): summary` or `type: summary`. Types: `feat`, `fix`, `perf`, `revert`,
 `docs`, `test`, `refactor`, `build`, `ci`, `chore`, `style`. Optional scopes:
-`runtime`, `client`, `native`, `web`, `desktop`, `providers`, `tooling`, `vm`, `layr`,
+`runtime`, `client`, `native`, `web`, `desktop`, `providers`, `tooling`, `layr`,
 `release`, `deps`.
 Pull requests merge by squash, so the title becomes the commit on main.
 [`conventional-commit.ts`](workspaces/tooling/apps/repository-checks/conventional-commit.ts)

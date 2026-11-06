@@ -69,20 +69,6 @@ instance = await fixture("Performance", false, {
       >);
       return true;
     }
-    if (url.pathname === "/api/linux-vm/settings") {
-      json({
-        settings: {
-          cpus: 4,
-          memoryBytes: 4294967296,
-          systemDiskBytes: 17179869184,
-          dataDiskBytes: 137438953472,
-        },
-        state: "running",
-        allocatedDiskBytes: 1024,
-        error: null,
-      } satisfies components["schemas"]["LinuxVMSettingsResponse"]);
-      return true;
-    }
     if (url.pathname === "/api/desktop") {
       json({
         application: "codex-agents",

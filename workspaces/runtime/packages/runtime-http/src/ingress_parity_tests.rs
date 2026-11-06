@@ -146,31 +146,6 @@ fn opted_in_ingress_matches_schema() {
             "ProjectDeleteRequest",
             json!({"id":"p","request_id":"r","expected_workspace_id":"w","expected_project_seq":1}),
         ),
-        ("ProjectSecretsListRequest", json!({"projectId":"p"})),
-        (
-            "ProjectSecretSetRequest",
-            json!({"projectId":"p","name":"TOKEN","value":"v","requestId":"r"}),
-        ),
-        (
-            "ProjectSecretRemoveRequest",
-            json!({"projectId":"p","name":"TOKEN","requestId":"r"}),
-        ),
-        ("VaultLoginRequest", json!({"profile":"p","requestId":"r"})),
-        ("VaultPullRequest", json!({"projectId":"p","requestId":"r"})),
-        ("VaultSetupFactsRequest", json!({"projectId":"p"})),
-        ("MacSyncConfigRequest", json!({"projectId":"p"})),
-        (
-            "MacSyncResolveRequest",
-            json!({"projectId":"p","path":"file","choice":"vm"}),
-        ),
-        (
-            "VaultSetupRequest",
-            json!({"projectId":"p","requestId":"r","prefix":"p","profile":"p","region":"us-east-1"}),
-        ),
-        (
-            "VaultUnlockRequest",
-            json!({"projectId":"p","words":"word"}),
-        ),
         ("CheckpointCaptureRequest", json!({"agent":"a"})),
         (
             "CheckpointPreviewRequest",
@@ -298,6 +273,7 @@ fn opted_in_ingress_matches_schema() {
         }
         for body in cases {
             let decoded = match name {
+<<<<<<< head
                 "NativeActionRequest" => {
                     studio_json::from_value::<Object<generated::NativeActionRequest>>(body.clone())
                         .is_ok()
@@ -367,6 +343,37 @@ fn opted_in_ingress_matches_schema() {
                 }
                 "ProjectDeleteRequest" => {
                     studio_json::from_value::<Object<generated::ProjectDeleteRequest>>(body.clone())
+=======
+                "IdRequest" => {
+                    studio_json::from_value::<Object<generated::IdRequest>>(body.clone()).is_ok()
+                }
+                "McpReconnectRequest" => {
+                    studio_json::from_value::<Object<generated::McpReconnectRequest>>(body.clone())
+                        .is_ok()
+                }
+                "ProjectDeleteRequest" => {
+                    studio_json::from_value::<Object<generated::ProjectDeleteRequest>>(body.clone())
+                        .is_ok()
+                }
+                "NativeActionRequest" => {
+                    studio_json::from_value::<Object<generated::NativeActionRequest>>(body.clone())
+                        .is_ok()
+                }
+                "ClaudeAddStartRequest" => studio_json::from_value::<
+                    Object<generated::ClaudeAddStartRequest>,
+                >(body.clone())
+                .is_ok(),
+                "ClaudeCancelRequest" => {
+                    studio_json::from_value::<Object<generated::ClaudeCancelRequest>>(body.clone())
+                        .is_ok()
+                }
+                "ClaudeCodeRequest" => {
+                    studio_json::from_value::<Object<generated::ClaudeCodeRequest>>(body.clone())
+                        .is_ok()
+                }
+                "ClaudeStartRequest" => {
+                    studio_json::from_value::<Object<generated::ClaudeStartRequest>>(body.clone())
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                         .is_ok()
                 }
                 "CheckpointCaptureRequest" => studio_json::from_value::<
@@ -446,13 +453,6 @@ async fn remove_ingress_matches_openapi() {
 fn named_patterns_match_openapi() {
     let document = crate::schema::openapi_document();
     for (schema, field, baseline) in [
-        ("ProjectSecretsListRequest", "projectId", "project"),
-        ("ProjectSecretSetRequest", "name", "TOKEN"),
-        ("ProjectSecretSetRequest", "requestId", "request"),
-        ("VaultLoginRequest", "requestId", "request"),
-        ("VaultLoginRequest", "profile", "profile"),
-        ("VaultSetupRequest", "prefix", "prefix"),
-        ("VaultSetupRequest", "region", "us-east-1"),
         ("AccountGroupRequest", "group", "team_1"),
         ("RenameServer", "label", "Server Name"),
         (
@@ -488,6 +488,7 @@ fn named_patterns_match_openapi() {
         for value in values {
             let wire = json!(value);
             let ok = match (schema, field) {
+<<<<<<< head
                 ("ProjectSecretsListRequest", _) => {
                     studio_json::from_value::<ProjectId>(wire.clone()).is_ok()
                 }
@@ -508,6 +509,8 @@ fn named_patterns_match_openapi() {
                 >(wire.clone())
                 .is_ok(),
                 ("VaultSetupRequest", _) => studio_json::from_value::<Region>(wire.clone()).is_ok(),
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
                 ("AccountGroupRequest", _) => studio_json::from_value::<
                     Option<studio_runtime_schema::project_ingress::AccountGroup>,
                 >(wire.clone())

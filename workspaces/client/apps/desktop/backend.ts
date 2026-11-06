@@ -203,7 +203,8 @@ async function identity(
             | undefined
         )?.code === "ECONNREFUSED";
       if (refused && !uncertain) return null;
-      if (!signal.aborted && !refused)
+      // A transport error (fetch's TypeError) can be a reset while the backend starts; retry it.
+      if (!signal.aborted && !(error instanceof TypeError))
         throw new Error(
           `Cannot verify the local backend: ${(error as NodeJS.ErrnoException).message}`,
         );

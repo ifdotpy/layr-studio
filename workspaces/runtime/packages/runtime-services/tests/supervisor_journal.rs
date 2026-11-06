@@ -37,9 +37,10 @@ fn template_mode(seed: Seed) -> tempfile::TempDir {
         Seed::NativeIds => "native-id-template",
         Seed::Requests => "request-cwd",
     };
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/supervisor/frozen")
-        .join(directory);
+    let source =
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("tests/supervisor/frozen")
+            .join(directory);
     for entry in fs::read_dir(source).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_str().unwrap();

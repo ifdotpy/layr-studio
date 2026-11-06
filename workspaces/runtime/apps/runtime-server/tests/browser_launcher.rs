@@ -1,6 +1,5 @@
-//! The launcher of agent sign-in links runs this binary (docs/vm-browser-bridge.md,
-//! "Native chats"): `xdg-open URL` in the host bridge's PATH folder reaches the bridge with
-//! no Python, with the exit codes and messages of `studio_browser.py`.
+//! The sign-in launcher runs this binary: `xdg-open URL` in the host bridge PATH
+//! reaches the bridge with the launcher's exit codes and messages.
 #![cfg(unix)]
 
 use std::process::Command;
@@ -56,7 +55,10 @@ async fn xdg_open_queues_a_link_through_the_runtime_binary() {
     let folder = state.path().join("browser-host");
     let launcher = write_launcher(
         &folder,
-        std::path::Path::new(env!("CARGO_BIN_EXE_studio-runtime-server")),
+        std::path::Path::new(
+            &std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+                .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+        ),
     )
     .expect("test step");
     assert_eq!(launcher, folder.join("studio-browser"));

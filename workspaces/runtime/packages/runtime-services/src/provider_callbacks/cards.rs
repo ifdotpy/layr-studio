@@ -136,7 +136,6 @@ pub(super) fn publish(tx: &Transaction<'_>, row: &Approval) -> Result<(), Callba
         });
         crate::tool_requests::reconcile_effect(tx, ExecutionEffectKind::Requests, &effect, &actor)?;
     }
-    crate::approval_sync::publish(tx, row)?;
     Ok(())
 }
 
@@ -991,7 +990,7 @@ fn card_context(tx: &Transaction<'_>, card: &Approval) -> Result<CallbackContext
         agent: card.agent.as_str().to_owned(),
         account: rpc.account.clone(),
         stream_id: if actor["executionMode"] == "vm" {
-            crate::account_worker::vm_journal_scope(&rpc.account, card.agent.as_str())
+            crate::account_worker::historical_actor_journal_scope(&rpc.account, card.agent.as_str())
         } else {
             rpc.account.clone()
         },

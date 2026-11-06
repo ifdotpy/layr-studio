@@ -1,10 +1,13 @@
 //! Read-only workspace maintenance facts for one authorized team.
 
 use crate::agent_management::{ManagementError, ManagementSnapshot, Records};
+<<<<<<< head
 #[cfg(unix)]
 use crate::linux_vm_guest::GuestRpc;
 #[cfg(unix)]
 use std::time::Duration;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -17,7 +20,6 @@ use studio_runtime_store::{AgentId, AgentRepository, RuntimeStore};
 trait Sources: Send + Sync {
     fn workspaces(&self) -> Result<Vec<Value>, String>;
     fn base(&self, repo: &Path) -> Result<Value, String>;
-    fn linux_vm(&self, state_dir: &Path) -> Value;
 }
 
 struct ProductionSources;
@@ -29,40 +31,6 @@ impl Sources for ProductionSources {
 
     fn base(&self, _repo: &Path) -> Result<Value, String> {
         Err(crate::legacy_image_workspace::FINISHED_MESSAGE.to_owned())
-    }
-
-    #[cfg(unix)]
-    fn linux_vm(&self, state_dir: &Path) -> Value {
-        let vm_dir = crate::vault::linux_vm_state_dir(state_dir);
-        let control = crate::linux_vm_guest::UnixVmControlRpc::new(&vm_dir);
-        let settings = match crate::linux_vm_settings::get_settings(&vm_dir) {
-            Ok(settings) => settings,
-            Err(error) => return json!({"state":"unavailable","error":error.to_string()}),
-        };
-        let host = match crate::linux_vm_settings::status(&vm_dir, &control) {
-            Ok(status) => status,
-            Err(error) => return json!({"state":"unavailable","error":error.to_string()}),
-        };
-        let mut result = json!({
-            "state":host["state"], "settings":settings,
-            "allocatedDiskBytes":host["allocatedDiskBytes"], "memoryLimitBytes":settings.memory_bytes,
-        });
-        if host["state"] == "running" {
-            let guest = crate::linux_vm_guest::UnixGuestRpc::new(&vm_dir);
-            match guest.call("health", &json!({}), None, Duration::from_secs(15)) {
-                Ok(health) => {
-                    result["disk"] = health.get("disk").cloned().unwrap_or(Value::Null);
-                    result["memory"] = health.get("memory").cloned().unwrap_or(Value::Null);
-                }
-                Err(_) => result["health"] = json!({"state":"unavailable"}),
-            }
-        }
-        result
-    }
-
-    #[cfg(not(unix))]
-    fn linux_vm(&self, _: &Path) -> Value {
-        json!({"state":"unavailable","error":"The VM control service requires Unix"})
     }
 }
 
@@ -153,12 +121,6 @@ fn collect(lead: &Value, team: &[Value], state_dir: &Path, sources: &dyn Sources
             })
             .collect::<Vec<_>>()
     );
-    if team
-        .iter()
-        .any(|agent| agent["environment"] == "linux" || agent["executionMode"] == "vm")
-    {
-        result["linuxVM"] = sources.linux_vm(state_dir);
-    }
     result
 }
 
@@ -197,21 +159,15 @@ mod tests {
             }
             Ok(json!({"state":"ready","version":"base-version","error":null}))
         }
-
-        fn linux_vm(&self, _: &Path) -> Value {
-            self.calls.lock().expect("calls").push("linuxVM".into());
-            json!({"state":"stopped","allocatedDiskBytes":42,"memoryLimitBytes":64})
-        }
     }
 
     #[test]
-    fn maintenance_report_filters_image_rows_and_reports_vm_resources_without_changes() {
+    fn maintenance_report_filters_image_rows_without_changes() {
         let root = tempfile::tempdir().expect("state directory");
         let lead = json!({"id":"lead","imageWorkspaceBaseRepo":"/base"});
         let team = vec![
             json!({"id":"archived","deletedAt":1,"imageWorkspaceReady":false,"imageWorkspaceRepo":"/repo"}),
             json!({"id":"active","imageWorkspaceReady":true,"imageWorkspaceRepo":"/repo"}),
-            json!({"id":"vm","executionMode":"vm","imageWorkspaceRepo":"/vm-repo"}),
         ];
         let before = team.clone();
         let sources = FakeSources::default();
@@ -221,11 +177,10 @@ mod tests {
             json!([{"id":"archived","state":"archived","path":"/owned","reason":"archived or stale"}])
         );
         assert_eq!(report["bases"].as_array().expect("bases").len(), 2);
-        assert_eq!(report["linuxVM"]["allocatedDiskBytes"], 42);
         assert_eq!(team, before);
         assert_eq!(
             *sources.calls.lock().expect("calls"),
-            vec!["workspaces", "/base", "/repo", "linuxVM"]
+            vec!["workspaces", "/base", "/repo"]
         );
     }
 

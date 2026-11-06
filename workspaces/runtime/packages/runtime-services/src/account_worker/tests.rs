@@ -45,9 +45,6 @@ mod transport_reattach;
 mod unclean_history;
 mod unknown_thread_retry;
 mod unsent_start;
-mod vm_attachments;
-mod vm_notifications;
-mod vm_reattach;
 use super::*;
 use crate::event_write::{AnnotationWrite, annotate};
 use std::{
@@ -114,11 +111,9 @@ pub(super) struct Faults {
     pub(super) hold_restart_recovery: std::sync::atomic::AtomicBool,
     pub(super) restart_recovery_held: tokio::sync::Notify,
     pub(super) release_restart_recovery: tokio::sync::Notify,
-    pub(super) vm_readiness_waiting: tokio::sync::Notify,
     pub(super) shutdown_callbacks_draining: tokio::sync::Notify,
     pub(super) shutdown_phase: std::sync::Mutex<&'static str>,
     pub(super) shutdown_phase_changed: tokio::sync::Notify,
-    pub(super) callback_phase: std::sync::Mutex<&'static str>,
     /// A test holding the write side blocks every account-worker store
     /// operation at its start, before any SQL is submitted.
     pub(super) operation_gate: tokio::sync::RwLock<()>,
@@ -161,14 +156,6 @@ impl Faults {
 
     pub(super) fn current_shutdown_phase(&self) -> &'static str {
         *self.shutdown_phase.lock().unwrap()
-    }
-
-    pub(super) fn mark_callback_phase(&self, phase: &'static str) {
-        *self.callback_phase.lock().unwrap() = phase;
-    }
-
-    pub(super) fn current_callback_phase(&self) -> &'static str {
-        *self.callback_phase.lock().unwrap()
     }
 
     pub(super) async fn pause(&self, index: usize) {
@@ -825,6 +812,46 @@ struct State {
     retained: bool,
 }
 
+#[tokio::test]
+async fn disk_wait_keeps_input_queued_and_starts_it_once_space_returns() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let mut state = State::new().await;
+    let free = Arc::new(AtomicU64::new(0));
+    let sample = Arc::clone(&free);
+    state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
+        state.root.clone(),
+        Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
+    )));
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    let waiting = state
+        .wait_record(|record| record["startWait"]["reason"] == "disk")
+        .await;
+    assert_eq!(waiting["status"], "queued");
+    assert_eq!(waiting["inFlight"], false);
+    assert!(waiting["error"].is_null(), "{waiting}");
+    assert_eq!(state.event_status("input").await, "pending");
+    assert!(peer.writes.try_recv().is_err());
+
+    free.store(
+        crate::disk_space::WORKER_STORAGE_MIN_FREE_BYTES * 4,
+        Ordering::SeqCst,
+    );
+    state.wake(&worker).await;
+    state
+        .wait_record(|record| record["startWait"].is_null())
+        .await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(60), peer.writes.recv())
+            .await
+            .expect("the input starts once space returns")
+            .is_some()
+    );
+    worker.shutdown().await.unwrap();
+}
+
 /// Native protocol fixtures opt into idle inventory only in its dedicated tests.
 async fn test_bridge(store: Arc<RuntimeStore>) -> StoreBridge {
     store
@@ -1248,11 +1275,9 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
                     "SELECT hold_status='invalid' AND hold_incident IS NOT NULL FROM runtime_agents WHERE id=?1",
                     [&bad_id], |row| row.get(0),
                 )?;
-                let projected: String = db.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1",
-                    [&bad_id],
-                    |row| row.get(0),
-                )?;
+                let projected = crate::entity_scope::direct_document(&db, "agent", &bad_id)?
+                    .and_then(|row| row.payload)
+                    .expect("held agent projection");
                 Ok((raw, diagnostic, json_extract_safe, projected))
             }
         })
@@ -1287,6 +1312,28 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
     assert!(message.contains("value type missing"), "{message}");
     assert!(message.contains("length not applicable"), "{message}");
     assert_eq!(held["rootId"], 23);
+    let rejected_id = bad_id.clone();
+    state.bridge.run(move |store| async move {
+        store.transaction_with(move |tx| {
+            let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+            let result = crate::coordination::post_message_with_admission(
+                tx,
+                crate::coordination::PostManagedMessage {
+                    room: &rejected_id, id: &id, text: "must not send",
+                    delivery: studio_runtime_schema::delivery::DeliveryMoment::CurrentTurn,
+                    assets: &[],
+                },
+                &crate::message_admission::PreparedAdmission::default(),
+            );
+            assert!(result.is_err());
+            let held: bool = tx.query_row("SELECT hold_status='invalid' FROM runtime_agents WHERE id=?1", [&rejected_id], |row| row.get(0))?;
+            assert!(held);
+            let sent: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND text='must not send')", [&rejected_id], |row| row.get(0))?;
+            assert!(!sent);
+            Ok::<_, StoreError>(())
+        }).await?;
+        Ok(())
+    }).await.unwrap();
     assert!(
         peer.writes.try_recv().is_err(),
         "invalid agent has no provider effect"
@@ -3700,7 +3747,7 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
     let mut worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
-    let delta = peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"base","delta":"a".repeat(64 * 1024)}})).await;
+    let delta = peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"base","delta":studio_runtime_store::text_blobs::incompressible_text(64 * 1024)}})).await;
     peer.acknowledged(delta).await;
     let full_size = state
         .bridge
@@ -3740,7 +3787,9 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
         .expect("persisted stream base");
     assert_eq!(
         preserved,
-        vec![json!("a".repeat(64 * 1024))],
+        vec![json!(
+            studio_runtime_store::text_blobs::incompressible_text(64 * 1024)
+        )],
         "the current stream owns the exact base before later deltas"
     );
     let delta = peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"base","delta":"tail"}})).await;
@@ -3763,7 +3812,13 @@ async fn scenario_stream_base_survives_replaced_visible_item() {
         })
         .await
         .unwrap();
-    assert_eq!(text, format!("{}tail", "a".repeat(64 * 1024)));
+    assert_eq!(
+        text,
+        format!(
+            "{}tail",
+            studio_runtime_store::text_blobs::incompressible_text(64 * 1024)
+        )
+    );
     assert_eq!(bases, 0);
     worker.shutdown().await.unwrap();
 }
@@ -4124,7 +4179,7 @@ async fn stream_base_and_metadata_rollback_together() {
     peer.phase("starting original turn");
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
-    let delta=peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"atomic","delta":"x".repeat(store::STREAM_FLUSH_BYTES)}})).await;
+    let delta=peer.frame(json!({"method":"item/agentMessage/delta","params":{"threadId":"fake-thread-0","turnId":"turn","itemId":"atomic","delta":studio_runtime_store::text_blobs::incompressible_text(store::STREAM_FLUSH_BYTES)}})).await;
     peer.acknowledged(delta).await;
     peer.phase("forcing stream transaction rollback");
     state.bridge.run(move |store| async move { store.transaction_with(move |tx| {
@@ -4151,7 +4206,12 @@ async fn stream_base_and_metadata_rollback_together() {
                             |row| row.get::<_, studio_runtime_store::stored_text::StoredText>(0),
                         )?
                         .into_string();
-                    assert_eq!(body, "x".repeat(store::STREAM_FLUSH_BYTES));
+                    assert_eq!(
+                        body,
+                        studio_runtime_store::text_blobs::incompressible_text(
+                            store::STREAM_FLUSH_BYTES
+                        )
+                    );
                     assert_eq!(store::checkpoint(tx, "default", 1)?, delta);
                     tx.execute_batch("DROP TRIGGER fail_stream_metadata")?;
                     Ok(())
@@ -4360,7 +4420,7 @@ async fn child_result_materializes_before_submission() {
     scenario_child_result_materializes_before_submission().await;
 }
 
-async fn scenario_workspace_refusal_retains_queue() {
+async fn scenario_workspace_pending_reuses_reserved_attempt() {
     let state = State::new().await;
     let agent = state.agent.clone();
     state
@@ -4368,10 +4428,14 @@ async fn scenario_workspace_refusal_retains_queue() {
         .run(move |store| async move {
             store
                 .transaction(move |tx| {
-                    let mut record =
+                    let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                    record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    AgentRepository::put(tx, &record)
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
                 })
                 .await?;
             Ok(())
@@ -4382,620 +4446,71 @@ async fn scenario_workspace_refusal_retains_queue() {
     let mut worker = peer.worker(state.bridge.clone()).await;
     state.wake(&worker).await;
     worker_barrier(&worker).await;
-    let record = state.record().await;
-    assert_ne!(record["status"], "failed");
-    assert!(record["error"].is_null());
+    if injected() {
+        return;
+    }
+    let pending = state.record().await;
+    assert_eq!(pending["status"], "starting");
+    assert_eq!(pending["startWait"]["reason"], "dependency");
+    assert_eq!(
+        pending["startAttempt"]["prepareError"],
+        "workspace-readiness/pending"
+    );
     assert_eq!(state.event_status("input").await, "reserved");
     assert!(peer.writes.try_recv().is_err());
-    worker.shutdown().await.unwrap();
-}
-#[tokio::test]
-async fn workspace_refusal_retains_queue() {
-    scenario_workspace_refusal_retains_queue().await;
-}
-
-struct TurnStartGuest {
-    calls: std::sync::Mutex<Vec<String>>,
-    project_id: std::sync::Mutex<Option<String>>,
-}
-
-#[derive(Debug, Default)]
-struct VmTurnGuestState {
-    calls: Vec<String>,
-    writes: Vec<Value>,
-    turn_start_handles: Vec<String>,
-    acknowledged_by_handle: Vec<(String, u64)>,
-    events: std::collections::VecDeque<Value>,
-    sequence: u64,
-    acknowledged: u64,
-    starts: usize,
-    uncertain_start_once: bool,
-    unknown_write_once: bool,
-    codex_refresh_on_start: bool,
-    hold_primary_after_turn_start: bool,
-    hold_thread_resume_reply: bool,
-    held_thread_resume: Option<(String, Value)>,
-    exit_primary_on_next: bool,
-    hold_primary_poll: bool,
-    primary_poll_ready: bool,
-    stops: Vec<Value>,
-    credential_documents: Vec<Value>,
-}
-
-#[derive(Default)]
-struct VmTurnGuest {
-    state: std::sync::Mutex<VmTurnGuestState>,
-    changed: tokio::sync::Notify,
-}
-
-impl VmTurnGuest {
-    fn thread_id(handle: &Value) -> &'static str {
-        if handle
-            .as_str()
-            .is_some_and(|handle| handle.ends_with("-sibling"))
-        {
-            "fake-thread-sibling"
-        } else {
-            "fake-thread-0"
-        }
-    }
-    fn enqueue_frame(state: &mut VmTurnGuestState, owner: &str, payload: Value) {
-        state.sequence += 1;
-        state.events.push_back(json!({
-            "_test_owner": owner,
-            "sequence": state.sequence,
-            "generation": 31,
-            "kind": "stdout",
-            "payload": payload.to_string(),
-        }));
-    }
-
-    fn release_thread_resume(&self) {
-        let mut state = self.state.lock().unwrap();
-        let (handle, id) = state
-            .held_thread_resume
-            .take()
-            .expect("thread/resume reply is held");
-        state.hold_thread_resume_reply = false;
-        Self::enqueue_frame(
-            &mut state,
-            &handle,
-            json!({"id":id,"result":{"thread":{"id":"fake-thread-0"}}}),
-        );
-        self.changed.notify_one();
-    }
-}
-
-impl crate::linux_vm_guest::GuestRpc for VmTurnGuest {
-    fn stream(
-        &self,
-        method: &str,
-        params: &Value,
-        _request_id: Option<&str>,
-        _timeout: std::time::Duration,
-        _on_frame: &mut dyn FnMut(
-            Value,
-        )
-            -> std::result::Result<(), crate::linux_vm_guest::GuestError>,
-    ) -> std::result::Result<Value, crate::linux_vm_guest::GuestError> {
-        let mut state = self.state.lock().unwrap();
-        state.calls.push(method.to_owned());
-        match method {
-            "project.ensure" => Ok(json!({"projectId":params["projectId"],"stateId":"ready"})),
-            "line.bind" => Ok(json!({
-                "cwd":"/home/studio/project","projectId":params["projectId"],
-                "line":"main","owner":"guest-owner","home":"/home/studio",
-                "stateId":"ready"
-            })),
-            "health" => Ok(json!({"ok":true})),
-            "agent.context" => Ok(json!({"projectId":params["projectId"],"line":"main"})),
-            "provider.start" => {
-                state.starts += 1;
-                self.changed.notify_one();
-                state.events.clear();
-                state.sequence = 0;
-                state.acknowledged = 0;
-                if state.codex_refresh_on_start {
-                    state.codex_refresh_on_start = false;
-                    Self::enqueue_frame(
-                        &mut state,
-                        params["handle"].as_str().unwrap_or_default(),
-                        json!({
-                            "id":"vm-auth-refresh",
-                            "method":"account/chatgptAuthTokens/refresh",
-                            "params":{"previousAccountId":"fixture-account"}
-                        }),
-                    );
-                }
-                if state.uncertain_start_once {
-                    state.uncertain_start_once = false;
-                    return Err(crate::linux_vm_guest::GuestError::Transport {
-                        message: "simulated lost provider start response".into(),
-                        uncertain: true,
-                    });
-                }
-                Ok(json!({
-                    "handle":params["handle"],"generation":31,"sequence":0,
-                    "acknowledged":0,"pid":42,"resumed":false,
-                    "initResult":{"capabilities":{}},"state":"running"
-                }))
-            }
-            "credentials.put" => {
-                state.credential_documents.push(params["files"][0].clone());
-                self.changed.notify_one();
-                Ok(json!({"files":[{"path":params["files"][0]["path"],"bytes":64}]}))
-            }
-            "provider.rpc" => match params["action"].as_str().unwrap_or("") {
-                "next" => {
-                    let sibling_handle = params["handle"]
-                        .as_str()
-                        .is_some_and(|handle| handle.ends_with("-sibling"));
-                    if state.hold_primary_poll && !sibling_handle {
-                        state.primary_poll_ready = true;
-                        self.changed.notify_one();
-                        return Ok(json!({"event":null}));
-                    }
-                    if state.exit_primary_on_next && !sibling_handle {
-                        state.exit_primary_on_next = false;
-                        self.changed.notify_one();
-                        // The guest no longer has the handle. An unproven transport error
-                        // is read again, so the exit uses this proven guest answer.
-                        return Err(crate::linux_vm_guest::GuestError::Rejected {
-                            code: Some("not_found".into()),
-                            detail: Some("The native provider handle does not exist".into()),
-                            uncertain: false,
-                        });
-                    }
-                    let owner_matches = state.events.front().is_some_and(|event| {
-                        event["_test_owner"]
-                            .as_str()
-                            .is_some_and(|owner| owner.ends_with("-sibling") == sibling_handle)
-                    });
-                    if owner_matches {
-                        let mut event = state.events.pop_front().expect("front event exists");
-                        event
-                            .as_object_mut()
-                            .expect("fake event object")
-                            .remove("_test_owner");
-                        Ok(json!({"event":event}))
-                    } else {
-                        Ok(json!({"event":null}))
-                    }
-                }
-                "write" => {
-                    let message = params["message"].clone();
-                    state.writes.push(message.clone());
-                    if state.unknown_write_once {
-                        state.unknown_write_once = false;
-                        return Err(crate::linux_vm_guest::GuestError::Rejected {
-                            code: Some("internal".into()),
-                            detail: None,
-                            uncertain: false,
-                        });
-                    }
-                    if message["method"] == "thread/resume" && state.hold_thread_resume_reply {
-                        state.held_thread_resume = Some((
-                            params["handle"].as_str().unwrap_or_default().to_owned(),
-                            message["id"].clone(),
-                        ));
-                        self.changed.notify_one();
-                    } else if message["method"] == "thread/start"
-                        || message["method"] == "thread/resume"
-                    {
-                        Self::enqueue_frame(
-                            &mut state,
-                            params["handle"].as_str().unwrap_or_default(),
-                            json!({"id":message["id"],"result":{"thread":{"id":Self::thread_id(&params["handle"])}}}),
-                        );
-                    } else if message["method"] == "turn/start" {
-                        let primary = params["handle"]
-                            .as_str()
-                            .is_some_and(|handle| !handle.ends_with("-sibling"));
-                        state
-                            .turn_start_handles
-                            .push(params["handle"].as_str().unwrap_or_default().to_owned());
-                        Self::enqueue_frame(
-                            &mut state,
-                            params["handle"].as_str().unwrap_or_default(),
-                            json!({"id":message["id"],"result":{"turn":{"id":"vm-turn"}}}),
-                        );
-                        if primary && state.hold_primary_after_turn_start {
-                            state.hold_primary_poll = true;
-                        }
-                        Self::enqueue_frame(
-                            &mut state,
-                            params["handle"].as_str().unwrap_or_default(),
-                            json!({"method":"turn/completed","params":{"threadId":Self::thread_id(&params["handle"]),"turn":{"id":"vm-turn","status":"completed"}}}),
-                        );
-                    } else if message["method"] == "thread/read" {
-                        Self::enqueue_frame(
-                            &mut state,
-                            params["handle"].as_str().unwrap_or_default(),
-                            json!({"id":message["id"],"result":{"thread":{"id":"fake-thread-0","turns":[]}}}),
-                        );
-                    }
-                    self.changed.notify_one();
-                    Ok(
-                        json!({"accepted":true,"remoteId":message.get("id").cloned().unwrap_or(Value::Null)}),
-                    )
-                }
-                "ack" => {
-                    state.acknowledged = params["sequence"].as_u64().unwrap_or(0);
-                    let acknowledged = state.acknowledged;
-                    state.acknowledged_by_handle.push((
-                        params["handle"].as_str().unwrap_or_default().to_owned(),
-                        acknowledged,
-                    ));
-                    self.changed.notify_one();
-                    Ok(json!({"acknowledged":state.acknowledged}))
-                }
-                "operationStatus" => Ok(json!({"accepted":false})),
-                "info" => Ok(json!({
-                    "handle":params["handle"],"generation":31,"sequence":state.sequence,
-                    "acknowledged":state.acknowledged,"pid":42,"resumed":true,
-                    "initResult":{"capabilities":{}},"state":"running"
-                })),
-                _ => Err(crate::linux_vm_guest::GuestError::InvalidRequest),
-            },
-            "provider.stop" => {
-                state.stops.push(params.clone());
-                Ok(json!({"handle":params["handle"],"state":"exited"}))
-            }
-            _ => Err(crate::linux_vm_guest::GuestError::InvalidRequest),
-        }
-    }
-}
-
-#[derive(Default)]
-struct VmTurnResolver {
-    reconnect_generation: Option<Arc<std::sync::atomic::AtomicU64>>,
-}
-impl preparation::VmProviderLaunchResolver for VmTurnResolver {
-    fn resolve(
-        &self,
-        request: preparation::VmProviderLaunchRequest,
-    ) -> preparation::VmProviderLaunchFuture<'_> {
-        Box::pin(async move {
-            Ok(preparation::VmProviderLaunch {
-                provider: "codex".into(),
-                profile: format!("profile:{}", request.account_key),
-                launch: ProviderLaunchSpec::new(
-                    vec!["codex".into(), "app-server".into()],
-                    BTreeMap::from([("CODEX_HOME".into(), request.guest_home + "/.codex")]),
-                    PathBuf::from(request.cwd),
-                ),
-                bootstrap: None,
-            })
-        })
-    }
-
-    fn refresh_codex(
-        &self,
-        _account_key: String,
-        previous_account_id: String,
-        _actor_id: String,
-        _actor_epoch: i64,
-        _generation: u64,
-        _root_request_id: String,
-        _source: studio_runtime_store::request_results::AdmittedRequest,
-    ) -> preparation::VmProviderAuthFuture<'_> {
-        let reconnect_generation = self.reconnect_generation.clone();
-        Box::pin(async move {
-            if let Some(generation) = reconnect_generation {
-                generation.store(2, std::sync::atomic::Ordering::SeqCst);
-            }
-            Ok(json!({
-                "accessToken":"fake-fresh-access-token",
-                "chatgptAccountId":previous_account_id
-            }))
-        })
-    }
-}
-
-struct FakeVmAccountSession {
-    generation: Arc<std::sync::atomic::AtomicU64>,
-    checks: Arc<std::sync::atomic::AtomicUsize>,
-    checked: Arc<tokio::sync::Notify>,
-    reconnect_on_second_check: bool,
-}
-impl crate::account_session_runtime::AccountSessionPort for FakeVmAccountSession {
-    fn current_scope(&self, account: &str) -> Option<crate::recovery_history::ConnectionScope> {
-        let check = self
-            .checks
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.checked.notify_one();
-        if self.reconnect_on_second_check && check >= 1 {
-            self.generation
-                .store(2, std::sync::atomic::Ordering::SeqCst);
-        }
-        (account == "default").then(|| crate::recovery_history::ConnectionScope {
-            account: account.to_owned(),
-            connection: "vm-test-connection".into(),
-            generation: self.generation.load(std::sync::atomic::Ordering::SeqCst),
-        })
-    }
-}
-
-struct VmClaudeRefreshResolver {
-    store: Arc<RuntimeStore>,
-    guest: Arc<VmTurnGuest>,
-    refreshes: std::sync::atomic::AtomicUsize,
-    refreshed: tokio::sync::Notify,
-    attempted: tokio::sync::Notify,
-    fail_next_refresh: std::sync::atomic::AtomicBool,
-}
-
-impl VmClaudeRefreshResolver {
-    fn credential_path(account_key: &str) -> String {
-        use sha2::Digest as _;
-        let digest = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(account_key.as_bytes()));
-        format!(
-            ".claude/studio-accounts/{}/.credentials.json",
-            &digest[..32]
-        )
-    }
-
-    async fn copy_version(
-        &self,
-        request: &preparation::VmProviderLaunchRequest,
-        version: usize,
-    ) -> Result<(), WorkerError> {
-        let document =
-            format!("{{\"claudeAiOauth\":{{\"accessToken\":\"fake-claude-{version}\"}}}}");
-        crate::linux_vm_provider::copy_guest_credentials(
-            Arc::clone(&self.store),
-            self.guest.clone(),
-            crate::linux_vm_provider::GuestCredentialTarget {
-                agent_id: &request.agent_id,
-                actor_epoch: request.epoch,
-                provider: "claude",
-                account_key: &request.account_key,
-                relative_path: &Self::credential_path(&request.account_key),
-            },
-            document.as_bytes(),
-        )
-        .await
-        .map_err(|_| WorkerError::PreparationPending("test/vm-credentials".into()))?;
-        Ok(())
-    }
-}
-
-impl preparation::VmProviderLaunchResolver for VmClaudeRefreshResolver {
-    fn resolve(
-        &self,
-        request: preparation::VmProviderLaunchRequest,
-    ) -> preparation::VmProviderLaunchFuture<'_> {
-        Box::pin(async move {
-            self.copy_version(&request, 0).await?;
-            let profile = Self::credential_path(&request.account_key)
-                .trim_end_matches("/.credentials.json")
-                .to_owned();
-            Ok(preparation::VmProviderLaunch {
-                provider: "claude".into(),
-                profile: profile.clone(),
-                launch: ProviderLaunchSpec::new(
-                    vec!["claude".into()],
-                    BTreeMap::from([
-                        (
-                            "CLAUDE_CONFIG_DIR".into(),
-                            format!("{}/{profile}", request.guest_home),
-                        ),
-                        ("STUDIO_CLAUDE_BIN".into(), "claude".into()),
-                    ]),
-                    PathBuf::from(request.cwd),
-                ),
-                bootstrap: None,
-            })
-        })
-    }
-
-    fn refresh_claude_credentials(
-        &self,
-        actors: Vec<preparation::VmProviderLaunchRequest>,
-    ) -> preparation::VmProviderRefreshFuture<'_> {
-        Box::pin(async move {
-            self.attempted.notify_one();
-            if self
-                .fail_next_refresh
-                .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                return Err(WorkerError::PreparationPending(
-                    "test/transient-credential-refresh".into(),
-                ));
-            }
-            let version = self
-                .refreshes
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1;
-            for actor in &actors {
-                self.copy_version(actor, version).await?;
-            }
-            self.refreshed.notify_one();
-            Ok(())
-        })
-    }
-}
-
-#[tokio::test]
-async fn vm_actor_turn_uses_guest_session_and_settles_complete_turn() {
-    vm_actor_turn_with_host_mcp(false).await;
-}
-
-#[tokio::test]
-async fn vm_codex_child_turn_does_not_send_host_mcp_overrides_to_guest() {
-    vm_actor_turn_with_host_mcp(true).await;
-}
-
-async fn vm_actor_turn_with_host_mcp(child: bool) {
-    let mut state = State::new().await;
-    // The synthetic guest cwd is not on the host test filesystem.
-    state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
-        state.root.clone(),
-        Arc::new(|_| Some(crate::disk_space::WORKER_STORAGE_MIN_FREE_BYTES)),
-    )));
-    let agent_id = state.agent.clone();
+    let agent = "workspace-owner".to_owned();
     state
         .bridge
         .run(move |store| async move {
             store
                 .transaction(move |tx| {
-                    let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                        .expect("fixture agent");
-                    if child {
-                        let mut parent = record.clone();
-                        parent.id = AgentId::from("vm-parent");
-                        parent.root_id = parent.id.clone();
-                        parent.status = studio_runtime_store::AgentStatus::Completed;
-                        parent.auto_wake = Some(false);
-                        AgentRepository::put(tx, &parent)?;
-                        record.root_id = parent.id.clone();
-                        record.parent_id = Some(parent.id.0);
-                        record.is_lead = Some(false);
-                        record.role = studio_runtime_schema::queue_command::Field::Value(
-                            studio_runtime_schema::creation_intent::AgentRole::Implementer,
-                        );
-                    }
-                    record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.layr_ready = Some(true);
-                    record.cwd = Some("/home/studio/project".into());
-                    record.workspace_mode =
-                        Some(studio_runtime_schema::records::WorkspaceMode::Layr);
-                    record.thread_id = None;
-                    AgentRepository::put(tx, &record)
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.workspace_operation = studio_runtime_schema::queue_command::Field::Missing;
+                    AgentRepository::put(tx, &row)
                 })
                 .await?;
             Ok(())
         })
         .await
         .unwrap();
-
-    let guest = Arc::new(VmTurnGuest::default());
-    let crate::browser::BrowserHomes {
-        root: _host_home,
-        shared,
-        account,
-        ..
-    } = crate::browser::browser_homes();
-    let mut resources = test_resources().unwrap();
-    resources.account_home = account.to_string_lossy().into_owned();
-    resources.shared_home = shared.to_string_lossy().into_owned();
-    resources.guest_rpc = Some(guest.clone());
-    resources.vm_provider_launch = Some(Arc::new(VmTurnResolver::default()));
-    let peer = Peer::new();
-    let mut worker = peer
-        .open_worker_with_resources(state.bridge.clone(), resources)
-        .await;
-    let mut ready = peer.ready.clone();
-    while !*ready.borrow_and_update() {
-        ready.changed().await.unwrap();
-    }
-    state.wake(&worker).await;
-
-    let settled = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let changed = guest.changed.notified();
-            let (has_turn, completed) = {
-                let state = guest.state.lock().unwrap();
-                (
-                    state
-                        .writes
-                        .iter()
-                        .any(|write| write["method"] == "turn/start"),
-                    state.acknowledged >= 3,
-                )
-            };
-            if has_turn && completed {
-                break;
-            }
-            changed.await;
-        }
-    })
-    .await;
-    assert!(
-        settled.is_ok(),
-        "guest turn did not settle: record={}, writes={:?}",
-        state.record().await,
-        guest.state.lock().unwrap().writes
-    );
-
-    {
-        let guest_state = guest.state.lock().unwrap();
-        assert_eq!(guest_state.starts, 1);
-        let thread = guest_state
-            .writes
-            .iter()
-            .find(|write| write["method"] == "thread/start")
-            .expect("actual guest thread start");
-        let config = thread["params"]["config"]
-            .as_object()
-            .expect("native config");
-        assert!(
-            !config
-                .keys()
-                .any(|key| key == "mcp_servers" || key.starts_with("mcp_servers.")),
-            "the isolated guest must not receive host MCP transports: {config:?}"
-        );
-        assert!(
-            guest_state
-                .writes
-                .iter()
-                .any(|write| write["method"] == "thread/start")
-        );
-        assert!(
-            guest_state
-                .writes
-                .iter()
-                .any(|write| write["method"] == "turn/start")
-        );
-        assert_eq!(guest_state.acknowledged, 3);
-    }
+    let turn = state.start(&mut peer, &worker).await;
+    let ready = state.record().await;
+    assert_eq!(ready["startAttempt"]["id"], pending["startAttempt"]["id"]);
+    assert!(ready["startAttempt"].get("prepareError").is_none());
+    assert!(ready.get("startWait").is_none());
+    peer.accepted(&turn).await;
     assert_eq!(state.event_status("input").await, "delivered");
     worker.shutdown().await.unwrap();
-    let guest_state = guest.state.lock().unwrap();
-    assert!(
-        guest_state.stops.is_empty(),
-        "worker cancellation detaches the transport"
-    );
+}
+#[tokio::test]
+async fn workspace_pending_reuses_reserved_attempt() {
+    scenario_workspace_pending_reuses_reserved_attempt().await;
 }
 
 #[tokio::test]
-async fn vm_session_identity_refusal_holds_one_actor_and_keeps_sibling_usable() {
+async fn expired_workspace_preparation_fails_without_replaying_input() {
     let state = State::new().await;
-    let primary_id = state.agent.clone();
-    let sibling_id = format!("{}-sibling", state.agent);
-    let sibling = sibling_id.clone();
+    let agent = state.agent.clone();
     state
         .bridge
         .run(move |store| async move {
             store
                 .transaction(move |tx| {
-                    let mut primary =
-                        AgentRepository::get(tx, &AgentId::from(primary_id.as_str()))?
-                            .expect("fixture agent");
-                    primary.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    primary.layr_ready = Some(true);
-                    primary.cwd = Some("/home/studio/project".into());
-                    primary.workspace_mode =
-                        Some(studio_runtime_schema::records::WorkspaceMode::Layr);
-                    primary.thread_id = None;
-                    AgentRepository::put(tx, &primary)?;
-
-                    let mut sibling_record = primary;
-                    sibling_record.id = AgentId::from(sibling.as_str());
-                    sibling_record.root_id = sibling_record.id.clone();
-                    sibling_record.status = studio_runtime_store::AgentStatus::Queued;
-                    sibling_record.thread_id = None;
-                    sibling_record.auto_wake = Some(true);
-                    sibling_record.in_flight = Some(false);
-                    sibling_record.error = studio_runtime_schema::queue_command::Field::Null;
-                    sibling_record.start_attempt.take();
-                    sibling_record.extra.remove("preparationWake");
-                    AgentRepository::put(tx, &sibling_record)
+                    let mut row =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    row.id = AgentId::from("workspace-owner");
+                    row.status = studio_runtime_store::AgentStatus::Waiting;
+                    row.auto_wake = Some(false);
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
+                    AgentRepository::put(tx, &row)
                 })
                 .await?;
             Ok(())
         })
         .await
+<<<<<<< head
         .expect("create a second durable VM actor");
 
     let guest = Arc::new(VmTurnGuest::default());
@@ -6547,6 +6062,8 @@ async fn expired_workspace_preparation_fails_without_replaying_input() {
             Ok(())
         })
         .await
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         .unwrap();
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -6684,7 +6201,7 @@ async fn nonresumable_preparation_expires_after_an_early_wake() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.start_attempt.as_mut().unwrap().prepare_error =
-                        Some("workspace-readiness/vm-not-ready".into());
+                        Some("workspace-readiness/not-resumable".into());
                     AgentRepository::put(tx, &row)
                 })
                 .await?;
@@ -6746,7 +6263,7 @@ async fn stale_wake_does_not_cancel_newer_preparation_deadline() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.start_attempt.as_mut().unwrap().prepare_error =
-                        Some("workspace-readiness/vm-not-ready".into());
+                        Some("workspace-readiness/not-resumable".into());
                     AgentRepository::put(tx, &row)
                 })
                 .await?;
@@ -6816,7 +6333,7 @@ async fn newer_wake_removes_older_preparation_wait() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.start_attempt.as_mut().unwrap().prepare_error =
-                        Some("workspace-readiness/vm-not-ready".into());
+                        Some("workspace-readiness/not-resumable".into());
                     AgentRepository::put(tx, &row)
                 })
                 .await?;
@@ -7305,36 +6822,4 @@ async fn thread_start_lost_before_turn_submission_remains_held() {
         "Unknown is never resent automatically"
     );
     replacement.shutdown().await.unwrap();
-}
-
-#[test]
-fn vm_refresh_timer_tracks_first_and_last_matching_session_only() {
-    let now = tokio::time::Instant::now();
-    let cadence_deadline = now + super::VM_CREDENTIAL_REFRESH_INTERVAL;
-
-    assert_eq!(
-        vm_refresh_deadline_after_session_change(false, false, true, None, now),
-        None,
-        "an empty account never starts a periodic VM timer"
-    );
-    assert_eq!(
-        vm_refresh_deadline_after_session_change(false, true, true, None, now),
-        Some(now),
-        "the first matching VM preserves the immediate refresh"
-    );
-    assert_eq!(
-        vm_refresh_deadline_after_session_change(true, true, true, Some(cadence_deadline), now),
-        Some(cadence_deadline),
-        "adding or retiring a non-last VM preserves the cadence"
-    );
-    assert_eq!(
-        vm_refresh_deadline_after_session_change(true, false, true, Some(cadence_deadline), now),
-        None,
-        "retiring the last matching VM disarms the timer"
-    );
-    assert_eq!(
-        vm_refresh_deadline_after_session_change(false, true, false, None, now),
-        None,
-        "a matching VM without a credential resolver has no timer"
-    );
 }

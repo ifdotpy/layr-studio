@@ -84,6 +84,12 @@ impl AccountSessionPort for InterruptBroker {
     }
 }
 
+/// The command that deletes `chat` and its descendants.
+fn delete_command(chat: &str) -> Value {
+    let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+    json!({"id":id.as_str(),"client":"fixture","number":1,"kind":"delete","target":chat,"body":{}})
+}
+
 async fn call(app: &axum::Router, path: &str, body: Value) -> (u16, Value) {
     let request = Request::builder()
         .method("POST")
@@ -258,9 +264,9 @@ async fn committed_delete_route_succeeds_with_unrelated_failing_cleanup() {
         None,
     );
     let app = router(state).expect("router").layer(Extension(ports));
-    let (status, response) = call(&app, "/api/conversation/delete", json!({"id":"agent"})).await;
+    let (status, response) = call(&app, "/api/commands", delete_command("agent")).await;
     assert_eq!(status, 200, "committed delete response: {response}");
-    assert_eq!(response["deleted"], json!(["agent"]));
+    assert_eq!(response["result"]["deleted"], json!(["agent"]));
     let reader = store.test_reader().expect("reader");
     let tombstone: bool = reader.query_row("SELECT json_type(record,'$.deletedAt') IN ('real','integer') AND json_type(record,'$.workspaceCleanupIntent') IS NULL FROM runtime_agents WHERE id='agent'", [], |row| row.get(0)).expect("deleted agent");
     assert!(tombstone, "delete commits and its own cleanup drains");
@@ -325,7 +331,7 @@ async fn production_delete_route_interrupts_and_settles_active_turn() {
     );
     let app = router(state).expect("router").layer(Extension(ports));
 
-    let (status, response) = call(&app, "/api/conversation/delete", json!({"id":"agent"})).await;
+    let (status, response) = call(&app, "/api/commands", delete_command("agent")).await;
 
     let calls = broker.calls.lock().expect("calls lock");
     let reader = store.test_reader().expect("diagnostic store read");
@@ -338,7 +344,7 @@ async fn production_delete_route_interrupts_and_settles_active_turn() {
         .expect("tombstoned agent row");
     let agent: Value = studio_json::from_str(&raw).expect("agent record");
     assert_eq!(status, 200, "response={response}; agent={raw}");
-    assert_eq!(response["deleted"], json!(["agent"]));
+    assert_eq!(response["result"]["deleted"], json!(["agent"]));
     assert_eq!(
         calls.iter().map(|call| call.method).collect::<Vec<_>>(),
         [

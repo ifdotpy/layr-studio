@@ -87,7 +87,7 @@ fn retry_allowed(entry: &Entry) -> Result<(), CommandError> {
         | OutboxKind::StreamFlush
         | OutboxKind::FollowupEffect
         | OutboxKind::WorkArchive
-        | OutboxKind::WorkVm
+        | OutboxKind::WorkLayr
         | OutboxKind::TerminalAction
         | OutboxKind::MonitorInput
         | OutboxKind::McpReconnect
@@ -237,7 +237,7 @@ fn settle_entity(
         | OutboxKind::StreamFlush
         | OutboxKind::FollowupEffect
         | OutboxKind::WorkArchive
-        | OutboxKind::WorkVm
+        | OutboxKind::WorkLayr
         | OutboxKind::TerminalAction
         | OutboxKind::MonitorInput
         | OutboxKind::McpReconnect

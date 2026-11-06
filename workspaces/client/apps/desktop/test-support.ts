@@ -2,7 +2,7 @@ import type { SavedRecovery } from "./recovery.ts";
 import type { components } from "../web/src/generated/api.ts";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
-// Trusted VM replies and test-owned JSON documents retain their base behavior.
+// Trusted replies and test-owned JSON documents retain their base behavior.
 // This single indexed view supplies the fields that each witness inspects.
 export function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;

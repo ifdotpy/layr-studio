@@ -148,7 +148,7 @@ domain!(WorkStatus { Ready=>"ready", Blocked=>"blocked", Running=>"running", Rev
 domain!(OwnerKind { Agent=>"agent", Task=>"task", Account=>"account", Vm=>"vm", Project=>"project", Monitor=>"monitor", Terminal=>"terminal", Message=>"message", Request=>"request", Server=>"server" });
 domain!(RequestResultStatus { Applied=>"applied", Rejected=>"rejected" });
 domain!(RequestReferenceKind { Agent=>"agent", Annotation=>"annotation", Complaint=>"complaint", Message=>"message", Project=>"project", Room=>"room", Work=>"work", Outbox=>"outbox", Approval=>"approval" });
-domain!(OutboxKind { ProviderCall=>"provider_call", ProviderCallback=>"provider_callback", JournalEntry=>"journal_entry", Publication=>"publication", StreamFlush=>"stream_flush", FollowupEffect=>"followup_effect", Steer=>"steer", VoiceStop=>"voice_stop", VoiceDelete=>"voice_delete", WorkArchive=>"work_archive", WorkVm=>"work_vm", TitleGeneration=>"title_generation", NativeAction=>"native_action", TerminalAction=>"terminal_action", MonitorInput=>"monitor_input", McpReconnect=>"mcp_reconnect", ProjectRegistration=>"project_registration", RemoteDelivery=>"remote_delivery", ManagedTool=>"managed_tool" });
+domain!(OutboxKind { ProviderCall=>"provider_call", ProviderCallback=>"provider_callback", JournalEntry=>"journal_entry", Publication=>"publication", StreamFlush=>"stream_flush", FollowupEffect=>"followup_effect", Steer=>"steer", VoiceStop=>"voice_stop", VoiceDelete=>"voice_delete", WorkArchive=>"work_archive", WorkLayr=>"work_vm", TitleGeneration=>"title_generation", NativeAction=>"native_action", TerminalAction=>"terminal_action", MonitorInput=>"monitor_input", McpReconnect=>"mcp_reconnect", ProjectRegistration=>"project_registration", RemoteDelivery=>"remote_delivery", ManagedTool=>"managed_tool" });
 /// Restart rule of an outbox kind after an unclean stop (target architecture, "Command execution").
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RestartRule {
@@ -179,7 +179,7 @@ impl OutboxKind {
             | Self::StreamFlush
             | Self::FollowupEffect
             | Self::WorkArchive
-            | Self::WorkVm
+            | Self::WorkLayr
             | Self::TerminalAction
             | Self::MonitorInput
             | Self::McpReconnect
@@ -662,7 +662,7 @@ mod tests {
             (OutboxKind::VoiceStop, RestartRule::None),
             (OutboxKind::VoiceDelete, RestartRule::None),
             (OutboxKind::WorkArchive, RestartRule::Local),
-            (OutboxKind::WorkVm, RestartRule::Local),
+            (OutboxKind::WorkLayr, RestartRule::Local),
             (OutboxKind::TitleGeneration, RestartRule::None),
             (OutboxKind::NativeAction, RestartRule::None),
             (OutboxKind::TerminalAction, RestartRule::Local),

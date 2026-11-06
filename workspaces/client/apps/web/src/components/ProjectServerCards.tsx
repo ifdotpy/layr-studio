@@ -63,7 +63,6 @@ export default function ProjectServerCards({
   const [fetched, setFetched] = useState<{
     key: string;
     system?: string | undefined;
-    hasStudioVm?: boolean | undefined;
     nativeLayr?: ProjectServerChoice["nativeLayr"] | undefined;
     nativeLayrMessage?: string | undefined;
     defaultWorkspaceMode?:
@@ -99,6 +98,11 @@ export default function ProjectServerCards({
   const defaultMode =
     server?.defaultWorkspaceMode ??
     (fetched?.key === connectionKey ? fetched.defaultWorkspaceMode : undefined);
+  const supportedDefaultMode = defaultMode
+    ? defaultMode === "layr-native"
+      ? "layr-native"
+      : "worktree"
+    : undefined;
   const fetchedKey = useRef("");
   fetchedKey.current = fetched?.key || "";
   const [modeChoice, setModeChoice] = useState<{
@@ -108,10 +112,10 @@ export default function ProjectServerCards({
   const chosenMode =
     modeChoice?.server === selected ? modeChoice.mode : undefined;
   const mode =
-    defaultMode &&
+    supportedDefaultMode &&
     (chosenMode && (chosenMode !== "layr-native" || nativeAvailable)
       ? chosenMode
-      : defaultMode);
+      : supportedDefaultMode);
   const worktreeAllowed = projectAllowsWorktree(project);
   const [models, setModels] = useState<Omit<
     NewChatSettings,
@@ -120,7 +124,6 @@ export default function ProjectServerCards({
   const [platformError, setPlatformError] = useState("");
   const knownSystem =
     !!server?.system &&
-    server.hasStudioVm !== undefined &&
     server.nativeLayr !== undefined &&
     server.defaultWorkspaceMode !== undefined;
   const disabled = !!server?.disabled;
@@ -143,7 +146,6 @@ export default function ProjectServerCards({
           setFetched({
             key: connectionKey,
             system: value.system,
-            hasStudioVm: value.hasStudioVm,
             nativeLayr: value.nativeLayr,
             nativeLayrMessage: value.nativeLayrMessage,
             defaultWorkspaceMode: value.defaultWorkspaceMode,
@@ -184,7 +186,9 @@ export default function ProjectServerCards({
                 <Text component="span" size="xs" c="dimmed">
                   {server.disabled ? "Offline" : "Active"}
                 </Text>
-                {folder && <span>{folder.path}</span>}
+                {folder && (
+                  <span className="project-server-path">{folder.path}</span>
+                )}
               </button>
               {!folder && (
                 <Button
@@ -212,12 +216,7 @@ export default function ProjectServerCards({
             onChange={(value) =>
               setModeChoice({
                 server: selected,
-                mode:
-                  value === "layr"
-                    ? "layr"
-                    : value === "layr-native"
-                      ? "layr-native"
-                      : "worktree",
+                mode: value === "layr-native" ? "layr-native" : "worktree",
               })
             }
             data={[
@@ -237,10 +236,6 @@ export default function ProjectServerCards({
                 ),
                 disabled: !nativeAvailable,
               },
-              ...((server?.hasStudioVm ??
-              (fetched?.key === connectionKey && fetched.hasStudioVm))
-                ? [{ value: "layr", label: "Layr VM" }]
-                : []),
               { value: "worktree", label: "WT", disabled: !worktreeAllowed },
             ]}
           />
@@ -286,7 +281,7 @@ export default function ProjectServerCards({
             !system ||
             (mode === "layr-native" && !nativeAvailable) ||
             (mode === "worktree" && !worktreeAllowed) ||
-            !defaultMode ||
+            !supportedDefaultMode ||
             !!platformError ||
             !!servers.find((row) => row.id === selected)?.disabled
           }

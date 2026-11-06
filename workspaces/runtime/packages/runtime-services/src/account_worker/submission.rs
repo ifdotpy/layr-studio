@@ -5,7 +5,6 @@
 //! so startup must hold the earlier reservation as an unknown outcome.
 use super::*;
 use crate::provider_session_task::PreparedRequest;
-use rusqlite::OptionalExtension;
 
 /// One request to commit, built by the worker and run in the agent's task
 /// (or inline for an interrupt).
@@ -13,7 +12,6 @@ pub(super) struct Commit {
     pub bridge: StoreBridge,
     pub account: String,
     pub connection_id: String,
-    pub generation: u64,
     /// Provider reply deadline of the request; unit: milliseconds.
     pub timeout_ms: u64,
     pub control: SessionControl,
@@ -33,12 +31,6 @@ pub(super) enum Committed {
     Nothing,
     /// A never-submitted batch was isolated and released for a fresh claim.
     Retry(String, i64),
-    /// The agent may run in a VM: the worker resolves its session, then
-    /// finishes the commit inline. Carries the launch lookup's result.
-    Vm(
-        Box<Commit>,
-        Box<Result<Option<preparation::VmProviderLaunchRequest>, WorkerError>>,
-    ),
     /// The submitted commit returned; only the write remains.
     Ready(Box<Ready>),
 }
@@ -48,8 +40,6 @@ pub(super) struct Ready {
     pub context: Arc<Pending>,
     pub prepared: PreparedRequest,
     pub control: SessionControl,
-    /// Written to a VM actor's own session.
-    pub vm: bool,
 }
 
 impl Commit {
@@ -66,25 +56,12 @@ impl Commit {
                 return Ok(Committed::Nothing);
             }
         }
-        if matches!(
-            self.context.method,
-            Method::ThreadStart | Method::TurnStart | Method::TurnInterrupt | Method::ThreadResume
-        ) {
-            let launch =
-                vm_launch_request(&self.bridge, &self.context.intent, self.generation).await;
-            if !matches!(launch, Ok(None)) {
-                // The worker completes the effect after the VM commit.
-                let mut commit = self;
-                commit.effect = None;
-                return Ok(Committed::Vm(Box::new(commit), Box::new(launch)));
-            }
-        }
         let control = self.control.clone();
-        Box::pin(self.finish(control, false)).await
+        Box::pin(self.finish(control)).await
     }
 
     /// Validate the request on `control`'s session, then commit `submitted`.
-    pub async fn finish(self, control: SessionControl, vm: bool) -> Result<Committed, WorkerError> {
+    pub async fn finish(self, control: SessionControl) -> Result<Committed, WorkerError> {
         let Self {
             bridge,
             account,
@@ -115,7 +92,6 @@ impl Commit {
         .await
         {
             Ok(prepared) => prepared,
-            Err(SessionTaskError::Closed) if vm => return Ok(Committed::Nothing),
             Err(error) => return Err(error.into()),
         };
         let recovery = prepared.recovery_record();
@@ -169,84 +145,6 @@ impl Commit {
             context,
             prepared,
             control,
-            vm,
         })))
     }
-}
-
-/// The agent's VM launch request, or `None` for a host agent.
-async fn vm_launch_request(
-    bridge: &StoreBridge,
-    intent: &TurnIntent,
-    generation: u64,
-) -> Result<Option<preparation::VmProviderLaunchRequest>, WorkerError> {
-    let agent_id = intent.agent_id.clone();
-    let attempt_id = intent.attempt_id.clone();
-    let lookup_id = agent_id.clone();
-    let intent_cwd = intent.cwd.clone();
-    let account_key = intent.account_key.clone();
-    let provider = intent.provider.key().to_owned();
-    let intent_epoch = intent.epoch;
-    bridge
-        .worker_run("vm_launch_request", move |store| async move {
-            store
-                .read_async("runtime-services/account_worker_read", move |connection| {
-                    // A host agent, the common case, needs only its mode, not its record.
-                    let vm = connection
-                        .prepare_cached(
-                            "SELECT json_extract(record,'$.executionMode')='vm' \
-                             FROM runtime_agents WHERE id=?1",
-                        )?
-                        .query_row([&lookup_id], |row| row.get::<_, Option<bool>>(0))
-                        .optional()?;
-                    match vm {
-                        None => {
-                            return Err(WorkerError::PreparationRefused("vm-agent/missing".into()));
-                        }
-                        Some(Some(true)) => {}
-                        Some(_) => return Ok(None),
-                    }
-                    let Some(record) =
-                        AgentRepository::get(connection, &AgentId::from(lookup_id.as_str()))?
-                    else {
-                        return Err(WorkerError::PreparationRefused("vm-agent/missing".into()));
-                    };
-                    if !crate::linux_vm_provider::vm_actor_matches(
-                        connection,
-                        &record.id.0,
-                        intent_epoch,
-                        &account_key,
-                        Some(&provider),
-                    )? {
-                        return Err(WorkerError::PreparationRefused(
-                            "vm-agent/identity-changed".into(),
-                        ));
-                    }
-                    let cwd = record.cwd.as_deref()
-                        .or(intent_cwd.as_deref())
-                        .filter(|value| value.starts_with('/'))
-                        .ok_or_else(|| WorkerError::PreparationRefused("vm-agent/cwd".into()))?;
-                    let guest_home = record
-                        .extra
-                        .get("layrHome")
-                        .and_then(Value::as_str)
-                        .filter(|value| value.starts_with('/'))
-                        .unwrap_or(crate::linux_vm_provider::DEFAULT_GUEST_HOME);
-                    Ok(Some(preparation::VmProviderLaunchRequest {
-                        root_request_id: store::execution_admission(connection, &attempt_id)?.0,
-                        source: store::execution_admission(connection, &attempt_id)?.1,
-                        final_effect: studio_runtime_store::ExecutionHistoryRepository::vm_credential_refresh_admission(connection,&attempt_id)?,
-                        attempt_id: attempt_id.clone(),
-                        agent_id: record.id.0,
-                        epoch: record.epoch,
-                        generation,
-                        account_key,
-                        provider,
-                        cwd: cwd.to_owned(),
-                        guest_home: guest_home.to_owned(),
-                    }))
-                })
-                .await
-        })
-        .await
 }

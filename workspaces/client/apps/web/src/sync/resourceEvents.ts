@@ -104,16 +104,6 @@ const renameProgressStatuses = {
   >,
   true
 >;
-const vaultProgressStates = {
-  running: true,
-  done: true,
-  failed: true,
-  signin: true,
-} satisfies Record<
-  NonNullable<components["schemas"]["VaultJobProgressEvent"]["value"]>["state"],
-  true
->;
-
 export type ResourceTokenRatesEvent =
   components["schemas"]["ResourceTokenRatesEvent"];
 export type ResourceLiveDeltaEvent =
@@ -1004,10 +994,7 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     const resource = candidate.resource as ResourceRef | undefined;
     if (
       !resource ||
-      (resource.kind !== "auth-progress" &&
-        resource.kind !== "vault-readiness" &&
-        resource.kind !== "vault-job-progress" &&
-        resource.kind !== "rename-progress")
+      (resource.kind !== "auth-progress" && resource.kind !== "rename-progress")
     )
       throw new TypeError("Invalid progress resource");
     if (resource.kind === "auth-progress") {
@@ -1033,22 +1020,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
             !Object.hasOwn(renameProgressStatuses, String(receipt.status))))
       )
         throw new TypeError("Invalid rename progress");
-    } else if (resource.kind === "vault-job-progress") {
-      const receipt = candidate.value as Record<string, unknown> | null;
-      if (
-        typeof resource.requestId !== "string" ||
-        !["setup", "login", "pull"].includes(resource.job) ||
-        (receipt !== null &&
-          (!receipt ||
-            receipt.requestId !== resource.requestId ||
-            !Object.hasOwn(vaultProgressStates, String(receipt.state))))
-      )
-        throw new TypeError("Invalid vault job progress");
-    } else if (
-      typeof resource.prefix !== "string" ||
-      typeof candidate.value !== "boolean"
-    ) {
-      throw new TypeError("Invalid vault readiness");
     }
     const event = value as ResourceProgressEvent;
     if (

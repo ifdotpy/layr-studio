@@ -378,3 +378,74 @@ async fn unwritten_thread_start_continues_after_a_message() {
         .await;
     replacement.shutdown().await.unwrap();
 }
+
+/// A restart held an unwritten thread start. The request's outbox row is later
+/// gone, so no receipt can arrive. A new explicit message starts a fresh
+/// preparation, and the unknown request is never sent again.
+#[tokio::test]
+async fn held_thread_start_without_a_live_receipt_releases_on_a_message() {
+    let state = State::new().await;
+    let agent_id = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    let mut agent =
+                        AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
+                    agent.thread_id = None;
+                    AgentRepository::put(tx, &agent)?;
+                    Ok(())
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    commit_thread_request_without_writing(&state, &worker).await;
+    worker.task.abort();
+    assert!(worker.completion().await.is_err());
+    let orphan = unresolved_thread_obligations(&state).await;
+    assert_eq!(orphan.len(), 1);
+
+    let mut bridge = StoreBridge::new(state.bridge.store.clone()).await.unwrap();
+    bridge.faults = state.bridge.faults.clone();
+    let held_peer = Peer::new();
+    let mut replacement = held_peer.worker(bridge).await;
+    worker_barrier(&replacement).await;
+    assert_eq!(
+        state.record().await["startOutcomeHold"]["reason"],
+        store::RECEIPT_PENDING_HOLD
+    );
+    replacement.shutdown().await.unwrap();
+
+    // The request settles and its outbox row goes away. Its receipt can no longer arrive.
+    let row = orphan[0].clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction(move |tx| {
+                    tx.execute("DELETE FROM runtime_outbox WHERE id=?1", [row.as_str()])
+                        .map_err(StoreError::from)?;
+                    Ok(())
+                })
+                .await?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    send_message(&state, "continue-message", "user").await;
+    let mut bridge = StoreBridge::new(state.bridge.store.clone()).await.unwrap();
+    bridge.faults = state.bridge.faults.clone();
+    let mut next = Peer::new();
+    let mut fresh = next.worker(bridge).await;
+    state.wake(&fresh).await;
+    let start = next.write("thread/start").await;
+    next.reply(&start, json!({"thread":{"id":"new-thread"}}))
+        .await;
+    fresh.shutdown().await.unwrap();
+}

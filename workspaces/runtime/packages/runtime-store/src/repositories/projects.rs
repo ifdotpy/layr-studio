@@ -325,7 +325,11 @@ impl ProjectsRepository {
             params![project.id, record],
             |row| row.get(0),
         )?;
+<<<<<<< head
         let record = studio_json::OwnedRawJson::from_string(stored)?;
+=======
+        let record = studio_json::value::RawValue::from_string(stored)?;
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         SyncDocumentsRepository::put_entity(
             transaction,
             "project",
@@ -369,7 +373,11 @@ impl ProjectsRepository {
             params![id, patch],
             |row| Ok((row.get(0)?, row.get::<_, Option<bool>>(1)?.unwrap_or(false))),
         )?;
+<<<<<<< head
         let record = studio_json::OwnedRawJson::from_string(record)?;
+=======
+        let record = studio_json::value::RawValue::from_string(record)?;
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         SyncDocumentsRepository::put_entity(transaction, "project", id, record, hidden)?;
         Ok(())
     }
@@ -579,7 +587,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
             CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(seq INTEGER);
+            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
             CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
         let tx = db.transaction().unwrap();
         let original: ProjectLive =
@@ -606,7 +614,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
             CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(seq INTEGER);
+            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
             CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
         let tx = db.transaction().unwrap();
         let project: ProjectLive = studio_json::from_str(
@@ -646,7 +654,7 @@ mod tests {
         db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
             CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
             CREATE TABLE sync_documents(seq INTEGER);
-            CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
             CREATE TABLE runtime_orchestration_settings(id TEXT,record TEXT);").expect("schema");
         crate::receipt_schema::create(&db).expect("request schema");
         let tx = db.transaction().expect("transaction");

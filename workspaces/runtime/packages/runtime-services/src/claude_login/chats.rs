@@ -3,13 +3,31 @@ use super::{LoginError, ports::LoginChats};
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_store::{AgentRecord, RuntimeStore, SchedulerRepository, Table};
+use tokio::sync::Notify;
 
-pub struct StoredChats(pub Arc<RuntimeStore>);
+pub struct StoredChats {
+    store: Arc<RuntimeStore>,
+    /// Wakes the continuation scheduler after the sign-in made auth waits due.
+    continuation_wake: Arc<Notify>,
+}
+impl StoredChats {
+    pub fn new(store: Arc<RuntimeStore>, continuation_wake: Arc<Notify>) -> Self {
+        Self {
+            store,
+            continuation_wake,
+        }
+    }
+}
 impl LoginChats for StoredChats {
     fn refresh<'a>(&'a self, account: &'a str) -> super::ports::FutureResult<'a, ()> {
         Box::pin(async move {
             let account = account.to_owned();
-            self.0
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| LoginError::Persistence)?
+                .as_secs_f64();
+            let woke = self
+                .store
                 .transaction(move |tx| {
                     for record in Table::<AgentRecord>::new(tx).list()? {
                         let agent = record.value();
@@ -28,10 +46,17 @@ impl LoginChats for StoredChats {
                             )?;
                         }
                     }
-                    Ok(())
+                    // A sign-in is proof for the auth waits of its account, as for Codex.
+                    crate::continuation_runtime::stage_sign_in_proof(tx, &account, now).map_err(
+                        |error| studio_runtime_store::StoreError::SchemaMismatch(error.to_string()),
+                    )
                 })
                 .await
-                .map_err(|_| LoginError::Persistence)
+                .map_err(|_| LoginError::Persistence)?;
+            if woke {
+                self.continuation_wake.notify_one();
+            }
+            Ok(())
         })
     }
 }

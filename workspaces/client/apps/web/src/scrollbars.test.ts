@@ -9,9 +9,7 @@ const read = (path: string) => readFileSync(join(sourceRoot, path), "utf8");
 
 it("shares the main-area scrollbar palette with native panes and Mantine controls", () => {
   const css = read("style.css");
-  expect(css).toMatch(
-    /--studio-scrollbar-thumb:\s*light-dark\(#18244718, #ffffff18\)/,
-  );
+  expect(css).toMatch(/--studio-scrollbar-thumb:\s*var\(--line-strong\)/);
   expect(css).toMatch(
     /\*\s*\{[^}]*scrollbar-width:\s*thin;[^}]*scrollbar-color:\s*var\(--studio-scrollbar-thumb\) transparent;/,
   );

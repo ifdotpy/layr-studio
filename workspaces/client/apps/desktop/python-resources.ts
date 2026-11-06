@@ -14,7 +14,6 @@ export const pythonResources = [
   "desktop_delivery.py",
   "delivery-contract.json",
   "desktop_updates.py",
-  "desktop_vm.py",
 ];
 
 // Reads the imports of each entry point and of each local module that it reaches.

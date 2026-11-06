@@ -124,6 +124,7 @@ import { isEmptyAssistantMessage } from "./turnHistoryModel";
 import { Dictation } from "./Dictation";
 import RealtimeVoice from "./RealtimeVoice";
 import OutboxControls from "./OutboxControls";
+import SettledDelivery from "./message-delivery/SettledDelivery";
 import StreamingText from "./conversation/transcript/StreamingText";
 import SelectionQuote, {
   selectedExcerpt,
@@ -1396,23 +1397,25 @@ export default function Conversation(p: {
         (m.deliveryStatus.state.kind === "stored" ||
           m.deliveryStatus.state.kind === "in_flight")) ||
         serverStatus(m.deliveryStatus) === MessageSendStatus.sending) && (
-        <span
-          className="message-delivery-status message-delivery-inline"
-          role="status"
-        >
-          {deliveryLabel(m)}
-          {m.role === "user" && (
-            <ActionIcon
-              size="sm"
-              aria-label="Remove sending message"
-              title="Remove from this device and stop retries. Work already sent continues."
-              disabled={removingSending}
-              onClick={() => void removeSending([m])}
-            >
-              <Trash2 size={14} />
-            </ActionIcon>
-          )}
-        </span>
+        <SettledDelivery transient>
+          <span
+            className="message-delivery-status message-delivery-inline"
+            role="status"
+          >
+            {deliveryLabel(m)}
+            {m.role === "user" && (
+              <ActionIcon
+                size="sm"
+                aria-label="Remove sending message"
+                title="Remove from this device and stop retries. Work already sent continues."
+                disabled={removingSending}
+                onClick={() => void removeSending([m])}
+              >
+                <Trash2 size={14} />
+              </ActionIcon>
+            )}
+          </span>
+        </SettledDelivery>
       )}
       {/* The main chat has two speakers; only team rooms name each sender. */}
       {p.room && (
@@ -1430,30 +1433,43 @@ export default function Conversation(p: {
             m.deliveryStatus.state.kind === "in_flight")
         ) &&
         serverStatus(m.deliveryStatus) !== MessageSendStatus.sending && (
-          <div className="message-delivery-heading">
-            <span
-              className="message-label message-delivery-status"
-              role="status"
-            >
-              {deliveryLabel(m)}
-            </span>
-            {m.role === "user" &&
-              m.localDelivery &&
-              (serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
-                serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
-                serverStatus(m.deliveryStatus) ===
-                  MessageSendStatus.cancelled) && (
-                <ActionIcon
-                  size="sm"
-                  variant="subtle"
-                  aria-label="Remove message"
-                  title="Remove from this device. Delivery is not cancelled."
-                  onClick={() => removeMessage(m)}
-                >
-                  <Trash2 size={14} />
-                </ActionIcon>
-              )}
-          </div>
+          <SettledDelivery
+            transient={
+              serverStatus(m.deliveryStatus) === MessageSendStatus.queued
+            }
+          >
+            <div className="message-delivery-heading">
+              {/* Delivery is the normal outcome: "Sent" stays for assistive
+                  technology only, so history is not a column of "Sent". */}
+              <span
+                className={`message-label message-delivery-status${
+                  serverStatus(m.deliveryStatus) === MessageSendStatus.delivered
+                    ? " sr-only"
+                    : ""
+                }`}
+                role="status"
+              >
+                {deliveryLabel(m)}
+              </span>
+              {m.role === "user" &&
+                m.localDelivery &&
+                (serverStatus(m.deliveryStatus) ===
+                  MessageSendStatus.uncertain ||
+                  serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
+                  serverStatus(m.deliveryStatus) ===
+                    MessageSendStatus.cancelled) && (
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    aria-label="Remove message"
+                    title="Remove from this device. Delivery is not cancelled."
+                    onClick={() => removeMessage(m)}
+                  >
+                    <Trash2 size={14} />
+                  </ActionIcon>
+                )}
+            </div>
+          </SettledDelivery>
         )}
       {m.role === "user" ? (
         userText(m)
@@ -2363,6 +2379,19 @@ export default function Conversation(p: {
                         </span>
                       )}
                       {queueControl("composer-queue-primary")}
+                      {/* The stop slot keeps its width while idle, so Stop
+                          appearing during a turn moves no other control. */}
+                      {!(
+                        agent &&
+                        ["running", "starting", "approval"].includes(
+                          agent.status || "",
+                        )
+                      ) && (
+                        <span
+                          className="composer-stop-slot"
+                          aria-hidden="true"
+                        />
+                      )}
                       {agent &&
                         ["running", "starting", "approval"].includes(
                           agent.status || "",

@@ -282,7 +282,8 @@ async fn lifecycle_failure_case(case_name: &str, tables: &[&str]) {
 async fn archive_failures_roll_back_rows_and_projections_after_restart() {
     lifecycle_failure_case(
         "unassign",
-        &["runtime_work", "runtime_agents", "sync_entities"],
+        // Unassign writes no client copy: work documents are built at read time.
+        &["runtime_work", "runtime_agents"],
     )
     .await;
 }
@@ -295,7 +296,7 @@ async fn stop_failures_roll_back_rows_and_projections_after_restart() {
             "runtime_agents",
             "approvals",
             "runtime_events",
-            "sync_entities",
+            "durable_rows",
         ],
     )
     .await;

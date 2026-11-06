@@ -157,11 +157,11 @@ export type BrowserOpenDetails = {
   clientId?: string;
   scope?: string;
   linuxUser?: string;
-  /** "vm": a VM chat; "host": a native chat of the chat's server. */
+  /** The server execution source. */
   source?: string;
   /** The `user_code` of a device code page, so the person can type it. */
   userCode?: string;
-  /** "waiting": the person opened the link in paste mode (docs/vm-browser-bridge.md, 6.3). */
+  /** "waiting": the person opened the link in paste mode. */
   phase?: "waiting";
   /** The request deadline, in epoch seconds. */
   expiresAt?: number;
@@ -173,7 +173,7 @@ export type BrowserOpenDetails = {
   joined?: string[];
 };
 
-/** The sign-in link of an agent (docs/vm-browser-bridge.md), or undefined. */
+/** The sign-in link of an agent, or undefined. */
 export function browserOpenDetails(
   approval: Approval,
 ): BrowserOpenDetails | undefined {

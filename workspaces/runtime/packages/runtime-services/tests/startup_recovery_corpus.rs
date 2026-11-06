@@ -66,10 +66,10 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
     let sync_entities = {
         let mut statement = db
             .prepare(
-                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agentSummary','agentDetail') ORDER BY collection,id",
+                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor') ORDER BY collection,id",
             )
             .expect("prepare projection snapshot");
-        statement
+        let mut rows = statement
             .query_map([], |row| {
                 Ok(json!({
                     "collection": row.get::<_, String>(0)?, "id": row.get::<_, String>(1)?,
@@ -85,7 +85,32 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
                 .expect("projection JSON");
                 projection
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        // The agent views and the windows are built at read time; compare them as the
+        // old copies.
+        rows.extend(
+            studio_runtime_services::entity_scope::agent_snapshot(&db)
+                .expect("agent views")
+                .into_iter()
+                .filter(|row| row.collection == "agent")
+                .chain(
+                    studio_runtime_services::entity_scope::live_documents(
+                        &db,
+                        r#"["task","monitor"]"#,
+                    )
+                    .expect("window documents"),
+                )
+                .map(|row| {
+                    json!({"collection": row.collection, "id": row.id, "deleted": 0,
+                        "payload": studio_json::from_str::<Value>(row.payload.as_deref().expect("agent view"))
+                            .expect("agent view JSON")})
+                }),
+        );
+        rows.sort_by(|a, b| {
+            (a["collection"].as_str(), a["id"].as_str())
+                .cmp(&(b["collection"].as_str(), b["id"].as_str()))
+        });
+        rows
     };
     json!({
         "agents": records("runtime_agents"),
@@ -300,8 +325,15 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
             .get_version_num(),
         7
     );
+<<<<<<< head
     let deviations_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/turn_lifecycle/deviations.json");
+=======
+    let deviations_path = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("tests/turn_lifecycle/deviations.json");
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     let deviations: Value = studio_json::from_slice(
         &std::fs::read(deviations_path).expect("read registered differences"),
     )

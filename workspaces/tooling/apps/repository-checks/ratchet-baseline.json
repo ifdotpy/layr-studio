@@ -2,15 +2,7 @@
   "from_value": [
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
-      "fingerprint": "ee40c0b3955a00b1c72314f8bfd405afb2ecae120f0e813e627e6b94304b9cea:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/connection_recovery.rs",
@@ -201,10 +193,6 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync/round.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/managed_child_create.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
@@ -311,14 +299,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/turn_prepare/budget_tests.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/workspace_cleanup_runtime.rs",
@@ -1020,10 +1000,6 @@
       "fingerprint": "c0eb60a63b48af266e5243cd264a9f30fde52fa234b1d2636f03ed034da98f58:0"
     },
     {
-      "file": "workspaces/runtime/apps/runtime-server/src/host_runtime.rs",
-      "fingerprint": "8fc61a2fcfed60d9f17403c371a98bf02bd612a12445bf2dd1d78437ff47d643:0"
-    },
-    {
       "file": "workspaces/runtime/apps/runtime-server/src/main.rs",
       "fingerprint": "3ea2b17f72e70cf31e9e4f31015656ab4e6d1f5302d3cc303758a90d60a0d4da:0"
     },
@@ -1080,18 +1056,6 @@
       "fingerprint": "d8548b8f36273bf423489fa844f5e0ed0239ac52400c9c67905156b81310a9f9:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/host_secrets.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/host_secrets.rs",
-      "fingerprint": "7f5da80eada717ce9d4f44456865a6d711ae1762fe420f9b2c95db0d43c01624:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/host_secrets.rs",
-      "fingerprint": "8d9b5fec7faa173315b13e0a978a06883471a58640a4a207389636f5037898d6:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/incoming_multi_server.rs",
       "fingerprint": "21fe2722b3d4df98e45f418ff2103b92b5aa2b8fdfcfdfb9f32912ba0925a8c2:0"
     },
@@ -1102,14 +1066,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/incoming_multi_server.rs",
       "fingerprint": "e099f0e47c0bab8e8ff28c8ae84faa755b715591f508bbdde06f9e7a7472fac0:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/linux_vm_settings.rs",
-      "fingerprint": "9e4f5f35eef9a2e5936c893515ddc402b1166b05d865a11e765a45ed6b545f38:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/mac_sync.rs",
-      "fingerprint": "b68cae77439ec9bea5dbb5c64ef051c290ed34f9f16e26185accdb5b78f8341a:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/monitors.rs",
@@ -1138,10 +1094,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/usage.rs",
       "fingerprint": "a961a3acfb456f93c1bdbdc78fb595abb459c23a58fc1624579742be66dac025:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/vm_native_provider.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/validation.rs",
@@ -1248,10 +1200,6 @@
       "fingerprint": "327b81f71e332185f8d9a36f4fe7f0b2c4206d9a5fe86bd56bb3aedaa531d8ae:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/tests.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/tests/journal_cost.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
@@ -1302,10 +1250,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/browser_host.rs",
       "fingerprint": "ac2d74b6b43962a17db7d42178ce5a2711603a29ac8431578ae491ec1021f466:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/catalog_reads.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/catalog_reads.rs",
@@ -1376,18 +1320,6 @@
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:2"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/host_project_runtime.rs",
       "fingerprint": "9cde23a0d4a44c09106be2ce36abb09287e92ddea78f4e19053d959634d14043:0"
     },
@@ -1422,26 +1354,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/limit_reset.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/linux_vm_runtime.rs",
-      "fingerprint": "e37d541fc9083aee1f145d26711e50329542d088535deafd92ee19b319352c11:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/linux_vm_runtime/tests.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/linux_vm_runtime/tests.rs",
-      "fingerprint": "75f66957e3552c5c24f6ded63977eb22639dd80a357cf2ffdb471e8377c3070a:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync/schedule.rs",
-      "fingerprint": "7a6bf4c961757ee90c1cf399f80b468b7e05a082dabb8156e75c3ca13c66b310:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync/schedule.rs",
-      "fingerprint": "8f7afbe5c371374b9ea3166fc974fc5b538fbf10f50484589449cf5729c28559:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/managed_host_tools/ingress_tests.rs",
@@ -1510,10 +1422,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/pricing.rs",
       "fingerprint": "76b7b10c50c5390c8908eb1e15e3250974664ecff8e2fe65b6c24f535181b974:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/project_secrets.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/projects/radio_lifecycle.rs",
@@ -1636,10 +1544,6 @@
       "fingerprint": "fc0bdf6c2167b6e7457d91a33dad9bf36d05a90d867f4b5b2c3e6ea0846de069:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/workspace_cleanup_runtime.rs",
-      "fingerprint": "24892be638aec99bf405ada08d1e0622a84d3c1a16168be5c384ac3b830a661b:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/workspace_ready_git.rs",
       "fingerprint": "61646432074cdfc314f09da169f02c976944ba27be34687f80fd8c95856906c2:0"
     },
@@ -1698,18 +1602,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/supervisor_journal.rs",
       "fingerprint": "459e134bbc7cee960205311a6b11bc05a79c00fc0cfe442db98287eec2320879:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
-      "fingerprint": "2b0052266d748682bf1786032614dabc12eb69da00b2ecbf75f33de6c11a71b9:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:1"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/workspace_ready/effects.rs",
@@ -1849,10 +1741,6 @@
     },
     {
       "file": "workspaces/runtime/packages/operations/tests/reservation.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/build.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
     {
@@ -1998,22 +1886,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/costs.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec_service/lifecycle.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/linux_vm_guest.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:1"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/managed_host_tools/ingress_tests.rs",
@@ -2170,18 +2042,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/thread_prepare_corpus.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/wave7_p04_review.rs",
@@ -2424,14 +2284,6 @@
       "fingerprint": "a5ca0f54fa95b87a5abd4a5b83b64cfb54b11ce757793481eb374f5e52ae0d8e:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "01f27b10b8ef5e93e647ca29fd505cce51d1ec51645a0d03bee9639fba4c3120:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "17bddd3fbec98b920c5403c5f59fe685493385466098b15d32b3b9da1ac22e9d:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/tests/claude_controls_actor.rs",
       "fingerprint": "379cfc2ad521a8f897929810c6d804e89d5f7da79cf036d5e54da46d2eac015a:0"
     },
@@ -2484,10 +2336,6 @@
       "fingerprint": "7afd828f70e9fb1103aa3bec869cb40f5e8092ec75ba60e6c73558e5df7397d5:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/tests.rs",
-      "fingerprint": "e6a27817be2ae1b1382dd8b1899be845ba3fded0910ebe9bed31d84fa284ff59:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/browser.rs",
       "fingerprint": "ee1590a7797963dcaddf95099f979ff9c4247c2d327fb53e1bd448cbe18ddc33:0"
     },
@@ -2521,7 +2369,7 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/thread_prepare.rs",
-      "fingerprint": "677b7a0a4e7bcf68d460ccd4512ab3b4304f0311ab9ad243c54484069a131eb6:0"
+      "fingerprint": "818fd96bf784433a27c05c3f241bcef48b13159960409509cc62f6695b2649ed:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/workspace_ready.rs",
@@ -2656,14 +2504,6 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/liveness.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/mac_sync/round.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
@@ -2807,22 +2647,6 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/vm_attachments.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/workspace_cleanup_runtime.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
@@ -2871,10 +2695,6 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/tests/monitor_wake_guarantees.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/tests/portable_history_python_parity.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
@@ -2913,18 +2733,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/session_cost_golden.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_corpus.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_corpus.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_corpus.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs",

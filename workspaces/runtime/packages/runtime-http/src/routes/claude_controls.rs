@@ -65,12 +65,7 @@ async fn repair_report(
         .and_then(|transfer| transfer.pending())
         .map(|transfer| transfer.source_account_key.as_str())
         .unwrap_or(&agent.account_key);
-    let session = state
-        .account_session
-        .as_ref()
-        .ok_or_else(ApiError::internal)?
-        .claude_control_session(account)
-        .map_err(session_error)?;
+    let session = control_session(&state, account).await?;
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         session.call_scoped(
@@ -171,6 +166,45 @@ mod session_request_tests {
     use super::SessionRequest;
 
     #[test]
+    fn agent_control_futures_stay_below_clippy_limit() {
+        let state = crate::HttpState::new(
+            String::new(),
+            String::new(),
+            String::new(),
+            0,
+            None,
+            None,
+            None,
+        );
+        let query = studio_json::from_str(r#"{"id":"agent"}"#).unwrap();
+        let request = studio_json::from_str(
+            r#"{"id":"agent","action":"command","command":"/help","request_id":"id"}"#,
+        )
+        .unwrap();
+        let backups =
+            studio_json::from_str(r#"{"id":"a","release":true,"request_id":"r"}"#).unwrap();
+        let repair = super::repair_report(
+            axum::extract::State(state.clone()),
+            super::TypedQuery(query),
+        );
+        let session = super::session(axum::extract::State(state.clone()), super::ApiJson(request));
+        let backups = super::file_backups_inner(state, backups);
+        let limit: usize = include_str!("../../../../clippy.toml")
+            .lines()
+            .find_map(|line| line.strip_prefix("future-size-threshold = "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        for size in [
+            std::mem::size_of_val(&repair),
+            std::mem::size_of_val(&session),
+            std::mem::size_of_val(&backups),
+        ] {
+            assert!(size <= limit, "agent control future is {size} bytes");
+        }
+    }
+
+    #[test]
     fn session_request_rejects_extra_fields_and_unbounded_stop_identity() {
         assert!(
             studio_json::from_str::<SessionRequest>(
@@ -265,35 +299,27 @@ async fn session(
     {
         return Err(control_error(ControlError::Request));
     }
-    // Native commands use the message service and need no provider control session.
-    let controls = || -> Result<Controls, ApiError> {
-        let session: Arc<dyn ControlSession> = if local_only {
-            Arc::new(LocalControlSession {
-                binding: ControlBinding::new(account.to_owned(), "local-no-thread".into(), 1)
-                    .map_err(control_error)?,
-            })
-        } else {
-            let broker = state
-                .account_session
-                .as_ref()
-                .ok_or_else(|| ApiError::dependency("provider-session/claude-controls"))?;
-            broker
-                .claude_control_session(account)
-                .map_err(session_error)?
-        };
-        Ok(Controls::new(
-            Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
-            session,
-        ))
+    // Commands use the message service; no-thread state and settings use stored data.
+    let request = match body {
+        SessionRequest::Command(request) => return command(state, request).await,
+        request @ (SessionRequest::Settings(_) | SessionRequest::Read(_)) => request,
     };
-    let result = match body {
-        SessionRequest::Command(request) => {
-            return command(state, request).await;
-        }
-        SessionRequest::Settings(request) => controls()?.execute(request).await,
-        SessionRequest::Read(request) => {
-            controls()?.read_or_stop_snapshot(&snapshot, &request).await
-        }
+    let session: Arc<dyn ControlSession> = if local_only {
+        Arc::new(LocalControlSession {
+            binding: ControlBinding::new(account.to_owned(), "local-no-thread".into(), 1)
+                .map_err(control_error)?,
+        })
+    } else {
+        control_session(&state, account).await?
+    };
+    let controls = Controls::new(
+        Arc::new(StoredControls::new(store.clone(), Arc::new(|_| {}))),
+        session,
+    );
+    let result = match request {
+        SessionRequest::Command(_) => unreachable!(),
+        SessionRequest::Settings(request) => controls.execute(request).await,
+        SessionRequest::Read(request) => controls.read_or_stop_snapshot(&snapshot, &request).await,
     };
     state.event_wake.notify_one();
     let result = result.map_err(control_error)?;
@@ -304,70 +330,105 @@ async fn file_backups(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<BackupsRequest>,
 ) -> Result<Json<crate::generated::ClaudeFileBackupsResponse>, ApiError> {
-    tokio::spawn(async move {
-        use studio_runtime_services::claude_controls::service::ControlScope;
-        use studio_runtime_store::ClaudeControlRepository;
-        let store = state.store.clone().ok_or_else(ApiError::internal)?;
-        let _execution = studio_runtime_services::checkpoints::RestoreExecution::acquire(format!(
-            "{}:{}",
-            store.state_dir().display(),
-            body.id
-        ))
-        .map_err(|_| control_error(ControlError::Busy))?;
-        let id = body.id.clone();
-        let (agent, settled) = store
-            .read_async("claude/file-backups", move |tx| {
-                let agent = AgentRepository::get(tx, &AgentId(id))?.ok_or_else(|| {
-                    studio_runtime_store::StoreError::InvalidStoredRecord {
-                        object: "agent",
-                        id: "missing".into(),
-                    }
-                })?;
-                let settled = ClaudeControlRepository::settled_file_rewinds(tx, &agent.value())?;
-                Ok::<_, studio_runtime_store::StoreError>((agent, settled))
-            })
-            .await
-            .map_err(|_| ApiError::internal())?;
-        require_claude_account(&state, &agent).await?;
-        let snapshot = studio_runtime_services::claude_controls::ControlSnapshot::from_records(
-            agent.value(),
-            None,
+    tokio::spawn(file_backups_inner(state, body))
+        .await
+        .map_err(|_| ApiError::internal())?
+}
+
+async fn file_backups_inner(
+    state: HttpState,
+    body: BackupsRequest,
+) -> Result<Json<crate::generated::ClaudeFileBackupsResponse>, ApiError> {
+    use studio_runtime_services::claude_controls::service::ControlScope;
+    use studio_runtime_store::ClaudeControlRepository;
+    let store = state.store.clone().ok_or_else(ApiError::internal)?;
+    let _execution = studio_runtime_services::checkpoints::RestoreExecution::acquire(format!(
+        "{}:{}",
+        store.state_dir().display(),
+        body.id
+    ))
+    .map_err(|_| control_error(ControlError::Busy))?;
+    let id = body.id.clone();
+    let (agent, settled) = store
+        .read_async("claude/file-backups", move |tx| {
+            let agent = AgentRepository::get(tx, &AgentId(id))?.ok_or_else(|| {
+                studio_runtime_store::StoreError::InvalidStoredRecord {
+                    object: "agent",
+                    id: "missing".into(),
+                }
+            })?;
+            let settled = ClaudeControlRepository::settled_file_rewinds(tx, &agent.value())?;
+            Ok::<_, studio_runtime_store::StoreError>((Box::new(agent), settled))
+        })
+        .await
+        .map_err(|_| ApiError::internal())?;
+    require_claude_account(&state, &agent).await?;
+    let snapshot = studio_runtime_services::claude_controls::ControlSnapshot::from_records(
+        agent.value(),
+        None,
+    )
+    .map_err(control_error)?;
+    let thread = agent
+        .thread_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| control_error(ControlError::Request))?;
+    let account = &agent.account_key;
+    let session = control_session(&state, account).await?;
+    let result = session
+        .call_scoped(
+            ControlScope {
+                agent: body.id,
+                epoch: snapshot.epoch(),
+                request_id: Some(body.request_id.clone()),
+            },
+            ControlInvocation::FileBackups {
+                thread_id: thread.to_owned(),
+                settled_request_ids: if body.release { Some(settled) } else { None },
+                request_id: body.request_id,
+            },
         )
+        .await
         .map_err(control_error)?;
-        let thread = agent
-            .thread_id
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| control_error(ControlError::Request))?;
-        let account = &agent.account_key;
-        let session = state
-            .account_session
-            .as_ref()
-            .ok_or_else(ApiError::internal)?
-            .claude_control_session(account)
-            .map_err(session_error)?;
-        let result = session
-            .call_scoped(
-                ControlScope {
-                    agent: body.id,
-                    epoch: snapshot.epoch(),
-                    request_id: Some(body.request_id.clone()),
-                },
-                ControlInvocation::FileBackups {
-                    thread_id: thread.to_owned(),
-                    settled_request_ids: if body.release { Some(settled) } else { None },
-                    request_id: body.request_id,
-                },
-            )
-            .await
-            .map_err(control_error)?;
-        let ControlReply::FileBackups(result) = result else {
-            return Err(ApiError::internal());
-        };
-        super::generated_json::<crate::generated::ClaudeFileBackupsResponse>(result).map(Json)
-    })
-    .await
-    .map_err(|_| ApiError::internal())?
+    let ControlReply::FileBackups(result) = result else {
+        return Err(ApiError::internal());
+    };
+    super::generated_json::<crate::generated::ClaudeFileBackupsResponse>(result).map(Json)
+}
+
+// Threaded controls, command discovery, repair reports and backups use the
+// retained account worker. Starting it does not submit a control request.
+async fn control_session(
+    state: &HttpState,
+    account: &str,
+) -> Result<Arc<dyn ControlSession>, ApiError> {
+    let broker = state
+        .account_session
+        .as_ref()
+        .ok_or_else(session_unavailable)?;
+    broker
+        .ensure_session(account)
+        .await
+        .map_err(|error| match error {
+            studio_runtime_services::account_session_runtime::AccountSessionError::Requires(_) => {
+                session_unavailable()
+            }
+            other @ (studio_runtime_services::account_session_runtime::AccountSessionError::Expired
+            | studio_runtime_services::account_session_runtime::AccountSessionError::Refused(_)
+            | studio_runtime_services::account_session_runtime::AccountSessionError::InvalidResponse(_)
+            | studio_runtime_services::account_session_runtime::AccountSessionError::Persistence
+            | studio_runtime_services::account_session_runtime::AccountSessionError::Unknown) => session_error(other),
+        })?;
+    broker
+        .claude_control_session(account)
+        .map_err(|_| session_unavailable())
+}
+
+fn session_unavailable() -> ApiError {
+    ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "The Claude account session is not running",
+    )
 }
 
 async fn require_claude_account(
@@ -441,7 +502,7 @@ async fn load_agent(
     id: String,
 ) -> Result<
     (
-        studio_runtime_store::AgentRecord,
+        Box<studio_runtime_store::AgentRecord>,
         Option<studio_runtime_store::WorkspaceOperationRecord>,
     ),
     ApiError,
@@ -459,7 +520,7 @@ async fn load_agent(
                 .map(|id| WorkspaceOperationsRepository::operation(tx, id))
                 .transpose()?
                 .flatten();
-            Ok::<_, studio_runtime_store::StoreError>(Some((agent, operation)))
+            Ok::<_, studio_runtime_store::StoreError>(Some((Box::new(agent), operation)))
         })
         .await
         .map_err(|_| ApiError::internal())?;

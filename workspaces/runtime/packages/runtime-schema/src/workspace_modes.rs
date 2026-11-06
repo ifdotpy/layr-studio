@@ -7,8 +7,6 @@ use studio_json::{Value, json};
 pub enum ChatWorkspaceMode {
     #[serde(rename = "layr-native")]
     LayrNative,
-    #[serde(rename = "layr")]
-    Layr,
     #[serde(rename = "worktree")]
     Worktree,
 }
@@ -17,7 +15,6 @@ impl ChatWorkspaceMode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::LayrNative => "layr-native",
-            Self::Layr => "layr",
             Self::Worktree => "worktree",
         }
     }
@@ -26,7 +23,6 @@ impl ChatWorkspaceMode {
 /// Workspace choices for a new chat, in selector order.
 pub const CHAT_WORKSPACE_MODES: &[&str] = &[
     ChatWorkspaceMode::LayrNative.as_str(),
-    ChatWorkspaceMode::Layr.as_str(),
     ChatWorkspaceMode::Worktree.as_str(),
 ];
 /// Additional workspace choice for a worker that uses its parent's folder.
@@ -189,6 +185,8 @@ mod tests {
     #[test]
     fn new_workspaces_reject_removed_mode_and_accept_native_layr() {
         assert!(accepts_chat("layr-native"));
+        assert!(!accepts_chat("layr"));
+        assert!(!accepts_worker("layr"));
         assert!(!accepts_chat("image"));
         assert!(!accepts_chat("shared"));
         assert!(accepts_worker("shared"));

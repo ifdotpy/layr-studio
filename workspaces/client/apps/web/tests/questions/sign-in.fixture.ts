@@ -10,7 +10,7 @@ type SignInFields = {
   clientId?: string;
   scope?: string;
   linuxUser?: string;
-  source?: "vm" | "host";
+  source?: "host";
   expiresAt?: number;
   userCode?: string;
 };

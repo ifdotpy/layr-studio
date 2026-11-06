@@ -137,8 +137,6 @@ export interface NativeMethods {
   openSignIn(
     value: string | { url: string; forward: SignInForward },
   ): Promise<void>;
-  /** Show the paper key of a new vault in Terminal (layr-desk keys). */
-  showVaultKeys(prefix: string): Promise<void>;
   getBackendUpdate(): Promise<{
     availableBackendBuild: string | null;
     updateRequired: boolean | null;
@@ -161,7 +159,7 @@ type OptionalNativeMethod =
   | "fileAction"
   | "openSignIn"
   | "getBackendUpdate";
-/** Methods allowed through the server wrapper; direct local frames also allow showVaultKeys. */
+/** Methods allowed through the server wrapper. */
 export const serverNativeMethods = {
   requestMicrophone: true,
   prepareTranscription: true,

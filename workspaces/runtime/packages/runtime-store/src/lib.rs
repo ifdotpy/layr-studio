@@ -58,7 +58,6 @@ pub mod supervisor_journal;
 pub mod terminal_output;
 pub mod text_blobs;
 pub mod transfer_record;
-pub mod vm_work_intent;
 pub mod wal_backup;
 pub mod work_history;
 mod write_alert;
@@ -123,9 +122,9 @@ pub use records::{
     RecordPredicate, RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction,
     StartAttemptView, StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold,
     StoredTitleJob, StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId,
-    TaskRecord, TaskRepository, TerminalRecord, TitleJob, ToolResultRecord, TranscriptAssetId,
-    TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord, UnknownAgentStatus,
-    UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
+    TaskRecord, TaskRepository, TerminalFault, TerminalRecord, TitleJob, ToolResultRecord,
+    TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord,
+    UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
     WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };
 pub use repositories::agent_indexed_reads::{AgentIndexedReads, reserved_turn_input};
@@ -170,8 +169,9 @@ pub use repositories::scheduler::{
 };
 pub use repositories::startup_recovery::{self, StartupRecoveryRepository};
 pub use repositories::sync_documents::{
-    ENTITY_TOMBSTONE_LIMIT, ENTITY_TOMBSTONE_PRUNE_BATCH, EntityPage, EntityRow, SyncDocument,
-    SyncDocumentsRepository, WORK_COLLECTIONS,
+    AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, ENTITY_TOMBSTONE_LIMIT,
+    ENTITY_TOMBSTONE_PRUNE_BATCH, EntityPage, EntityRow, SyncDocument, SyncDocumentsRepository,
+    WINDOW_COLLECTIONS, WORK_COLLECTIONS,
 };
 pub use repositories::terminals::{ArchiveAppend, TerminalRow, TerminalsRepository};
 pub use repositories::transcript::{
@@ -194,6 +194,16 @@ pub use repositories::workspace_views::{
 };
 
 const DATABASE_BUSY_TIMEOUT_MS: u32 = 15_000;
+/// Maximum mapped database bytes per connection; SQLite may cap or disable mapping.
+const DATABASE_MMAP_SIZE_BYTES: i64 = 0;
+/// Suggested maximum SQLite page-cache memory per connection, in KiB.
+const DATABASE_CACHE_SIZE_KIB: i64 = 4096;
+
+fn configure_read_pages(connection: &Connection, schema: &str) -> rusqlite::Result<()> {
+    connection.pragma_update(Some(schema), "mmap_size", DATABASE_MMAP_SIZE_BYTES)?;
+    connection.pragma_update(Some(schema), "cache_size", -DATABASE_CACHE_SIZE_KIB)
+}
+
 /// A Rust repository-owned index whose SQL is shared by bootstrap and the
 /// fresh-state cross-language schema parity check.
 #[doc(hidden)]
@@ -250,7 +260,7 @@ pub enum ObservedTable {
 /// Maximum rowid occurrences recorded per observed table for one writer transaction.
 /// Unit: occurrences, so a row written twice counts twice. Overflow drops that
 /// table's row precision for the commit and reports [`TableChange::Full`].
-const CHANGED_ROW_HINT_LIMIT: usize = 1024;
+pub const CHANGED_ROW_HINT_LIMIT: usize = 1024;
 
 /// What one known commit changed in an observed table.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -278,16 +288,15 @@ pub enum ResourceChange {
 }
 
 // Entity projection tables whose rows are delivered by entity-backed sync refs.
-const ENTITY_RESOURCE_TABLES: [&str; 5] = [
+const ENTITY_RESOURCE_TABLES: [&str; 4] = [
     "sync_entities",
     "sync_entity_meta",
     "durable_rows",
-    "durable_view_log",
     "durable_floor",
 ];
 
 type ResourceChangeObserver = Arc<dyn Fn(ResourceChange) + Send + Sync>;
-type TableChangeObserver = Arc<dyn for<'a> Fn(TableChange<'a>) + Send + Sync>;
+type TableChangeObserver = Arc<dyn for<'a> Fn(TableChange<'a>, bool) + Send + Sync>;
 type TableChangeObserverRegistry = Mutex<HashMap<ObservedTable, Vec<TableChangeObserver>>>;
 
 /// Rowids written by the current writer transaction, grouped by observed table bit.
@@ -296,6 +305,7 @@ struct ChangedRowHints {
     /// Tables whose rowids are recorded for the whole transaction.
     complete: u32,
     rows: [Vec<i64>; u32::BITS as usize],
+    outbox_kinds: Vec<studio_runtime_schema::persistence::OutboxKind>,
 }
 
 thread_local! {
@@ -317,6 +327,25 @@ impl ChangedRowHints {
             rows.clear();
         }
     }
+}
+
+// A typed put classifies only the single update-hook occurrence it caused.
+fn outbox_hint_position() -> Option<usize> {
+    CHANGED_ROWS.with_borrow(|rows| {
+        let bit = ObservedTable::RuntimeOutbox.change_bit();
+        (rows.complete & bit != 0).then(|| rows.rows[bit.trailing_zeros() as usize].len())
+    })
+}
+
+fn record_outbox_kind(before: Option<usize>, kind: studio_runtime_schema::persistence::OutboxKind) {
+    CHANGED_ROWS.with_borrow_mut(|rows| {
+        let bit = ObservedTable::RuntimeOutbox.change_bit();
+        if rows.complete & bit != 0
+            && before.is_some_and(|n| rows.rows[bit.trailing_zeros() as usize].len() == n + 1)
+        {
+            rows.outbox_kinds.push(kind);
+        }
+    });
 }
 
 impl ObservedTable {
@@ -540,6 +569,20 @@ fn fire_table_change_observers(
             }
             _ => TableChange::Full,
         };
+        let local_outbox_only = table == ObservedTable::RuntimeOutbox
+            && changed_rows.is_some_and(|rows| {
+                let kinds = &rows.outbox_kinds;
+                rows.complete & bit != 0
+                    && !kinds.is_empty()
+                    && kinds.len() == rows.rows[bit.trailing_zeros() as usize].len()
+                    && kinds.iter().all(|kind| {
+                        matches!(
+                            kind,
+                            studio_runtime_schema::persistence::OutboxKind::JournalEntry
+                                | studio_runtime_schema::persistence::OutboxKind::Publication
+                        )
+                    })
+            });
         let callbacks = observers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -548,7 +591,9 @@ fn fire_table_change_observers(
             .unwrap_or_default();
         for callback in callbacks {
             if let Err(_panic_payload) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(change)))
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    callback(change, local_outbox_only)
+                }))
             {
                 // A table observer panic must not interrupt other invalidations.
             }
@@ -1379,6 +1424,7 @@ impl RuntimeStore {
                 sqlite_durability::configure_synchronous(connection).map_err(StoreError::from)?;
                 schema::verify_serving_pragmas(connection, "canvas.sqlite3")?;
                 schema::register_python_trigger_functions(connection)?;
+                configure_read_pages(connection, "main")?;
                 install_table_change_hooks(
                     connection,
                     hook_table_change_flags,
@@ -1523,9 +1569,7 @@ impl RuntimeStore {
             ))
     }
 
-    pub fn transaction_local_server_id(
-        transaction: &Transaction<'_>,
-    ) -> StoreResult<Option<String>> {
+    pub fn transaction_local_server_id(transaction: &Connection) -> StoreResult<Option<String>> {
         let Some(path) = transaction.path() else {
             return Ok(None);
         };
@@ -1548,7 +1592,7 @@ impl RuntimeStore {
         table: ObservedTable,
         observer: impl Fn() + Send + Sync + 'static,
     ) {
-        self.add_table_observer(table, move |_change| observer());
+        self.add_table_observer(table, move |_change, _local| observer());
     }
 
     /// Like [`Self::add_table_change_observer`], but a known commit passes the
@@ -1562,13 +1606,23 @@ impl RuntimeStore {
     ) {
         self.table_row_interest
             .fetch_or(table.change_bit(), Ordering::Release);
-        self.add_table_observer(table, observer);
+        self.add_table_observer(table, move |change, _local| observer(change));
+    }
+
+    /// Observe outbox commits, with a true hint only when every write is a typed
+    /// journal or publication put. False includes raw, mixed, overflow and unknown.
+    pub fn add_outbox_change_observer(&self, observer: impl Fn(bool) + Send + Sync + 'static) {
+        self.table_row_interest
+            .fetch_or(ObservedTable::RuntimeOutbox.change_bit(), Ordering::Release);
+        self.add_table_observer(ObservedTable::RuntimeOutbox, move |_change, local| {
+            observer(local)
+        });
     }
 
     fn add_table_observer(
         &self,
         table: ObservedTable,
-        observer: impl for<'a> Fn(TableChange<'a>) + Send + Sync + 'static,
+        observer: impl for<'a> Fn(TableChange<'a>, bool) + Send + Sync + 'static,
     ) {
         self.table_commit_observers
             .lock()
@@ -2318,7 +2372,10 @@ impl RuntimeStore {
     }
 
     /// Whether projection maintenance has not observed the current commit generation and vault signature.
-    pub fn entity_projections_need_maintenance(&self, vault_signature: &str) -> StoreResult<bool> {
+    pub fn entity_projections_need_maintenance(
+        &self,
+        project_signature: &str,
+    ) -> StoreResult<bool> {
         let last = self
             .last_entity_projection_state
             .lock()
@@ -2326,7 +2383,7 @@ impl RuntimeStore {
         let current_generation = self.committed_change_generation();
         Ok(match last.as_ref() {
             Some((generation, signature)) => {
-                *generation != current_generation || signature != vault_signature
+                *generation != current_generation || signature != project_signature
             }
             None => true,
         })
@@ -2343,7 +2400,7 @@ impl RuntimeStore {
     pub fn mark_entity_projections_maintained(
         &self,
         generation: u64,
-        vault_signature: String,
+        project_signature: String,
     ) -> StoreResult<()> {
         if generation > self.committed_change_generation() {
             return Err(StoreError::RecordContract(
@@ -2353,7 +2410,7 @@ impl RuntimeStore {
         *self
             .last_entity_projection_state
             .lock()
-            .map_err(|_| StoreError::WriterPoisoned)? = Some((generation, vault_signature));
+            .map_err(|_| StoreError::WriterPoisoned)? = Some((generation, project_signature));
         Ok(())
     }
 
@@ -2472,6 +2529,7 @@ fn open_database(path: &Path, flags: OpenFlags) -> StoreResult<Connection> {
         Some("canvas.sqlite3") => StoreDatabaseKind::Canvas,
         _ => StoreDatabaseKind::Other,
     };
+    configure_read_pages(&connection, "main")?;
     install_profile(&mut connection, database);
     connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
     connection.busy_timeout(std::time::Duration::from_millis(u64::from(
@@ -2486,6 +2544,46 @@ mod read_pool_tests {
     use std::sync::mpsc;
 
     const READ_POOL_TEST_WATCHDOG: Duration = Duration::from_secs(5);
+
+    #[tokio::test]
+    async fn serving_connections_set_read_page_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let read = |db: &Connection| -> rusqlite::Result<(i64, i64)> {
+            Ok((
+                db.query_row("PRAGMA mmap_size", [], |r| r.get(0))?,
+                db.query_row("PRAGMA cache_size", [], |r| r.get(0))?,
+            ))
+        };
+        let writer = store
+            .transaction_with(move |tx| -> StoreResult<_> { Ok(read(tx)?) })
+            .await
+            .unwrap();
+        let reader = store
+            .read_async("test/page-policy", move |tx| -> StoreResult<_> {
+                Ok(read(tx)?)
+            })
+            .await
+            .unwrap();
+        let analytics = read(&store.analytics.lock().expect("analytics connection")).unwrap();
+        let version = read(&store.version_reader.lock().expect("version reader")).unwrap();
+        let cost = store
+            .with_cost_reader(
+                move |db| -> Result<_, repositories::analytics::AnalyticsStoreError> {
+                    Ok((
+                        read(db)?,
+                        db.query_row("PRAGMA canvas.mmap_size", [], |r| r.get::<_, i64>(0))?,
+                        db.query_row("PRAGMA canvas.cache_size", [], |r| r.get::<_, i64>(0))?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(writer, (0, -DATABASE_CACHE_SIZE_KIB));
+        assert_eq!(reader, writer);
+        assert_eq!(analytics, writer);
+        assert_eq!(version, writer);
+        assert_eq!(cost, (writer, writer.0, writer.1));
+    }
 
     #[tokio::test]
     async fn sequential_reads_reuse_a_bounded_connection() {
@@ -4025,6 +4123,45 @@ mod commit_notification_tests {
     }
 
     #[tokio::test]
+    async fn ambiguous_typed_outbox_commit_has_no_local_only_hint() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let hints = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&hints);
+        store.add_outbox_change_observer(move |local| captured.lock().unwrap().push(local));
+        store
+            .simulate_unknown_commit_after_success
+            .store(true, Ordering::Release);
+        let result = store
+            .transaction(|tx| {
+                outbox::Outbox::put(
+                    tx,
+                    &outbox::OutboxRow {
+                        id: "unknown-outbox".into(),
+                        kind: OutboxKind::JournalEntry,
+                        owner_kind: OwnerKind::Account,
+                        owner_id: "account".into(),
+                        request_id: None,
+                        signature: "sig".into(),
+                        status: OutboxStatus::Pending,
+                        account: None,
+                        stream_id: None,
+                        generation: None,
+                        ordinal: None,
+                        next_at: None,
+                        payload: studio_test_deps::EmptyObject {},
+                        created: 1,
+                    },
+                )?;
+                Ok(())
+            })
+            .await;
+        assert!(matches!(result, Err(StoreError::CommitOutcomeUnknown(_))));
+        assert_eq!(*hints.lock().unwrap(), vec![false]);
+    }
+
+    #[tokio::test]
     async fn ambiguous_commit_wakes_table_observer_and_returns_unknown() {
         let directory = tempfile::tempdir().expect("temporary state directory");
         let store = RuntimeStore::open(Some(directory.path()))
@@ -5207,6 +5344,15 @@ mod projection_adapter_tests {
             count: 3,
         });
         assert_eq!(projected, studio_json::json!({"name":"sample", "count":3}));
+<<<<<<< head
+    }
+}
+
+impl From<studio_json::error::Error> for StoreError {
+    fn from(value: studio_json::error::Error) -> Self {
+        Self::Json(value.into())
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
 }
 
@@ -5215,3 +5361,5 @@ impl From<studio_json::error::Error> for StoreError {
         Self::Json(value.into())
     }
 }
+
+pub mod work_intent;

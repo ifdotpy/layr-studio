@@ -203,14 +203,16 @@ fn settle_tool_abandoned(
             let mut message = "The server stopped before this request recorded its result; it may have run. Do not repeat the mutation with a new id.".to_owned();
             // A host command keeps its guest operation: the caller reads its
             // outcome with action status or list.
-            if record["tool"] == crate::host_exec::TOOL
+            if record["tool"] == "host_exec"
                 && let Some(operation) = record
-                    .get(crate::host_exec::RECEIPT_REQUEST_FIELD)
+                    .get("hostExecRequest")
                     .and_then(|request| request.pointer("/params/operationId"))
                     .and_then(Value::as_str)
             {
                 message.push(' ');
-                message.push_str(&crate::host_exec::operation_note(operation));
+                message.push_str(&format!(
+                    "Operation: {operation}. Use action status or list; never repeat the command."
+                ));
             }
             json!({
                 "requestId":id, "stage":"interrupted", "outcome":"unknown",

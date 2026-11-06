@@ -105,7 +105,6 @@ export function bindNativeFrames(
       [
         "desktop.fileAction",
         "desktop.revealPath",
-        "desktop.showVaultKeys",
         "desktop.pickDirectory",
         "desktop.pickAttachments",
       ].includes(method);

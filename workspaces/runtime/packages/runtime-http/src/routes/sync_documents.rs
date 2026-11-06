@@ -177,15 +177,12 @@ pub(crate) async fn pull(
         .into_response());
     }
     let generation_before_vault_read = store.committed_change_generation();
-    let vault_snapshot = if scope == "drafts" {
-        sync_policy::ProjectVaultSnapshot::default()
+    let project_snapshot = if scope == "drafts" {
+        sync_policy::ProjectSnapshot::default()
     } else {
-        sync_policy::ProjectVaultSnapshot::capture_for_sync(
-            &store,
-            std::path::Path::new(&state_dir),
-        )
-        .await
-        .map_err(map_sync_store_error)?
+        sync_policy::ProjectSnapshot::capture_for_sync(&store, std::path::Path::new(&state_dir))
+            .await
+            .map_err(map_sync_store_error)?
     };
     let read_store = store.clone();
     let read_validators = validators.clone();
@@ -224,16 +221,16 @@ pub(crate) async fn pull(
                         response,
                     )));
                 }
-                if !vault_snapshot
+                if !project_snapshot
                     .matches_sources(connection)
                     .map_err(map_sync_store_error)?
                 {
                     return Ok(EntityPullResult::NeedsMaintenance(generation));
                 }
-                let vault_signature = vault_snapshot.signature();
+                let project_signature = project_snapshot.signature();
                 if generation_before_vault_read != store.committed_change_generation()
                     || store
-                        .entity_projections_need_maintenance(&vault_signature)
+                        .entity_projections_need_maintenance(&project_signature)
                         .map_err(map_sync_store_error)?
                 {
                     // Under steady writes the commit generation always differs from the last
@@ -243,7 +240,7 @@ pub(crate) async fn pull(
                     // here: the snapshot may predate the sampled generation.
                     let current = sync_policy::has_complete_entity_seed(connection)
                         .map_err(map_sync_store_error)?
-                        && vault_snapshot
+                        && project_snapshot
                             .matches_entity_projections(connection)
                             .map_err(map_sync_store_error)?;
                     if !current {
@@ -319,7 +316,7 @@ pub(crate) async fn pull(
 enum EntityMaintenancePreparation {
     Response(SyncPullResponseBody),
     ReadFallback {
-        vault_signature: String,
+        project_signature: String,
         observed_generation: u64,
     },
     PrepareFilesystem,
@@ -351,7 +348,7 @@ async fn pull_with_maintenance(
         let prepare_validators = validators.clone();
         let prepare_priority_id = priority_id.clone();
         let generation_before_vault_read = store.committed_change_generation();
-        let vault_snapshot = sync_policy::ProjectVaultSnapshot::capture_for_sync(
+        let project_snapshot = sync_policy::ProjectSnapshot::capture_for_sync(
             &store,
             std::path::Path::new(&state_dir),
         )
@@ -361,17 +358,17 @@ async fn pull_with_maintenance(
             .read_async(
                 "runtime-http/routes/sync_documents/entity-maintenance-preparation",
                 move |transaction| -> Result<EntityMaintenancePreparation, ApiError> {
-                    if !vault_snapshot
+                    if !project_snapshot
                         .matches_sources(transaction)
                         .map_err(map_sync_store_error)?
                     {
                         return Ok(EntityMaintenancePreparation::PrepareFilesystem);
                     }
-                    let vault_signature = vault_snapshot.signature();
+                    let project_signature = project_snapshot.signature();
                     let observed_generation = prepare_store.committed_change_generation();
                     let needs_maintenance = generation_before_vault_read != observed_generation
                         || prepare_store
-                            .entity_projections_need_maintenance(&vault_signature)
+                            .entity_projections_need_maintenance(&project_signature)
                             .map_err(map_sync_store_error)?;
                     if !needs_maintenance {
                         return match pull_entities(
@@ -395,7 +392,7 @@ async fn pull_with_maintenance(
                                 studio_runtime_store::SqliteError::SqliteFailure(error, _),
                             )) if error.code == studio_runtime_store::ErrorCode::ReadOnly => {
                                 Ok(EntityMaintenancePreparation::ReadFallback {
-                                    vault_signature,
+                                    project_signature,
                                     observed_generation,
                                 })
                             }
@@ -405,7 +402,7 @@ async fn pull_with_maintenance(
 
                     if sync_policy::has_complete_entity_seed(transaction)
                         .map_err(map_sync_store_error)?
-                        && vault_snapshot
+                        && project_snapshot
                             .matches_entity_projections(transaction)
                             .map_err(map_sync_store_error)?
                     {
@@ -431,7 +428,7 @@ async fn pull_with_maintenance(
                         prepare_store
                             .mark_entity_projections_maintained(
                                 generation_before_vault_read,
-                                vault_signature,
+                                project_signature,
                             )
                             .map_err(map_sync_store_error)?;
                         return Ok(EntityMaintenancePreparation::Response(response));
@@ -442,10 +439,10 @@ async fn pull_with_maintenance(
             )
             .await?;
 
-        let (rooms, vault_snapshot, vault_signature, project_server_id) = match preparation {
+        let (rooms, project_snapshot, project_signature, project_server_id) = match preparation {
             EntityMaintenancePreparation::Response(response) => return Ok(response),
             EntityMaintenancePreparation::ReadFallback {
-                vault_signature,
+                project_signature,
                 observed_generation,
             } => {
                 let writer_store = store.clone();
@@ -455,7 +452,8 @@ async fn pull_with_maintenance(
                 let (response, _) = store
                     .transaction_with_commit_generation(move |transaction| {
                         if writer_store.committed_change_generation() != observed_generation
-                            || writer_store.entity_projections_need_maintenance(&vault_signature)?
+                            || writer_store
+                                .entity_projections_need_maintenance(&project_signature)?
                         {
                             return Ok(None);
                         }
@@ -491,7 +489,7 @@ async fn pull_with_maintenance(
                         |transaction| {
                             Ok((
                                 RoomSources::read_for_sync(transaction)?,
-                                sync_policy::ProjectVaultSnapshot::stored_projects(transaction)?,
+                                sync_policy::ProjectSnapshot::stored_projects(transaction)?,
                             ))
                         },
                     )
@@ -504,17 +502,22 @@ async fn pull_with_maintenance(
                     move || -> Result<_, ApiError> {
                         // Path canonicalization runs after the read and outside
                         // a SQLite transaction; the writer rechecks these room inputs.
-                        let vault_snapshot = sync_policy::ProjectVaultSnapshot::capture(
+                        let project_snapshot = sync_policy::ProjectSnapshot::capture(
                             std::path::Path::new(&prepare_state_dir),
                             &projects,
                         );
-                        let vault_signature = vault_snapshot.signature();
+                        let project_signature = project_snapshot.signature();
                         let project_server_id = prepare_store
                             .local_server_id()
                             .map_err(map_sync_store_error)?;
                         let rooms =
                             RoomDirectory::prepare(room_sources).map_err(map_sync_store_error)?;
-                        Ok((rooms, vault_snapshot, vault_signature, project_server_id))
+                        Ok((
+                            rooms,
+                            project_snapshot,
+                            project_signature,
+                            project_server_id,
+                        ))
                     },
                 )
                 .await
@@ -535,7 +538,7 @@ async fn pull_with_maintenance(
                     &transaction_state_dir,
                     true,
                     project_server_id.as_deref(),
-                    Some(&vault_snapshot),
+                    Some(&project_snapshot),
                     Some(&rooms),
                     after,
                     limit,
@@ -554,7 +557,7 @@ async fn pull_with_maintenance(
             continue;
         };
         store
-            .mark_entity_projections_maintained(committed_generation, vault_signature)
+            .mark_entity_projections_maintained(committed_generation, project_signature)
             .map_err(map_sync_store_error)?;
         return Ok(response);
     }
@@ -732,7 +735,7 @@ fn pull_entities(
     state_dir: &str,
     maintain_projections: bool,
     project_server_id: Option<&str>,
-    vault_snapshot: Option<&sync_policy::ProjectVaultSnapshot>,
+    project_snapshot: Option<&sync_policy::ProjectSnapshot>,
     rooms: Option<&RoomDirectory>,
     after: i64,
     limit: i64,
@@ -744,7 +747,7 @@ fn pull_entities(
     validators: &crate::validation::Registry,
 ) -> Result<SyncPullResponseBody, StoreError> {
     if maintain_projections {
-        let vault_snapshot = vault_snapshot.ok_or(StoreError::RecordContract(
+        let project_snapshot = project_snapshot.ok_or(StoreError::RecordContract(
             "entity projection maintenance is missing its vault snapshot",
         ))?;
         let rooms = rooms.ok_or(StoreError::RecordContract(
@@ -766,7 +769,7 @@ fn pull_entities(
             transaction,
             state_dir,
             project_server_id,
-            vault_snapshot,
+            project_snapshot,
             rooms,
             |collection, id, value, deleted| {
                 if collection == "workDetail" && !deleted {
@@ -783,17 +786,20 @@ fn pull_entities(
         )?;
     }
     let mut page = if fresh {
-        SyncDocumentsRepository::pull_global_entities(
+        studio_runtime_services::entity_scope::pull_global_fresh(
             transaction,
             after,
             limit,
-            fresh,
             initial_high,
-            reset_support,
             priority_id,
         )?
     } else {
-        studio_runtime_services::work_scope::pull_global(transaction, after, limit, reset_support)?
+        studio_runtime_services::entity_scope::pull_global(
+            transaction,
+            after,
+            limit,
+            reset_support,
+        )?
     };
     let workspace_id = SyncDocumentsRepository::workspace_id(transaction)?;
     if page.reset {
@@ -831,9 +837,16 @@ fn pull_entities(
     loop {
         let raw_count = page.rows.len();
         let mut reached_limit = false;
-        for row in &page.rows {
+        for (index, row) in page.rows.iter().enumerate() {
+            // The limit cuts only between change numbers: the rest of a unit that shares
+            // the number of the last document is still sent, or the checkpoint would skip it.
+            if reached_limit && page.rows[index - 1].sequence != row.sequence {
+                break;
+            }
             checkpoint = row.sequence;
-            if !seen_sequences.insert(row.sequence) {
+            // Rows built from one main-table change share its number, so the key is
+            // the document and its number, not the number alone.
+            if !seen_sequences.insert((row.collection.clone(), row.id.clone(), row.sequence)) {
                 continue;
             }
             let Some(document) = entity_document(row) else {
@@ -841,9 +854,8 @@ fn pull_entities(
             };
             documents
                 .push(crate::generated::SyncPullResponseDocumentsItemUnion::SyncEntity(document));
-            if documents.len() == page_limit {
+            if documents.len() >= page_limit {
                 reached_limit = true;
-                break;
             }
         }
         if reached_limit {
@@ -860,17 +872,15 @@ fn pull_entities(
         }
         scan_after = next_after;
         page = if fresh {
-            SyncDocumentsRepository::pull_global_entities(
+            studio_runtime_services::entity_scope::pull_global_fresh(
                 transaction,
                 next_after,
                 limit,
-                fresh,
                 initial_high,
-                reset_support,
                 None,
             )?
         } else {
-            studio_runtime_services::work_scope::pull_global(
+            studio_runtime_services::entity_scope::pull_global(
                 transaction,
                 next_after,
                 limit,
@@ -1640,6 +1650,7 @@ mod vault_maintenance_tests {
     }
 
     #[tokio::test]
+<<<<<<< head
     async fn entity_pull_reprojects_when_cached_vault_changes_without_a_store_write() {
         let directory = tempfile::tempdir().expect("isolated state directory");
         let store = Arc::new(
@@ -1773,6 +1784,8 @@ mod vault_maintenance_tests {
     /// Steady writes keep moving the commit generation. A pull whose projections still match
     /// its snapshot must be served while the global maintenance lock is held elsewhere.
     #[tokio::test]
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     async fn entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock() {
         use axum::body::Body;
         use axum::extract::ConnectInfo;
@@ -1881,10 +1894,22 @@ mod vault_maintenance_tests {
         assert!(sync_policy::has_complete_entity_seed(&store.test_reader().unwrap()).unwrap());
         store.transaction(|tx| {
             tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.capacity','$.naming'),'$.maxAgents',80,'$.maxAgentsExplicit',json('true'),'$.needsTitle',json('true')) WHERE id='agent-1'", [])?;
-            tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(json_remove(payload,'$.value.capacity','$.value.naming')), payload=json_remove(payload,'$.value.capacity','$.value.naming') WHERE collection IN ('agent','agentDetail') AND id='agent-1'", [])?;
             Ok(())
         }).await.unwrap();
         drop(store);
+        // A completed writer response can arrive just before its actor drops
+        // the last runtime-lock lease. Wait for that lease before reopening.
+        let lock_path = directory.path().join("runtime.lock");
+        studio_runtime_process::blocking_pool::spawn_blocking("test/runtime-lock", move || {
+            let lock = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(lock_path)
+                .unwrap();
+            lock.lock().unwrap();
+        })
+        .await
+        .unwrap();
         studio_runtime_store::migrations::test_apply_catalog_before_capacity(
             &directory.path().join("canvas.sqlite3"),
         )
@@ -1956,7 +1981,7 @@ mod vault_maintenance_tests {
                         "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
                         rusqlite::params![
                             format!("work-{index:04}"),
-                            json!({"id":format!("work-{index:04}"),"owner":id,"results":[]})
+                            json!({"id":format!("work-{index:04}"),"rootId":id,"title":"Fixture work","description":"","status":"ready","owner":id,"dependencies":[],"created":1,"updated":1,"version":1,"gate":null,"results":[],"decisions":[],"releases":[]})
                                 .to_string()
                         ],
                     )?;
@@ -2010,7 +2035,7 @@ mod vault_maintenance_tests {
         let reader = store.test_reader().expect("store reader");
         assert!(sync_policy::has_complete_entity_seed(&reader).expect("seed marker reads"));
         drop(reader);
-        let vault_snapshot = sync_policy::ProjectVaultSnapshot::capture_for_sync(
+        let project_snapshot = sync_policy::ProjectSnapshot::capture_for_sync(
             &store,
             std::path::Path::new(&state_dir),
         )
@@ -2018,7 +2043,7 @@ mod vault_maintenance_tests {
         .expect("vault snapshot");
         assert!(
             !store
-                .entity_projections_need_maintenance(&vault_snapshot.signature())
+                .entity_projections_need_maintenance(&project_snapshot.signature())
                 .expect("projection watermark reads")
         );
         let warm_started = std::time::Instant::now();

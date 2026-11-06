@@ -681,15 +681,14 @@ async fn deferring_a_question_publishes_the_request_entity() {
         deferral.by,
         studio_runtime_schema::approvals::Principal::Owner
     );
-    let payload: String = store
-        .test_reader()
-        .unwrap()
-        .query_row(
-            "SELECT payload FROM sync_entities WHERE collection='request' AND id=?1",
-            [id],
-            |row| row.get(0),
-        )
-        .expect("request entity");
+    let payload = studio_runtime_services::entity_scope::direct_document(
+        &store.test_reader().unwrap(),
+        "request",
+        id,
+    )
+    .unwrap()
+    .and_then(|row| row.payload)
+    .expect("request entity");
     assert!(
         payload.contains("\"deferral\":{\"active\":true"),
         "{payload}"

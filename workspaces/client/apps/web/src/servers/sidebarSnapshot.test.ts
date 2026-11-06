@@ -49,6 +49,25 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("server sidebar projection", () => {
+  it("retains an epoch-scoped workspace copy wait for the chat row", () => {
+    const data = snapshot();
+    data.threads = [
+      {
+        id: "lead",
+        status: AgentStatus.starting,
+        epoch: 2,
+        startWait: {
+          reason: "workspace_copy",
+          epoch: 2,
+          progress: { phase: "staging", done: 2, total: 4, unit: "files" },
+        },
+      },
+    ];
+    expect(sidebarSnapshot(data).threads[0]).toMatchObject({
+      epoch: 2,
+      startWait: { reason: "workspace_copy", progress: { done: 2, total: 4 } },
+    });
+  });
   it("preserves organization, tails, workers and radio membership without transcripts or session state", () => {
     const data = snapshot();
     data.threads = [
@@ -122,7 +141,6 @@ describe("server sidebar projection", () => {
             name: "Remote project",
           },
         ],
-        layrReadiness: { state: "failed", error: "The VM is not running." },
       },
     ];
     data.runtime.peerTeams = [
@@ -294,30 +312,6 @@ describe("server sidebar projection", () => {
     const projected = sidebarSnapshot(data);
     expect(projected.sidebarOrder).toEqual(order);
     expect(projected.savedOrder).toEqual({ projects: ["/legacy"] });
-  });
-
-  it("shows Layr chats in their host project", () => {
-    const line = "/var/lib/codex-studio/layr/projects/da54bb40/lines/main";
-    const vm = {
-      id: "vm-lead",
-      cwd: line,
-      executionMode: "vm",
-      projectPath: "/Users/me/Projects/attar",
-    } as Snapshot["threads"][number];
-    const native = {
-      id: "native",
-      cwd: line,
-      executionMode: "native",
-      projectPath: "/Users/me/Projects/attar",
-    } as Snapshot["threads"][number];
-    const data = snapshot();
-    data.threads = [vm, native];
-    const threads = sidebarSnapshot(data).threads;
-    expect(threads.map((row) => row.projectPath)).toEqual([
-      "/Users/me/Projects/attar",
-      "/Users/me/Projects/attar",
-    ]);
-    expect(vm.cwd).toBe(line);
   });
 
   it("uses empty saved preferences when keys are missing or invalid", () => {

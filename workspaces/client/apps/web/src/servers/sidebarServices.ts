@@ -11,9 +11,6 @@ import {
   type SidebarTarget,
 } from "../components/sidebar/services";
 import type { Project } from "../types";
-import type { LayrReadinessEntry } from "../components/sidebar/LayrReadiness";
-import type { LayrSyncEntry } from "../components/sidebar/MacSync";
-import type { VaultEntry } from "../components/sidebar/Vault";
 import { mergeSidebar, type MergedSidebar } from "./mergedSidebar";
 import {
   mergedSidebarPreferences,
@@ -143,15 +140,6 @@ export function sidebarWireRequest(
       ),
     };
   }
-  // Mac folder sync, project secrets and the project vault name their layr project, which the
-  // owning server keeps as is; an AWS sign-in names no project.
-  if (
-    endpoint === "/api/mac-sync/resolve" ||
-    endpoint === "/api/mac-sync/config" ||
-    endpoint.startsWith("/api/project-secrets/") ||
-    endpoint.startsWith("/api/vault/")
-  )
-    return value;
   if (endpoint !== "/api/projects" && endpoint !== "/api/peer-teams")
     throw new Error("The sidebar API path is unavailable.");
   if (typeof value.path !== "string")
@@ -361,9 +349,6 @@ export function createMergedSidebarServices(
         : model.projectReferences.get(path)?.path || path,
     chatPath: (id: string) => model.chatReferences.get(id)?.path || "",
     alias: (target: SidebarTarget) => aliases[sidebarOwner(model, target)],
-    layrReadiness: (path: string) => sidebarLayrReadiness(model, aliases, path),
-    layrSync: (path: string) => sidebarLayrSync(model, aliases, path),
-    vault: (path: string) => sidebarVault(model, aliases, path),
   };
 }
 
@@ -389,74 +374,4 @@ export function sidebarUnavailableReason(
     `The project's home server ${owner} is not connected. ` +
     "If that server lost its identity, references to its previous identity remain unavailable."
   );
-}
-
-/** Each server reports layr readiness for its own folder of the project; Linux servers report
- * none. Actions on the layr project go to that server. */
-export function sidebarLayrReadiness(
-  model: MergedSidebar,
-  aliases: Record<string, string>,
-  path: string,
-): LayrReadinessEntry[] {
-  const seen = new Set<string>();
-  const entries: LayrReadinessEntry[] = [];
-  for (const member of model.groups.get(path)?.members || []) {
-    const readiness = member.project.layrReadiness;
-    if (!readiness || seen.has(member.source.id)) continue;
-    seen.add(member.source.id);
-    entries.push({
-      ...(model.sources.length > 1
-        ? { server: aliases[member.source.id] || member.source.id }
-        : {}),
-      ownerId: member.source.id,
-      readiness,
-    });
-  }
-  return entries;
-}
-
-/** Each macOS server syncs its own Mac folder of the project; actions go to that server. */
-export function sidebarLayrSync(
-  model: MergedSidebar,
-  aliases: Record<string, string>,
-  path: string,
-): LayrSyncEntry[] {
-  const seen = new Set<string>();
-  const entries: LayrSyncEntry[] = [];
-  for (const member of model.groups.get(path)?.members || []) {
-    const sync = member.project.layrSync;
-    if (!sync || seen.has(member.source.id)) continue;
-    seen.add(member.source.id);
-    entries.push({
-      ...(model.sources.length > 1
-        ? { server: aliases[member.source.id] || member.source.id }
-        : {}),
-      ownerId: member.source.id,
-      sync,
-    });
-  }
-  return entries;
-}
-
-/** Each macOS server reports the vault of its own layr project; actions go to that server. */
-export function sidebarVault(
-  model: MergedSidebar,
-  aliases: Record<string, string>,
-  path: string,
-): VaultEntry[] {
-  const seen = new Set<string>();
-  const entries: VaultEntry[] = [];
-  for (const member of model.groups.get(path)?.members || []) {
-    const vault = member.project.vault;
-    if (!vault || seen.has(member.source.id)) continue;
-    seen.add(member.source.id);
-    entries.push({
-      ...(model.sources.length > 1
-        ? { server: aliases[member.source.id] || member.source.id }
-        : {}),
-      ownerId: member.source.id,
-      vault,
-    });
-  }
-  return entries;
 }

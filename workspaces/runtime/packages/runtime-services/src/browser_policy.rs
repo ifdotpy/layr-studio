@@ -1,11 +1,4 @@
-//! The URL rules of the browser bridge (docs/vm-browser-bridge.md, "URL policy" and
-//! section 6.3).
-//!
-//! The owner of these rules is `workspaces/runtime/apps/vm-guest/browser_policy.py`; the guest
-//! and the Python server import it. This module is its Rust port, and
-//! `tests/browser_policy_differential.rs` runs both on one corpus so every accepted link, every
-//! field and every refusal message stays equal. The splitting follows Python's `urlsplit`,
-//! `parse_qs(keep_blank_values=True)` and `ipaddress` rules that the owner depends on.
+//! URL validation and sign-in link detection for the browser bridge.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -673,7 +666,7 @@ fn query_names(link: &str) -> BTreeSet<String> {
 }
 
 /// The links in an agent's message that the person must open to sign in or approve
-/// (`sign_in_links` of the owner, docs/vm-browser-bridge.md section 7). Only protocol markers in
+/// Only protocol markers in
 /// the query count, so an ordinary link stays an ordinary link.
 pub fn sign_in_links(text: &str) -> Vec<String> {
     let mut links: Vec<String> = Vec::new();
@@ -722,10 +715,15 @@ mod tests {
 
     #[test]
     fn sign_in_links_follow_the_shared_corpus() {
+<<<<<<< head
         // The owner (vm-guest/browser_policy.py) checks the same file.
         let corpus: Vec<studio_json::Value> =
             studio_json::from_str(include_str!("../../../apps/vm-guest/sign_in_links.json"))
                 .expect("corpus");
+=======
+        let corpus: Vec<studio_json::Value> =
+            studio_json::from_str(include_str!("sign_in_links.json")).expect("corpus");
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
         assert!(corpus.len() > 20);
         for case in corpus {
             let expected: Vec<String> =

@@ -376,6 +376,7 @@ struct CodexClaimProfile {
     _extra: BTreeMap<String, IgnoredAny>,
 }
 
+<<<<<<< head
 /// Credential needed by the VM login; values must never be logged.
 pub enum CodexVmCredential {
     ApiKey(String),
@@ -519,6 +520,8 @@ pub fn codex_vm_auth(
     })
 }
 
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 fn codex_metadata(auth: CodexAuthFile) -> Result<AuthMetadata, ()> {
     let tokens = auth.tokens.unwrap_or_default();
     let token = tokens
@@ -3406,6 +3409,7 @@ mod tests {
     const PLACEHOLDER_KEY: &str = "placeholder-secret-do-not-persist";
 
     #[test]
+<<<<<<< head
     fn vm_codex_projection_matches_legacy_ingress() {
         fn legacy(bytes: &[u8], expected: Option<&str>) -> Result<Value, &'static str> {
             let auth: Value = studio_json::from_slice(bytes).map_err(|_| "invalid")?;
@@ -3536,6 +3540,8 @@ mod tests {
     }
 
     #[test]
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     fn codex_account_producers_reserve_explicit_login_and_replay_exact_receipt() {
         let fixture = TestDir::new();
         let path = fixture.path.join("registry.json");

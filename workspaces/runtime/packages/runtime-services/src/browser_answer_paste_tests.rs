@@ -1,8 +1,12 @@
-//! Paste mode and the pasted redirect (docs/vm-browser-bridge.md, section 6.3).
+//! Paste mode and the pasted redirect.
 
 use super::{BrowserAnswerContext, BrowserAnswerError, answer};
 use crate::browser_cards::fixture;
+<<<<<<< head
 use crate::linux_vm_guest::{GuestError, GuestRpc};
+=======
+use crate::browser_rpc::{BrowserRpc, BrowserRpcError};
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use studio_json::{Value, json};
@@ -11,7 +15,7 @@ use studio_runtime_schema::approvals::{
     CloseReason, Decision, Timestamp,
 };
 
-type Respond = Box<dyn Fn(&str, &Value) -> Result<Value, GuestError> + Send + Sync>;
+type Respond = Box<dyn Fn(&str, &Value) -> Result<Value, BrowserRpcError> + Send + Sync>;
 
 struct ScriptGuest {
     calls: Mutex<Vec<(String, Value, String)>>,
@@ -20,7 +24,7 @@ struct ScriptGuest {
 
 impl ScriptGuest {
     fn new(
-        respond: impl Fn(&str, &Value) -> Result<Value, GuestError> + Send + Sync + 'static,
+        respond: impl Fn(&str, &Value) -> Result<Value, BrowserRpcError> + Send + Sync + 'static,
     ) -> Arc<Self> {
         Arc::new(Self {
             calls: Mutex::new(Vec::new()),
@@ -38,15 +42,15 @@ impl ScriptGuest {
     }
 }
 
-impl GuestRpc for ScriptGuest {
+impl BrowserRpc for ScriptGuest {
     fn stream(
         &self,
         method: &str,
         params: &Value,
         request_id: Option<&str>,
         _timeout: Duration,
-        _on_frame: &mut dyn FnMut(Value) -> Result<(), GuestError>,
-    ) -> Result<Value, GuestError> {
+        _on_frame: &mut dyn FnMut(Value) -> Result<(), BrowserRpcError>,
+    ) -> Result<Value, BrowserRpcError> {
         self.calls.lock().expect("test step").push((
             method.to_owned(),
             params.clone(),
@@ -61,7 +65,7 @@ const AGENT: &str = "browser-paste-agent";
 const LINK: &str = "https://id.example.com/auth?client_id=kube&redirect_uri=http%3A%2F%2Flocalhost%3A8000&response_type=code&scope=openid&state=S1";
 
 fn approve_then(
-    callback: impl Fn(&Value) -> Result<Value, GuestError> + Send + Sync + 'static,
+    callback: impl Fn(&Value) -> Result<Value, BrowserRpcError> + Send + Sync + 'static,
 ) -> Arc<ScriptGuest> {
     ScriptGuest::new(move |method, params| match method {
         "browser.answer" => Ok(
@@ -69,11 +73,11 @@ fn approve_then(
         ),
         "browser.callback" => callback(params),
         "browser.close" => Ok(json!({"state":"closed"})),
-        _ => Err(GuestError::InvalidRequest),
+        _ => Err(BrowserRpcError::InvalidRequest),
     })
 }
 
-fn signed_in(_: &Value) -> Result<Value, GuestError> {
+fn signed_in(_: &Value) -> Result<Value, BrowserRpcError> {
     Ok(json!({"status":200,"contentType":"text/html","body":"PGgxPm9rPC9oMT4=","done":true}))
 }
 
@@ -117,7 +121,6 @@ fn context(guest: Arc<ScriptGuest>, local: bool) -> BrowserAnswerContext {
     BrowserAnswerContext {
         local_window: local,
         guest,
-        local_forwarder: None,
         now: 100.0,
         http_providers: Default::default(),
     }
@@ -302,7 +305,7 @@ async fn a_result_of_another_sign_in_is_refused_and_nothing_is_relayed() {
 async fn a_paste_before_the_approval_or_after_the_deadline_is_refused() {
     let (_dir, store, id) = store(LINK, redirect()).await;
     let guest = approve_then(|_| {
-        Err(GuestError::Rejected {
+        Err(BrowserRpcError::Rejected {
             code: Some("stale".into()),
             detail: Some("The sign-in forward is closed".into()),
             uncertain: false,
@@ -343,7 +346,7 @@ async fn a_paste_before_the_approval_or_after_the_deadline_is_refused() {
 async fn a_lost_relay_reply_is_unknown_and_never_sent_again() {
     let (_dir, store, id) = store(LINK, redirect()).await;
     let guest = approve_then(|_| {
-        Err(GuestError::Transport {
+        Err(BrowserRpcError::Transport {
             message: "reply lost".into(),
             uncertain: true,
         })
@@ -386,7 +389,7 @@ async fn a_relay_that_the_bridge_did_not_send_keeps_the_card_waiting_for_a_retry
             signed_in(params)
         } else {
             // The host bridge could not read its listeners and forwarded nothing.
-            Err(GuestError::Rejected {
+            Err(BrowserRpcError::Rejected {
                 code: Some(crate::browser_host::NOT_SENT_CODE.into()),
                 detail: Some("Studio could not read the listening ports of this computer".into()),
                 uncertain: false,
@@ -433,7 +436,7 @@ async fn a_relay_that_failed_after_the_forward_started_stays_unknown() {
     let (_dir, store, id) = store(LINK, redirect()).await;
     // The command did not answer after the bridge sent the request to it.
     let guest = approve_then(|_| {
-        Err(GuestError::Rejected {
+        Err(BrowserRpcError::Rejected {
             code: Some("unavailable".into()),
             detail: Some("The sign-in command did not answer on port 8000".into()),
             uncertain: false,
@@ -507,7 +510,7 @@ async fn a_device_code_page_opens_from_any_window_without_a_forward() {
     let (_dir, store, id) = store(device, None).await;
     let guest = ScriptGuest::new(|method, _| match method {
         "browser.answer" => Ok(json!({"state":"opened","lease":null})),
-        _ => Err(GuestError::InvalidRequest),
+        _ => Err(BrowserRpcError::InvalidRequest),
     });
     for _ in 0..2 {
         let opened = answer(

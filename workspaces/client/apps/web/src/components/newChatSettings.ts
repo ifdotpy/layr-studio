@@ -68,7 +68,9 @@ export function settingsForNewChatAccount(
     fast_mode: false,
     daybreak_enabled: false,
     worker_defaults: pinnedWorkerDefaults,
-    review_defaults: undefined,
+    review_defaults: settings.review_defaults?.account_key
+      ? settings.review_defaults
+      : undefined,
   };
 }
 
@@ -200,10 +202,11 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
     review === undefined ||
     (record(review) &&
       Object.keys(review).every((key) =>
-        ["model", "effort", "fast_mode"].includes(key),
+        ["model", "effort", "fast_mode", "account_key"].includes(key),
       ) &&
       (review.fast_mode === undefined ||
         typeof review.fast_mode === "boolean") &&
+      (review.account_key === undefined || nullableName(review.account_key)) &&
       nullableName(review.model) &&
       nullableName(review.effort))
   );

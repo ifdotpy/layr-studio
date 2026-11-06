@@ -2410,8 +2410,7 @@ async function startSyncResourceStream(
   let stateSequence: number | null = null;
   let pendingStateSequence: number | null = null;
   let observeStateResource:
-    | ReturnType<typeof createStateResourceAdapter>
-    | undefined;
+    ReturnType<typeof createStateResourceAdapter> | undefined;
   let failure: unknown;
   let reader;
   try {
@@ -4394,11 +4393,14 @@ export async function cleanupOwned(
     if (deleteIntent.state === "prepared") {
       await saveJournal(journalPath, journal);
       try {
-        const deleted = await client.request(
-          "POST",
-          "/api/conversation/delete",
-          { id: deleteIntent.targetId },
-        );
+        const deleted = await client.request("POST", "/api/commands", {
+          id: randomUUID(),
+          client: "verify-rust-chat-scale",
+          number: Date.now(),
+          kind: "delete",
+          target: deleteIntent.targetId,
+          body: {},
+        });
         deleteIntent.state = "confirmed";
         deleteIntent.elapsedMs = deleted.elapsedMs;
       } catch (error) {

@@ -201,15 +201,11 @@ test("composer keeps one tools row and readable mixed-provider execution summary
                 "data-mantine-color-scheme",
                 scheme,
               );
-              const workspace = document.querySelector(".workspace")!;
-              const gutter = parseFloat(
-                getComputedStyle(workspace).getPropertyValue("--chat-gutter"),
-              );
-              // The same column ratio owned by the Studio content-width preference.
-              document.documentElement.style.setProperty(
-                "--studio-content-width-ratio",
-                String(target / (workspace.clientWidth - 2 * gutter)),
-              );
+              // The composer keeps the standard column whatever the reading
+              // width, so the check sets the composer width itself.
+              document
+                .querySelector<HTMLElement>("#composer")!
+                .style.setProperty("width", `${target}px`);
             },
             { target, scheme },
           );

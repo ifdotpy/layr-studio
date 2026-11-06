@@ -1,6 +1,5 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use super::*;
+<<<<<<< head
 use crate::provider_callbacks::{
     CallbackContext, CallbackDecision, ManagedToolPortsConfig, ManagedToolRuntimePorts,
     dispatch_with_managed_tools,
@@ -320,6 +319,9 @@ async fn only_a_ready_vm_reviewer_reads_layr() {
     assert!(text(&unattached).contains(DEPENDENCY), "{unattached}");
     assert!(fixture.calls().is_empty());
 }
+=======
+use studio_json::json;
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 
 /// The exact allowlist and argument rules of Python `run_layr_read`.
 #[test]

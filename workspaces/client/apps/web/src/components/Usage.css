@@ -37,7 +37,7 @@
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--studio-radius-control);
   background: transparent;
   cursor: pointer;
 }
@@ -45,23 +45,23 @@
   outline: none;
 }
 .account-limits-dot-target:focus-visible .account-limits-dot {
-  outline: 2px solid var(--muted);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 .account-limits-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: light-dark(#8b909a, #858b96);
+  background: var(--studio-state-paused);
 }
 .account-limits-dot[data-color="green"] {
-  background: light-dark(#34866d, #67ad91);
+  background: var(--studio-state-unread);
 }
 .account-limits-dot[data-color="yellow"] {
-  background: light-dark(#a67c21, #d5ad52);
+  background: var(--studio-state-answer);
 }
 .account-limits-dot[data-color="red"] {
-  background: light-dark(#b35151, #cc7777);
+  background: var(--studio-state-error);
 }
 .account-limits-dot[data-current] {
   outline: 1px solid var(--muted);
@@ -69,7 +69,7 @@
 }
 .account-limits-dot-tooltip {
   white-space: pre-line;
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .account-limits-popover {
   padding: 0;
@@ -104,7 +104,7 @@
 }
 .account-limit-group {
   border: var(--studio-border-width) solid var(--line);
-  border-radius: var(--mantine-spacing-xs);
+  border-radius: var(--studio-radius-card);
   padding: var(--mantine-spacing-sm);
   min-width: 0;
 }
@@ -300,8 +300,8 @@
   font-variant-numeric: tabular-nums;
 }
 .account-cost-values strong.account-cost-missing {
-  font-size: var(--studio-text-body);
-  font-weight: 500;
+  font-size: var(--studio-text-meta);
+  font-weight: 400;
   color: var(--muted);
 }
 .account-costs p {
@@ -370,7 +370,7 @@
 .account-reset-confirm {
   background: var(--surface);
   border: var(--studio-border-width) solid var(--line);
-  border-radius: var(--mantine-spacing-xs);
+  border-radius: var(--studio-radius-card);
   margin-top: var(--mantine-spacing-xs);
   padding: var(--mantine-spacing-xs);
 }
@@ -388,7 +388,7 @@
   padding: var(--mantine-spacing-xs);
   margin-bottom: var(--mantine-spacing-xs);
   border: var(--studio-border-width) solid var(--mantine-color-orange-6);
-  border-radius: var(--mantine-spacing-xs);
+  border-radius: var(--studio-radius-card);
   overflow-wrap: anywhere;
 }
 .account-limit-recovery p {
@@ -396,7 +396,7 @@
 }
 
 /* The composer footer keeps context, estimate and allowance in one row. */
-.account-cost-values strong {
+.account-cost-values strong:not(.account-cost-missing) {
   font-size: var(--studio-text-body);
 }
 .account-limits-panel small,
@@ -429,8 +429,8 @@
   color: var(--text);
 }
 .account-limits-tiles .setup-account[data-selected] {
-  border-color: var(--line);
-  background: var(--mantine-color-default-hover);
+  border-color: transparent;
+  background: var(--selected);
 }
 .account-limits-tile-name {
   line-height: 1.4;
@@ -516,16 +516,20 @@
 .session-cost-summary:empty {
   display: none;
 }
+/* "Context" and "Context 100%" take one width, so the first usage report
+   does not push the session cost. */
 .context-use {
   order: -1;
-  min-width: 0;
+  min-width: 4.75rem;
+  text-align: start;
   min-height: var(--studio-control-size);
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--studio-radius-control);
   background: transparent;
   color: var(--muted);
   font: inherit;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -533,7 +537,7 @@
   color: var(--text);
 }
 .context-use:focus-visible {
-  outline: 2px solid var(--mantine-primary-color-filled);
+  outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
 .account-limits-summary {
@@ -718,9 +722,15 @@
     min-height: var(--studio-secondary-touch-target);
     min-width: var(--studio-secondary-touch-target);
   }
+  /* The context label keeps the "Context 100%" width on touch too. */
+  .usage-footer .context-use {
+    min-width: max(4.75rem, var(--studio-secondary-touch-target));
+  }
+  /* As a flex row the label's trailing space collapses; the gap keeps it. */
   .usage-footer .session-cost-summary {
     display: flex;
     align-items: center;
+    gap: 0.25em;
   }
   .usage-footer {
     gap: var(--mantine-spacing-xs);
@@ -728,4 +738,18 @@
   .account-limits-group {
     gap: var(--mantine-spacing-xs);
   }
+}
+
+/* In a phone sheet the sheet title names the panel, and the sheet scrolls. */
+.context-sheet .mantine-Drawer-body > strong:first-child,
+.account-limits-sheet .account-limits-heading h3 {
+  display: none;
+}
+.account-limits-sheet .account-limits-heading {
+  justify-content: flex-end;
+}
+.account-limits-sheet .account-limits-panel {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
 }

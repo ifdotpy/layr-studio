@@ -453,8 +453,7 @@ async function recordCreateNavigation(
     previousAgentId:
       (
         journal.stages.create!.request as
-          | ApiSchemas["CreateLeadRequest"]
-          | undefined
+          ApiSchemas["CreateLeadRequest"] | undefined
       )?.previous || null,
     chatId: journal.chatId,
     observedAt: new Date().toISOString(),
@@ -768,10 +767,13 @@ async function main() {
     saveJournal(journalPath, journal);
     await route.continue();
   });
-  await page.route("**/api/conversation/delete", async (route) => {
+  await page.route("**/api/commands", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
-    const body = readVerifierRequest<ApiSchemas["IdRequest"]>(route.request());
-    if (body.id !== journal.chatId)
+    const body = readVerifierRequest<ApiSchemas["CommandRequest"]>(
+      route.request(),
+    );
+    if (body.kind !== "delete") return route.continue();
+    if (body.target !== journal.chatId)
       throw new Error("Refused to delete a chat outside this lifecycle.");
     if (
       !journal.stages.answer?.state ||
@@ -1231,14 +1233,17 @@ async function main() {
       const deleteResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
-          routePath(response.request()) === "/api/conversation/delete",
+          routePath(response.request()) === "/api/commands" &&
+          response.request().postDataJSON()?.kind === "delete",
         { timeout: DELETE_ACK_TIMEOUT_MS },
       );
       await confirmation
         .getByRole("button", { name: "Delete chat", exact: true })
         .click();
       const response = await deleteResponse;
-      const body = await jsonResponse<ApiSchemas["DeletedResponse"]>(response);
+      const commandBody =
+        await jsonResponse<ApiSchemas["CommandResponse"]>(response);
+      const body = commandBody?.kind === "delete" ? commandBody.result : null;
       assert.equal(
         response.status(),
         200,

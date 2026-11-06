@@ -4713,6 +4713,7 @@ async fn retained_malformed_monitor_owner_keeps_unknown_proof_without_resending(
         .await;
 }
 
+<<<<<<< head
 #[tokio::test]
 async fn retained_vm_thread_start_provenance_survives_next_generation_attach() {
     use studio_runtime_schema::persistence::{OutboxStatus, RequestIdentity};
@@ -4867,6 +4868,8 @@ async fn retained_vm_thread_start_provenance_survives_next_generation_attach() {
         .unwrap();
 }
 
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 /// An actor-less read-only model list is not blocked by an unload of the
 /// agent's thread that waits for its turn recovery.
 #[tokio::test]
@@ -4913,5 +4916,31 @@ async fn thread_unload_settles_the_attached_start_as_unknown_without_resend() {
     assert!(
         peer.writes.try_recv().is_err(),
         "the start is not sent again"
+    );
+}
+
+/// A thread unload while its turn runs ends the turn as interrupted. The chat
+/// does not stay running, and nothing is sent again.
+#[tokio::test]
+async fn thread_unload_ends_a_running_turn_as_interrupted() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer
+        .frame(json!({"method":"turn/started","params":{"threadId":"fake-thread-0","turn":{"id":"turn-a"}}}))
+        .await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(state.record().await["status"], "running");
+    let cursor = peer
+        .frame(json!({"method":"thread/closed","params":{"threadId":"fake-thread-0"}}))
+        .await;
+    peer.acknowledged(cursor).await;
+    let record = state.record().await;
+    assert_eq!(record["status"], "interrupted", "{record}");
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the running turn is not sent again"
     );
 }

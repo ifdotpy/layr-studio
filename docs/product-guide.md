@@ -89,11 +89,10 @@ provider-compatible defaults.
 
 Chat creation selects `workspaceMode`.
 
-| Mode                 | Platform                         | Agent workspace       |
-| -------------------- | -------------------------------- | --------------------- |
-| `layr-native` (Layr) | macOS and Linux                  | Native Layr lines     |
-| `layr` (Layr VM)     | Servers with the Studio Linux VM | Owned lines in the VM |
-| `worktree` (WT)      | macOS and Linux                  | Git worktrees         |
+| Mode                 | Platform        | Agent workspace   |
+| -------------------- | --------------- | ----------------- |
+| `layr-native` (Layr) | macOS and Linux | Native Layr lines |
+| `worktree` (WT)      | macOS and Linux | Git worktrees     |
 
 Layr is the default on macOS. Linux uses Layr only when its native capability is ready.
 Otherwise, Linux defaults to WT. The selector shows the reason when Layr is unavailable.
@@ -106,10 +105,6 @@ server state directory, for example
 absolute directory; an invalid file or missing directory refuses new worktrees
 instead of falling back. Each new worktree reads the file, so a change needs no
 restart. Archive and cleanup still manage worktrees under the previous root.
-
-The first layr chat imports the project once. Later chats reuse the VM main line.
-The host project folder stays separate. Export a copy only on request.
-See [VM chats](linux-vm-workspaces.md).
 
 ## Setup
 
@@ -491,7 +486,7 @@ Use **Delete project…** in either project sidebar menu to delete a registered
 project, including all its chats, archived chats, workers and shared rooms.
 The action is also available for older registered projects identified by their folder path.
 Confirmation stops running agents. History, cost accounting, the project folder
-and Git worktrees remain; disposable managed images and virtual machine worker lines may be
+and Git worktrees remain; disposable managed images and worker lines may be
 removed. Deletion cannot be undone in Studio. Projects spanning servers are
 refused. If the result is unconfirmed, **Recover saved request** checks the same
 intention with its original identity; it does not start another deletion.

@@ -1,12 +1,5 @@
-//! Sign-in request cards from the browser bridges (docs/vm-browser-bridge.md, sections 2(b)
-//! and 6). The Rust port of `codex_browser_bridge.Bridge.poll` and `apply`.
-//!
-//! One poll runs for each source: the guest service of the Linux VM on this Mac (`vm`) and
-//! the host bridge of commands on this server (`host`, `browser_host`). It long-polls `browser.wait`,
-//! writes one typed `BrowserOpen` approval for each new pending link, refuses links that no chat
-//! can own, keeps the card's deadline equal to the guest request's, and expires a pending
-//! card when its guest request ends. A card that nobody answered tells its chat
-//! (`unanswered_event`), so the agent does not wait for a result that cannot come.
+//! Sign-in cards from the host browser bridge. Pending requests are reflected in
+//! approvals and closed requests notify their chat when needed.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -24,7 +17,7 @@ use studio_runtime_store::{RuntimeStore, Transaction};
 use tokio::sync::{Notify, watch};
 
 use crate::browser::BrowserForwarder;
-use crate::linux_vm_guest::{GuestError, GuestRpc};
+use crate::browser_rpc::{BrowserRpc, BrowserRpcError};
 
 /// The method name of the old request records. Readers outside the browser cluster
 /// still query it until they move to the approvals table.
@@ -65,7 +58,7 @@ fn outcome_text(outcome: BrowserOutcome) -> Option<&'static str> {
 }
 
 /// The chat event text when a pending card ends before anyone answered it, by the guest state
-/// that ended its request (docs/vm-browser-bridge.md, section 2(b)). `replaced` has none: the
+/// that ended its request. `replaced` has none: the
 /// chat gave a newer link.
 fn unanswered_text(state: &str) -> Option<&'static str> {
     Some(match state {
@@ -145,7 +138,6 @@ pub(crate) fn save(
 ) -> Result<(), BrowserCardError> {
     row.request = Request::BrowserOpen(card);
     approvals::put(tx, &row)?;
-    crate::approval_sync::publish(tx, &row)?;
     Ok(())
 }
 
@@ -304,10 +296,7 @@ pub(crate) fn waits_for_address(phase: &BrowserPhase) -> bool {
 /// A bridge that the server polls.
 #[derive(Clone)]
 pub struct CardSource {
-    /// `vm`: links of VM chats from the guest. `host`: links of commands that run on this
-    /// server: native chats, and `host_exec` commands of VM chats.
-    pub source: &'static str,
-    pub guest: Arc<dyn GuestRpc>,
+    pub guest: Arc<dyn BrowserRpc>,
     /// The forwards that this server holds for the source's approvals.
     pub forwarder: Option<Arc<BrowserForwarder>>,
     /// Test provider origins that may use http. Production passes none.
@@ -337,11 +326,6 @@ fn refusal(
     let agent: Value = studio_json::from_str(&raw).unwrap_or(Value::Null);
     if python_truthy(agent.get("deletedAt")) {
         return Ok(Some("The chat was deleted".into()));
-    }
-    // The host bridge also serves a VM chat's `host_exec` command, which runs on this Mac.
-    let vm = agent.get("executionMode").and_then(Value::as_str) == Some("vm");
-    if source.source == "vm" && !vm {
-        return Ok(Some("The chat is not an active VM chat".into()));
     }
     if let Some(project) = agent
         .get("layrProjectId")
@@ -426,7 +410,7 @@ pub async fn apply(
                     if applied.refused.is_none() {
                         match new_card(&source, &item, &bridge_id) {
                             Some((agent, card)) => {
-                                let row = approvals::create(
+                                approvals::create(
                                     tx,
                                     NewApproval {
                                         id: ApprovalId(key.clone()),
@@ -445,7 +429,6 @@ pub async fn apply(
                                     },
                                     Timestamp(now),
                                 )?;
-                                crate::approval_sync::publish(tx, &row)?;
                             }
                             None => applied.refused = Some("The card is invalid".into()),
                         }
@@ -570,11 +553,7 @@ fn new_card(source: &CardSource, item: &Value, bridge_id: &str) -> Option<(Agent
             url,
             bridge_id: bridge_id.to_owned(),
             host: text("host")?,
-            source: if source.source == "host" {
-                BrowserSource::Host
-            } else {
-                BrowserSource::Vm
-            },
+            source: BrowserSource::Host,
             redirect,
             client_id: text("clientId"),
             scope: text("scope"),
@@ -591,12 +570,12 @@ fn new_card(source: &CardSource, item: &Value, bridge_id: &str) -> Option<(Agent
 /// Run one blocking guest call on its own thread, so a long poll never holds the runtime's
 /// blocking pool or its shutdown.
 pub async fn guest_call(
-    guest: Arc<dyn GuestRpc>,
+    guest: Arc<dyn BrowserRpc>,
     method: &'static str,
     params: Value,
     request_id: Option<String>,
     timeout: Duration,
-) -> Result<Value, GuestError> {
+) -> Result<Value, BrowserRpcError> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let spawned = std::thread::Builder::new()
         .name("studio-browser-guest".into())
@@ -604,19 +583,19 @@ pub async fn guest_call(
             drop(sender.send(guest.call(method, &params, request_id.as_deref(), timeout)));
         });
     if spawned.is_err() {
-        return Err(GuestError::Transport {
+        return Err(BrowserRpcError::Transport {
             message: "could not start the browser bridge call".into(),
             uncertain: false,
         });
     }
-    receiver.await.unwrap_or(Err(GuestError::Transport {
+    receiver.await.unwrap_or(Err(BrowserRpcError::Transport {
         message: "the browser bridge call ended without a result".into(),
         uncertain: true,
     }))
 }
 
 /// Close a guest request. A failure leaves it to end at its own deadline.
-pub async fn close_guest(guest: Arc<dyn GuestRpc>, bridge_id: &str, reason: &str) {
+pub async fn close_guest(guest: Arc<dyn BrowserRpc>, bridge_id: &str, reason: &str) {
     drop(
         guest_call(
             guest,
@@ -685,15 +664,14 @@ pub async fn poll_once(
 #[derive(Debug, thiserror::Error)]
 pub enum PollError {
     #[error(transparent)]
-    Guest(#[from] GuestError),
+    Guest(#[from] BrowserRpcError),
     #[error(transparent)]
     Card(#[from] BrowserCardError),
     #[error("the browser.wait result is invalid")]
     Invalid,
 }
 
-/// Keep one source's poll running until shutdown. An older guest refuses the unknown method
-/// with invalid_params; a stopped VM has no guest socket.
+/// Keep the host bridge poll running until shutdown.
 pub async fn run(
     store: Arc<RuntimeStore>,
     source: CardSource,
@@ -717,7 +695,7 @@ pub async fn run(
                     if matches!(error.code(), Some("invalid_params" | "invalid_request")) => 120,
                 Err(PollError::Guest(_)) => 15,
                 Err(error) => {
-                    eprintln!("browser bridge poll ({}): {error}", source.source);
+                    eprintln!("browser bridge poll: {error}");
                     15
                 }
             },
@@ -741,7 +719,7 @@ pub(crate) mod fixture {
             url: "https://login.example.test/".into(),
             bridge_id: bridge.into(),
             host: "login.example.test".into(),
-            source: BrowserSource::Vm,
+            source: BrowserSource::Host,
             redirect: None,
             client_id: None,
             scope: None,

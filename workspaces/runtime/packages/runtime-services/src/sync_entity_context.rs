@@ -2,7 +2,10 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
+<<<<<<< head
 use std::collections::HashMap;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 use studio_json::Value;
 #[cfg(test)]
 use studio_json::json;
@@ -14,11 +17,7 @@ use crate::submit_gates::{AgentAuthorityRow, Deletion, ProjectAuthorityRow};
 use crate::sync_policy::table_exists;
 use crate::sync_views::{AgentViewContext, RoomViewContext, TransferObservation};
 
-/// Lead ids bound into one `IN (...)` lookup while building agent contexts,
-/// kept below SQLite's host-parameter limit. Unit: rows (ids) per statement.
-const LEAD_LOOKUP_CHUNK_ROWS: usize = 500;
-
-fn transfer_observation(transaction: &Transaction<'_>, record: &Value) -> TransferObservation {
+fn transfer_observation(transaction: &Connection, record: &Value) -> TransferObservation {
     if record.get("isLead").and_then(Value::as_bool) != Some(true) {
         return TransferObservation::Absent;
     }
@@ -55,7 +54,7 @@ fn transfer_observation(transaction: &Transaction<'_>, record: &Value) -> Transf
 }
 
 fn account_destinations(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
 ) -> StoreResult<Vec<studio_runtime_schema::account_destination::AccountDestination>> {
     #[derive(serde::Deserialize)]
     struct Entity {
@@ -94,6 +93,7 @@ fn account_destinations(
         .collect())
 }
 
+<<<<<<< head
 /// Work performed by one bulk projection-context pass, exposed for deterministic tests.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AgentContextWork {
@@ -297,8 +297,10 @@ pub(crate) fn agent_view_contexts(
     Ok((contexts, work))
 }
 
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 pub(crate) fn agent_view_context(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     record: &Value,
     project_server_id: Option<&str>,
 ) -> StoreResult<AgentViewContext> {
@@ -371,11 +373,49 @@ pub(crate) fn agent_view_context(
     })
 }
 
-/// The status is read from the chat row (`domain`), not from the retired agent column.
-pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),''),json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT COALESCE(json_extract(record,'$.status'),'unknown') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+
+fn status_is_working(status: &studio_runtime_store::AgentStatus) -> bool {
+    use studio_runtime_store::AgentStatus;
+    match status {
+        AgentStatus::Starting
+        | AgentStatus::Running
+        | AgentStatus::Waiting
+        | AgentStatus::WaitingOnMonitor
+        | AgentStatus::Approval => true,
+        AgentStatus::Unknown
+        | AgentStatus::Idle
+        | AgentStatus::Queued
+        | AgentStatus::Completed
+        | AgentStatus::Interrupted
+        | AgentStatus::Failed
+        | AgentStatus::Blocked
+        | AgentStatus::Paused
+        | AgentStatus::Parked
+        | AgentStatus::Abandoned
+        | AgentStatus::CapacityRetry
+        | AgentStatus::Other(_) => false,
+    }
+}
+
+/// The team counts of a lead as its view shows them, as JSON text; None for a member.
+pub(crate) fn team_counts_text(transaction: &Connection, id: &str) -> StoreResult<Option<String>> {
+    let lead: Option<bool> = transaction
+        .prepare_cached("SELECT json_extract(record,'$.isLead') FROM runtime_agents WHERE id=?1")?
+        .query_row([id], |row| row.get(0))
+        .optional()?
+        .flatten();
+    if lead != Some(true) {
+        return Ok(None);
+    }
+    team_counts(transaction, id, &studio_json::json!({"isLead": true}))?
+        .map(|counts| studio_json::to_string(&counts))
+        .transpose()
+        .map_err(studio_runtime_store::StoreError::from)
+}
 
 fn team_counts(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     id: &str,
     record: &Value,
 ) -> StoreResult<Option<studio_runtime_schema::agent_progress::TeamCounts>> {
@@ -385,16 +425,11 @@ fn team_counts(
     let mut total = 0;
     let mut working = 0;
     let mut statement = transaction.prepare_cached(TEAM_COUNT_INPUTS_SQL)?;
-    let rows = statement.query_map([id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<bool>>(1)?.unwrap_or(false),
-        ))
-    })?;
+    let rows = statement.query_map([id], |row| row.get::<_, String>(0))?;
     for row in rows {
-        let (status, auto_wake) = row?;
+        let status = studio_runtime_store::AgentStatus::parse(&row?);
         total += 1;
-        if crate::turn_prepare::WorkerStatus::from_agent_status(&status).working(auto_wake) {
+        if status_is_working(&status) {
             working += 1;
         }
     }
@@ -405,7 +440,7 @@ fn team_counts(
 }
 
 fn exists_for_agent(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     table: &str,
     agent_column: &str,
     agent_id: &str,
@@ -652,7 +687,7 @@ impl RoomDirectory {
 
 /// Pending input flags are list data, independent of whether a chat is visible.
 fn pending_attention(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     id: &str,
     record: &Value,
 ) -> StoreResult<(bool, bool)> {
@@ -843,6 +878,7 @@ mod room_preparation_tests {
         ));
         assert_eq!(first.active_agent_indices.len(), 1);
     }
+<<<<<<< head
 
     #[test]
     fn cold_agent_contexts_scan_work_once_for_many_agents() {
@@ -982,4 +1018,6 @@ mod room_preparation_tests {
         assert!(!contexts["lead-busy"].empty_lead);
         assert!(contexts["lead-empty"].empty_lead);
     }
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 }

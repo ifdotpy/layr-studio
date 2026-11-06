@@ -4,7 +4,7 @@
    Apply to every native scroll container, including portaled overlays.
    Keep Mantine's more-specific viewport hiding and scrolling behavior. */
 :root {
-  --studio-scrollbar-thumb: light-dark(#18244718, #ffffff18);
+  --studio-scrollbar-thumb: var(--line-strong);
   /* Visible Mantine thumb width in CSS pixels; native thin remains platform-owned. */
   --studio-scrollbar-thumb-size: 6px;
 }
@@ -96,7 +96,7 @@ button {
   cursor: pointer;
 }
 small {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   color: var(--muted);
 }
 p {
@@ -113,18 +113,41 @@ p {
 }
 .notice {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .danger {
-  color: light-dark(#a52c3c, #ffa8a8);
+  color: var(--studio-state-error);
 }
 .startup {
   display: grid;
   place-content: center;
+  justify-items: center;
+  gap: var(--mantine-spacing-sm);
   width: 100%;
   color: var(--muted);
+  font-size: var(--studio-text-meta);
+}
+/* The same spinner as the first paint in index.html. */
+.startup[data-connecting]::before {
+  content: "";
+  width: 1rem;
+  height: 1rem;
+  border: 0.09375rem solid var(--line-strong);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: studio-startup-spin 0.8s linear infinite;
+}
+@keyframes studio-startup-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .startup[data-connecting]::before {
+    animation: none;
+  }
 }
 #lead-row .mantine-Button-inner,
 .picker .mantine-Button-inner {
@@ -136,22 +159,22 @@ p {
   color: var(--muted);
 }
 #open-complaints.selected {
-  background: light-dark(#1824470c, #ffffff0c);
+  background: var(--selected);
 }
 
 .unread {
   width: 7px;
   height: 7px;
-  background: light-dark(#3e51aa, #8ca5ff);
+  background: var(--studio-state-unread);
   border-radius: 50%;
 }
 #open-complaints {
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 #complaint-count {
   font-size: var(--studio-text-meta);
-  color: light-dark(#a52c3c, #ffcf94);
+  color: var(--studio-state-answer);
 }
 
 /* Main workspace. */
@@ -188,7 +211,7 @@ p {
   }
 }
 #view-toggle {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   padding: 0 10px;
 }
 #sidebar-toggle,
@@ -196,12 +219,42 @@ p {
 #team-close {
   display: none;
 }
+/* Notices above the transcript take no height in the flow: the stack floats
+   under the header, so a notice that appears or leaves moves nothing. */
+.workspace-notices {
+  position: relative;
+  z-index: 40;
+  flex: none;
+  height: 0;
+}
+.workspace-notices-stack {
+  position: absolute;
+  inset-block-start: var(--mantine-spacing-xs);
+  inset-inline: var(--chat-gutter, var(--mantine-spacing-md));
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+  max-height: 40dvh;
+  overflow: auto;
+  pointer-events: none;
+}
+.workspace-notices-stack > *,
+.workspace-notices-stack .sync-status {
+  pointer-events: auto;
+}
+.workspace-notices-stack:empty,
+.workspace-notices-stack .sync-notices:empty {
+  display: none;
+}
 #error {
-  padding: 12px 24px;
-  background: #fa525211;
-  color: light-dark(#a52c3c, #ffa8a8);
+  padding: 10px 14px;
+  border: var(--studio-border-width) solid
+    color-mix(in srgb, var(--studio-state-error) 40%, var(--line));
+  border-radius: var(--studio-radius-card);
+  background: color-mix(in srgb, var(--studio-state-error) 10%, var(--overlay));
+  box-shadow: var(--studio-shadow-md);
+  color: var(--studio-state-error);
   margin: 0;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   overflow-wrap: anywhere;
 }
 #toast {
@@ -212,11 +265,11 @@ p {
   transform: translateX(-50%);
   max-width: min(560px, calc(100vw - 32px));
   padding: 12px 18px;
-  border-radius: 10px;
-  background: light-dark(#f4f5f8, #303038);
-  border: 1px solid light-dark(#18244718, #ffffff18);
-  box-shadow: 0 8px 32px #0005;
-  font-size: 13px;
+  border-radius: var(--studio-radius-card);
+  background: var(--overlay);
+  border: 0;
+  box-shadow: var(--studio-shadow-lg);
+  font-size: var(--studio-text-body);
 }
 
 /* AI conversation uses a reading column, unboxed assistant text, and one composer. */
@@ -242,9 +295,9 @@ p {
   width: fit-content;
   max-width: 85%;
   margin-left: auto;
-  background: light-dark(#f4f5f8, #2b2b33);
+  background: var(--raised);
   padding: 12px 17px;
-  border-radius: 17px 17px 5px 17px;
+  border-radius: var(--studio-radius-dialog);
 }
 .ai-conversation .message.user .message-bottom {
   display: none;
@@ -256,7 +309,7 @@ p {
   margin-bottom: 8px;
 }
 .prose {
-  font-size: 14px;
+  font-size: var(--studio-text-body);
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
@@ -281,13 +334,15 @@ p {
   margin: 24px 0 12px;
 }
 .prose h1 {
-  font-size: 23px;
+  font-size: var(--studio-text-display);
+  letter-spacing: var(--studio-tracking-section);
 }
 .prose h2 {
-  font-size: 20px;
+  font-size: var(--studio-text-section);
+  letter-spacing: var(--studio-tracking-section);
 }
 .prose h3 {
-  font-size: 16px;
+  font-size: var(--studio-text-title);
 }
 .prose ul,
 .prose ol {
@@ -301,21 +356,21 @@ p {
 .request pre {
   overflow: auto;
   white-space: pre;
-  background: light-dark(#f4f5f8, #141418);
-  border: 1px solid light-dark(#1824470d, #ffffff0d);
-  border-radius: 10px;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-card);
   padding: 16px;
-  font-family: var(--mantine-font-family-monospace);
+  font-family: var(--studio-font-mono);
   font-size: var(--studio-text-code);
   line-height: 1.7;
   max-height: 440px;
 }
 .prose code {
-  font-family: var(--mantine-font-family-monospace);
+  font-family: var(--studio-font-mono);
   font-size: var(--studio-text-code);
-  background: light-dark(#18244708, #ffffff08);
+  background: var(--raised);
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--studio-radius-control);
 }
 .prose pre code {
   background: transparent;
@@ -326,26 +381,26 @@ p {
   display: block;
   overflow-x: auto;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   margin: 18px 0;
 }
 .prose th,
 .prose td {
-  border-bottom: 1px solid light-dark(#18244714, #ffffff14);
+  border-bottom: 1px solid var(--line);
   padding: 10px 14px;
   text-align: left;
   min-width: 110px;
   overflow-wrap: normal;
 }
 .prose th {
-  background: light-dark(#18244705, #ffffff05);
+  background: var(--inset);
   font-weight: 600;
 }
 .prose blockquote {
-  border-left: 3px solid light-dark(#737b8c, #55556a);
+  border-left: 3px solid var(--line-strong);
   margin-left: 0;
   padding-left: 18px;
-  color: light-dark(#515a6c, #b5b5c5);
+  color: var(--muted);
 }
 .prose hr {
   border: 0;
@@ -366,7 +421,7 @@ p {
 .tool-group {
   margin: 0 0 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .tool-group > summary {
   min-height: 26px;
@@ -409,14 +464,18 @@ p {
   flex-shrink: 1;
   min-height: 0;
   margin: 8px auto 0;
-  background: var(--raised);
-  border: var(--studio-border-width) solid var(--line);
-  border-radius: 18px;
-  --composer-border-transition: border-color 0.15s;
+  background: var(--surface);
+  border: var(--studio-border-width) solid var(--line-strong);
+  border-radius: var(--studio-radius-dialog);
+  box-shadow: var(--studio-shadow-sm);
+  --composer-border-transition: border-color 0.15s, box-shadow 0.15s;
   transition: var(--composer-border-transition);
 }
 #composer:focus-within {
-  border-color: var(--accent);
+  border-color: var(--muted);
+  box-shadow:
+    var(--studio-shadow-sm),
+    0 0 0 0.1875rem color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .composer-bar {
   flex-shrink: 0;
@@ -428,14 +487,14 @@ p {
   );
   padding: 0;
   line-height: 1.65;
-  font-size: 14px;
+  font-size: var(--studio-text-body);
   color: var(--text);
   overflow-y: auto;
   flex-shrink: 1;
   resize: none;
 }
 #message::placeholder {
-  color: light-dark(#515a6c, #9696a5);
+  color: var(--muted);
 }
 .composer-bar {
   display: flex;
@@ -444,8 +503,8 @@ p {
 }
 #project {
   max-width: 55%;
-  color: light-dark(#515a6c, #aaaab9);
-  font-size: 12px;
+  color: var(--muted);
+  font-size: var(--studio-text-meta);
   padding: 0 4px;
 }
 #project .mantine-Button-label {
@@ -481,8 +540,8 @@ p {
   /* Mantine sets transform on :active; translate keeps the button centered. */
   translate: -50% 0;
   z-index: 2;
-  font-size: 12px;
-  box-shadow: 0 4px 20px #0003;
+  font-size: var(--studio-text-meta);
+  box-shadow: var(--studio-shadow-md);
 }
 /* Keep the Latest button clear of pending request actions. */
 #conversation:has(.request-answer-form, #requests .request-card) .jump-slot {
@@ -491,7 +550,7 @@ p {
 
 /* Telegram conventions belong only to agent-to-agent rooms. */
 .agent-conversation {
-  background: light-dark(#f4f5f8, #171c23);
+  background: var(--surface);
 }
 .agent-conversation #messages {
   padding-top: 24px;
@@ -502,21 +561,21 @@ p {
   max-width: 88%;
   padding: 12px 16px 8px;
   margin-bottom: 12px;
-  background: light-dark(#f4f5f8, #242d38);
+  background: var(--raised);
   border-radius: 13px 13px 13px 3px;
 }
 .agent-conversation .bubble.outgoing {
-  background: light-dark(#3e51aa, #293a56);
+  background: var(--selected);
   margin-left: auto;
   border-radius: 13px 13px 3px 13px;
 }
 .agent-conversation .message-label {
-  color: light-dark(#3e51aa, #a8c3ec);
-  font-size: 12px;
-  font-weight: 550;
+  color: var(--text);
+  font-size: var(--studio-text-meta);
+  font-weight: 500;
 }
 .agent-conversation .prose {
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   line-height: 1.65;
 }
 .agent-conversation .message-bottom {
@@ -535,7 +594,7 @@ p {
   text-align: center;
   font-size: var(--studio-text-meta);
   color: var(--muted);
-  background: light-dark(#f4f5f8, #1b2028);
+  background: var(--surface);
   margin: 0;
   border-top: 1px solid var(--line);
 }
@@ -548,7 +607,7 @@ p {
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  background: light-dark(#f4f5f8, #18181d);
+  background: var(--sidebar);
   border-left: 1px solid var(--line);
   padding: 26px 14px 14px;
 }
@@ -561,8 +620,8 @@ p {
 }
 .team-heading h2 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 550;
+  font-size: var(--studio-text-body);
+  font-weight: 500;
   flex: 1;
 }
 .team-heading > span {
@@ -574,14 +633,14 @@ p {
   justify-content: flex-start;
   margin-bottom: 8px;
   padding: 0 7px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   overflow: hidden;
 }
 #team .mantine-TextInput-root {
   margin: 0 0 12px;
 }
 #worker-search {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   background: transparent;
 }
 #workers {
@@ -597,12 +656,12 @@ p {
   width: 100%;
   gap: 10px;
   padding: 10px 8px;
-  border-radius: 7px;
+  border-radius: var(--studio-radius-control);
   text-align: left;
 }
 .worker:hover,
 .worker-entry.selected {
-  background: light-dark(#18244708, #ffffff08);
+  background: var(--selected);
 }
 .worker-text {
   min-width: 0;
@@ -610,8 +669,8 @@ p {
 }
 .worker-text strong {
   display: block;
-  font-size: 12px;
-  font-weight: 450;
+  font-size: var(--studio-text-meta);
+  font-weight: 400;
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.4;
@@ -644,22 +703,22 @@ p {
   height: 6px;
   margin-top: 5px;
   border-radius: 50%;
-  background: light-dark(#737b8c, #606070);
+  background: var(--studio-state-paused);
 }
 .dot.running,
 .dot.starting {
-  background: light-dark(#3e51aa, #89b6a0);
-  box-shadow: 0 0 0 3px #89b6a00d;
+  background: var(--studio-state-working);
+  box-shadow: 0 0 0 3px var(--studio-state-working-soft);
 }
 .dot.waiting,
 .dot.approval {
-  background: light-dark(#a52c3c, #e7b878);
+  background: var(--studio-state-answer);
 }
 .dot.failed {
-  background: light-dark(#a52c3c, #e79494);
+  background: var(--studio-state-error);
 }
 .dot.completed {
-  background: light-dark(#515a6c, #8c98ad);
+  background: var(--muted);
 }
 .worker-group summary {
   color: var(--muted);
@@ -687,14 +746,14 @@ p {
   align-items: flex-start;
   gap: 12px;
   padding: 15px;
-  border: 1px solid light-dark(#18244716, #ffffff16);
-  border-radius: 12px;
-  background: light-dark(#f4f5f8, #24242c);
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-dialog);
+  background: var(--surface);
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .request-icon {
-  color: light-dark(#3e51aa, #adabde);
+  color: var(--studio-state-answer);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -703,8 +762,8 @@ p {
   min-width: 0;
 }
 .request-copy strong {
-  font-size: 12px;
-  font-weight: 550;
+  font-size: var(--studio-text-meta);
+  font-weight: 500;
 }
 .request-copy p {
   margin: 5px 0 0;
@@ -716,7 +775,7 @@ p {
   flex-wrap: wrap;
 }
 .request-actions button {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 #answer-fields,
 #complaint-form {
@@ -772,8 +831,8 @@ p {
 .complaint-response {
   padding: 16px;
   margin: 16px 0;
-  background: light-dark(#18244704, #ffffff04);
-  border-radius: 9px;
+  background: var(--inset);
+  border-radius: var(--studio-radius-card);
 }
 .complaint-response small {
   display: block;
@@ -889,7 +948,7 @@ p {
   min-height: 30px;
   padding: 4px 0 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .agent-phase-copy {
   min-width: 0;
@@ -910,6 +969,9 @@ p {
   display: flex;
   gap: 3px;
   margin-left: 2px;
+}
+.agent-phase.active:not([data-wait-state]) > svg {
+  animation: phase-pulse 1.2s ease-in-out infinite;
 }
 .phase-dots i {
   width: 3px;
@@ -961,7 +1023,7 @@ p {
 }
 .activity-running {
   font-size: var(--studio-text-meta);
-  color: light-dark(#3e51aa, #aaa4e6);
+  color: var(--studio-state-working);
   margin-left: auto;
 }
 .tool-card {
@@ -987,7 +1049,7 @@ p {
 .tool-icon {
   display: grid;
   place-items: center;
-  color: light-dark(#515a6c, #b5b5c6);
+  color: var(--muted);
   flex-shrink: 0;
 }
 .tool-title {
@@ -996,8 +1058,8 @@ p {
   gap: 8px;
   min-width: 0;
   flex: 1;
-  color: light-dark(#252b3b, #d9d9e3);
-  font-size: 12px;
+  color: var(--text);
+  font-size: var(--studio-text-meta);
   overflow-wrap: anywhere;
 }
 .tool-meta {
@@ -1016,11 +1078,11 @@ p {
   transform: rotate(90deg);
 }
 .tool-body {
-  border-top: 1px solid light-dark(#1824470b, #ffffff0b);
+  border-top: 1px solid var(--line);
   padding: 8px 0 8px 22px;
   min-width: 0;
-  font-size: 12px;
-  color: light-dark(#515a6c, #b5b5c6);
+  font-size: var(--studio-text-meta);
+  color: var(--muted);
 }
 .tool-body pre {
   box-sizing: border-box;
@@ -1035,7 +1097,7 @@ p {
   font-size: var(--studio-text-meta);
   padding: 12px;
   margin: 7px 0 12px;
-  background: light-dark(#f4f5f8, #17171c);
+  background: var(--inset);
 }
 .tool-section {
   min-width: 0;
@@ -1044,7 +1106,7 @@ p {
 .tool-section > span {
   display: block;
   font-size: var(--studio-text-meta);
-  font-weight: 550;
+  font-weight: 500;
   color: var(--muted);
   margin-bottom: 7px;
 }
@@ -1068,7 +1130,7 @@ p {
   gap: 10px;
 }
 .tool-arguments dt {
-  font-family: var(--mantine-font-family-monospace);
+  font-family: var(--studio-font-mono);
   font-size: var(--studio-text-meta);
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -1085,7 +1147,7 @@ p {
   margin-bottom: 14px;
 }
 .tool-raw {
-  border-top: 1px solid light-dark(#1824470b, #ffffff0b);
+  border-top: 1px solid var(--line);
   margin-top: 12px;
   padding-top: 8px;
 }
@@ -1099,6 +1161,7 @@ p {
 @media (prefers-reduced-motion: reduce) {
   .markdown-block,
   .phase-dots i,
+  .agent-phase.active > svg,
   .spin {
     animation: none;
   }
@@ -1120,10 +1183,10 @@ p {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 15px;
+  font-size: var(--studio-text-title);
 }
 .tasks-title > svg {
-  color: light-dark(#3e51aa, #a5b4fc);
+  color: var(--muted);
 }
 .tasks-drawer-body {
   flex: 1;
@@ -1167,7 +1230,7 @@ p {
 .tasks-search input {
   background: transparent;
   border-color: transparent;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .tasks-rows {
   flex: 1;
@@ -1180,14 +1243,14 @@ p {
   padding: 14px;
   margin-bottom: 4px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--studio-radius-card);
 }
 .task-row:hover {
-  background: light-dark(#18244705, #ffffff05);
+  background: var(--hover);
 }
 .task-row.selected {
-  background: #91a7ff0b;
-  border-color: #91a7ff28;
+  background: var(--selected);
+  border-color: var(--line-strong);
 }
 .task-row-heading,
 .task-row-footer {
@@ -1200,7 +1263,7 @@ p {
   display: flex;
 }
 .task-kind-icon.active {
-  color: light-dark(#3e51aa, #a5b4fc);
+  color: var(--studio-state-working);
 }
 .task-row-kind {
   font-size: var(--studio-text-meta);
@@ -1219,12 +1282,12 @@ p {
   overflow: hidden;
   overflow-wrap: anywhere;
   margin: 10px 0 12px;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   line-height: 1.65;
   font-weight: 500;
 }
 .task-command-title {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--studio-font-mono);
 }
 .task-row-footer > span:first-child {
   flex: 1;
@@ -1247,7 +1310,7 @@ p {
   color: var(--muted);
   padding: 48px 24px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .tasks-empty > strong {
   display: block;
@@ -1293,7 +1356,7 @@ p {
   padding: 8px 24px 24px;
 }
 .task-detail h2 {
-  font-size: 15px;
+  font-size: var(--studio-text-title);
   line-height: 1.7;
   overflow-wrap: anywhere;
   font-weight: 500;
@@ -1333,15 +1396,15 @@ p {
   line-height: 1.7;
 }
 .task-note {
-  font-size: 12px;
-  color: light-dark(#515a6c, #aebbd8);
+  font-size: var(--studio-text-meta);
+  color: var(--muted);
   line-height: 1.7;
   margin: 20px 0;
 }
 .task-terminal {
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: light-dark(#f4f5f8, #131317);
+  border-radius: var(--studio-radius-card);
+  background: var(--inset);
   overflow: hidden;
   margin-top: 20px;
 }
@@ -1372,7 +1435,7 @@ p {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   tab-size: 2;
-  color: light-dark(#252b3b, #c6cbd7);
+  color: var(--text);
 }
 .task-output.empty {
   color: var(--muted);
@@ -1422,15 +1485,15 @@ p {
   border-top: 1px solid var(--line);
 }
 .task-error {
-  background: #fa525211;
-  color: light-dark(#a52c3c, #ffa8a8);
+  background: var(--studio-state-error-soft);
+  color: var(--studio-state-error);
   padding: 12px;
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--studio-radius-card);
+  font-size: var(--studio-text-meta);
   overflow-wrap: anywhere;
 }
 .task-failed {
-  color: light-dark(#a52c3c, #ffa8a8);
+  color: var(--studio-state-error);
 }
 @media (max-width: 640px) {
   .tasks-drawer-header {
@@ -1439,7 +1502,7 @@ p {
   }
   .tasks-title {
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--studio-text-body);
   }
   .tasks-toolbar {
     padding: 12px 16px;
@@ -1477,7 +1540,7 @@ p {
     padding: 12px 16px;
   }
   .task-detail h2 {
-    font-size: 13px;
+    font-size: var(--studio-text-body);
   }
 }
 
@@ -1519,7 +1582,7 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   align-items: center;
   gap: 6px;
   padding: 8px;
-  border-radius: 7px;
+  border-radius: var(--studio-radius-control);
 }
 .worker-heading {
   display: flex;
@@ -1571,7 +1634,8 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
     --modal-y-offset: 16px;
   }
   .workspace-header .mantine-ActionIcon-root,
-  #composer .mantine-ActionIcon-root {
+  #composer .mantine-ActionIcon-root,
+  #composer .composer-stop-slot {
     min-width: 44px;
     min-height: 44px;
   }
@@ -1596,19 +1660,20 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 }
 .sync-status {
   flex-shrink: 0;
-  margin: 4px 12px;
+  margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--studio-radius-card);
+  background: var(--overlay);
+  box-shadow: var(--studio-shadow-md);
+  font-size: var(--studio-text-body);
   max-height: 160px;
   overflow: auto;
   overflow-wrap: anywhere;
 }
 .sync-notices {
-  flex-shrink: 0;
-  max-height: 25dvh;
-  overflow: auto;
+  display: grid;
+  gap: var(--mantine-spacing-xs);
 }
 
 .draft-versions {
@@ -1619,7 +1684,7 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 .draft-versions > p {
   margin: 8px 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .draft-version {
   padding: 8px 0;
@@ -1631,7 +1696,7 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--studio-text-body);
 }
 .draft-version-actions {
   display: flex;
@@ -1666,7 +1731,7 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   gap: 7px;
   margin-bottom: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
 }
 .ai-conversation .message.assistant,
 .agent-conversation .message.bubble {
@@ -1676,13 +1741,13 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   margin-bottom: 14px;
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 16px 16px 16px 4px;
+  border-radius: var(--studio-radius-dialog);
 }
 .ai-conversation .message.user,
 .agent-conversation .message.bubble.outgoing {
   margin-left: auto;
-  background: light-dark(#e5f1fc, #253a50);
-  border-radius: 16px 16px 4px 16px;
+  background: var(--raised);
+  border-radius: var(--studio-radius-dialog);
 }
 
 /* Inline error detail toggles read as quiet text actions. */
@@ -1700,8 +1765,16 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
   color: var(--mantine-color-text);
 }
 
-/* Assistant answers keep their card for emphasis within the shared column. */
-.ai-conversation .message.assistant,
+/* Assistant answers are plain prose across the column; only the user's
+   own messages sit in a bubble. Agent-to-agent rooms keep their bubbles. */
+.ai-conversation .message.assistant {
+  width: auto;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
 .agent-conversation .message.bubble:not(.outgoing) {
   max-width: 100%;
 }
@@ -1760,7 +1833,7 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 .studio-recovery-banner {
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--surface);
   font-size: var(--studio-text-body);
 }
@@ -1775,13 +1848,24 @@ html[data-terminal-dock]:not([data-terminal-shell]) body #root {
 /* Delivery status and message actions both sit under a user bubble. Stack
    them so the status never covers the action buttons. */
 @media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  /* The hover actions hang under the bubble: the gap below it holds them,
+     so they never cover the next answer. */
+  #conversation.ai-conversation .message.user {
+    margin-bottom: 2.5rem;
+  }
   .ai-conversation
-    .message.user:has(.message-delivery-heading, .message-delivery-inline)
+    .message.user:has(
+      .message-delivery-heading:not(:has(> .sr-only:only-child)),
+      .message-delivery-inline
+    )
     .message-bottom {
     top: calc(100% + 24px);
   }
   .ai-conversation
-    .message.user:has(.message-delivery-heading, .message-delivery-inline) {
+    .message.user:has(
+      .message-delivery-heading:not(:has(> .sr-only:only-child)),
+      .message-delivery-inline
+    ) {
     margin-bottom: 52px;
   }
 }

@@ -1,11 +1,9 @@
 //! Read persisted rule and owner records for the rules list.
 
 use rusqlite::{Connection, Transaction};
-use serde::Serialize;
 
 use crate::StoreResult;
 use crate::records::{AgentId, AgentRecord, RuleRecord, Table};
-use crate::repositories::sync_documents::SyncDocumentsRepository;
 use crate::schema::{SchemaRequirements, TableRequirement};
 
 const RULE_TABLE: TableRequirement = TableRequirement {
@@ -52,23 +50,12 @@ impl RulesRepository {
         Table::<AgentRecord>::new(connection).get(&AgentId::from(id))
     }
 
-    pub fn publish_entity(transaction: &Transaction<'_>, record: &RuleRecord) -> StoreResult<()> {
-        put_rule_entity(
-            transaction,
-            record.id(),
-            Some(&record.agent),
-            Some(record.name.as_str()),
-            false,
-        )
-    }
-
+    /// Store a rule. Its client view is built at read time (`entity_scope`).
     pub fn put(transaction: &Transaction<'_>, record: &RuleRecord) -> StoreResult<()> {
-        Self::publish_entity(transaction, record)?;
         Table::<RuleRecord>::new(transaction).put(record)
     }
 
     pub fn delete(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
-        put_rule_entity(transaction, id, None, None, true)?;
         Table::<RuleRecord>::new(transaction).delete(&id.to_owned())?;
         Ok(())
     }
@@ -88,6 +75,7 @@ impl RulesRepository {
     }
 }
 
+<<<<<<< head
 fn put_rule_entity(
     transaction: &Transaction<'_>,
     id: &str,
@@ -132,6 +120,8 @@ fn put_rule_entity(
     Ok(())
 }
 
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 #[cfg(test)]
 mod tests {
     use super::{REQUIREMENTS, RulesRepository};
@@ -175,6 +165,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< head
     fn rule_mutations_keep_the_renderer_entity_in_the_same_transaction() {
         use crate::records::RuleRecord;
         use rusqlite::TransactionBehavior;
@@ -282,6 +273,8 @@ mod tests {
     }
 
     #[test]
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     fn active_check_lookup_is_filtered_and_ignores_unrelated_invalid_rows() {
         let db = Connection::open_in_memory().expect("in-memory database opens");
         db.execute_batch(

@@ -14,10 +14,9 @@ use crate::domain::{
     unfinished_turn_sql,
 };
 
-/// A deleted agent (tombstone) never occupies a slot. Together with the chat
-/// capacity statuses ([`CHAT_CAPACITY_STATUSES`]) this is the one owner of every
-/// slot query. A deleted agent keeps its status, so the live check stays.
-const CAPACITY_LIVE: &str = "deleted_at IS NULL";
+/// Deleted and invalid agents never occupy a slot, even if their chat retains
+/// an active status. This predicate owns the live condition for every slot query.
+const CAPACITY_LIVE: &str = "deleted_at IS NULL AND hold_status<>'invalid'";
 const REMOTE_WORKER_KEY: &str = "COALESCE(remote_worker,0)";
 /// Agents by team root, in rowid order within a root.
 pub const ROOT_INDEX: &str = "runtime_agent_root_v2";
@@ -487,6 +486,29 @@ mod tests {
         // Live paused agents hold slots but are not counted as work; tombstones are not counted.
         assert_eq!(by_account["default"], 3);
         assert_eq!(by_account["b"], 1);
+    }
+
+    #[test]
+    fn invalid_starting_agent_does_not_occupy_an_unrelated_slot() {
+        let connection = database();
+        insert(
+            &connection,
+            json!({"id":"bad","provider":"codex","rootId":"lead","status":"starting","accountKey":"default"}),
+        );
+        connection.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId',json('23')),hold_status='invalid' WHERE id='bad'", []).unwrap();
+        assert_eq!(
+            AgentIndexedReads::global_slots_in_use(&connection, "other").unwrap(),
+            0
+        );
+        assert_eq!(
+            AgentIndexedReads::team_slots_in_use(&connection, "other", "lead").unwrap(),
+            0
+        );
+        assert!(
+            AgentIndexedReads::slots_by_account(&connection)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

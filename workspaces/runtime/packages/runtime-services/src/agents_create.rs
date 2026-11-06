@@ -8,7 +8,6 @@
 //! provide the authoritative value once that change is merged.
 mod operations;
 pub(crate) use operations::DEFAULT_LEAD_MODEL;
-pub(crate) use operations::set_vm_workspace_fields;
 pub use operations::*;
 
 use rusqlite::{Connection, OptionalExtension};
@@ -241,13 +240,7 @@ pub fn publish_agent(transaction: &Transaction<'_>, record: &Value) -> Result<Va
         .ok_or_else(|| StoreError::SchemaMismatch("agent sync projection has no id".to_owned()))?;
     let deleted = crate::event_write::truthy(record.get("deletedAt"));
     let projection = sync_projection(transaction, record)?;
-    crate::sync_policy::publish_agent_projection(
-        transaction,
-        id,
-        projection.clone(),
-        deleted,
-        &|_, _, _, _| true,
-    )?;
+    crate::sync_policy::publish_agent_projection(transaction, id, deleted)?;
     Ok(projection)
 }
 
@@ -808,7 +801,7 @@ mod tests {
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);"),
+                 CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,record TEXT); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE IF NOT EXISTS agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT);  CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);"),
             )
             .expect("agent-create tables exist");
         connection
@@ -1071,12 +1064,9 @@ mod tests {
             (kind.as_str(), status.as_str(), text.as_str()),
             ("user", "pending", "Start the task")
         );
-        let projection: String = connection
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='agent' AND id='agent-a'",
-                [],
-                |row| row.get(0),
-            )
+        let projection = crate::entity_scope::direct_document(&connection, "agent", "agent-a")
+            .expect("agent projection reads")
+            .and_then(|row| row.payload)
             .expect("agent projection exists");
         assert_eq!(
             studio_json::from_str::<studio_json::Value>(&projection).expect("projection JSON")["value"]
@@ -1184,7 +1174,7 @@ mod tests {
     fn creation_failpoints_rollback_every_row_and_retry_once_after_restart() {
         let failure_points = [
             ("agent row", "runtime_agents", "INSERT"),
-            ("sync entity and sequence", "sync_entities", "INSERT"),
+            ("agent views mark", "durable_rows", "INSERT"),
             ("initial event", "runtime_events", "INSERT"),
             ("event queue metadata", "runtime_event_meta", "INSERT"),
             // Queueing a created agent leaves its stored record unchanged, and
@@ -1286,8 +1276,8 @@ mod tests {
                 .expect("count successful retry rows");
             assert_eq!(
                 (agents, events, projections),
-                (1, 1, 3),
-                "failpoint {index}: agent plus summary/detail projections"
+                (1, 1, 0),
+                "failpoint {index}: agent and event; the views are built at read time"
             );
             let (event_status, queue_metadata): (String, i64) = connection
                 .query_row(

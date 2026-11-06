@@ -2163,10 +2163,6 @@
             "default": null,
             "title": "Transferid",
             "type": "string"
-          },
-          "vmSessionCopy": {
-            "$ref": "#/components/schemas/JsonObjectResponse",
-            "default": null
           }
         },
         "title": "AccountHistoryRecordResponse",
@@ -6653,6 +6649,79 @@
               "epoch"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "progress": {
+                "additionalProperties": false,
+                "properties": {
+                  "done": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "phase": {
+                    "enum": [
+                      "sizing",
+                      "staging",
+                      "importing_commits",
+                      "materializing",
+                      "restoring_attributes",
+                      "warming_caches",
+                      "transferring",
+                      "creating_line",
+                      "archiving",
+                      "uploading",
+                      "importing_project",
+                      "completed",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "total": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "enum": [
+                      "files",
+                      "bytes",
+                      "commits"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "phase",
+                  "done",
+                  "unit"
+                ],
+                "type": "object"
+              },
+              "reason": {
+                "const": "workspace_copy",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "epoch",
+              "progress"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -6791,73 +6860,6 @@
         ],
         "title": "AgentMode",
         "type": "string"
-      },
-      "AgentMoveToHostRequest": {
-        "additionalProperties": false,
-        "description": "Move one idle VM chat to this device. A lead moves with its workers. The chat keeps its thread and history.",
-        "properties": {
-          "id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Id",
-            "type": "string"
-          },
-          "request_id": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "request_id"
-        ],
-        "title": "AgentMoveToHostRequest",
-        "type": "object"
-      },
-      "AgentMoveToHostResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "cwd": {
-            "title": "Cwd",
-            "type": "string"
-          },
-          "executionMode": {
-            "enum": [
-              "native"
-            ],
-            "title": "Executionmode",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "movedAgents": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Movedagents",
-            "type": "array"
-          },
-          "workspaceMode": {
-            "enum": [
-              "shared"
-            ],
-            "title": "Workspacemode",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "executionMode",
-          "workspaceMode",
-          "cwd",
-          "movedAgents"
-        ],
-        "title": "AgentMoveToHostResponse",
-        "type": "object"
       },
       "AgentNaming": {
         "enum": [
@@ -8349,10 +8351,6 @@
             "default": null,
             "title": "Usageresumeenabled",
             "type": "boolean"
-          },
-          "vmAccountSwitch": {
-            "$ref": "#/components/schemas/JsonObjectResponse",
-            "default": null
           },
           "workerBaseBehindMain": {
             "anyOf": [
@@ -10519,6 +10517,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AgentStall"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startWait": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentEntityStartWaitDto"
               },
               {
                 "type": "null"
@@ -16025,8 +16033,9 @@
             "type": "integer"
           },
           "fontFamily": {
-            "default": "system",
+            "default": "geist",
             "enum": [
+              "geist",
               "system",
               "arial",
               "inter",
@@ -18780,7 +18789,7 @@
         "oneOf": [
           {
             "const": "vm",
-            "description": "The guest service of the Linux VM on this Mac.",
+            "description": "Historical guest source retained for saved cards.",
             "type": "string"
           },
           {
@@ -19890,7 +19899,6 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "enum": [
           "layr-native",
-          "layr",
           "worktree"
         ],
         "title": "ChatWorkspaceMode",
@@ -22314,6 +22322,12 @@
         "description": "The answer of an approval: the answer fields, without the approval id (the command target).",
         "type": "object"
       },
+      "CommandDeleteBody": {
+        "additionalProperties": false,
+        "description": "A delete has no options: it always deletes the descendants of the chat too.",
+        "properties": {},
+        "type": "object"
+      },
       "CommandErrorCode": {
         "enum": [
           "receipt_expired",
@@ -22344,6 +22358,7 @@
         "discriminator": {
           "mapping": {
             "answer": "#/components/schemas/CommandRequestAnswer",
+            "delete": "#/components/schemas/CommandRequestDelete",
             "lead_message": "#/components/schemas/CommandRequestLeadMessage",
             "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
@@ -22373,6 +22388,9 @@
             "$ref": "#/components/schemas/CommandRequestAnswer"
           },
           {
+            "$ref": "#/components/schemas/CommandRequestDelete"
+          },
+          {
             "$ref": "#/components/schemas/CommandRequestLeadMessage"
           }
         ],
@@ -22395,6 +22413,46 @@
           },
           "kind": {
             "const": "answer",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CommandRequestDelete": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandDeleteBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "delete",
             "type": "string"
           },
           "number": {
@@ -22677,10 +22735,11 @@
         "type": "object"
       },
       "CommandResponse": {
-        "description": "One applied command. The kind names the kind-specific result; only answer has one.",
+        "description": "One applied command. The kind names the kind-specific result; answer, lead_message and delete have one.",
         "discriminator": {
           "mapping": {
             "answer": "#/components/schemas/CommandResponseAnswer",
+            "delete": "#/components/schemas/CommandResponseDelete",
             "lead_message": "#/components/schemas/CommandResponseLeadMessage",
             "pause": "#/components/schemas/CommandResponseApplied",
             "resolve": "#/components/schemas/CommandResponseApplied",
@@ -22699,6 +22758,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandResponseLeadMessage"
+          },
+          {
+            "$ref": "#/components/schemas/CommandResponseDelete"
           }
         ]
       },
@@ -22795,6 +22857,65 @@
           "seq",
           "rows",
           "kind"
+        ],
+        "type": "object"
+      },
+      "CommandResponseDelete": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "delete",
+            "type": "string"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "ref_kind": {
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": false,
+            "properties": {
+              "deleted": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "deleted"
+            ],
+            "type": "object"
+          },
+          "rev": {
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CommandRow"
+            },
+            "type": "array"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "applied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "ref_kind",
+          "ref_id",
+          "rev",
+          "seq",
+          "rows",
+          "kind",
+          "result"
         ],
         "type": "object"
       },
@@ -24980,7 +25101,6 @@
             "default": "worktree",
             "enum": [
               "layr-native",
-              "layr",
               "worktree",
               "shared"
             ],
@@ -25303,7 +25423,6 @@
             "description": "When omitted, the server selects native Layr when available; otherwise it selects worktree.",
             "enum": [
               "layr-native",
-              "layr",
               "worktree"
             ],
             "title": "Workspacemode",
@@ -25476,23 +25595,6 @@
         "title": "DeleteAccountRequest",
         "type": "object"
       },
-      "DeletedResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "deleted": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Deleted",
-            "type": "array"
-          }
-        },
-        "required": [
-          "deleted"
-        ],
-        "title": "DeletedResponse",
-        "type": "object"
-      },
       "DeletedRuleReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -25653,17 +25755,6 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DiskSpaceStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "linuxVm": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LinuxVMStatus"
               },
               {
                 "type": "null"
@@ -25858,17 +25949,6 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DiskSpaceStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "linuxVm": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LinuxVMStatus"
               },
               {
                 "type": "null"
@@ -30328,343 +30408,6 @@
         "title": "LimitsResource",
         "type": "object"
       },
-      "LinuxVMDownload": {
-        "additionalProperties": false,
-        "properties": {
-          "attempt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Attempt",
-            "type": "integer"
-          },
-          "bytes": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Bytes",
-            "type": "integer"
-          },
-          "seconds": {
-            "title": "Seconds",
-            "type": "number"
-          },
-          "stage": {
-            "title": "Stage",
-            "type": "string"
-          }
-        },
-        "required": [
-          "stage",
-          "attempt",
-          "bytes",
-          "seconds"
-        ],
-        "title": "LinuxVMDownload",
-        "type": "object"
-      },
-      "LinuxVMProvision": {
-        "additionalProperties": false,
-        "properties": {
-          "cause": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Cause"
-          },
-          "downloads": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/LinuxVMDownload"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Downloads"
-          },
-          "stage": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Stage"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "State"
-          }
-        },
-        "title": "LinuxVMProvision",
-        "type": "object"
-      },
-      "LinuxVMSettings": {
-        "additionalProperties": false,
-        "properties": {
-          "cpus": {
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "title": "Cpus",
-            "type": "integer"
-          },
-          "dataDiskBytes": {
-            "maximum": 1099511627776,
-            "minimum": 8589934592,
-            "title": "Datadiskbytes",
-            "type": "integer"
-          },
-          "memoryBytes": {
-            "maximum": 68719476736,
-            "minimum": 1073741824,
-            "title": "Memorybytes",
-            "type": "integer"
-          },
-          "systemDiskBytes": {
-            "maximum": 137438953472,
-            "minimum": 8589934592,
-            "title": "Systemdiskbytes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "cpus",
-          "memoryBytes",
-          "systemDiskBytes",
-          "dataDiskBytes"
-        ],
-        "title": "LinuxVMSettings",
-        "type": "object"
-      },
-      "LinuxVMSettingsResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "allocatedDiskBytes": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Allocateddiskbytes"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "settings": {
-            "$ref": "#/components/schemas/LinuxVMSettings"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "settings",
-          "state"
-        ],
-        "title": "LinuxVMSettingsResponse",
-        "type": "object"
-      },
-      "LinuxVMShareProject": {
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Path"
-          },
-          "projectId": {
-            "title": "Projectid",
-            "type": "string"
-          },
-          "readOnly": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Readonly"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "state"
-        ],
-        "title": "LinuxVMShareProject",
-        "type": "object"
-      },
-      "LinuxVMShareStatus": {
-        "additionalProperties": false,
-        "properties": {
-          "projects": {
-            "items": {
-              "$ref": "#/components/schemas/LinuxVMShareProject"
-            },
-            "title": "Projects",
-            "type": "array"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "projects"
-        ],
-        "title": "LinuxVMShareStatus",
-        "type": "object"
-      },
-      "LinuxVMStatus": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known local status fields plus unprojected host and guest status data.",
-        "properties": {
-          "allocatedDiskBytes": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Allocateddiskbytes"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "freeHostBytes": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Freehostbytes"
-          },
-          "layr": {
-            "$ref": "#/components/schemas/JsonValue",
-            "default": null
-          },
-          "provision": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LinuxVMProvision"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "share": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LinuxVMShareStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "state": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "State"
-          }
-        },
-        "title": "LinuxVMStatus",
-        "type": "object"
-      },
       "ListProjectGrantsRequest": {
         "additionalProperties": false,
         "properties": {
@@ -30983,253 +30726,6 @@
           "login_id"
         ],
         "title": "LoginRequest",
-        "type": "object"
-      },
-      "MacSyncConfigRequest": {
-        "additionalProperties": false,
-        "description": "Pause or resume the sync, or let Mac deletions that paused it go to the VM.",
-        "properties": {
-          "allowDeletes": {
-            "default": false,
-            "title": "Allowdeletes",
-            "type": "boolean"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Enabled"
-          },
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId"
-        ],
-        "title": "MacSyncConfigRequest",
-        "type": "object"
-      },
-      "MacSyncResolveRequest": {
-        "additionalProperties": false,
-        "description": "Keep the Mac version, keep the VM version, or ask the lead to combine them.",
-        "properties": {
-          "choice": {
-            "enum": [
-              "mac",
-              "vm",
-              "agent"
-            ],
-            "title": "Choice",
-            "type": "string"
-          },
-          "path": {
-            "maxLength": 4096,
-            "minLength": 1,
-            "title": "Path",
-            "type": "string"
-          },
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "path",
-          "choice"
-        ],
-        "title": "MacSyncResolveRequest",
-        "type": "object"
-      },
-      "MacSyncResolveResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "choice": {
-            "enum": [
-              "mac",
-              "vm",
-              "agent"
-            ],
-            "title": "Choice",
-            "type": "string"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "file",
-                  "link",
-                  "absent"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Kind"
-          },
-          "leadId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Leadid"
-          },
-          "line": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Line"
-          },
-          "mainStateId": {
-            "title": "Mainstateid",
-            "type": "string"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "stateId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Stateid"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MacSyncStatusResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "path",
-          "choice",
-          "mainStateId",
-          "status"
-        ],
-        "title": "MacSyncResolveResponse",
-        "type": "object"
-      },
-      "MacSyncStatusResponse": {
-        "additionalProperties": false,
-        "description": "A project's Mac folder sync. conflicts and choices wait for the user; withAgent waits\nfor the lead; deletes counts Mac deletions that wait for a confirmation.",
-        "properties": {
-          "at": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "At"
-          },
-          "choices": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Choices",
-            "type": "array"
-          },
-          "conflicts": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Conflicts",
-            "type": "array"
-          },
-          "deletes": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Deletes",
-            "type": "integer"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "folder": {
-            "title": "Folder",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Reason"
-          },
-          "state": {
-            "enum": [
-              "syncing",
-              "synced",
-              "waiting",
-              "conflict",
-              "paused",
-              "error"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "withAgent": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Withagent",
-            "type": "array"
-          }
-        },
-        "required": [
-          "state",
-          "folder",
-          "enabled",
-          "conflicts",
-          "choices",
-          "withAgent",
-          "deletes",
-          "reason",
-          "at"
-        ],
-        "title": "MacSyncStatusResponse",
         "type": "object"
       },
       "ManagedMessageBody": {
@@ -39582,26 +39078,6 @@
             "title": "Id",
             "type": "string"
           },
-          "layrReadiness": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ProjectLayrReadinessDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "layrSync": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ProjectLayrSyncDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "locations": {
             "anyOf": [
               {
@@ -39726,16 +39202,6 @@
               }
             ],
             "title": "Updated"
-          },
-          "vault": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ProjectVaultDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "workerBaseRef": {
             "anyOf": [
@@ -39915,124 +39381,6 @@
           "warning"
         ],
         "title": "ProjectInviteResponse",
-        "type": "object"
-      },
-      "ProjectLayrReadinessDto": {
-        "additionalProperties": false,
-        "description": "Whether a new layr chat of the project starts without an import (docs/vm-layr.md).\nA ready project has the ID of its layr project.",
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Error"
-          },
-          "projectId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Projectid"
-          },
-          "state": {
-            "enum": [
-              "ready",
-              "importing",
-              "not_imported",
-              "failed"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state"
-        ],
-        "title": "ProjectLayrReadinessDto",
-        "type": "object"
-      },
-      "ProjectLayrSyncDto": {
-        "additionalProperties": false,
-        "description": "The Mac folder sync of the project's layr project (docs/vm-mac-sync.md). conflicts and\nchoices wait for the user, withAgent for the lead, deletes for a confirmation.",
-        "properties": {
-          "choices": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Choices",
-            "type": "array"
-          },
-          "conflicts": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Conflicts",
-            "type": "array"
-          },
-          "deletes": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Deletes",
-            "type": "integer"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "projectId": {
-            "title": "Projectid",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Reason"
-          },
-          "state": {
-            "enum": [
-              "syncing",
-              "synced",
-              "waiting",
-              "conflict",
-              "paused",
-              "error"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "withAgent": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Withagent",
-            "type": "array"
-          }
-        },
-        "required": [
-          "projectId",
-          "state",
-          "enabled",
-          "conflicts",
-          "choices",
-          "withAgent",
-          "deletes"
-        ],
-        "title": "ProjectLayrSyncDto",
         "type": "object"
       },
       "ProjectLocation": {
@@ -40667,199 +40015,6 @@
           "removed"
         ],
         "title": "ProjectRemovalResponse",
-        "type": "object"
-      },
-      "ProjectSecretRemoveRequest": {
-        "additionalProperties": false,
-        "description": "Remove one secret. A repeated requestId returns the saved reply and changes nothing.",
-        "properties": {
-          "name": {
-            "pattern": "^[A-Z_][A-Z0-9_]{0,63}$",
-            "title": "Name",
-            "type": "string"
-          },
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          },
-          "requestId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,99}$",
-            "title": "Requestid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "name",
-          "requestId"
-        ],
-        "title": "ProjectSecretRemoveRequest",
-        "type": "object"
-      },
-      "ProjectSecretSetRequest": {
-        "additionalProperties": false,
-        "description": "Set one secret. The VM keeps the value; no response returns it. A repeated requestId\nreturns the saved reply and sets nothing.",
-        "properties": {
-          "name": {
-            "pattern": "^[A-Z_][A-Z0-9_]{0,63}$",
-            "title": "Name",
-            "type": "string"
-          },
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          },
-          "requestId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,99}$",
-            "title": "Requestid",
-            "type": "string"
-          },
-          "value": {
-            "maxLength": 16384,
-            "minLength": 1,
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "name",
-          "requestId",
-          "value"
-        ],
-        "title": "ProjectSecretSetRequest",
-        "type": "object"
-      },
-      "ProjectSecretsListRequest": {
-        "additionalProperties": false,
-        "description": "The names of a layr project's secrets (docs/project-secrets.md).",
-        "properties": {
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId"
-        ],
-        "title": "ProjectSecretsListRequest",
-        "type": "object"
-      },
-      "ProjectSecretsResponse": {
-        "additionalProperties": false,
-        "description": "The secret names of a layr project, never a value.",
-        "properties": {
-          "names": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Names",
-            "type": "array"
-          },
-          "projectId": {
-            "title": "Projectid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "names"
-        ],
-        "title": "ProjectSecretsResponse",
-        "type": "object"
-      },
-      "ProjectVaultDto": {
-        "additionalProperties": false,
-        "description": "The project vault of the project's layr project (docs/vault.md): the VM writer's last\nreport. state none: no vault; error: the last push failed (reason). site and prefix make\nthe Desk link of the vault.",
-        "properties": {
-          "disk": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Disk"
-          },
-          "lastPush": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Lastpush"
-          },
-          "prefix": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Prefix"
-          },
-          "projectId": {
-            "title": "Projectid",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Reason"
-          },
-          "site": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Site"
-          },
-          "state": {
-            "enum": [
-              "ok",
-              "error",
-              "none"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "unlocked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unlocked"
-          }
-        },
-        "required": [
-          "projectId",
-          "state"
-        ],
-        "title": "ProjectVaultDto",
         "type": "object"
       },
       "ProjectWriteRequest": {
@@ -44437,12 +43592,6 @@
             "$ref": "#/components/schemas/AuthProgressEvent"
           },
           {
-            "$ref": "#/components/schemas/VaultReadinessEvent"
-          },
-          {
-            "$ref": "#/components/schemas/VaultJobProgressEvent"
-          },
-          {
             "$ref": "#/components/schemas/RenameProgressEvent"
           }
         ],
@@ -44478,8 +43627,6 @@
             "terminals": "#/components/schemas/TerminalsResource",
             "transcript": "#/components/schemas/TranscriptResource",
             "transcripts": "#/components/schemas/TranscriptsResource",
-            "vault-job-progress": "#/components/schemas/VaultJobProgressResource",
-            "vault-readiness": "#/components/schemas/VaultReadinessResource",
             "voice": "#/components/schemas/VoiceResource",
             "work": "#/components/schemas/WorkResource",
             "workspace": "#/components/schemas/WorkspaceResource"
@@ -44549,12 +43696,6 @@
           },
           {
             "$ref": "#/components/schemas/AuthProgressResource"
-          },
-          {
-            "$ref": "#/components/schemas/VaultReadinessResource"
-          },
-          {
-            "$ref": "#/components/schemas/VaultJobProgressResource"
           },
           {
             "$ref": "#/components/schemas/RenameProgressResource"
@@ -45391,6 +44532,17 @@
       "ReviewDefaults": {
         "additionalProperties": false,
         "properties": {
+          "account_key": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "effort": {
             "anyOf": [
               {
@@ -45432,6 +44584,12 @@
       "ReviewDefaultsDto": {
         "additionalProperties": false,
         "properties": {
+          "accountKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "effort": {
             "anyOf": [
               {
@@ -51128,7 +50286,8 @@
           "dispatch_pending",
           "paused",
           "native_failure",
-          "account_transfer"
+          "account_transfer",
+          "workspace_copy"
         ],
         "type": "string"
       },
@@ -51379,6 +50538,79 @@
             "required": [
               "reason",
               "epoch"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "progress": {
+                "additionalProperties": false,
+                "properties": {
+                  "done": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "phase": {
+                    "enum": [
+                      "sizing",
+                      "staging",
+                      "importing_commits",
+                      "materializing",
+                      "restoring_attributes",
+                      "warming_caches",
+                      "transferring",
+                      "creating_line",
+                      "archiving",
+                      "uploading",
+                      "importing_project",
+                      "completed",
+                      "failed"
+                    ],
+                    "type": "string"
+                  },
+                  "total": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "enum": [
+                      "files",
+                      "bytes",
+                      "commits"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "phase",
+                  "done",
+                  "unit"
+                ],
+                "type": "object"
+              },
+              "reason": {
+                "const": "workspace_copy",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "epoch",
+              "progress"
             ],
             "type": "object"
           }
@@ -52424,25 +51656,6 @@
             },
             "type": "array"
           },
-          "vault-job-progress": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VaultSetupResponse"
-              },
-              {
-                "$ref": "#/components/schemas/VaultLoginResponse"
-              },
-              {
-                "$ref": "#/components/schemas/VaultPullResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "vault-readiness": {
-            "type": "boolean"
-          },
           "voice": {
             "$ref": "#/components/schemas/VoiceRecordBatch"
           },
@@ -52479,8 +51692,6 @@
           "terminals",
           "transcript",
           "transcripts",
-          "vault-job-progress",
-          "vault-readiness",
           "voice",
           "workspace",
           "processes",
@@ -60116,11 +59327,6 @@
           "defaultWorkspaceMode": {
             "$ref": "#/components/schemas/ChatWorkspaceMode"
           },
-          "hasStudioVm": {
-            "default": false,
-            "description": "The server has a created Studio Linux VM.",
-            "type": "boolean"
-          },
           "nativeLayr": {
             "$ref": "#/components/schemas/NativeLayrCapability"
           },
@@ -61553,986 +60759,6 @@
           "cacheWriteInput",
           "output"
         ],
-        "type": "object"
-      },
-      "VaultAwsProfileDto": {
-        "additionalProperties": false,
-        "description": "An AWS profile of this Mac: signedIn says whether it has keys or a usable sign-in.",
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "region": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Region"
-          },
-          "signedIn": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Signedin"
-          },
-          "sso": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Sso"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "VaultAwsProfileDto",
-        "type": "object"
-      },
-      "VaultJobProgressEvent": {
-        "additionalProperties": false,
-        "description": "Transient subscribed progress; never persisted to the server or client entity store.",
-        "oneOf": [
-          {
-            "properties": {
-              "resource": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/VaultJobProgressResource"
-                  },
-                  {
-                    "properties": {
-                      "job": {
-                        "const": "setup",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "job"
-                    ],
-                    "type": "object"
-                  }
-                ]
-              },
-              "value": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/VaultSetupResponse"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "resource",
-              "value"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "resource": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/VaultJobProgressResource"
-                  },
-                  {
-                    "properties": {
-                      "job": {
-                        "const": "login",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "job"
-                    ],
-                    "type": "object"
-                  }
-                ]
-              },
-              "value": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/VaultLoginResponse"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "resource",
-              "value"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "resource": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/VaultJobProgressResource"
-                  },
-                  {
-                    "properties": {
-                      "job": {
-                        "const": "pull",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "job"
-                    ],
-                    "type": "object"
-                  }
-                ]
-              },
-              "value": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/VaultPullResponse"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "resource",
-              "value"
-            ],
-            "type": "object"
-          }
-        ],
-        "properties": {
-          "epoch": {
-            "minLength": 1,
-            "title": "Epoch",
-            "type": "string"
-          },
-          "protocol": {
-            "const": 4,
-            "maximum": 4,
-            "minimum": 4,
-            "title": "Protocol",
-            "type": "integer"
-          },
-          "resource": {
-            "$ref": "#/components/schemas/VaultJobProgressResource"
-          },
-          "revision": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Revision",
-            "type": "integer"
-          },
-          "value": {},
-          "workspaceId": {
-            "minLength": 1,
-            "title": "Workspaceid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "protocol",
-          "workspaceId",
-          "epoch",
-          "revision",
-          "resource",
-          "value"
-        ],
-        "title": "VaultJobProgressEvent",
-        "type": "object"
-      },
-      "VaultJobProgressResource": {
-        "additionalProperties": false,
-        "properties": {
-          "job": {
-            "enum": [
-              "setup",
-              "login",
-              "pull"
-            ],
-            "type": "string"
-          },
-          "kind": {
-            "const": "vault-job-progress",
-            "type": "string"
-          },
-          "requestId": {
-            "maxLength": 256,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "requestId",
-          "job"
-        ],
-        "title": "VaultJobProgressResource",
-        "type": "object"
-      },
-      "VaultLoginDone": {
-        "properties": {
-          "state": {
-            "const": "done",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state"
-        ],
-        "title": "VaultLoginDone",
-        "type": "object"
-      },
-      "VaultLoginRequest": {
-        "additionalProperties": false,
-        "description": "Sign in to an AWS profile. A repeated requestId returns the same sign-in.",
-        "properties": {
-          "profile": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}$",
-            "title": "Profile",
-            "type": "string"
-          },
-          "requestId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
-            "title": "Requestid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requestId",
-          "profile"
-        ],
-        "title": "VaultLoginRequest",
-        "type": "object"
-      },
-      "VaultLoginResponse": {
-        "additionalProperties": false,
-        "description": "One AWS sign-in: running (page and code once AWS gives them), done or failed.",
-        "oneOf": [
-          {
-            "properties": {
-              "state": {
-                "const": "running",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          },
-          {
-            "$ref": "#/components/schemas/VaultLoginDone"
-          },
-          {
-            "properties": {
-              "state": {
-                "const": "failed",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          }
-        ],
-        "properties": {
-          "code": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Code"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "page": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Page"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "running",
-              "done",
-              "failed"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requestId",
-          "state"
-        ],
-        "title": "VaultLoginResponse",
-        "type": "object"
-      },
-      "VaultPullBytes": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "title": "VaultPullBytes",
-        "type": "integer"
-      },
-      "VaultPullDone": {
-        "allOf": [
-          {
-            "properties": {
-              "state": {
-                "const": "done",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          },
-          {
-            "$ref": "#/components/schemas/VaultPullOutcome"
-          }
-        ],
-        "title": "VaultPullDone"
-      },
-      "VaultPullFiles": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "title": "VaultPullFiles",
-        "type": "integer"
-      },
-      "VaultPullOutcome": {
-        "properties": {
-          "bytes": {
-            "$ref": "#/components/schemas/VaultPullBytes"
-          },
-          "files": {
-            "$ref": "#/components/schemas/VaultPullFiles"
-          },
-          "seq": {
-            "$ref": "#/components/schemas/VaultPullSequence"
-          }
-        },
-        "required": [
-          "seq",
-          "files",
-          "bytes"
-        ],
-        "title": "VaultPullOutcome",
-        "type": "object"
-      },
-      "VaultPullRequest": {
-        "additionalProperties": false,
-        "description": "Pull the latest vault state into a new folder below `to` (Downloads when left out).\nA repeated requestId returns the same pull.",
-        "properties": {
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          },
-          "requestId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
-            "title": "Requestid",
-            "type": "string"
-          },
-          "to": {
-            "anyOf": [
-              {
-                "maxLength": 4096,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "To"
-          }
-        },
-        "required": [
-          "projectId",
-          "requestId"
-        ],
-        "title": "VaultPullRequest",
-        "type": "object"
-      },
-      "VaultPullResponse": {
-        "additionalProperties": false,
-        "description": "One pull of a vault state into a Mac folder: running, done (seq, files, bytes) or\nfailed (error).",
-        "oneOf": [
-          {
-            "properties": {
-              "state": {
-                "const": "running",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          },
-          {
-            "$ref": "#/components/schemas/VaultPullDone"
-          },
-          {
-            "properties": {
-              "state": {
-                "const": "failed",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          }
-        ],
-        "properties": {
-          "bytes": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VaultPullBytes"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Bytes"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "files": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VaultPullFiles"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Files"
-          },
-          "folder": {
-            "title": "Folder",
-            "type": "string"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          },
-          "seq": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VaultPullSequence"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Seq"
-          },
-          "state": {
-            "enum": [
-              "running",
-              "done",
-              "failed"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requestId",
-          "state",
-          "folder"
-        ],
-        "title": "VaultPullResponse",
-        "type": "object"
-      },
-      "VaultPullSequence": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "title": "VaultPullSequence",
-        "type": "integer"
-      },
-      "VaultReadinessEvent": {
-        "additionalProperties": false,
-        "description": "Transient subscribed progress; never persisted to the server or client entity store.",
-        "properties": {
-          "epoch": {
-            "minLength": 1,
-            "title": "Epoch",
-            "type": "string"
-          },
-          "protocol": {
-            "const": 4,
-            "maximum": 4,
-            "minimum": 4,
-            "title": "Protocol",
-            "type": "integer"
-          },
-          "resource": {
-            "$ref": "#/components/schemas/VaultReadinessResource"
-          },
-          "revision": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Revision",
-            "type": "integer"
-          },
-          "value": {
-            "type": "boolean"
-          },
-          "workspaceId": {
-            "minLength": 1,
-            "title": "Workspaceid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "protocol",
-          "workspaceId",
-          "epoch",
-          "revision",
-          "resource",
-          "value"
-        ],
-        "title": "VaultReadinessEvent",
-        "type": "object"
-      },
-      "VaultReadinessResource": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "const": "vault-readiness",
-            "type": "string"
-          },
-          "prefix": {
-            "maxLength": 44,
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "prefix"
-        ],
-        "title": "VaultReadinessResource",
-        "type": "object"
-      },
-      "VaultSetupDone": {
-        "properties": {
-          "site": {
-            "type": "string"
-          },
-          "state": {
-            "const": "done",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "site"
-        ],
-        "title": "VaultSetupDone",
-        "type": "object"
-      },
-      "VaultSetupFactsRequest": {
-        "additionalProperties": false,
-        "description": "The facts for the vault setup dialog; prefix replaces the name from the folder.",
-        "properties": {
-          "prefix": {
-            "anyOf": [
-              {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,43}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Prefix"
-          },
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId"
-        ],
-        "title": "VaultSetupFactsRequest",
-        "type": "object"
-      },
-      "VaultSetupFactsResponse": {
-        "additionalProperties": false,
-        "description": "The vault name, whether this Mac has its keys, the gateway's Desk site and account, and\nthe AWS profiles.",
-        "properties": {
-          "gatewayProfile": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Gatewayprofile"
-          },
-          "keys": {
-            "title": "Keys",
-            "type": "boolean"
-          },
-          "prefix": {
-            "title": "Prefix",
-            "type": "string"
-          },
-          "profiles": {
-            "items": {
-              "$ref": "#/components/schemas/VaultAwsProfileDto"
-            },
-            "title": "Profiles",
-            "type": "array"
-          },
-          "region": {
-            "title": "Region",
-            "type": "string"
-          },
-          "site": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Site"
-          }
-        },
-        "required": [
-          "prefix",
-          "keys",
-          "site",
-          "region",
-          "gatewayProfile",
-          "profiles"
-        ],
-        "title": "VaultSetupFactsResponse",
-        "type": "object"
-      },
-      "VaultSetupRequest": {
-        "additionalProperties": false,
-        "description": "Make the project's vault with an AWS profile. A repeated requestId returns the same job.",
-        "properties": {
-          "prefix": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,43}$",
-            "title": "Prefix",
-            "type": "string"
-          },
-          "profile": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}$",
-            "title": "Profile",
-            "type": "string"
-          },
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          },
-          "region": {
-            "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$",
-            "title": "Region",
-            "type": "string"
-          },
-          "requestId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
-            "title": "Requestid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "requestId",
-          "prefix",
-          "profile",
-          "region"
-        ],
-        "title": "VaultSetupRequest",
-        "type": "object"
-      },
-      "VaultSetupResponse": {
-        "additionalProperties": false,
-        "description": "One vault setup: running (progress), done (site), failed (error), or signin when the\nAWS profile needs a sign-in first.",
-        "oneOf": [
-          {
-            "properties": {
-              "state": {
-                "const": "running",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          },
-          {
-            "$ref": "#/components/schemas/VaultSetupDone"
-          },
-          {
-            "properties": {
-              "state": {
-                "const": "failed",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "state": {
-                "const": "signin",
-                "type": "string"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "type": "object"
-          }
-        ],
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "prefix": {
-            "title": "Prefix",
-            "type": "string"
-          },
-          "progress": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Progress"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          },
-          "site": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Site"
-          },
-          "state": {
-            "enum": [
-              "running",
-              "done",
-              "failed",
-              "signin"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requestId",
-          "state",
-          "prefix"
-        ],
-        "title": "VaultSetupResponse",
-        "type": "object"
-      },
-      "VaultUnlockRequest": {
-        "additionalProperties": false,
-        "description": "The paper words of the project's vault, to keep its key on this Mac.",
-        "properties": {
-          "projectId": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-            "title": "Projectid",
-            "type": "string"
-          },
-          "words": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Words",
-            "type": "string"
-          }
-        },
-        "required": [
-          "projectId",
-          "words"
-        ],
-        "title": "VaultUnlockRequest",
-        "type": "object"
-      },
-      "VaultUnlockResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "unlocked": {
-            "title": "Unlocked",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "unlocked"
-        ],
-        "title": "VaultUnlockResponse",
-        "type": "object"
-      },
-      "VmFinderViewResponse": {
-        "additionalProperties": false,
-        "description": "A VM chat: the read-only ~/Studio view of its layr project. The path is set only when mounted.",
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Error"
-          },
-          "kind": {
-            "const": "vm",
-            "title": "Kind",
-            "type": "string"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Path"
-          },
-          "state": {
-            "enum": [
-              "mounted",
-              "unmounted",
-              "failed"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "state",
-          "path",
-          "error"
-        ],
-        "title": "VmFinderViewResponse",
         "type": "object"
       },
       "VoiceAuth": {
@@ -69690,7 +67916,7 @@
     },
     "/api/agents/finder-view": {
       "get": {
-        "description": "Where Finder shows the chat's files. Reads saved records only; never mounts or calls the VM.",
+        "description": "Where the file manager shows the chat's files. Reads saved records only.",
         "operationId": "finder_view_api_agents_finder_view_get",
         "parameters": [
           {
@@ -69713,9 +67939,6 @@
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/NativeFinderViewResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/VmFinderViewResponse"
                     }
                   ],
                   "title": "Response Finder View Api Agents Finder View Get"
@@ -69795,131 +68018,6 @@
           }
         },
         "summary": "Finder View"
-      }
-    },
-    "/api/agents/move-to-host": {
-      "post": {
-        "operationId": "move_to_host_api_agents_move_to_host_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentMoveToHostRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentMoveToHostResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Move an idle VM chat to this device"
       }
     },
     "/api/agents/workspace-mode": {
@@ -72588,131 +70686,6 @@
         "summary": "Conversation Settings"
       }
     },
-    "/api/conversation/delete": {
-      "post": {
-        "operationId": "delete_conversation_api_conversation_delete_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IdRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeletedResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Delete Conversation"
-      }
-    },
     "/api/costs": {
       "get": {
         "operationId": "costs_api_costs_get",
@@ -74522,460 +72495,6 @@
           }
         },
         "summary": "Reset Limits"
-      }
-    },
-    "/api/linux-vm/settings": {
-      "get": {
-        "operationId": "linux_vm_settings_api_linux_vm_settings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LinuxVMSettingsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Linux Vm Settings"
-      },
-      "post": {
-        "operationId": "linux_vm_settings_write_api_linux_vm_settings_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinuxVMSettings"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LinuxVMSettingsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Linux Vm Settings Write"
-      }
-    },
-    "/api/mac-sync/config": {
-      "post": {
-        "description": "Pause or resume a project's Mac folder sync, or confirm the Mac deletions that paused it.",
-        "operationId": "mac_sync_config_api_mac_sync_config_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MacSyncConfigRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MacSyncStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Mac Sync Config"
-      }
-    },
-    "/api/mac-sync/resolve": {
-      "post": {
-        "description": "Settle one conflicting path of a project's Mac folder sync.",
-        "operationId": "mac_sync_resolve_api_mac_sync_resolve_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MacSyncResolveRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MacSyncResolveResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Mac Sync Resolve"
       }
     },
     "/api/mcp/reconnect": {
@@ -78453,384 +75972,6 @@
           }
         },
         "summary": "Project Location Query"
-      }
-    },
-    "/api/project-secrets/list": {
-      "post": {
-        "description": "The names of the project's secrets.",
-        "operationId": "project_secrets_list_api_project_secrets_list_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectSecretsListRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectSecretsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Project Secrets List"
-      }
-    },
-    "/api/project-secrets/remove": {
-      "post": {
-        "description": "Remove one secret of the project.",
-        "operationId": "project_secrets_remove_api_project_secrets_remove_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectSecretRemoveRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectSecretsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Project Secrets Remove"
-      }
-    },
-    "/api/project-secrets/set": {
-      "post": {
-        "description": "Set one secret of the project; agent processes that start later get it.",
-        "operationId": "project_secrets_set_api_project_secrets_set_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectSecretSetRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectSecretsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Project Secrets Set"
       }
     },
     "/api/projects": {
@@ -83595,620 +80736,6 @@
           }
         },
         "summary": "Usage Resume"
-      }
-    },
-    "/api/vault/aws-login": {
-      "post": {
-        "description": "Start a sign-in to an AWS profile, or report the sign-in that this requestId\nstarted.",
-        "operationId": "vault_aws_login_api_vault_aws_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VaultLoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VaultLoginResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Vault Aws Login"
-      }
-    },
-    "/api/vault/pull": {
-      "post": {
-        "description": "Start a pull of the project's latest vault state into a new Mac folder, or report\nthe pull that this requestId started.",
-        "operationId": "vault_pull_api_vault_pull_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VaultPullRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VaultPullResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Vault Pull"
-      }
-    },
-    "/api/vault/setup": {
-      "post": {
-        "description": "Start the setup of the project's vault, or report the setup that this requestId\nstarted.",
-        "operationId": "vault_setup_api_vault_setup_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VaultSetupRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VaultSetupResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Vault Setup"
-      }
-    },
-    "/api/vault/setup/facts": {
-      "post": {
-        "description": "What the vault setup dialog needs: the vault name, the keys on this Mac, the Desk\nsite and the AWS profiles.",
-        "operationId": "vault_setup_facts_api_vault_setup_facts_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VaultSetupFactsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VaultSetupFactsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Vault Setup Facts"
-      }
-    },
-    "/api/vault/unlock": {
-      "post": {
-        "description": "Keep the vault key on this Mac from the paper words; the words reach only layr-desk.",
-        "operationId": "vault_unlock_api_vault_unlock_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VaultUnlockRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VaultUnlockResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Vault Unlock"
       }
     },
     "/api/voice/end": {

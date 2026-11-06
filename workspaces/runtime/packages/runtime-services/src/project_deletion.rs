@@ -545,6 +545,7 @@ fn membership(
     for (id, agent) in agents {
         let explicitly_other =
             matches!(binding(agent), Ok(Some((p, s))) if !projects.contains(p) || s != server);
+<<<<<<< head
         let associated = selected.contains(id)
             || selected.contains(agent.root_id.as_ref())
             || (!explicitly_other
@@ -553,6 +554,16 @@ fn membership(
                     .value()
                     .is_some_and(|p| paths.contains(p))
                     || agent.cwd.as_ref().is_some_and(|p| paths.contains(p))))
+=======
+        let associated = selected.contains(agent.root_id.as_ref())
+            || (!explicitly_other
+                && (agent.parent_id.is_none() || !agents.contains_key(agent.root_id.as_ref()))
+                && agent
+                    .host_project_path
+                    .value()
+                    .or(agent.cwd.as_ref())
+                    .is_some_and(|p| paths.contains(p)))
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
             || (!explicitly_other
                 && agent
                     .project_id

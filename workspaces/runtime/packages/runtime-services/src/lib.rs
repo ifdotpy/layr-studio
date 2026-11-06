@@ -46,6 +46,7 @@ pub mod browser_environment;
 #[cfg(unix)]
 pub mod browser_host;
 pub mod browser_policy;
+pub mod browser_rpc;
 pub mod callback_runtime;
 pub mod capacity_retry;
 pub mod catalog_reads;
@@ -73,6 +74,7 @@ pub mod diagnostics;
 pub mod disk_space;
 pub mod edit_turn;
 pub mod entity_publication;
+pub mod entity_scope;
 pub mod event_write;
 pub mod federation;
 pub mod federation_credentials;
@@ -82,9 +84,6 @@ pub mod federation_lead;
 pub mod federation_limits;
 pub mod federation_messaging;
 pub mod file_derived;
-pub mod host_exec;
-#[cfg(unix)]
-pub mod host_exec_service;
 pub mod host_project_runtime;
 pub mod host_worker_create;
 pub mod idle_compaction;
@@ -93,16 +92,7 @@ pub(crate) mod layr_read;
 pub mod legacy_image_workspace;
 pub mod lifecycle_effects;
 pub mod limit_reset;
-pub mod linux_vm_guest;
-pub mod linux_vm_provider;
-#[cfg(unix)]
-pub mod linux_vm_runtime;
-pub mod linux_vm_settings;
-#[cfg(unix)]
-pub mod linux_vm_share;
-pub mod linux_vm_update;
 pub mod liveness;
-pub mod mac_sync;
 pub mod maintenance;
 #[allow(dead_code)] // The managed-tools callback caller is integrated by its owning package.
 pub(crate) mod managed_child_create;
@@ -144,6 +134,7 @@ pub mod orchestration_wire;
 pub mod orchestration_worker;
 pub mod organization_effects;
 pub mod outbox_resolve;
+pub mod own_link;
 pub mod panels;
 pub mod payload_blobs;
 pub mod payload_store;
@@ -161,7 +152,6 @@ pub mod project_locations;
 mod project_path;
 pub mod project_peer;
 pub mod project_projection;
-pub mod project_secrets;
 pub mod projects;
 pub mod provider_adapter;
 pub mod provider_binaries;
@@ -193,7 +183,6 @@ pub mod rules;
 pub mod rules_engine;
 pub mod rules_tick;
 pub mod safety_buffering;
-mod saved_mount;
 pub mod scheduler;
 pub mod server_exec;
 pub mod server_git;
@@ -202,6 +191,7 @@ pub mod shell_command;
 pub mod shell_policy;
 pub mod shell_pressure;
 pub mod sign_in;
+pub mod simple_move;
 pub mod storage_retention;
 pub mod stored_text_compaction;
 pub mod studio_errors;
@@ -233,22 +223,18 @@ pub mod turn_prepare;
 pub mod unclean_recovery;
 pub mod usage;
 pub mod usage_resume;
-pub mod vault;
-mod vm_attachments;
-pub mod vm_preparation;
-pub mod vm_to_host;
 pub mod voice;
 pub mod voice_runtime;
 pub mod wakeups;
 pub mod web_push;
 pub mod work_assignment_runtime;
 pub mod work_policy;
-pub mod work_scope;
 pub mod work_write;
 pub mod workspace_cleanup_runtime;
 pub mod workspace_files;
 pub mod workspace_operations;
 pub mod workspace_operations_effects;
+mod workspace_paths;
 pub mod workspace_ready;
 pub mod workspace_ready_git;
 pub mod workspace_views;
@@ -275,7 +261,10 @@ mod registration_tests {
 
     #[test]
     fn service_modules_match_the_source_directory_in_alphabetical_order() {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let directory = Path::new(
+            &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("src");
         let path_included_children = fs::read_dir(&directory)
             .expect("services source directory is readable")
             .filter_map(|entry| {

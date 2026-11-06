@@ -2,7 +2,7 @@
   margin: 16px 0;
   padding: 12px 0;
   border-block: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -40,6 +40,6 @@
   margin: 4px 0 0;
 }
 .native-runtime-status .native-runtime-warning {
-  color: var(--warning, #e3b761);
+  color: var(--studio-warning);
   margin: 4px 0 0;
 }

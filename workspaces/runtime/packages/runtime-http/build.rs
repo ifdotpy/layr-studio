@@ -1,92 +1,8 @@
 #![allow(
     clippy::disallowed_methods,
-    reason = "build script runs in a dedicated compiler process, outside Tokio"
+    reason = "build script runs outside the HTTP runtime"
 )]
-use std::env;
-use std::error::Error;
-use std::fs;
-use std::path::PathBuf;
-
-use openapi_to_rust::analysis::{ObjectAdditionalProperties, PropertyConstraints, SchemaType};
-use openapi_to_rust::{CodeGenerator, GeneratorConfig, SchemaAnalyzer};
-
-// Only ingress schemas whose consumers and full constraints have been audited.
-const CONSTRAINED_INGRESS: &[&str] = &[
-    "CheckpointPreviewRequest",
-    "CheckpointRestoreRequest",
-    "CheckpointCaptureRequest",
-    "ClaudeAddStartRequest",
-    "ClaudeCancelRequest",
-    "ClaudeCodeRequest",
-    "ClaudeStartRequest",
-    "IdRequest",
-    "MacSyncConfigRequest",
-    "MacSyncResolveRequest",
-    "McpReconnectRequest",
-    "McpSessionBinding",
-    "NativeActionRequest",
-    "ActionContext",
-    "SafetyActionRequest",
-    "ProjectSecretsListRequest",
-    "ProjectDeleteRequest",
-    "ProjectSecretSetRequest",
-    "ProjectSecretRemoveRequest",
-    "VaultLoginRequest",
-    "VaultPullRequest",
-    "VaultSetupFactsRequest",
-    "VaultSetupRequest",
-    "VaultUnlockRequest",
-    "VoiceEndRequest",
-    "VoiceStartRequest",
-    "VoiceStatusRequest",
-    "VoiceRecordsRequest",
-    "WebPushRemoveRequest",
-    "WebPushSubscribeRequest",
-];
-
-const PATTERN_TYPES: &[(&str, &str)] = &[
-    (
-        "^[a-z0-9][a-z0-9_-]{0,31}$",
-        "studio_runtime_schema::project_ingress::AccountGroup",
-    ),
-    ("\\S", "crate::ingress_pattern::NonWhitespace"),
-    (
-        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-        "crate::ingress_pattern::Uuid",
-    ),
-    (
-        "^[^\\s\\p{C}](?:[^\\s\\p{C}]| +[^\\s\\p{C}])*$",
-        "studio_runtime_schema::multi_server_ingress::ServerLabel",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-        "crate::ingress_pattern::ProjectId",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
-        "crate::ingress_pattern::VaultRequestId",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9:_-]{0,99}$",
-        "crate::ingress_pattern::SecretRequestId",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}$",
-        "crate::ingress_pattern::AwsProfileName",
-    ),
-    (
-        "^[A-Z_][A-Z0-9_]{0,63}$",
-        "crate::ingress_pattern::SecretName",
-    ),
-    (
-        "^[a-z]{2}(-[a-z]+)+-[0-9]$",
-        "crate::ingress_pattern::Region",
-    ),
-    (
-        "^[A-Za-z0-9][A-Za-z0-9_-]{0,43}$",
-        "studio_runtime_schema::resource_ref::VaultPrefix",
-    ),
-];
+use std::{env, error::Error, fs, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
@@ -111,6 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         shared, inherited,
         "HTTP Clippy config must preserve the policy owned by runtime/clippy.toml"
     );
+<<<<<<< head
     let spec_path = manifest_dir.join("openapi.json");
     let output_dir = PathBuf::from(env::var("OUT_DIR")?).join("generated");
     println!("cargo:rerun-if-changed=openapi.json");
@@ -864,5 +781,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         module_lines.push("pub use types::*;".to_owned());
     }
     fs::write(output_dir.join("mod.rs"), module_lines.join("\n") + "\n")?;
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     Ok(())
 }

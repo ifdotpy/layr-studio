@@ -833,11 +833,6 @@ async fn create(
     if !studio_runtime_schema::workspace_modes::accepts_chat(&workspace) {
         return Err(OperationError::Invalid("Unknown workspace mode"));
     }
-    if workspace == "layr" && !cfg!(target_os = "macos") {
-        return Err(OperationError::Invalid(
-            "This server has no Studio Linux VM",
-        ));
-    }
     if !draft && request.cwd.as_deref().is_none_or(str::is_empty) {
         return Err(OperationError::Invalid(
             "Select an existing project directory",
@@ -1129,9 +1124,6 @@ async fn create(
                 .to_owned(),
         );
     }
-    if workspace == "layr" {
-        set_vm_workspace_fields(&mut record, &cwd);
-    }
     record.model = Some(settings.model.clone());
     record.effort = settings.effort.clone().map_or(Field::Null, Field::Value);
     record.fast_mode = Some(settings.fast_mode);
@@ -1247,9 +1239,7 @@ async fn create(
                 reused.pending_settings = Field::Missing;
                 reused.pending_settings_account_key = Field::Missing;
             }
-            if workspace_for_write == "layr" {
-                set_vm_workspace_fields(&mut reused, &cwd);
-            } else if workspace_for_write == "layr-native" {
+            if workspace_for_write == "layr-native" {
                 crate::layr_native::configure_new_chat(&mut reused, &project_path);
                 if reused.layr_store_root.is_none() {
                     reused.layr_store_root = record.layr_store_root.clone();
@@ -1378,23 +1368,11 @@ async fn create_child(
         parent.get("executionMode").and_then(Value::as_str) == Some("vm"),
     )?;
     validate_parent_workspace_for_create(workspace, &parent)?;
-    if workspace == "layr" && !cfg!(target_os = "macos") {
-        return Err(OperationError::Invalid(
-            "This server supports only worktree chats",
-        ));
-    }
     let cwd = parent
         .get("cwd")
         .and_then(Value::as_str)
         .ok_or(OperationError::Internal)?;
-    let host_cwd = if workspace == "layr" {
-        root.get("hostProjectPath")
-            .or_else(|| root.get("cwd"))
-            .and_then(Value::as_str)
-            .unwrap_or(cwd)
-    } else {
-        cwd
-    };
+    let host_cwd = cwd;
     if crate::projects::refuses_worktree(&context.store, cwd, workspace).await? {
         return Err(OperationError::Invalid(
             crate::projects::WORKTREE_REFUSED_BY_LAYR_POLICY,
@@ -1460,10 +1438,7 @@ async fn create_child(
         .get("cwd")
         .and_then(Value::as_str)
         .ok_or(OperationError::Internal)?;
-    // Python persists VM workers against the host project identity
-    // (`codex_runtime.py:5018-5020`), while `cwd` is guest-local. Freeze that
-    // same identity for the writer recheck in `host_worker_create`.
-    let parent_project_path = parent_project_path(&parent, &root, parent_cwd);
+    let parent_project_path = parent_cwd;
     let parent_account_key = parent
         .get("accountKey")
         .and_then(Value::as_str)
@@ -1524,13 +1499,6 @@ async fn create_child(
     )
     .await
     .map_err(|_| OperationError::Internal)??;
-    if workspace == "layr" {
-        record.cwd = Some(cwd.to_owned());
-        set_vm_workspace_fields(&mut record, host_cwd);
-        if role == "reviewer" {
-            record.worktree = Some(false);
-        }
-    }
     if workspace == "layr-native" {
         crate::layr_native::configure_child(&mut record, &parent_record, &root_record);
     }
@@ -1619,11 +1587,6 @@ fn validate_parent_workspace_for_create(
             "A native Layr workspace requires a native Layr parent",
         ));
     }
-    if workspace == "layr" && parent.get("executionMode").and_then(Value::as_str) != Some("vm") {
-        return Err(OperationError::Invalid(
-            "A VM workspace requires a VM parent",
-        ));
-    }
     Ok(())
 }
 
@@ -1641,9 +1604,9 @@ fn child_role_workspace<'a>(
     if !matches!(role, "implementer" | "reviewer") {
         return Err(OperationError::Invalid("Invalid agent role"));
     }
-    if role == "reviewer" && vm_parent && requested_workspace.is_some_and(|mode| mode != "layr") {
+    if vm_parent {
         return Err(OperationError::Invalid(
-            "A VM reviewer must use the parent's layr workspace",
+            "The parent workspace is unavailable",
         ));
     }
     if role == "reviewer"
@@ -1654,13 +1617,12 @@ fn child_role_workspace<'a>(
             "A native Layr reviewer must use the parent's workspace",
         ));
     }
-    let workspace = requested_workspace.unwrap_or(
-        if role == "reviewer" && !vm_parent && parent_workspace != "layr-native" {
+    let workspace =
+        requested_workspace.unwrap_or(if role == "reviewer" && parent_workspace != "layr-native" {
             "shared"
         } else {
             parent_workspace
-        },
-    );
+        });
     if !studio_runtime_schema::workspace_modes::accepts_worker(workspace) {
         return Err(OperationError::Invalid("Unknown workspace mode"));
     }
@@ -1668,48 +1630,20 @@ fn child_role_workspace<'a>(
     Ok((role, workspace, worktree))
 }
 
-fn parent_project_path<'a>(parent: &'a Value, root: &'a Value, parent_cwd: &'a str) -> &'a str {
-    if parent.get("executionMode").and_then(Value::as_str) == Some("vm") {
-        parent
-            .get("hostProjectPath")
-            .or_else(|| root.get("hostProjectPath"))
-            .or_else(|| root.get("cwd"))
-            .and_then(Value::as_str)
-            .unwrap_or(parent_cwd)
-    } else {
-        parent_cwd
-    }
-}
-
 fn parent_project_binding(
     db: &rusqlite::Connection,
     parent: &Value,
-    root: &Value,
+    _root: &Value,
 ) -> Result<Option<Value>, OperationError> {
     let parent_cwd = parent
         .get("cwd")
         .and_then(Value::as_str)
         .ok_or(OperationError::Internal)?;
-    let project_path = parent_project_path(parent, root, parent_cwd);
+    let project_path = parent_cwd;
     Ok(
         studio_runtime_store::ProjectsRepository::get(db, project_path)?
             .map(|(_, project)| project),
     )
-}
-
-/// Persist the host identity while the VM guest creates the project and line
-/// before its first turn. Python's `codex_runtime.py:5018-5026` stores these
-/// fields at creation; `codex_vm_agents.py:196-230` fills the guest association
-/// during preparation.
-pub(crate) fn set_vm_workspace_fields(record: &mut AgentRecord, host_root: &str) {
-    record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Layr);
-    record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-    record.host_project_path = Field::Value(host_root.to_owned());
-    record.environment = Field::Value(studio_runtime_store::StoredTransferValue::Known(
-        studio_runtime_schema::project_ingress::WorkerEnvironment::Linux,
-    ));
-    record.worktree = Some(false);
-    record.layr_ready = Some(false);
 }
 
 pub async fn configure(
@@ -3112,6 +3046,7 @@ async fn resolve_review_defaults(
     let Some(value) = value else {
         return Ok(
             studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+                account_key: None,
                 model: None,
                 effort: None,
                 fast_mode: None,
@@ -3119,10 +3054,40 @@ async fn resolve_review_defaults(
         );
     };
     let mut defaults = studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+        account_key: value.account_key.value().cloned(),
         model: None,
         effort: None,
         fast_mode: value.fast_mode,
     };
+    if let Some(key) = defaults.account_key.as_deref() {
+        if excluded_account_keys.iter().any(|excluded| excluded == key) {
+            return Err(OperationError::Invalid(
+                "This account is excluded from subagents",
+            ));
+        }
+        if let Some(driver) = context.driver.clone() {
+            let key = key.to_owned();
+            let (identity, status, native_proof) =
+                studio_runtime_process::blocking_pool::spawn_blocking(
+                    "runtime-services/agents_create/review_account_identity",
+                    move || account_identity_blocking(&driver, &key),
+                )
+                .await
+                .map_err(|_| OperationError::Internal)??;
+            if status != AccountStatus::Ready && !native_proof {
+                return Err(OperationError::Invalid(
+                    "This account is unavailable for review",
+                ));
+            }
+            if identity.provider != studio_runtime_providers::ProviderKind::Codex {
+                return Err(OperationError::Invalid(
+                    "Native review needs a Codex account",
+                ));
+            }
+        } else if value.model.value().is_none() {
+            return Err(OperationError::Internal);
+        }
+    }
     let Some(model) = value.model.value().map(String::as_str) else {
         if value.effort.value().is_some() {
             return Err(OperationError::Invalid(
@@ -3144,7 +3109,11 @@ async fn resolve_review_defaults(
             environment
                 .select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
                     parent_account_key: account_key,
-                    requested_account_key: worker_account_key,
+                    requested_account_key: value
+                        .account_key
+                        .value()
+                        .map(String::as_str)
+                        .or(worker_account_key),
                     default_account_key: None,
                     model,
                     excluded_account_keys,
@@ -3160,7 +3129,12 @@ async fn resolve_review_defaults(
                         name,
                     ) => OperationError::Unavailable(name),
                 })?
-        } else if let Some(worker_account_key) = worker_account_key {
+        } else if let Some(worker_account_key) = value
+            .account_key
+            .value()
+            .map(String::as_str)
+            .or(worker_account_key)
+        {
             (
                 worker_account_key.to_owned(),
                 account_identity(context, worker_account_key).await?,
@@ -3168,6 +3142,11 @@ async fn resolve_review_defaults(
         } else {
             (account_key.to_owned(), account.clone())
         };
+    if catalog_account.provider != studio_runtime_providers::ProviderKind::Codex {
+        return Err(OperationError::Invalid(
+            "Native review needs a Codex account",
+        ));
+    }
     let catalog = if let Some(environment) = context.managed_creation_environment {
         Some(environment.catalog())
     } else {
@@ -3325,7 +3304,6 @@ fn lead_signature(
         use studio_runtime_schema::records::WorkspaceMode;
         settings.workspace_mode = Some(match workspace_mode {
             "layr-native" => WorkspaceMode::LayrNative,
-            "layr" => WorkspaceMode::Layr,
             "worktree" => WorkspaceMode::Worktree,
             "shared" => WorkspaceMode::Shared,
             "image" => WorkspaceMode::Image,
@@ -3389,7 +3367,6 @@ pub(crate) fn build_agent_record(
     };
     let workspace = match workspace_mode {
         "layr-native" => WorkspaceMode::LayrNative,
-        "layr" => WorkspaceMode::Layr,
         "image" => WorkspaceMode::Image,
         "worktree" => WorkspaceMode::Worktree,
         "shared" => WorkspaceMode::Shared,
@@ -3465,6 +3442,7 @@ pub(crate) fn build_agent_record(
         ));
         record.review_defaults = Some(Box::new(
             studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+                account_key: None,
                 model: None,
                 effort: None,
                 fast_mode: None,
@@ -4468,6 +4446,7 @@ mod tests {
         for model in [Field::Null, Field::Value("gpt-6-astra".to_owned())] {
             for fast in [true, false] {
                 let payload = ReviewDefaults {
+                    account_key: Field::Missing,
                     model: model.clone(),
                     effort: Field::Null,
                     fast_mode: Some(fast),
@@ -4486,6 +4465,7 @@ mod tests {
             }
         }
         let legacy = ReviewDefaults {
+            account_key: Field::Missing,
             model: Field::Null,
             effort: Field::Null,
             fast_mode: None,
@@ -4495,6 +4475,40 @@ mod tests {
                 .await
                 .expect("legacy defaults validate");
         assert!(resolved.fast_mode.is_none());
+    }
+
+    #[tokio::test]
+    async fn review_defaults_validate_explicit_account() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        let environment = managed_fixture();
+        let validate = |_: &str, _: &Value| true;
+        let context = worker_defaults_context(
+            std::sync::Arc::new(store),
+            &environment,
+            std::sync::Arc::new(validate),
+        );
+        let account = AccountIdentity {
+            provider: studio_runtime_providers::ProviderKind::Codex,
+            home: None,
+            account_id: None,
+            email: None,
+        };
+        let defaults: ReviewDefaults =
+            studio_json::from_str(r#"{"account_key":"default","model":"gpt-6-astra"}"#).unwrap();
+        let result =
+            resolve_review_defaults(&context, Some(&defaults), "default", &account, None, &[])
+                .await
+                .unwrap();
+        assert_eq!(result.account_key.as_deref(), Some("default"));
+        let invalid: ReviewDefaults =
+            studio_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-astra"}"#)
+                .unwrap();
+        assert!(
+            resolve_review_defaults(&context, Some(&invalid), "default", &account, None, &[])
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -4567,51 +4581,6 @@ mod tests {
         assert_eq!(review.effort.as_deref(), Some("high"));
         assert_eq!(payload["account_key"], "claude-local");
         assert_eq!(payload["model"], "default");
-    }
-
-    #[test]
-    fn vm_child_recheck_freezes_host_project_path_not_guest_cwd() {
-        let parent = json!({
-            "cwd":"/guest/project/lines/main",
-            "executionMode":"vm",
-            "hostProjectPath":"/host/project"
-        });
-        let root = json!({"cwd":"/host/project","hostProjectPath":"/host/project"});
-        assert_eq!(
-            parent_project_path(&parent, &root, "/guest/project/lines/main"),
-            "/host/project"
-        );
-    }
-
-    #[test]
-    fn vm_child_loads_project_binding_from_frozen_host_project_path() {
-        let connection = rusqlite::Connection::open_in_memory().expect("open project fixture");
-        connection
-            .execute(
-                "CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-                [],
-            )
-            .expect("project table");
-        let project = json!({"id":"host-project","path":"/host/project"});
-        connection
-            .execute(
-                "INSERT INTO runtime_projects(id,record) VALUES(?1,?2)",
-                ("/host/project", project.to_string()),
-            )
-            .expect("save host project");
-
-        let parent = json!({
-            "cwd":"/guest/project/lines/main",
-            "executionMode":"vm",
-            "hostProjectPath":"/host/project"
-        });
-        let root = json!({"cwd":"/host/project","hostProjectPath":"/host/project"});
-        assert_eq!(
-            parent_project_binding(&connection, &parent, &root)
-                .expect("load frozen project binding")
-                .expect("host project exists"),
-            project
-        );
     }
 
     #[tokio::test]
@@ -5018,52 +4987,10 @@ mod tests {
             child_role_workspace(Some("orchestrator"), None, "worktree", false),
             Err(OperationError::Invalid("Invalid agent role"))
         ));
-        let mut vm = AgentRecord::test_defaults();
-        vm.cwd = Some("/guest/project/lines/main".into());
-        set_vm_workspace_fields(&mut vm, "/host/project");
-        assert_eq!(
-            vm.workspace_mode,
-            Some(studio_runtime_schema::records::WorkspaceMode::Layr)
-        );
-        assert_eq!(
-            vm.execution_mode,
-            Some(studio_runtime_store::AgentExecutionMode::Vm)
-        );
         assert!(matches!(
-            vm.environment.value(),
-            Some(studio_runtime_store::StoredTransferValue::Known(
-                studio_runtime_schema::project_ingress::WorkerEnvironment::Linux
-            ))
-        ));
-        assert_eq!(
-            vm.host_project_path.value().map(String::as_str),
-            Some("/host/project")
-        );
-        assert_eq!(vm.cwd.as_deref(), Some("/guest/project/lines/main"));
-        assert_eq!(vm.worktree, Some(false));
-        assert_eq!(
-            child_role_workspace(None, None, "layr", true)
-                .expect("VM implementer inherits layr workspace"),
-            ("implementer", "layr", false)
-        );
-        assert!(matches!(
-            validate_parent_workspace_for_create("layr", &json!({"executionMode":"native"})),
+            child_role_workspace(None, None, "layr", true),
             Err(OperationError::Invalid(
-                "A VM workspace requires a VM parent"
-            ))
-        ));
-        assert!(
-            validate_parent_workspace_for_create("layr", &json!({"executionMode":"vm"})).is_ok()
-        );
-        assert_eq!(
-            child_role_workspace(Some("reviewer"), None, "layr", true)
-                .expect("VM reviewer inherits layr workspace"),
-            ("reviewer", "layr", false)
-        );
-        assert!(matches!(
-            child_role_workspace(Some("reviewer"), Some("shared"), "layr", true),
-            Err(OperationError::Invalid(
-                "A VM reviewer must use the parent's layr workspace"
+                "The parent workspace is unavailable"
             ))
         ));
         assert!(

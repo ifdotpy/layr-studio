@@ -241,6 +241,7 @@ import {
   verifyToolProof,
   studioToolCatalog,
   exactTurnTools,
+  moveExportBlocked,
 } from "./move.ts";
 
 import {
@@ -250,7 +251,9 @@ import {
   externalRefusal,
   serverAlias,
   canonicalJson,
+  movableExternalCatalog,
 } from "./move-external.ts";
+import type { ExternalServer } from "./move-external.ts";
 
 const externalConfigs = new Map<
   string,
@@ -1044,6 +1047,14 @@ async function currentExternalProof(
     ? expected.map((server) => server.alias)
     : externalAliases(proof);
   if (!aliases.length) return { catalogs: [], configs: {}, transports: {} };
+  return movableExternalCatalog(aliases, () => provenExternalCatalog(s, expected, aliases, proof));
+}
+async function provenExternalCatalog(
+  s: Pick<Session, "cwd" | "moveProof"> & Partial<Pick<Session, "id">>,
+  expected: ExternalServer[] | undefined,
+  aliases: string[],
+  proof: Partial<Pick<BridgeMoveProof, "externalTransports">>,
+) {
   if (expected) {
     try {
       return await targetExternalCatalog(s.cwd, expected, {
@@ -3239,10 +3250,8 @@ async function handle(
     case "claude/moveExport": {
       const { method, params: p } = request;
       const s = await session(p.threadId);
-      if (queries.get(s.id)?.turn || queries.get(s.id)?.tasks.size)
-        throw new Error(
-          "Finish the Claude turn and background tasks before a move",
-        );
+      if (moveExportBlocked(queries.get(s.id)))
+        throw new Error("Finish the Claude turn before a move");
       const proof = await proofOptions(
         s,
         await savedPromptProof(

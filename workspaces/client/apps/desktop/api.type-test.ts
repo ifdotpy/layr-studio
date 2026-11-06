@@ -124,8 +124,6 @@ function nativeResults(
   invoke(["transcribeAudio"]);
   // @ts-expect-error Preload calls keep method and payload paired.
   invoke(["openExternal", { action: "reveal", target: {} }]);
-  // @ts-expect-error Server wrappers cannot expose vault keys.
-  bridge.serverNativeAction?.("local", "showVaultKeys", "prefix");
   // @ts-expect-error Wrapped transcription requires its payload too.
   bridge.serverNativeAction?.("remote", "transcribeAudio");
   // @ts-expect-error Wrapped payloads keep their method.

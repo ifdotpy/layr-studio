@@ -63,7 +63,7 @@ export function canForwardSignIn(): boolean {
 }
 
 /** Open a sign-in link that the person approved in a request card
- * (docs/vm-browser-bridge.md). The desktop brings the browser to the front; other links
+ *. The desktop brings the browser to the front; other links
  * keep opening in the background. A plain browser window opens a new tab. With `forward`,
  * the command waits on another computer: this Mac first holds its redirect port. */
 export async function openSignInPage(

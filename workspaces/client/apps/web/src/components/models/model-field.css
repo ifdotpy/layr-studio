@@ -41,16 +41,32 @@
 }
 .setup-models .mantine-Button-label {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--mantine-spacing-xs);
 }
+/* The recommendation sits right after the name as a small pill; the right
+   edge belongs to the check. */
+.setup-models .mantine-Button-label > small {
+  padding: 0 0.375rem;
+  border: var(--studio-border-width) solid var(--line);
+  border-radius: var(--studio-radius-pill);
+  line-height: 1.4;
+}
+/* A fixed slot keeps names aligned whether or not a row is selected. */
+.setup-model-check {
+  display: inline-flex;
+  flex: none;
+  width: 0.875rem;
+  margin-inline-start: auto;
+}
+
 .setup-models small {
   color: var(--mantine-color-dimmed);
   font-size: var(--mantine-font-size-xs);
   font-weight: 400;
 }
 .setup-models [data-selected] {
-  background: var(--mantine-primary-color-light);
+  background: var(--selected);
 }
 .setup-model-name {
   overflow: hidden;

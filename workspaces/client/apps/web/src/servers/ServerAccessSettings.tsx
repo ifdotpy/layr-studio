@@ -4,7 +4,7 @@ import { randomUUID } from "../uuid";
 import { useServerStorage } from "./ServerServicesContext";
 import { useServerApi } from "./ServerServicesContext";
 import { ActionButton } from "../components/ui/primitives";
-import { Button, Textarea, TextInput } from "@mantine/core";
+import { Button, SegmentedControl, Textarea, TextInput } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { errorText } from "../api";
 import type { ServerAccessState, ServerAccessRequest } from "./accessContract";
@@ -14,7 +14,11 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
 
   const [state, setState] = useState<ServerAccessState | null>(null);
   const [invitation, setInvitation] = useState("");
+  const [invitationGrant, setInvitationGrant] = useState<"full" | "observe">(
+    "full",
+  );
   const [label, setLabel] = useState("Studio server");
+  const [grant, setGrant] = useState<"full" | "observe">("full");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef<ServerAccessRequest | null>(null);
@@ -55,8 +59,12 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
     void refreshSession()
       .then(() => serverAccess("POST", body))
       .then(async (result) => {
-        if ("invitation" in result)
+        if ("invitation" in result) {
           setInvitation(JSON.stringify(result.invitation, null, 2));
+          setInvitationGrant(
+            "grant" in body && body.grant === "observe" ? "observe" : "full",
+          );
+        }
         pending.current = null;
         outbox.remove("serverAccess", "");
         await load();
@@ -79,6 +87,16 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
         maxLength={80}
         onChange={(event) => setLabel(event.currentTarget.value)}
       />
+      <SegmentedControl
+        aria-label="Access of the paired UI"
+        value={grant}
+        disabled={busy}
+        onChange={(value) => setGrant(value === "observe" ? "observe" : "full")}
+        data={[
+          { value: "full", label: "Full access" },
+          { value: "observe", label: "View only" },
+        ]}
+      />
       <ActionButton
         actionRole="secondary"
         disabled={busy}
@@ -86,6 +104,7 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
           run({
             action: "create_invite",
             label,
+            grant,
             requestId: randomUUID(),
           })
         }
@@ -108,7 +127,11 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
           readOnly
           autosize
           minRows={6}
-          description="Copy the whole invitation into the other UI. The invitation grants full server access."
+          description={
+            invitationGrant === "observe"
+              ? "Copy the whole invitation into the other UI. The paired UI can view this server but cannot change anything."
+              : "Copy the whole invitation into the other UI. The invitation grants full server access."
+          }
         />
       )}
       {error && <p role="alert">{error}</p>}

@@ -112,12 +112,14 @@ export type CommandPost = (
   options?: {
     workspaceId?: string | undefined;
     sessionToken?: string | undefined;
+    signal?: AbortSignal | undefined;
   },
 ) => Promise<CommandResponse>;
 
 type CommandOptions = {
   workspaceId?: string | undefined;
   sessionToken?: string | undefined;
+  signal?: AbortSignal | undefined;
 };
 
 export function createCommandClient(
@@ -172,6 +174,9 @@ export function createCommandClient(
     /** Pause the chat. `descendants` pauses its workers too. */
     pause: (chat: string, descendants: boolean, options?: CommandOptions) =>
       run(make("pause", chat, { descendants }), options),
+    /** Delete the chat and its descendants. The response lists every deleted id. */
+    delete: (chat: string, options?: CommandOptions) =>
+      run(make("delete", chat, {}), options),
     /** The approval id is the command target. The body is the answer without its `id`. */
     answer: (
       approval: string,

@@ -1,7 +1,5 @@
 import { outboxRequests } from "../browserPersistence";
-import { useServerFileDialogs } from "../servers/ServerServicesContext";
 import {
-  localSidebarBackend,
   localSidebarServices,
   SidebarBackendProvider,
   useSidebarVisualState,
@@ -69,32 +67,6 @@ import RemoteProjects, {
   type RemoteProjectList,
 } from "./sidebar/RemoteProjects";
 import { SidebarWarningsTarget } from "./SidebarWarnings";
-import {
-  activeLayrReadiness,
-  describeWithLayrReadiness,
-  layrReadinessSummary,
-} from "./sidebar/LayrReadiness";
-import {
-  layrSyncSummary,
-  macSyncOpen,
-  MacSyncConflicts,
-  projectChip,
-  type LayrSyncEntry,
-} from "./sidebar/MacSync";
-import LayrMenu from "./sidebar/LayrMenu";
-import VaultSetup from "./sidebar/VaultSetup";
-import VaultUnlock from "./sidebar/VaultUnlock";
-import ProjectSecretsDialog from "./sidebar/ProjectSecretsDialog";
-import {
-  chipWithVault,
-  deskLink,
-  vaultActions,
-  pullText,
-  pullVault,
-  VAULT_SETUP_URL,
-  vaultLabel,
-  type VaultEntry,
-} from "./sidebar/Vault";
 import { readServerAliases } from "../servers/registry";
 import {
   DEFAULT_LOCAL_SERVER_ALIAS,
@@ -184,8 +156,6 @@ export default function Sidebar(p: SidebarProps) {
 }
 
 function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
-  const { canPickDirectory, pickDirectory, revealPath } =
-    useServerFileDialogs();
   const services = p.services;
   const lastOpened = useRef(p.opened);
   if (p.opened) lastOpened.current = p.opened;
@@ -326,26 +296,6 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     path: string;
     id?: string;
     action: "save" | "delete";
-  } | null>(null);
-  // The project and server whose Mac sync conflicts are open.
-  const [syncDialog, setSyncDialog] = useState<{
-    path: string;
-    ownerId?: string;
-  } | null>(null);
-  // The project and server whose vault unlock dialog is open.
-  const [unlockDialog, setUnlockDialog] = useState<{
-    path: string;
-    ownerId?: string;
-  } | null>(null);
-  // The project and server whose vault setup dialog is open.
-  const [setupDialog, setSetupDialog] = useState<{
-    path: string;
-    ownerId?: string;
-  } | null>(null);
-  // The project and server whose secrets dialog is open.
-  const [secretsDialog, setSecretsDialog] = useState<{
-    path: string;
-    ownerId?: string;
   } | null>(null);
   const peerTeams = useMemo(
     () => (runtime?.peerTeamsVersion === 1 ? runtime.peerTeams || [] : []),
@@ -1388,6 +1338,13 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
               <Menu.Item onClick={() => setArchive(!archive)}>
                 {archive ? "Show active chats" : "Show archived chats"}
               </Menu.Item>
+              {/* A narrow sidebar hides these two buttons; the menu keeps them. */}
+              {p.newSharedChat && (
+                <Menu.Item onClick={() => p.newSharedChat?.()}>
+                  New shared chat
+                </Menu.Item>
+              )}
+              <Menu.Item onClick={p.addProject}>Add project</Menu.Item>
             </Menu.Dropdown>
           </Menu>
           <ActionIcon
@@ -1409,11 +1366,13 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
               <Users size={16} />
             </ActionIcon>
           )}
-          {
-            <ActionIcon aria-label="Add project" onClick={p.addProject}>
-              <Plus size={18} />
-            </ActionIcon>
-          }
+          <ActionIcon
+            className="sidebar-add-project"
+            aria-label="Add project"
+            onClick={p.addProject}
+          >
+            <Plus size={18} />
+          </ActionIcon>
         </div>
         {projectGroups.map((group) => {
           const oldChatCount = Math.max(
@@ -1421,90 +1380,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
             filtered.filter((agent) => agent.projectPath === group.path)
               .length - group.chats.length,
           );
-          const readinessEntries = activeLayrReadiness(
-            services.layrReadiness?.(group.path) ??
-              (group.layrReadiness ? [{ readiness: group.layrReadiness }] : []),
-          );
-          const layr = layrReadinessSummary(readinessEntries);
-          // Each ready layr project of the row has its secrets, on the server that holds it.
-          const secretEntries = readinessEntries.filter(
-            (entry) => !!entry.readiness.projectId,
-          );
-          const secretsBackend = (entry: { ownerId?: string }) =>
-            entry.ownerId
-              ? services.byOwner(entry.ownerId)
-              : services.owner(projectTarget(group.path));
-          const secretsEntry =
-            secretsDialog?.path === group.path
-              ? secretEntries.find(
-                  (entry) => entry.ownerId === secretsDialog.ownerId,
-                ) || null
-              : null;
-          const syncEntries: LayrSyncEntry[] =
-            services.layrSync?.(group.path) ??
-            (group.layrSync ? [{ sync: group.layrSync }] : []);
-          const sync = layrSyncSummary(syncEntries);
-          const chip = projectChip(layr, sync);
-          const syncBackend = (entry: LayrSyncEntry) =>
-            entry.ownerId
-              ? services.byOwner(entry.ownerId)
-              : services.owner(projectTarget(group.path));
-          const configureSync = async (
-            entry: LayrSyncEntry,
-            change: { enabled?: boolean; allowDeletes?: boolean },
-          ) => {
-            try {
-              await syncBackend(entry).post(
-                "/api/mac-sync/config",
-                { projectId: entry.sync.projectId, ...change },
-                { timeoutMs: 30000 },
-              );
-            } catch (error) {
-              p.notify?.(errorText(error));
-            }
-          };
-          const vaultEntries: VaultEntry[] =
-            services.vault?.(group.path) ??
-            (group.vault ? [{ vault: group.vault }] : []);
-          const vaultBackend = (entry: VaultEntry) =>
-            entry.ownerId
-              ? services.byOwner(entry.ownerId)
-              : services.owner(projectTarget(group.path));
-          // Unlock, Pull and the disk act on the Mac that holds the project: only this Mac.
-          const actions = (entry: VaultEntry) =>
-            vaultActions(entry.vault, {
-              onThisMac:
-                !serverViewId &&
-                vaultBackend(entry).ownerId === localSidebarBackend.ownerId,
-              desktop: canPickDirectory(),
-            });
-          const pull = async (entry: VaultEntry) => {
-            try {
-              const desktop = canPickDirectory();
-              const to = desktop ? await pickDirectory() : null;
-              if (desktop && !to) return;
-              p.notify?.(`Pulling ${group.name} from its vault…`);
-              p.notify?.(
-                pullText(
-                  await pullVault(
-                    vaultBackend(entry),
-                    entry.vault.projectId,
-                    to,
-                  ),
-                ),
-              );
-            } catch (error) {
-              p.notify?.(errorText(error));
-            }
-          };
-          const layrChip = chipWithVault(chip, vaultEntries);
           const closed = !!collapsed[projectTreeKey(group.path)] && !query;
-          const syncDialogEntry =
-            syncDialog?.path === group.path
-              ? syncEntries.find(
-                  (entry) => entry.ownerId === syncDialog.ownerId,
-                ) || null
-              : null;
           return (
             <section
               className="sidebar-project"
@@ -1519,10 +1395,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
                     group.path,
                     allProjectGroups.map((item) => item.path),
                   )}
-                  aria-description={describeWithLayrReadiness(
-                    layrChip?.summary ?? null,
-                    "Drag to reorder. Alt + Up or Down also works.",
-                  )}
+                  aria-description="Drag to reorder. Alt + Up or Down also works."
                   className="project-tree-toggle"
                   aria-label={group.name}
                   title={services.displayPath?.(group.path) || group.path}
@@ -1658,208 +1531,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
                     </Menu.Dropdown>
                   </Menu>
                 )}
-                {layrChip && (
-                  <LayrMenu chip={layrChip}>
-                    {(layr?.title ?? "").split("\n").map((line) => (
-                      <Menu.Label key={`layr:${line}`}>{line}</Menu.Label>
-                    ))}
-                    {syncEntries.length > 0 && <Menu.Divider />}
-                    {syncEntries.length > 0 && (
-                      <Menu.Label>Folder sync</Menu.Label>
-                    )}
-                    {syncEntries.flatMap((entry) => {
-                      const suffix = entry.server ? ` (${entry.server})` : "";
-                      const key = entry.ownerId || "local";
-                      const waiting =
-                        macSyncOpen(entry.sync).length +
-                        entry.sync.withAgent.length;
-                      return [
-                        waiting > 0 && (
-                          <Menu.Item
-                            key={`${key}:choose`}
-                            onClick={() =>
-                              setSyncDialog({
-                                path: group.path,
-                                ...(entry.ownerId
-                                  ? { ownerId: entry.ownerId }
-                                  : {}),
-                              })
-                            }
-                          >
-                            {`Choose versions (${waiting})${suffix}`}
-                          </Menu.Item>
-                        ),
-                        entry.sync.deletes > 0 && (
-                          <Menu.Item
-                            key={`${key}:deletes`}
-                            onClick={() =>
-                              void configureSync(entry, {
-                                allowDeletes: true,
-                              })
-                            }
-                          >
-                            {`Sync ${entry.sync.deletes} local deletions${suffix}`}
-                          </Menu.Item>
-                        ),
-                        <Menu.Item
-                          key={`${key}:pause`}
-                          onClick={() =>
-                            void configureSync(entry, {
-                              enabled: !entry.sync.enabled,
-                            })
-                          }
-                        >
-                          {`${entry.sync.enabled ? "Pause" : "Resume"} sync${suffix}`}
-                        </Menu.Item>,
-                      ];
-                    })}
-                    {vaultEntries.length > 0 && <Menu.Divider />}
-                    {vaultEntries.flatMap((entry) => {
-                      const suffix = entry.server ? ` (${entry.server})` : "";
-                      const key = `vault:${entry.ownerId || "local"}`;
-                      const link = deskLink(entry.vault);
-                      return [
-                        <Menu.Label
-                          key={`${key}:label`}
-                          title={entry.vault.reason ?? undefined}
-                        >
-                          {`${vaultLabel(entry.vault)}${suffix}`}
-                        </Menu.Label>,
-                        link && (
-                          <Menu.Item
-                            key={`${key}:desk`}
-                            component="a"
-                            href={link}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {`Open in Desk${suffix}`}
-                          </Menu.Item>
-                        ),
-                        actions(entry).includes("unlock") && (
-                          <Menu.Item
-                            key={`${key}:unlock`}
-                            onClick={() =>
-                              setUnlockDialog({
-                                path: group.path,
-                                ...(entry.ownerId
-                                  ? { ownerId: entry.ownerId }
-                                  : {}),
-                              })
-                            }
-                          >
-                            {`Unlock on this computer…${suffix}`}
-                          </Menu.Item>
-                        ),
-                        actions(entry).includes("finder") && (
-                          <Menu.Item
-                            key={`${key}:finder`}
-                            onClick={() => void revealPath(entry.vault.disk!)}
-                          >
-                            {`Show folder${suffix}`}
-                          </Menu.Item>
-                        ),
-                        actions(entry).includes("pull") && (
-                          <Menu.Item
-                            key={`${key}:pull`}
-                            onClick={() => void pull(entry)}
-                          >
-                            {`Pull…${suffix}`}
-                          </Menu.Item>
-                        ),
-                        actions(entry).includes("setup") && (
-                          <Menu.Item
-                            key={`${key}:setup`}
-                            onClick={() =>
-                              setSetupDialog({
-                                path: group.path,
-                                ...(entry.ownerId
-                                  ? { ownerId: entry.ownerId }
-                                  : {}),
-                              })
-                            }
-                          >
-                            Set up vault…
-                          </Menu.Item>
-                        ),
-                        actions(entry).includes("guide") && (
-                          <Menu.Item
-                            key={`${key}:guide`}
-                            component="a"
-                            href={VAULT_SETUP_URL}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {`How to set up a vault${suffix}`}
-                          </Menu.Item>
-                        ),
-                      ];
-                    })}
-                    {secretEntries.length > 0 && <Menu.Divider />}
-                    {secretEntries.map((entry) => (
-                      <Menu.Item
-                        key={`secrets:${entry.ownerId || "local"}`}
-                        onClick={() =>
-                          setSecretsDialog({
-                            path: group.path,
-                            ...(entry.ownerId
-                              ? { ownerId: entry.ownerId }
-                              : {}),
-                          })
-                        }
-                      >
-                        {`Secrets…${entry.server ? ` (${entry.server})` : ""}`}
-                      </Menu.Item>
-                    ))}
-                  </LayrMenu>
-                )}
               </div>
-              {secretsEntry?.readiness.projectId && (
-                <ProjectSecretsDialog
-                  key={`${secretsEntry.ownerId || "local"}:${secretsEntry.readiness.projectId}`}
-                  projectId={secretsEntry.readiness.projectId}
-                  backend={secretsBackend(secretsEntry)}
-                  title={`Secrets: ${group.name}${secretsEntry.server ? ` (${secretsEntry.server})` : ""}`}
-                  onClose={() => setSecretsDialog(null)}
-                />
-              )}
-              {setupDialog?.path === group.path &&
-                (() => {
-                  const entry = vaultEntries.find(
-                    (item) => item.ownerId === setupDialog.ownerId,
-                  );
-                  return entry ? (
-                    <VaultSetup
-                      entry={entry}
-                      name={group.name}
-                      backend={vaultBackend(entry)}
-                      onClose={() => setSetupDialog(null)}
-                      onDone={(text) => p.notify?.(text)}
-                    />
-                  ) : null;
-                })()}
-              {unlockDialog?.path === group.path &&
-                (() => {
-                  const entry = vaultEntries.find(
-                    (item) => item.ownerId === unlockDialog.ownerId,
-                  );
-                  return entry ? (
-                    <VaultUnlock
-                      entry={entry}
-                      backend={vaultBackend(entry)}
-                      onClose={() => setUnlockDialog(null)}
-                      onDone={(text) => p.notify?.(text)}
-                    />
-                  ) : null;
-                })()}
-              {syncDialogEntry && (
-                <MacSyncConflicts
-                  entry={syncDialogEntry}
-                  backend={syncBackend(syncDialogEntry)}
-                  projectName={group.name}
-                  onClose={() => setSyncDialog(null)}
-                />
-              )}
               {teamDialog?.path === group.path &&
                 (teamDialog.id &&
                 !peerTeams.some((t) => t.id === teamDialog.id) ? (

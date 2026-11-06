@@ -18,6 +18,7 @@ pub fn dispatch(_request: &Frame) -> CallbackDecision {
     CallbackDecision::Unsupported
 }
 
+<<<<<<< head
 /// Resolve a Codex VM token refresh only for the actor whose guest emitted it.
 /// The resolver owns host account validation and the stable retained refresh ID.
 pub(super) fn is_vm_codex_refresh_request(frame: &Frame) -> bool {
@@ -119,6 +120,8 @@ pub(super) async fn vm_codex_refresh_response(
 /// Resolve a tool callback only when this account worker has one active turn
 /// bound to its current provider generation. Tool arguments never supply actor
 /// identity. Ambiguous account sessions fail closed.
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 pub(super) async fn managed_response(
     store: &Arc<RuntimeStore>,
     account: &str,
@@ -592,7 +595,7 @@ pub(super) fn callback_context_in(
         agent: agent_id.to_owned(),
         account: account.to_owned(),
         stream_id: if agent.execution_mode == Some(AgentExecutionMode::Vm) {
-            super::vm_journal_scope(account, agent_id)
+            super::historical_actor_journal_scope(account, agent_id)
         } else {
             account.to_owned()
         },
@@ -868,6 +871,7 @@ mod catalog_wait_tests {
         );
     }
 }
+<<<<<<< head
 
 #[cfg(test)]
 mod vm_auth_tests {
@@ -1045,3 +1049,5 @@ mod vm_auth_tests {
         assert!(calls.lock().expect("read refresh calls").is_empty());
     }
 }
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31

@@ -31,7 +31,7 @@
 .radio-participant small,
 .radio-speaker {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .radio-participant[data-speaking="true"] .radio-speaker {
   color: var(--text);
@@ -61,7 +61,7 @@
   margin-bottom: 20px;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--studio-radius-dialog);
   overflow-wrap: anywhere;
   min-width: 0;
 }
@@ -79,7 +79,7 @@
 .radio-author .message-date {
   margin-left: auto;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--studio-text-meta);
 }
 .radio-empty {
   color: var(--muted);
@@ -104,7 +104,7 @@
 }
 .radio-compose-actions > span {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   color: var(--muted);
 }
 .radio-retry {
@@ -118,9 +118,9 @@
   width: 100%;
   padding: 7px 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--studio-text-body);
   text-align: left;
-  border-radius: 6px;
+  border-radius: var(--studio-radius-control);
 }
 .peer-team-shared-chat[aria-current="page"] {
   color: var(--text);

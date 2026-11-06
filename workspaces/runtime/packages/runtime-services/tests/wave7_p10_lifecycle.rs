@@ -203,7 +203,6 @@ async fn attach_voice_scope(store: &RuntimeStore) {
     studio_runtime_services::account_worker::attach_provider_stream_for_test(
         store,
         "voice-account",
-        None,
         6,
         "6",
     )
@@ -709,13 +708,22 @@ async fn production_delete_releases_deleted_worker_work_item() {
     assert!(work["owner"].is_null());
     assert_eq!(work["status"], "ready");
     assert_eq!(work["version"], 2);
-    let payload: String = db
-        .query_row(
-            "SELECT payload FROM sync_entities WHERE collection='work' \
-             AND id='deleted-worker-task' AND deleted=0",
-            [],
-            |row| row.get(0),
-        )
+    // Work documents are built from the work row at read time.
+    let page = studio_runtime_services::entity_scope::resume(
+        &db,
+        None,
+        Some(r#"["work"]"#),
+        None,
+        None,
+        true,
+        512,
+    )
+    .expect("read-time documents");
+    let payload = page
+        .rows
+        .into_iter()
+        .find(|row| row.id == "deleted-worker-task" && !row.deleted)
+        .and_then(|row| row.payload)
         .expect("released work entity");
     let entity: Value = studio_json::from_str(&payload).expect("entity JSON");
     // The renderer view carries the released status, not the owner.
@@ -771,6 +779,37 @@ fn state(store: &RuntimeStore) -> Value {
         .expect("rows")
         .collect::<Result<Vec<_>, _>>()
         .expect("sync rows");
+    // Work documents and agent views have no copy in sync_entities; a reader builds
+    // them at read time.
+    let mut sync = sync;
+    let collections = studio_json::to_string(
+        &studio_runtime_store::WORK_COLLECTIONS
+            .iter()
+            .chain(&["agent", "agentSummary", "agentDetail"])
+            .collect::<Vec<_>>(),
+    )
+    .expect("collections");
+    let page = studio_runtime_services::entity_scope::resume(
+        &db,
+        None,
+        Some(&collections),
+        None,
+        None,
+        true,
+        512,
+    )
+    .expect("work documents");
+    for row in page.rows {
+        sync.push(json!([
+            row.collection,
+            row.id,
+            row.sequence,
+            "",
+            row.payload,
+            0
+        ]));
+    }
+    sync.sort_by(|a, b| (a[0].as_str(), a[1].as_str()).cmp(&(b[0].as_str(), b[1].as_str())));
     json!({"tables":records,"sync":sync})
 }
 

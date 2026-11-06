@@ -17,6 +17,14 @@ use std::fmt;
 
 pub use serde_json::{Deserializer, Map, Number, Serializer, Value, error, json, value};
 
+<<<<<<< head
+=======
+/// Serde's private wire marker for raw JSON values.
+pub const RAW_VALUE_TOKEN: &str = "$serde_json::private::RawValue";
+/// Serde JSON's `number.rs` marker, emitted when its `arbitrary_precision` feature is enabled.
+pub const NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
 #[cfg(not(feature = "sonic-backend"))]
 mod raw;
 #[cfg(not(feature = "sonic-backend"))]

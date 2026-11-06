@@ -1677,10 +1677,7 @@ exit 0"#;
 
     #[test]
     fn installer_file_names_match_desktop_updates() {
-        const INSTALLER: &str = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../client/apps/desktop/desktop_updates.py"
-        ));
+        const INSTALLER: &str = include_str!("../../../../client/apps/desktop/desktop_updates.py");
         for line in [
             format!("APP_NAME = '{APP_NAME}'"),
             format!("PENDING_FILE = '{PENDING_FILE}'"),

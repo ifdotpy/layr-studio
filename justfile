@@ -80,11 +80,11 @@ boundaries-check:
 check-affected base *args:
     @node {{quote(facade)}} check-affected {{quote(base)}} {{args}}
 
-[doc("Run the fast nextest profile and JS/guest witnesses in five bounded concurrent lanes.")]
+[doc("Run the fast nextest profile and JS witnesses in bounded concurrent lanes.")]
 test-fast:
     @just _test-gate test-fast
 
-[doc("Run the broad nextest profile and JS/guest checks with one renderer build and browser smoke.")]
+[doc("Run the broad nextest profile and JS checks with one renderer build and browser smoke.")]
 test-comprehensive:
     @just _test-gate test-comprehensive
 
@@ -121,7 +121,7 @@ _test-gate gate:
 test-fast-rest:
     @node {{quote(facade)}} test-fast-rest
 
-[doc("Run JS and guest checks against prebuilt WASM/supervisor artifacts; never compile Rust.")]
+[doc("Run JS checks against prebuilt WASM/supervisor artifacts; never compile Rust.")]
 test-fast-rest-non-rust:
     @node {{quote(facade)}} test-fast-rest-non-rust
 
@@ -179,6 +179,12 @@ test-provider-reap-timing:
 test-rust-many-agents:
     @cargo nextest run -p studio-runtime-services --lib --run-ignored only -E 'test(two_hundred_agents_complete_two_exchanges)'
 
+[doc("Run manual Callgrind and DHAT backend benchmarks (requires Valgrind and gungraun-runner).")]
+bench-gungraun *args:
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-store --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-http --features bench-support --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-services --features bench-support --bench hot_paths -- {{args}}
+
 [doc("Run the full web browser project with its 900-second global cap.")]
 test-browser:
     @node {{quote(facade)}} test-browser
@@ -198,6 +204,10 @@ benchmark-client-interactions baseline output:
 test-browser-smoke *args:
     @node {{quote(facade)}} test-browser-smoke {{args}}
 
+[doc("Manual: drive agent turns through every layout configuration and device profile (desktop, phone, Duo, with and without the keyboard) and report layout shifts. Needs the renderer build and a debug server. Flags: --profile NAME,... --out DIR --chromium PATH.")]
+layout-shift-matrix *args:
+    @node workspaces/client/apps/web/scripts/layout-shift-matrix.ts {{args}}
+
 [doc("Check the main user scenarios on the app installed on this Mac, with its own test chats. See docs/testing.md, Installed scenario smoke.")]
 smoke-installed *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/installed-smoke/smoke.ts")}} "$@"
@@ -205,6 +215,14 @@ smoke-installed *args:
 [doc("Install a newer build over the current one on an isolated clone with real processes, before a live install. See docs/testing.md, Upgrade canary.")]
 upgrade-canary *args:
     @node {{quote(justfile_directory() / "workspaces/tooling/apps/upgrade-canary/canary.ts")}} "$@"
+
+[doc("Regenerate the web client large entity transfer fixture from the Rust server.")]
+regenerate-entity-server-frames:
+    @STUDIO_REGENERATE_ENTITY_FRAMES=1 cargo test -j 4 -p studio-runtime-http --lib cold_entity_client_fixture_matches_server_frames
+
+[doc("Manual heavy check: replay a real large entity SSE snapshot after a failed write.")]
+test-entity-server-heavy:
+    @STUDIO_ENTITY_SERVER_HEAVY=1 pnpm --filter codex-agents-web exec vitest run --config vitest.unit.config.ts src/sync/client.entityServer.test.ts -t "stages a cold" --maxWorkers=1
 
 [doc("Run the full browser project as a manual heavy check.")]
 test-heavy:
@@ -220,11 +238,7 @@ test-native-webview:
     @cargo build -p studio-native-client --features native-check --locked
     @node workspaces/client/apps/native/check-native.ts
 
-[doc("Manual check: run real guest module worker aggregation and crash scenarios.")]
-test-guest-runner-processes:
-    @node --test workspaces/runtime/apps/vm-guest/run-guest-suite-processes.test.mts
-
-[doc("Manual process check: run detached host_exec startup, replacement and guest broker scenarios.")]
+[doc("Manual process check: run desktop startup delivery.")]
 test-real-process-probe:
     @STUDIO_REAL_PROCESS_TESTS=1 python3 -I -B workspaces/client/apps/desktop/startup-delivery-test.py StartupDeliveryTests.test_owned_launcher_probe_observes_its_real_kernel_companion_without_runtime_state
 
@@ -233,6 +247,3 @@ test-live-handover:
 
 test-quarantine:
     @cargo nextest run --build-jobs 4 -p studio-runtime-services -p studio-runtime-process --run-ignored only --test-threads 1 -E 'test(=wave7_p04_review::answer_and_cancellation_restart_at_each_real_store_queue_and_transport_boundary) | test(=workspace_ready_git::tests::worktree_children_spawned_together_in_one_repository_all_start) | test(=terminal_pty::tests::printf_output_is_delivered_losslessly) | test(=account_worker::tests::publication_off_path::analytics_are_logged_in_the_journal_commit_and_projected_off_the_writer) | test(=account_worker::tests::idle_unload::codex_a_finished_worker_whose_turn_failed_unloads_its_thread) | test(=account_worker::tests::accepted_turn_reattaches_and_keeps_notification_effects) | test(=multi_server_corpus::python_authentication_outputs_match_complete_principal_and_writes) | test(=provider_task::unverifiable_retained_child_refused_before_open)'
-
-test-host-exec-processes:
-    @cargo nextest run --build-jobs 4 -p studio-runtime-server --test integration --run-ignored only --test-threads 1 -E 'test(/^host_exec_service::/)'

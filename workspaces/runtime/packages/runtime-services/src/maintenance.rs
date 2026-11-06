@@ -253,7 +253,7 @@ mod tests {
                     deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY,scope TEXT,id TEXT,payload TEXT,
                     deleted INTEGER,UNIQUE(scope,id));
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
                  CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                  CREATE TABLE runtime_agent_record_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL);
                  INSERT INTO runtime_agent_record_generation VALUES(1,0);

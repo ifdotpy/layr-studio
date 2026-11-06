@@ -129,8 +129,6 @@ impl ResourceIdentity for SubscribedResource {
             | ResourceRef::QueueResource(_)
             | ResourceRef::ReceiptsResource(_)
             | ResourceRef::RenameProgressResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_)
             | ResourceRef::VoiceResource(_) => ResourceKind::Other,
         })
     }
@@ -165,9 +163,6 @@ fn authorize_resource(
     let class = match resource {
         ResourceRef::AuthProgressResource(_) => {
             crate::route_class::class_of("POST", "/api/accounts/login")
-        }
-        ResourceRef::VaultJobProgressResource(_) | ResourceRef::VaultReadinessResource(_) => {
-            crate::route_class::class_of("POST", "/api/vault/setup")
         }
         ResourceRef::AccountsResource(_)
         | ResourceRef::CostsResource(_)
@@ -213,17 +208,11 @@ fn progress_resource(
     selector: studio_runtime_schema::progress_selector::ProgressSelector,
 ) -> Result<ResourceRef, ApiError> {
     use studio_runtime_schema::progress_selector::ProgressSelector;
-    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource, VaultJobResource};
+    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource};
     Ok(match selector {
         ProgressSelector::Auth { request_id } => {
             ResourceRef::AuthProgressResource(RequestResource {
                 request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
-            })
-        }
-        ProgressSelector::Vault { request_id, job } => {
-            ResourceRef::VaultJobProgressResource(VaultJobResource {
-                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
-                job,
             })
         }
         ProgressSelector::Rename {
@@ -488,10 +477,6 @@ async fn sync_stream(
         Err(error) => return error.into_response(),
     };
     let cache_policies = cache_decisions(&resources, locality);
-    let vault_readiness = match readiness_source(&state, &resources).await {
-        Ok(source) => source,
-        Err(error) => return error.into_response(),
-    };
     let store = match state.store.clone() {
         Some(store) => store,
         None => return ApiError::internal().into_response(),
@@ -611,8 +596,6 @@ async fn sync_stream(
             | ResourceRef::VoiceResource(_)
             | ResourceRef::WorkspaceResource(_)
             | ResourceRef::AuthProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
             | ResourceRef::RenameProgressResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
@@ -690,33 +673,10 @@ async fn sync_stream(
         principal,
         studio_runtime_services::principal::Principal::Owner
     ) {
-        let mut selectors = Vec::new();
-        if let Some(client) = &state.vault_job_client {
-            match super::host_secrets::retained_progress(client).await {
-                Ok(retained) => selectors.extend(retained),
-                Err(error) => return error.into_response(),
-            }
-        }
         let cursor = state.sync_changes.snapshot();
         if let Err(error) = append_auth_baseline(&state, &cursor, &mut initial).await {
             return error.into_response();
         }
-        let resources = match selectors
-            .into_iter()
-            .map(|selector| SubscribedResource::new(progress_resource(selector)?))
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(resources) => resources,
-            Err(error) => return error.into_response(),
-        };
-        let view = ResourceChanges {
-            versions: vec![cursor.revision; resources.len()],
-            cursor,
-            resources,
-            entity_reset: false,
-            overflow: false,
-        };
-        append_progress_frames(&state, &view, &mut initial).await;
     }
     // OpenAPI owns the omitted-selector compatibility default; the HTTP witness
     // keeps this native/signed-client behavior in parity with that contract.
@@ -732,7 +692,6 @@ async fn sync_stream(
     let stream_state = ResourceStream {
         principal: Some(principal),
         http_state: Some(state.clone()),
-        vault_readiness,
         subscription: Some(subscription),
         initial,
         entity_transfers: entity_transfers.into(),
@@ -788,6 +747,7 @@ async fn sampled_resource_content(
 fn discard_sample(samples: &Mutex<BTreeMap<String, Vec<u8>>>, resource: &SubscribedResource) {
     if let Ok(mut samples) = samples.lock() {
         samples.remove(&resource.key);
+<<<<<<< head
     }
 }
 
@@ -802,26 +762,11 @@ async fn readiness_source(
         .any(|resource| matches!(resource.resource, ResourceRef::VaultReadinessResource(_)))
     {
         return Ok(None);
+=======
+>>>>>>> agent-8b610cda59ed4865310e15f0285f6e5ba521d8474d0ed359b5e088286474ab31
     }
-    let settings = super::host_secrets::settings_dir(&state.state_dir);
-    let changes = Arc::clone(&state.sync_changes);
-    studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-http/vault-readiness-source",
-        move || {
-            studio_runtime_services::vault::watch_readiness(
-                &settings,
-                Arc::new(move || changes.notify_one()),
-            )
-        },
-    )
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map(Some)
-    .map_err(|_| ApiError::internal())
 }
 
-/// Progress is deliberately separate from resources/entityChanges: OAuth links
-/// must never enter SQLite, RxDB, entity replay, or durable checkpoints.
 pub(super) async fn append_progress_frames(
     state: &HttpState,
     view: &ResourceChanges<SubscribedResource>,
@@ -834,9 +779,7 @@ pub(super) async fn append_progress_frames(
                     .await
                     .unwrap_or(Value::Null)
             }
-            ResourceRef::RenameProgressResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_) => {
+            ResourceRef::RenameProgressResource(_) => {
                 let Some(bytes) = resource_content(state.clone(), resource.clone()).await else {
                     continue;
                 };
@@ -1306,7 +1249,7 @@ async fn read_entity_changes_typed(
             }
             let batch = match after {
                 Some(after) if after >= floor && after < sequence => {
-                    studio_runtime_services::work_scope::resume(
+                    studio_runtime_services::entity_scope::resume(
                         connection,
                         Some(after),
                         Some(
@@ -1693,8 +1636,6 @@ async fn attach_transient_snapshots(
             | ResourceRef::TranscriptsResource(_)
             | ResourceRef::WorkspaceResource(_)
             | ResourceRef::AuthProgressResource(_)
-            | ResourceRef::VaultReadinessResource(_)
-            | ResourceRef::VaultJobProgressResource(_)
             | ResourceRef::RenameProgressResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
@@ -1710,7 +1651,6 @@ struct ResourceStream {
     principal: Option<studio_runtime_services::principal::Principal>,
     subscription: Option<LiveSubscription>,
     http_state: Option<HttpState>,
-    vault_readiness: Option<studio_runtime_services::vault::VaultReadinessWatcher>,
     initial: VecDeque<Event>,
     entity_transfers: VecDeque<entity_transfer::TransferReader>,
     scoped_sequences: BTreeMap<String, SubscriptionCursor>,
@@ -1728,8 +1668,8 @@ struct ResourceStream {
     store: Option<Arc<RuntimeStore>>,
     changes: tokio::sync::watch::Receiver<ChangeSnapshot>,
     notifications: Arc<ResourceNotifications>,
-    /// Committed model text, in memory. A lagging stream drops frames; the durable item catches up.
-    live: tokio::sync::broadcast::Receiver<LiveEvent>,
+    /// Committed model text, in memory. A slow stream gets merged deltas.
+    live: studio_runtime_services::resource_notify::LiveReceiver,
     token_rates: Option<tokio::sync::watch::Receiver<Arc<TokenRates>>>,
     /// Last snapshot sent by this stream; clearing it makes the next frame a full snapshot.
     last_token_rates: Option<Arc<TokenRates>>,
@@ -1760,15 +1700,6 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
     state
         .scoped_sequences
         .retain(|key, _| retained_scopes.contains(key));
-    let readiness_interest = state
-        .resources
-        .iter()
-        .any(|resource| matches!(resource.resource, ResourceRef::VaultReadinessResource(_)));
-    if readiness_interest != state.vault_readiness.is_some()
-        && let Some(http) = &state.http_state
-    {
-        state.vault_readiness = readiness_source(http, &state.resources).await.ok()?;
-    }
     state.terminal_cursors.retain(|id, _| {
         state
             .resources
@@ -1893,24 +1824,22 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
     Some(())
 }
 
-/// A lagged live receiver closes the stream so its client can recover its baseline.
+/// The next live event for the subscribed resources. It never ends the stream.
 async fn next_live_delta(
-    live: &mut tokio::sync::broadcast::Receiver<LiveEvent>,
+    live: &mut studio_runtime_services::resource_notify::LiveReceiver,
     resources: &[SubscribedResource],
 ) -> Option<LiveEvent> {
-    use tokio::sync::broadcast::error::RecvError;
     loop {
         match live.recv().await {
-            Ok(LiveEvent::Delta(delta))
+            LiveEvent::Delta(delta)
                 if resources.iter().any(|resource| {
                     matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id.as_str() == delta.agent_id)
                 }) =>
             {
                 return Some(LiveEvent::Delta(delta));
             }
-            Ok(LiveEvent::Progress(selector)) => return Some(LiveEvent::Progress(selector)),
-            Ok(_) => {}
-            Err(RecvError::Lagged(_) | RecvError::Closed) => return None,
+            LiveEvent::Progress(selector) => return Some(LiveEvent::Progress(selector)),
+            LiveEvent::Delta(_) => {}
         }
     }
 }
@@ -2338,7 +2267,8 @@ fn resource_event(
     .expect("event serializes")
 }
 
-pub(super) fn sse_event(name: &str, revision: Option<i64>, payload: impl Serialize) -> Event {
+#[doc(hidden)]
+pub fn sse_event(name: &str, revision: Option<i64>, payload: impl Serialize) -> Event {
     // These stream DTOs contain only JSON-compatible fields and string map keys.
     let event = Event::default()
         .event(name)
@@ -3036,36 +2966,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn state_stream_vault_job_progress_includes_missing_receipt() {
-        let mut state = HttpState::new(
-            "token".into(),
-            "workspace".into(),
-            "/unused".into(),
-            0,
-            None,
-            None,
-            None,
-        );
-        state.validators = crate::validation::Registry::compile(&[]).expect("validators");
-        let view = ResourceChanges {
-            cursor: state.sync_changes.snapshot(),
-            resources: fixture_resources(&[
-                json!({"kind":"vault-job-progress","requestId":"one","job":"setup"}),
-            ]),
-            versions: vec![1],
-            entity_reset: false,
-            overflow: false,
-        };
-        let mut frames = VecDeque::new();
-        append_progress_frames(&state, &view, &mut frames).await;
-        assert_eq!(
-            frames.len(),
-            1,
-            "missing receipts must have an explicit transient baseline"
-        );
-    }
-
-    #[tokio::test]
     async fn state_stream_progress_frames_are_transient_and_scoped() {
         use studio_runtime_services::claude_login::{
             LoginError,
@@ -3190,7 +3090,7 @@ mod tests {
             .expect("start once");
         assert!(matches!(
             live.try_recv(),
-            Ok(studio_runtime_services::resource_notify::LiveEvent::Progress(
+            Some(studio_runtime_services::resource_notify::LiveEvent::Progress(
                 studio_runtime_schema::progress_selector::ProgressSelector::Auth { request_id }
             )) if request_id == id
         ));
@@ -3300,39 +3200,6 @@ mod tests {
                 .expect("frame")
                 .contains("ABCD-1234")
         );
-    }
-
-    #[test]
-    fn state_stream_vault_prefix_contract_matches_its_runtime_owner() {
-        let root = tempfile::tempdir().expect("isolated state");
-        let mut state = HttpState::new(
-            "".into(),
-            "".into(),
-            root.path().display().to_string(),
-            0,
-            None,
-            None,
-            None,
-        );
-        state.validators = crate::validation::Registry::compile(&[]).expect("router validators");
-        for prefix in [
-            "".to_owned(),
-            "a".into(),
-            "Project_1".into(),
-            "../other".into(),
-            "-bad".into(),
-            "a".repeat(44),
-            "a".repeat(45),
-        ] {
-            assert_eq!(
-                state.validators.validate_component(
-                    "ResourceRef",
-                    &json!({"kind":"vault-readiness","prefix":prefix})
-                ),
-                studio_runtime_services::vault::valid_prefix(&prefix),
-                "vault::valid_prefix owns the prefix contract: {prefix}"
-            );
-        }
     }
 
     #[test]
@@ -3752,13 +3619,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lagged_live_receiver_closes_stream() {
+    async fn slow_stream_gets_merged_live_deltas() {
         let changes =
             Arc::new(studio_runtime_services::change_notifications::ChangeNotificationHub::new());
         let notifications = Arc::new(ResourceNotifications::new(changes.clone()));
         let tokens = TokenRateHub::new();
-        let stream = test_stream(&changes, &tokens, notifications.clone(), &[]);
-        for index in 0..=studio_runtime_services::resource_notify::LIVE_DELTA_CAPACITY {
+        let stream = test_stream(
+            &changes,
+            &tokens,
+            notifications.clone(),
+            &[json!({"kind":"transcript","agentId":"agent"})],
+        );
+        let count = 2 * studio_runtime_services::resource_notify::LIVE_DELTA_CAPACITY;
+        for index in 0..count {
             notifications.publish_live(LiveDelta {
                 agent_id: "agent".into(),
                 item_id: "item".into(),
@@ -3766,11 +3639,13 @@ mod tests {
                 text: "x".into(),
             });
         }
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), next_frame(stream))
-                .await
-                .expect("lag must terminate the stream")
-                .is_none()
+        let (frame, _) = tokio::time::timeout(Duration::from_millis(500), next_frame(stream))
+            .await
+            .expect("a slow stream stays open")
+            .expect("merged frame");
+        assert_eq!(
+            event_document(frame).await,
+            json!({"agentId":"agent","itemId":"item","offset":0,"text":"x".repeat(count)})
         );
     }
 
@@ -3917,7 +3792,9 @@ mod tests {
         .await
         .expect("owner receives progress without subscription");
         assert!(String::from_utf8_lossy(&frame).contains(id));
-        for stream in [&mut device, &mut peer] {
+        // A device with full access may sign in an account, so it sees the progress.
+        drop(device);
+        for stream in [&mut peer] {
             let received = tokio::time::timeout(Duration::from_millis(200), async {
                 while let Some(Ok(frame)) = stream.next().await {
                     if String::from_utf8_lossy(&frame).contains("auth-progress") {
@@ -3991,7 +3868,7 @@ mod tests {
     async fn owner_progress_is_forbidden_to_other_principals() {
         use axum::extract::ConnectInfo;
         use axum::http::Request;
-        use studio_runtime_services::principal::{Grant, Principal};
+        use studio_runtime_services::principal::Principal;
         use tower::ServiceExt;
 
         let root = tempfile::tempdir().expect("isolated state");
@@ -4006,15 +3883,10 @@ mod tests {
             None,
         );
         let app = crate::router(state).expect("router");
-        for principal in [
-            Principal::Device {
-                id: "device".into(),
-                grant: Grant::Full,
-            },
-            Principal::Peer {
-                server: "peer".into(),
-            },
-        ] {
+        // A device with full access may follow a sign-in; a peer server may not.
+        for principal in [Principal::Peer {
+            server: "peer".into(),
+        }] {
             let request = |method: &str, uri: &str, body: Body| {
                 Request::builder()
                     .method(method)
@@ -4042,7 +3914,7 @@ mod tests {
                     .expect("data"),
             )
             .expect("session");
-            let update = json!({"sessionId":session["sessionId"],"gen":1,"add":[{"resource":{"kind":"vault-job-progress","requestId":"one","job":"setup"}}],"remove":[]});
+            let update = json!({"sessionId":session["sessionId"],"gen":1,"add":[{"resource":{"kind":"auth-progress","requestId":"one"}}],"remove":[]});
             let denied = app
                 .clone()
                 .oneshot(request(
@@ -5888,25 +5760,19 @@ mod tests {
             .transaction(|tx| {
                 SyncDocumentsRepository::put_entity(
                     tx,
-                    "agentSummary",
+                    "project",
                     "first",
                     json!({"id":"first","name":"superseded","status":"idle","source":"managed"}),
                     false,
                 )?;
                 SyncDocumentsRepository::put_entity(
                     tx,
-                    "agentSummary",
+                    "project",
                     "first",
                     json!({"id":"first","name":"First","status":"idle","source":"managed"}),
                     false,
                 )?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "agentSummary",
-                    "removed",
-                    json!({}),
-                    true,
-                )?;
+                SyncDocumentsRepository::put_entity(tx, "project", "removed", json!({}), true)?;
                 Ok(())
             })
             .await
@@ -5944,7 +5810,7 @@ mod tests {
                 for index in 0..SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
                     SyncDocumentsRepository::put_entity(
                         tx,
-                        "agentSummary",
+                        "project",
                         &format!("deleted-{index}"),
                         json!({}),
                         true,
@@ -5980,7 +5846,7 @@ mod tests {
                 for index in 0..count {
                     let id = format!("agent-{index}");
                     let name = if scenario == "bytes" { "é".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 2) } else { "Agent".into() };
-                    SyncDocumentsRepository::put_entity(tx, "agentSummary", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
+                    SyncDocumentsRepository::put_entity(tx, "project", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
                 }
                 if scenario == "pruned" {
                     tx.execute("INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('entity_tombstone_floor','1')", [])?;
@@ -6232,10 +6098,7 @@ mod tests {
     }
 
     mod token_rate_difference {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../runtime-services/tests/support/token_rate_difference.rs"
-        ));
+        include!("../../../runtime-services/tests/support/token_rate_difference.rs");
     }
 
     #[tokio::test]
@@ -6391,7 +6254,7 @@ mod tests {
         changed("00000000-0000-4000-8000-000000000001");
         assert!(matches!(
             live.try_recv(),
-            Ok(studio_runtime_services::resource_notify::LiveEvent::Progress(
+            Some(studio_runtime_services::resource_notify::LiveEvent::Progress(
                 studio_runtime_schema::progress_selector::ProgressSelector::Auth { request_id }
             )) if request_id == "00000000-0000-4000-8000-000000000001"
         ));
@@ -6524,7 +6387,6 @@ mod tests {
         let state = ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),
@@ -6579,7 +6441,6 @@ mod tests {
         let state = ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),
@@ -7018,7 +6879,6 @@ mod tests {
         ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),
@@ -7418,7 +7278,6 @@ mod tests {
         let state = ResourceStream {
             principal: None,
             http_state: None,
-            vault_readiness: None,
             subscription: None,
             initial: VecDeque::new(),
             entity_transfers: VecDeque::new(),

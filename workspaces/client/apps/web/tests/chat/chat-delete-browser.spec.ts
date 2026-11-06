@@ -40,9 +40,22 @@ test("chat deletion trusts the server result and settles from SSE", async ({
       await page.locator("[data-delete-chat]").click();
     };
     await page.route(
-      "**/api/conversation/delete",
+      "**/api/commands",
       async (route) => {
-        await route.fulfill({ json: { deleted: [id, "new-worker"] } });
+        if (route.request().postDataJSON()?.kind !== "delete")
+          return route.continue();
+        await route.fulfill({
+          json: {
+            status: "applied",
+            ref_kind: "agent",
+            ref_id: id,
+            rev: 0,
+            seq: 0,
+            rows: [],
+            kind: "delete",
+            result: { deleted: [id, "new-worker"] },
+          },
+        });
       },
       { times: 1 },
     );
@@ -67,8 +80,10 @@ test("chat deletion trusts the server result and settles from SSE", async ({
       forward = resolve;
     });
     await page.route(
-      "**/api/conversation/delete",
+      "**/api/commands",
       async (route) => {
+        if (route.request().postDataJSON()?.kind !== "delete")
+          return route.continue();
         await beforeForward;
         const response = await route.fetch();
         sent();
@@ -79,7 +94,8 @@ test("chat deletion trusts the server result and settles from SSE", async ({
     );
     const aborted = page.waitForEvent("requestfailed", {
       predicate: (request) =>
-        request.url().endsWith("/api/conversation/delete"),
+        request.url().endsWith("/api/commands") &&
+        request.postDataJSON()?.kind === "delete",
     });
     await remove();
     await expect(page.getByText("Deleting chat…")).toBeVisible();

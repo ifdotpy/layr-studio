@@ -388,28 +388,11 @@ export interface paths {
     };
     /**
      * Finder View
-     * @description Where Finder shows the chat's files. Reads saved records only; never mounts or calls the VM.
+     * @description Where the file manager shows the chat's files. Reads saved records only.
      */
     get: operations["finder_view_api_agents_finder_view_get"];
     put?: never | undefined;
     post?: never | undefined;
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/agents/move-to-host": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /** Move an idle VM chat to this device */
-    post: operations["move_to_host_api_agents_move_to_host_post"];
     delete?: never | undefined;
     options?: never | undefined;
     head?: never | undefined;
@@ -807,23 +790,6 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
-  "/api/conversation/delete": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /** Delete Conversation */
-    post: operations["delete_conversation_api_conversation_delete_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
   "/api/costs": {
     parameters: {
       query?: never | undefined;
@@ -1093,64 +1059,6 @@ export interface paths {
     put?: never | undefined;
     /** Reset Limits */
     post: operations["reset_limits_api_limits_reset_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/linux-vm/settings": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    /** Linux Vm Settings */
-    get: operations["linux_vm_settings_api_linux_vm_settings_get"];
-    put?: never | undefined;
-    /** Linux Vm Settings Write */
-    post: operations["linux_vm_settings_write_api_linux_vm_settings_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/mac-sync/config": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Mac Sync Config
-     * @description Pause or resume a project's Mac folder sync, or confirm the Mac deletions that paused it.
-     */
-    post: operations["mac_sync_config_api_mac_sync_config_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/mac-sync/resolve": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Mac Sync Resolve
-     * @description Settle one conflicting path of a project's Mac folder sync.
-     */
-    post: operations["mac_sync_resolve_api_mac_sync_resolve_post"];
     delete?: never | undefined;
     options?: never | undefined;
     head?: never | undefined;
@@ -1529,66 +1437,6 @@ export interface paths {
     get: operations["project_location_query_api_project_locations_get"];
     put?: never | undefined;
     post?: never | undefined;
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/project-secrets/list": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Project Secrets List
-     * @description The names of the project's secrets.
-     */
-    post: operations["project_secrets_list_api_project_secrets_list_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/project-secrets/remove": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Project Secrets Remove
-     * @description Remove one secret of the project.
-     */
-    post: operations["project_secrets_remove_api_project_secrets_remove_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/project-secrets/set": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Project Secrets Set
-     * @description Set one secret of the project; agent processes that start later get it.
-     */
-    post: operations["project_secrets_set_api_project_secrets_set_post"];
     delete?: never | undefined;
     options?: never | undefined;
     head?: never | undefined;
@@ -2318,110 +2166,6 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
-  "/api/vault/aws-login": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Vault Aws Login
-     * @description Start a sign-in to an AWS profile, or report the sign-in that this requestId
-     *     started.
-     */
-    post: operations["vault_aws_login_api_vault_aws_login_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/vault/pull": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Vault Pull
-     * @description Start a pull of the project's latest vault state into a new Mac folder, or report
-     *     the pull that this requestId started.
-     */
-    post: operations["vault_pull_api_vault_pull_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/vault/setup": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Vault Setup
-     * @description Start the setup of the project's vault, or report the setup that this requestId
-     *     started.
-     */
-    post: operations["vault_setup_api_vault_setup_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/vault/setup/facts": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Vault Setup Facts
-     * @description What the vault setup dialog needs: the vault name, the keys on this Mac, the Desk
-     *     site and the AWS profiles.
-     */
-    post: operations["vault_setup_facts_api_vault_setup_facts_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
-  "/api/vault/unlock": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /**
-     * Vault Unlock
-     * @description Keep the vault key on this Mac from the paper words; the words reach only layr-desk.
-     */
-    post: operations["vault_unlock_api_vault_unlock_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
   "/api/voice/end": {
     parameters: {
       query?: never | undefined;
@@ -3061,8 +2805,6 @@ export interface components {
        * @default null
        */
       transferId?: string | undefined;
-      /** @default null */
-      vmSessionCopy?: components["schemas"]["JsonObjectResponse"] | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
@@ -4514,6 +4256,35 @@ export interface components {
           epoch: number;
           /** @constant */
           reason: "account_transfer";
+        }
+      | {
+          /** Format: int64 */
+          epoch: number;
+          progress: {
+            /** Format: uint64 */
+            done: number;
+            /** @enum {string} */
+            phase:
+              | "sizing"
+              | "staging"
+              | "importing_commits"
+              | "materializing"
+              | "restoring_attributes"
+              | "warming_caches"
+              | "transferring"
+              | "creating_line"
+              | "archiving"
+              | "uploading"
+              | "importing_project"
+              | "completed"
+              | "failed";
+            /** Format: uint64 */
+            total?: number | null | undefined;
+            /** @enum {string} */
+            unit: "files" | "bytes" | "commits";
+          };
+          /** @constant */
+          reason: "workspace_copy";
         };
     /**
      * AgentEntityUsageResumeDto
@@ -4562,35 +4333,6 @@ export interface components {
      * @enum {string}
      */
     AgentMode: "multi" | "single";
-    /**
-     * AgentMoveToHostRequest
-     * @description Move one idle VM chat to this device. A lead moves with its workers. The chat keeps its thread and history.
-     */
-    AgentMoveToHostRequest: {
-      /** Id */
-      id: string;
-      /** Request Id */
-      request_id: string;
-    };
-    /** AgentMoveToHostResponse */
-    AgentMoveToHostResponse: {
-      /** Cwd */
-      cwd: string;
-      /**
-       * Executionmode
-       * @enum {string}
-       */
-      executionMode: "native";
-      /** Id */
-      id: string;
-      /** Movedagents */
-      movedAgents: string[];
-      /**
-       * Workspacemode
-       * @enum {string}
-       */
-      workspaceMode: "shared";
-    };
     /** @enum {string} */
     AgentNaming: "automatic" | "pending_title" | "manual";
     /** AgentNativeRelease */
@@ -5643,8 +5385,6 @@ export interface components {
        * @default null
        */
       usageResumeEnabled?: boolean | undefined;
-      /** @default null */
-      vmAccountSwitch?: components["schemas"]["JsonObjectResponse"] | undefined;
       /**
        * Workerbasebehindmain
        * @default null
@@ -6476,6 +6216,10 @@ export interface components {
       sharedRoomId?: null | string | undefined;
       source?: components["schemas"]["AgentSource"] | null | undefined;
       stall?: components["schemas"]["AgentStall"] | null | undefined;
+      startWait?:
+        | components["schemas"]["AgentEntityStartWaitDto"]
+        | null
+        | undefined;
       status?: components["schemas"]["AgentStatus"] | null | undefined;
       teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
@@ -8369,10 +8113,11 @@ export interface components {
       contentWidth?: number | undefined;
       /**
        * Fontfamily
-       * @default system
+       * @default geist
        * @enum {string}
        */
       fontFamily?:
+        | "geist"
         | "system"
         | "arial"
         | "inter"
@@ -10003,7 +9748,7 @@ export interface components {
      * ChatWorkspaceMode
      * @enum {string}
      */
-    ChatWorkspaceMode: "layr-native" | "layr" | "worktree";
+    ChatWorkspaceMode: "layr-native" | "worktree";
     /** CheckpointCaptureRequest */
     CheckpointCaptureRequest: {
       /** Agent */
@@ -11059,6 +10804,8 @@ export interface components {
     CommandAnswerBody: {
       [key: string]: unknown;
     };
+    /** @description A delete has no options: it always deletes the descendants of the chat too. */
+    CommandDeleteBody: Record<string, never>;
     /** @enum {string} */
     CommandErrorCode: "receipt_expired" | "native_layr_store";
     /** @description Identity of the outbox command that delivers an answer. */
@@ -11077,6 +10824,7 @@ export interface components {
       | components["schemas"]["CommandRequestResolve"]
       | components["schemas"]["CommandRequestPause"]
       | components["schemas"]["CommandRequestAnswer"]
+      | components["schemas"]["CommandRequestDelete"]
       | components["schemas"]["CommandRequestLeadMessage"];
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
@@ -11087,6 +10835,18 @@ export interface components {
        * @enum {string}
        */
       kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestDelete: {
+      body: components["schemas"]["CommandDeleteBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "delete";
       number: number;
       target: string;
     };
@@ -11167,11 +10927,12 @@ export interface components {
       /** @enum {string} */
       action: "retry" | "delivered" | "discard";
     };
-    /** @description One applied command. The kind names the kind-specific result; only answer has one. */
+    /** @description One applied command. The kind names the kind-specific result; answer, lead_message and delete have one. */
     CommandResponse:
       | components["schemas"]["CommandResponseApplied"]
       | components["schemas"]["CommandResponseAnswer"]
-      | components["schemas"]["CommandResponseLeadMessage"];
+      | components["schemas"]["CommandResponseLeadMessage"]
+      | components["schemas"]["CommandResponseDelete"];
     CommandResponseAnswer: {
       /**
        * @description discriminator enum property added by openapi-typescript
@@ -11195,6 +10956,23 @@ export interface components {
       kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
+      rev: number;
+      rows: components["schemas"]["CommandRow"][];
+      seq: number;
+      /** @enum {string} */
+      status: "applied";
+    };
+    CommandResponseDelete: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "delete";
+      ref_id: string;
+      ref_kind: string;
+      result: {
+        deleted: string[];
+      };
       rev: number;
       rows: components["schemas"]["CommandRow"][];
       seq: number;
@@ -12281,12 +12059,7 @@ export interface components {
        * @default worktree
        * @enum {string}
        */
-      workspaceMode?:
-        | "layr-native"
-        | "layr"
-        | "worktree"
-        | "shared"
-        | undefined;
+      workspaceMode?: "layr-native" | "worktree" | "shared" | undefined;
       /**
        * Yolo Mode
        * @default true
@@ -12422,7 +12195,7 @@ export interface components {
        * @description When omitted, the server selects native Layr when available; otherwise it selects worktree.
        * @enum {string}
        */
-      workspaceMode?: "layr-native" | "layr" | "worktree" | undefined;
+      workspaceMode?: "layr-native" | "worktree" | undefined;
       /**
        * Yolo Mode
        * @default true
@@ -12495,11 +12268,6 @@ export interface components {
       account_key: string;
       /** Request Id */
       request_id: string;
-    };
-    /** DeletedResponse */
-    DeletedResponse: {
-      /** Deleted */
-      deleted: string[];
     };
     /** DeletedRuleReceipt */
     DeletedRuleReceipt: {
@@ -12577,8 +12345,6 @@ export interface components {
       browser: components["schemas"]["BrowserStatus"] | null;
       /** @default null */
       diskSpace?: components["schemas"]["DiskSpaceStatus"] | null | undefined;
-      /** @default null */
-      linuxVm?: components["schemas"]["LinuxVMStatus"] | null | undefined;
       liveUpdate: components["schemas"]["LiveUpdateStatus"] | null;
       /** Mobileprotocol */
       mobileProtocol: number;
@@ -12631,8 +12397,6 @@ export interface components {
       browser: components["schemas"]["BrowserStatus"] | null;
       /** @default null */
       diskSpace?: components["schemas"]["DiskSpaceStatus"] | null | undefined;
-      /** @default null */
-      linuxVm?: components["schemas"]["LinuxVMStatus"] | null | undefined;
       liveUpdate: components["schemas"]["LiveUpdateStatus"] | null;
       /** Mobileprotocol */
       mobileProtocol: number;
@@ -14396,130 +14160,6 @@ export interface components {
        */
       kind: "limits";
     };
-    /** LinuxVMDownload */
-    LinuxVMDownload: {
-      /** Attempt */
-      attempt: number;
-      /** Bytes */
-      bytes: number;
-      /** Seconds */
-      seconds: number;
-      /** Stage */
-      stage: string;
-    };
-    /** LinuxVMProvision */
-    LinuxVMProvision: {
-      /**
-       * Cause
-       * @default null
-       */
-      cause?: null | string | undefined;
-      /**
-       * Downloads
-       * @default null
-       */
-      downloads?: components["schemas"]["LinuxVMDownload"][] | null | undefined;
-      /**
-       * Stage
-       * @default null
-       */
-      stage?: null | string | undefined;
-      /**
-       * State
-       * @default null
-       */
-      state?: null | string | undefined;
-    };
-    /** LinuxVMSettings */
-    LinuxVMSettings: {
-      /** Cpus */
-      cpus: number;
-      /** Datadiskbytes */
-      dataDiskBytes: number;
-      /** Memorybytes */
-      memoryBytes: number;
-      /** Systemdiskbytes */
-      systemDiskBytes: number;
-    };
-    /** LinuxVMSettingsResponse */
-    LinuxVMSettingsResponse: {
-      /**
-       * Allocateddiskbytes
-       * @default null
-       */
-      allocatedDiskBytes?: number | null | undefined;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      settings: components["schemas"]["LinuxVMSettings"];
-      /** State */
-      state: string;
-    };
-    /** LinuxVMShareProject */
-    LinuxVMShareProject: {
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /**
-       * Path
-       * @default null
-       */
-      path?: null | string | undefined;
-      /** Projectid */
-      projectId: string;
-      /**
-       * Readonly
-       * @default null
-       */
-      readOnly?: boolean | null | undefined;
-      /** State */
-      state: string;
-    };
-    /** LinuxVMShareStatus */
-    LinuxVMShareStatus: {
-      /** Projects */
-      projects: components["schemas"]["LinuxVMShareProject"][];
-      /** State */
-      state: string;
-    };
-    /**
-     * LinuxVMStatus
-     * @description Known local status fields plus unprojected host and guest status data.
-     */
-    LinuxVMStatus: {
-      /**
-       * Allocateddiskbytes
-       * @default null
-       */
-      allocatedDiskBytes?: number | null | undefined;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /**
-       * Freehostbytes
-       * @default null
-       */
-      freeHostBytes?: number | null | undefined;
-      /** @default null */
-      layr?: components["schemas"]["JsonValue"] | undefined;
-      /** @default null */
-      provision?: components["schemas"]["LinuxVMProvision"] | null | undefined;
-      /** @default null */
-      share?: components["schemas"]["LinuxVMShareStatus"] | null | undefined;
-      /**
-       * State
-       * @default null
-       */
-      state?: null | string | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
     /** ListProjectGrantsRequest */
     ListProjectGrantsRequest: {
       /**
@@ -14643,100 +14283,6 @@ export interface components {
       label?: string | null | undefined;
       /** Login Id */
       login_id: string;
-    };
-    /**
-     * MacSyncConfigRequest
-     * @description Pause or resume the sync, or let Mac deletions that paused it go to the VM.
-     */
-    MacSyncConfigRequest: {
-      /**
-       * Allowdeletes
-       * @default false
-       */
-      allowDeletes?: boolean | undefined;
-      /**
-       * Enabled
-       * @default null
-       */
-      enabled?: boolean | null | undefined;
-      /** Projectid */
-      projectId: string;
-    };
-    /**
-     * MacSyncResolveRequest
-     * @description Keep the Mac version, keep the VM version, or ask the lead to combine them.
-     */
-    MacSyncResolveRequest: {
-      /**
-       * Choice
-       * @enum {string}
-       */
-      choice: "mac" | "vm" | "agent";
-      /** Path */
-      path: string;
-      /** Projectid */
-      projectId: string;
-    };
-    /** MacSyncResolveResponse */
-    MacSyncResolveResponse: {
-      /**
-       * Choice
-       * @enum {string}
-       */
-      choice: "mac" | "vm" | "agent";
-      /**
-       * Kind
-       * @default null
-       */
-      kind?: ("file" | "link" | "absent") | null | undefined;
-      /**
-       * Leadid
-       * @default null
-       */
-      leadId?: null | string | undefined;
-      /**
-       * Line
-       * @default null
-       */
-      line?: null | string | undefined;
-      /** Mainstateid */
-      mainStateId: string;
-      /** Path */
-      path: string;
-      /**
-       * Stateid
-       * @default null
-       */
-      stateId?: null | string | undefined;
-      status: components["schemas"]["MacSyncStatusResponse"] | null;
-    };
-    /**
-     * MacSyncStatusResponse
-     * @description A project's Mac folder sync. conflicts and choices wait for the user; withAgent waits
-     *     for the lead; deletes counts Mac deletions that wait for a confirmation.
-     */
-    MacSyncStatusResponse: {
-      /** At */
-      at: null | number;
-      /** Choices */
-      choices: string[];
-      /** Conflicts */
-      conflicts: string[];
-      /** Deletes */
-      deletes: number;
-      /** Enabled */
-      enabled: boolean;
-      /** Folder */
-      folder: string;
-      /** Reason */
-      reason: null | string;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "syncing" | "synced" | "waiting" | "conflict" | "paused" | "error";
-      /** Withagent */
-      withAgent: string[];
     };
     /** ManagedMessageBody */
     ManagedMessageBody: {
@@ -18248,11 +17794,6 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
-      layrReadiness?:
-        | components["schemas"]["ProjectLayrReadinessDto"]
-        | null
-        | undefined;
-      layrSync?: components["schemas"]["ProjectLayrSyncDto"] | null | undefined;
       /** Locations */
       locations?:
         | components["schemas"]["ProjectLocationDto"][]
@@ -18282,7 +17823,6 @@ export interface components {
       serverLabel?: null | string | undefined;
       /** Updated */
       updated?: null | number | undefined;
-      vault?: components["schemas"]["ProjectVaultDto"] | null | undefined;
       /** Workerbaseref */
       workerBaseRef?: null | string | undefined;
       /** Workerbaserevision */
@@ -18338,48 +17878,6 @@ export interface components {
       invitation: components["schemas"]["FederationInvitation"];
       /** Warning */
       warning: string;
-    };
-    /**
-     * ProjectLayrReadinessDto
-     * @description Whether a new layr chat of the project starts without an import (docs/vm-layr.md).
-     *     A ready project has the ID of its layr project.
-     */
-    ProjectLayrReadinessDto: {
-      /** Error */
-      error?: null | string | undefined;
-      /** Projectid */
-      projectId?: null | string | undefined;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "ready" | "importing" | "not_imported" | "failed";
-    };
-    /**
-     * ProjectLayrSyncDto
-     * @description The Mac folder sync of the project's layr project (docs/vm-mac-sync.md). conflicts and
-     *     choices wait for the user, withAgent for the lead, deletes for a confirmation.
-     */
-    ProjectLayrSyncDto: {
-      /** Choices */
-      choices: string[];
-      /** Conflicts */
-      conflicts: string[];
-      /** Deletes */
-      deletes: number;
-      /** Enabled */
-      enabled: boolean;
-      /** Projectid */
-      projectId: string;
-      /** Reason */
-      reason?: null | string | undefined;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "syncing" | "synced" | "waiting" | "conflict" | "paused" | "error";
-      /** Withagent */
-      withAgent: string[];
     };
     /**
      * ProjectLocation
@@ -18633,78 +18131,6 @@ export interface components {
       id: string;
       /** Removed */
       removed: boolean;
-    };
-    /**
-     * ProjectSecretRemoveRequest
-     * @description Remove one secret. A repeated requestId returns the saved reply and changes nothing.
-     */
-    ProjectSecretRemoveRequest: {
-      /** Name */
-      name: string;
-      /** Projectid */
-      projectId: string;
-      /** Requestid */
-      requestId: string;
-    };
-    /**
-     * ProjectSecretSetRequest
-     * @description Set one secret. The VM keeps the value; no response returns it. A repeated requestId
-     *     returns the saved reply and sets nothing.
-     */
-    ProjectSecretSetRequest: {
-      /** Name */
-      name: string;
-      /** Projectid */
-      projectId: string;
-      /** Requestid */
-      requestId: string;
-      /** Value */
-      value: string;
-    };
-    /**
-     * ProjectSecretsListRequest
-     * @description The names of a layr project's secrets (docs/project-secrets.md).
-     */
-    ProjectSecretsListRequest: {
-      /** Projectid */
-      projectId: string;
-    };
-    /**
-     * ProjectSecretsResponse
-     * @description The secret names of a layr project, never a value.
-     */
-    ProjectSecretsResponse: {
-      /** Names */
-      names: string[];
-      /** Projectid */
-      projectId: string;
-    };
-    /**
-     * ProjectVaultDto
-     * @description The project vault of the project's layr project (docs/vault.md): the VM writer's last
-     *     report. state none: no vault; error: the last push failed (reason). site and prefix make
-     *     the Desk link of the vault.
-     */
-    ProjectVaultDto: {
-      /** Disk */
-      disk?: null | string | undefined;
-      /** Lastpush */
-      lastPush?: null | number | undefined;
-      /** Prefix */
-      prefix?: null | string | undefined;
-      /** Projectid */
-      projectId: string;
-      /** Reason */
-      reason?: null | string | undefined;
-      /** Site */
-      site?: null | string | undefined;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "ok" | "error" | "none";
-      /** Unlocked */
-      unlocked?: boolean | null | undefined;
     };
     /** ProjectWriteRequest */
     ProjectWriteRequest: {
@@ -20041,8 +19467,6 @@ export interface components {
     /** ResourceProgressEvent */
     ResourceProgressEvent:
       | components["schemas"]["AuthProgressEvent"]
-      | components["schemas"]["VaultReadinessEvent"]
-      | components["schemas"]["VaultJobProgressEvent"]
       | components["schemas"]["RenameProgressEvent"];
     /**
      * ResourceRef
@@ -20070,8 +19494,6 @@ export interface components {
       | components["schemas"]["VoiceResource"]
       | components["schemas"]["WorkspaceResource"]
       | components["schemas"]["AuthProgressResource"]
-      | components["schemas"]["VaultReadinessResource"]
-      | components["schemas"]["VaultJobProgressResource"]
       | components["schemas"]["RenameProgressResource"]
       | components["schemas"]["AgentDetailResource"]
       | components["schemas"]["MonitorsResource"]
@@ -20426,6 +19848,7 @@ export interface components {
     };
     /** ReviewDefaults */
     ReviewDefaults: {
+      account_key?: string | null | undefined;
       /** Effort */
       effort: string | null;
       /** @description Override Fast mode for native reviews and reviewer tasks. Omission preserves caller inheritance for native reviews and worker-default inheritance for reviewer tasks. */
@@ -20435,6 +19858,7 @@ export interface components {
     };
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
+      accountKey?: string | null | undefined;
       /** Effort */
       effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;
@@ -22642,7 +22066,8 @@ export interface components {
       | "dispatch_pending"
       | "paused"
       | "native_failure"
-      | "account_transfer";
+      | "account_transfer"
+      | "workspace_copy";
     /**
      * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
      *
@@ -22732,6 +22157,35 @@ export interface components {
           epoch: number;
           /** @constant */
           reason: "account_transfer";
+        }
+      | {
+          /** Format: int64 */
+          epoch: number;
+          progress: {
+            /** Format: uint64 */
+            done: number;
+            /** @enum {string} */
+            phase:
+              | "sizing"
+              | "staging"
+              | "importing_commits"
+              | "materializing"
+              | "restoring_attributes"
+              | "warming_caches"
+              | "transferring"
+              | "creating_line"
+              | "archiving"
+              | "uploading"
+              | "importing_project"
+              | "completed"
+              | "failed";
+            /** Format: uint64 */
+            total?: number | null | undefined;
+            /** @enum {string} */
+            unit: "files" | "bytes" | "commits";
+          };
+          /** @constant */
+          reason: "workspace_copy";
         };
     /** StateResource */
     StateResource: {
@@ -23120,12 +22574,6 @@ export interface components {
       terminals: components["schemas"]["TerminalRecord"][];
       transcript: components["schemas"]["TranscriptPageResponse"];
       transcripts: components["schemas"]["SyncEntityPayload"][];
-      "vault-job-progress":
-        | components["schemas"]["VaultSetupResponse"]
-        | components["schemas"]["VaultLoginResponse"]
-        | components["schemas"]["VaultPullResponse"]
-        | null;
-      "vault-readiness": boolean;
       voice: components["schemas"]["VoiceRecordBatch"];
       work: components["schemas"]["WorkList"];
       workspace: components["schemas"]["SyncEntityPayload"][];
@@ -26214,11 +25662,6 @@ export interface components {
       defaultWorkspaceMode?:
         | components["schemas"]["ChatWorkspaceMode"]
         | undefined;
-      /**
-       * @description The server has a created Studio Linux VM.
-       * @default false
-       */
-      hasStudioVm?: boolean | undefined;
       nativeLayr?: components["schemas"]["NativeLayrCapability"] | undefined;
       nativeLayrMessage?: string | undefined;
       /** Projects */
@@ -26726,380 +26169,6 @@ export interface components {
        * @description Base-rate input, excluding cache reads and writes; tokens.
        */
       uncachedInput: number;
-    };
-    /**
-     * VaultAwsProfileDto
-     * @description An AWS profile of this Mac: signedIn says whether it has keys or a usable sign-in.
-     */
-    VaultAwsProfileDto: {
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /** Name */
-      name: string;
-      /**
-       * Region
-       * @default null
-       */
-      region?: null | string | undefined;
-      /**
-       * Signedin
-       * @default null
-       */
-      signedIn?: boolean | null | undefined;
-      /**
-       * Sso
-       * @default null
-       */
-      sso?: boolean | null | undefined;
-    };
-    /**
-     * VaultJobProgressEvent
-     * @description Transient subscribed progress; never persisted to the server or client entity store.
-     */
-    VaultJobProgressEvent: {
-      /** Epoch */
-      epoch: string;
-      /**
-       * Protocol
-       * @constant
-       */
-      protocol: 4;
-      resource: components["schemas"]["VaultJobProgressResource"];
-      /** Revision */
-      revision: number;
-      value: unknown;
-      /** Workspaceid */
-      workspaceId: string;
-    } & (
-      | {
-          resource: components["schemas"]["VaultJobProgressResource"] & {
-            /** @constant */
-            job: "setup";
-          };
-          value: components["schemas"]["VaultSetupResponse"] | null;
-        }
-      | {
-          resource: components["schemas"]["VaultJobProgressResource"] & {
-            /** @constant */
-            job: "login";
-          };
-          value: components["schemas"]["VaultLoginResponse"] | null;
-        }
-      | {
-          resource: components["schemas"]["VaultJobProgressResource"] & {
-            /** @constant */
-            job: "pull";
-          };
-          value: components["schemas"]["VaultPullResponse"] | null;
-        }
-    );
-    /** VaultJobProgressResource */
-    VaultJobProgressResource: {
-      /** @enum {string} */
-      job: "setup" | "login" | "pull";
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      kind: "vault-job-progress";
-      requestId: string;
-    };
-    /** VaultLoginDone */
-    VaultLoginDone: {
-      /** @constant */
-      state: "done";
-    };
-    /**
-     * VaultLoginRequest
-     * @description Sign in to an AWS profile. A repeated requestId returns the same sign-in.
-     */
-    VaultLoginRequest: {
-      /** Profile */
-      profile: string;
-      /** Requestid */
-      requestId: string;
-    };
-    /**
-     * VaultLoginResponse
-     * @description One AWS sign-in: running (page and code once AWS gives them), done or failed.
-     */
-    VaultLoginResponse: {
-      /**
-       * Code
-       * @default null
-       */
-      code?: null | string | undefined;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /**
-       * Page
-       * @default null
-       */
-      page?: null | string | undefined;
-      /** Requestid */
-      requestId: string;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "running" | "done" | "failed";
-    } & (
-      | {
-          /** @constant */
-          state: "running";
-        }
-      | components["schemas"]["VaultLoginDone"]
-      | {
-          /** @constant */
-          state: "failed";
-        }
-    );
-    /** VaultPullBytes */
-    VaultPullBytes: number;
-    /** VaultPullDone */
-    VaultPullDone: {
-      /** @constant */
-      state: "done";
-    } & components["schemas"]["VaultPullOutcome"];
-    /** VaultPullFiles */
-    VaultPullFiles: number;
-    /** VaultPullOutcome */
-    VaultPullOutcome: {
-      bytes: components["schemas"]["VaultPullBytes"];
-      files: components["schemas"]["VaultPullFiles"];
-      seq: components["schemas"]["VaultPullSequence"];
-    };
-    /**
-     * VaultPullRequest
-     * @description Pull the latest vault state into a new folder below `to` (Downloads when left out).
-     *     A repeated requestId returns the same pull.
-     */
-    VaultPullRequest: {
-      /** Projectid */
-      projectId: string;
-      /** Requestid */
-      requestId: string;
-      /**
-       * To
-       * @default null
-       */
-      to?: string | null | undefined;
-    };
-    /**
-     * VaultPullResponse
-     * @description One pull of a vault state into a Mac folder: running, done (seq, files, bytes) or
-     *     failed (error).
-     */
-    VaultPullResponse: {
-      /**
-       * Bytes
-       * @default null
-       */
-      bytes?: components["schemas"]["VaultPullBytes"] | null | undefined;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /**
-       * Files
-       * @default null
-       */
-      files?: components["schemas"]["VaultPullFiles"] | null | undefined;
-      /** Folder */
-      folder: string;
-      /** Requestid */
-      requestId: string;
-      /**
-       * Seq
-       * @default null
-       */
-      seq?: components["schemas"]["VaultPullSequence"] | null | undefined;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "running" | "done" | "failed";
-    } & (
-      | {
-          /** @constant */
-          state: "running";
-        }
-      | components["schemas"]["VaultPullDone"]
-      | {
-          /** @constant */
-          state: "failed";
-        }
-    );
-    /** VaultPullSequence */
-    VaultPullSequence: number;
-    /**
-     * VaultReadinessEvent
-     * @description Transient subscribed progress; never persisted to the server or client entity store.
-     */
-    VaultReadinessEvent: {
-      /** Epoch */
-      epoch: string;
-      /**
-       * Protocol
-       * @constant
-       */
-      protocol: 4;
-      resource: components["schemas"]["VaultReadinessResource"];
-      /** Revision */
-      revision: number;
-      value: boolean;
-      /** Workspaceid */
-      workspaceId: string;
-    };
-    /** VaultReadinessResource */
-    VaultReadinessResource: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      kind: "vault-readiness";
-      prefix: string;
-    };
-    /** VaultSetupDone */
-    VaultSetupDone: {
-      site: string;
-      /** @constant */
-      state: "done";
-    };
-    /**
-     * VaultSetupFactsRequest
-     * @description The facts for the vault setup dialog; prefix replaces the name from the folder.
-     */
-    VaultSetupFactsRequest: {
-      /**
-       * Prefix
-       * @default null
-       */
-      prefix?: string | null | undefined;
-      /** Projectid */
-      projectId: string;
-    };
-    /**
-     * VaultSetupFactsResponse
-     * @description The vault name, whether this Mac has its keys, the gateway's Desk site and account, and
-     *     the AWS profiles.
-     */
-    VaultSetupFactsResponse: {
-      /** Gatewayprofile */
-      gatewayProfile: null | string;
-      /** Keys */
-      keys: boolean;
-      /** Prefix */
-      prefix: string;
-      /** Profiles */
-      profiles: components["schemas"]["VaultAwsProfileDto"][];
-      /** Region */
-      region: string;
-      /** Site */
-      site: null | string;
-    };
-    /**
-     * VaultSetupRequest
-     * @description Make the project's vault with an AWS profile. A repeated requestId returns the same job.
-     */
-    VaultSetupRequest: {
-      /** Prefix */
-      prefix: string;
-      /** Profile */
-      profile: string;
-      /** Projectid */
-      projectId: string;
-      /** Region */
-      region: string;
-      /** Requestid */
-      requestId: string;
-    };
-    /**
-     * VaultSetupResponse
-     * @description One vault setup: running (progress), done (site), failed (error), or signin when the
-     *     AWS profile needs a sign-in first.
-     */
-    VaultSetupResponse: {
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /** Prefix */
-      prefix: string;
-      /**
-       * Progress
-       * @default null
-       */
-      progress?: null | string | undefined;
-      /** Requestid */
-      requestId: string;
-      /**
-       * Site
-       * @default null
-       */
-      site?: null | string | undefined;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "running" | "done" | "failed" | "signin";
-    } & (
-      | {
-          /** @constant */
-          state: "running";
-        }
-      | components["schemas"]["VaultSetupDone"]
-      | {
-          /** @constant */
-          state: "failed";
-        }
-      | {
-          /** @constant */
-          state: "signin";
-        }
-    );
-    /**
-     * VaultUnlockRequest
-     * @description The paper words of the project's vault, to keep its key on this Mac.
-     */
-    VaultUnlockRequest: {
-      /** Projectid */
-      projectId: string;
-      /** Words */
-      words: string;
-    };
-    /** VaultUnlockResponse */
-    VaultUnlockResponse: {
-      /** Unlocked */
-      unlocked: boolean;
-    };
-    /**
-     * VmFinderViewResponse
-     * @description A VM chat: the read-only ~/Studio view of its layr project. The path is set only when mounted.
-     */
-    VmFinderViewResponse: {
-      /** Error */
-      error: null | string;
-      /**
-       * Kind
-       * @constant
-       */
-      kind: "vm";
-      /** Path */
-      path: null | string;
-      /**
-       * State
-       * @enum {string}
-       */
-      state: "mounted" | "unmounted" | "failed";
     };
     /**
      * VoiceAuth
@@ -30488,9 +29557,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json":
-            | components["schemas"]["NativeFinderViewResponse"]
-            | components["schemas"]["VmFinderViewResponse"];
+          "application/json": components["schemas"]["NativeFinderViewResponse"];
         };
       };
       /** @description Bad Request */
@@ -30505,71 +29572,6 @@ export interface operations {
       429: components["responses"]["ApiError429"];
       /** @description Internal Server Error */
       500: components["responses"]["ApiError500"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  move_to_host_api_agents_move_to_host_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AgentMoveToHostRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentMoveToHostResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
       /** @description Service Unavailable */
       503: components["responses"]["ApiError503"];
     };
@@ -31967,71 +30969,6 @@ export interface operations {
       503: components["responses"]["ApiError503"];
     };
   };
-  delete_conversation_api_conversation_delete_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["IdRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DeletedResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
   costs_api_costs_get: {
     parameters: {
       query?:
@@ -32902,244 +31839,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["LimitResetResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  linux_vm_settings_api_linux_vm_settings_get: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody?: never | undefined;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["LinuxVMSettingsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  linux_vm_settings_write_api_linux_vm_settings_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["LinuxVMSettings"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["LinuxVMSettingsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  mac_sync_config_api_mac_sync_config_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["MacSyncConfigRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MacSyncStatusResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  mac_sync_resolve_api_mac_sync_resolve_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["MacSyncResolveRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MacSyncResolveResponse"];
         };
       };
       /** @description Bad Request */
@@ -35228,201 +33927,6 @@ export interface operations {
       429: components["responses"]["ApiError429"];
       /** @description Internal Server Error */
       500: components["responses"]["ApiError500"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  project_secrets_list_api_project_secrets_list_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ProjectSecretsListRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProjectSecretsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  project_secrets_remove_api_project_secrets_remove_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ProjectSecretRemoveRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProjectSecretsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  project_secrets_set_api_project_secrets_set_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ProjectSecretSetRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProjectSecretsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
       /** @description Service Unavailable */
       503: components["responses"]["ApiError503"];
     };
@@ -37939,323 +36443,6 @@ export interface operations {
       503: components["responses"]["ApiError503"];
     };
   };
-  vault_aws_login_api_vault_aws_login_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["VaultLoginRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["VaultLoginResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  vault_pull_api_vault_pull_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["VaultPullRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["VaultPullResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  vault_setup_api_vault_setup_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["VaultSetupRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["VaultSetupResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  vault_setup_facts_api_vault_setup_facts_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["VaultSetupFactsRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["VaultSetupFactsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  vault_unlock_api_vault_unlock_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["VaultUnlockRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["VaultUnlockResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
   end_api_voice_end_post: {
     parameters: {
       query?: never | undefined;
@@ -39213,7 +37400,6 @@ export const ChatOperationalKind = {
 export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
 export const ChatWorkspaceMode = {
   "layr-native": "layr-native",
-  layr: "layr",
   worktree: "worktree",
 } as const;
 export type ChatWorkspaceMode = components["schemas"]["ChatWorkspaceMode"];
@@ -39801,6 +37987,7 @@ export const StartWaitReason = {
   paused: "paused",
   native_failure: "native_failure",
   account_transfer: "account_transfer",
+  workspace_copy: "workspace_copy",
 } as const;
 export type StartWaitReason = components["schemas"]["StartWaitReason"];
 export const studio_api__agents__models__AgentRole = {

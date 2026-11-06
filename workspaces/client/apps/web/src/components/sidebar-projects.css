@@ -18,8 +18,7 @@
   :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible,
 .fleet-menu
   :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: var(--studio-focus-ring-width) solid
-    var(--mantine-primary-color-filled);
+  outline: var(--studio-focus-ring-width) solid var(--accent);
   outline-offset: calc(
     -1 * (var(--studio-focus-ring-width) + var(--studio-focus-ring-inset))
   );
@@ -52,9 +51,10 @@
 .brand-name strong {
   font: inherit;
 }
+/* The one primary sidebar action takes the ink color, like Geist. */
 .sidebar-new-chat {
   flex: none;
-  color: var(--studio-state-working);
+  color: var(--text);
 }
 #chat-search {
   font-size: var(--mantine-font-size-sm);
@@ -182,7 +182,7 @@
   align-items: center;
   position: relative;
   min-inline-size: 0;
-  border-radius: 0;
+  border-radius: var(--studio-radius-control);
   margin: 0;
 }
 .sidebar-row:hover {
@@ -208,15 +208,21 @@
   border-radius: 0;
   text-align: start;
 }
-.fleet-strip[data-studio-state="answer"] {
-  background: var(--studio-state-answer-soft);
-}
-.fleet-strip[data-studio-state="error"] {
-  background: var(--studio-state-error-soft);
-}
 .row-copy {
   flex: 1;
   min-inline-size: 0;
+}
+
+.layr-copy-progress {
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+}
+
+.layr-copy-progress progress {
+  --layr-copy-progress-height: 4px;
+  width: 100%;
+  height: var(--layr-copy-progress-height);
 }
 .row-copy strong {
   display: block;
@@ -226,6 +232,21 @@
   white-space: nowrap;
   font-size: var(--mantine-font-size-sm);
   font-weight: 400;
+}
+/* The status icon owns a fixed first column, empty for an idle chat, so
+   every title and meta line starts at the same x. */
+.row-copy:has(> .fleet-chat-heading) {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--mantine-spacing-xs);
+}
+.row-copy > .fleet-chat-heading {
+  display: contents;
+}
+.row-copy > .fleet-chat-heading ~ *,
+.row-copy > .fleet-chat-heading > strong {
+  grid-column: 2;
 }
 .fleet-chat-heading > .chat-status {
   --agent-activity-color: var(--studio-state);
@@ -342,58 +363,6 @@
 #sidebar [data-drop-edge="after"]::after {
   inset-block-end: 0;
 }
-.project-tree-heading:has(> .project-tree-layr) {
-  flex-wrap: wrap;
-}
-.project-tree-layr {
-  flex: 1 0 100%;
-  padding: 0 0 var(--mantine-spacing-xs) var(--mantine-spacing-lg);
-}
-.project-tree-layr .project-layr-readiness {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--mantine-spacing-xs) / 2);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-family: inherit;
-  font-size: var(--mantine-font-size-xs);
-  font-weight: 400;
-  cursor: pointer;
-}
-.project-layr-readiness::before {
-  content: "";
-  inline-size: var(--studio-dot-size);
-  block-size: var(--studio-dot-size);
-  border-radius: 50%;
-  background: currentColor;
-}
-.project-layr-readiness[data-state="ready"]::before,
-.project-layr-readiness[data-vault] svg {
-  color: var(--studio-state-unread);
-}
-.project-layr-readiness[data-state="importing"]::before {
-  color: var(--studio-state-working);
-}
-.project-layr-readiness[data-state="not_imported"]::before {
-  background: transparent;
-  outline: var(--studio-border-width) solid currentColor;
-}
-.project-layr-readiness[data-vault]::before {
-  display: none;
-}
-.project-layr-readiness[data-state="failed"]::before,
-.project-layr-readiness[data-vault="error"] svg,
-.project-layr-readiness[data-attention="true"] {
-  color: var(--studio-state-answer);
-}
-.mac-sync-conflict-path {
-  flex: 1;
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
-  font-family: var(--mantine-font-family-monospace);
-}
 .desktop-inset-titlebar .sidebar-header {
   -webkit-app-region: drag;
   padding-block: var(--mantine-spacing-md) var(--mantine-spacing-xs);
@@ -485,20 +454,14 @@
 }
 
 /* A narrow list (the iPhone Duo sidebar) cannot fit the label beside four
-   touch targets; the label takes its own row instead of sitting under them. */
+   touch targets. It keeps one row: the label, the options menu, which also
+   holds the shared chat and add project actions, and New chat. */
 .chat-scroll {
   container: chat-list / inline-size;
 }
 @container chat-list (max-width: 280px) {
-  .projects-heading {
-    flex-wrap: wrap;
-    row-gap: 0;
-  }
-  .projects-heading-label {
-    flex-basis: 100%;
-  }
-  .projects-heading-label + * {
-    margin-inline-start: auto;
+  .projects-heading :is(.sidebar-shared-chat, .sidebar-add-project) {
+    display: none;
   }
 }
 
@@ -530,20 +493,17 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+  /* Without a close button the title owns the first row, so a warning count
+     that appears in the second row never re-wraps the header. */
+  .sidebar-header:not(:has(> [aria-label="Close conversations"])) > .brand {
+    flex-basis: 100%;
+  }
   .sidebar-header > [aria-label="Close conversations"] {
     order: 1;
   }
   .sidebar-header > :not(.brand, [aria-label="Close conversations"]) {
     order: 2;
   }
-  .sidebar-header .sidebar-warnings-target:has(.conversation-warning-count) {
-    margin-inline-end: 2rem;
-  }
-  .sidebar-header .conversation-warning-count {
-    inset-block-start: 50%;
-    inset-inline-start: calc(100% - 0.375rem);
-    inset-inline-end: auto;
-    inline-size: max-content;
-    transform: translateY(-50%);
-  }
+  /* The warning count keeps the icon's corner, as everywhere else, so its
+     arrival does not push search and settings. */
 }
