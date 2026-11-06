@@ -1772,7 +1772,8 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
                 "threadId":"retained-thread","turnId":"retained-turn","submitted":true,"created":1.0,
                 "events":["delivered-input"],"activeAtReservation":false,"settingsFixed":true,
                 "requestTicket":"retained-start","connectionGeneration":7,"connectionId":"reattached-connection"}});
-        tx.execute("INSERT INTO runtime_agents(id,record) VALUES ('managed-actor',?1)", [actor.to_string()])?;
+        // The repository writes the chat and turn rows that the recovery reads.
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(actor.clone())?)?;
         tx.execute("INSERT INTO runtime_events(id,agent,epoch,kind,text,status,created,turn_id) VALUES ('delivered-input','managed-actor',0,'user','original input','delivered',1.0,'retained-turn')", [])?;
         tx.execute("INSERT INTO runtime_account_state(account,next_generation,journal_ack,recovery_required,streams) VALUES ('default',7,0,0,'null') ON CONFLICT(account) DO UPDATE SET next_generation=7", [])?;
         let accepted = json!({"account":"default","journalScope":"default","generation":7,"cursor":1,

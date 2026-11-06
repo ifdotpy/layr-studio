@@ -101,7 +101,7 @@ fn eligible_view(db: &Connection, agent: &ShellPolicyAgent) -> Result<bool, Stor
     }
     let id = agent.id.as_deref().unwrap_or_default();
     let blocked: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND kind!='shell_policy' AND status IN ('pending','reserved','dispatching','uncertain')) OR EXISTS(SELECT 1 FROM runtime_agents child WHERE json_extract(child.record,'$.rootId')=?2 AND child.id!=?1 AND COALESCE(json_extract(child.record,'$.deletedAt'),0)=0 AND (json_extract(child.record,'$.inFlight')=1 OR json_extract(child.record,'$.status') IN ('queued','starting','running','approval','compacting')))",
+        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND kind!='shell_policy' AND status IN ('pending','reserved','dispatching','uncertain')) OR EXISTS(SELECT 1 FROM runtime_agents child WHERE json_extract(child.record,'$.rootId')=?2 AND child.id!=?1 AND COALESCE(json_extract(child.record,'$.deletedAt'),0)=0 AND (EXISTS(SELECT 1 FROM turns WHERE turns.chat=child.id AND turns.state IN ('starting','running')) OR EXISTS(SELECT 1 FROM chats WHERE chats.id=child.id AND chats.status IN ('queued','starting','running','approval','compacting'))))",
         (id, agent.root_id.as_deref().unwrap_or(id)), |row| row.get(0))?;
     Ok(!blocked)
 }
@@ -694,7 +694,7 @@ mod receipt_tests {
     #[test]
     fn partial_projection_keeps_legacy_defaults_and_truthiness() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT); CREATE TABLE runtime_events(agent TEXT,kind TEXT,status TEXT)").unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT); CREATE TABLE runtime_events(agent TEXT,kind TEXT,status TEXT); CREATE TABLE chats(id TEXT,status TEXT); CREATE TABLE turns(chat TEXT,state TEXT)").unwrap();
         let base = json!({"autoWake":true,"status":"idle","threadId":null,"id":false,"rootId":7});
         assert!(eligible(&db, &base).unwrap());
         for (field, value) in [

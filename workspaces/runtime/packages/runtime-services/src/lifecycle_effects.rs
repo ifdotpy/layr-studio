@@ -1008,7 +1008,7 @@ fn release_work(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), Ma
                  WHERE json_extract(w.record,'$.status') IN ('ready','running','blocked') \
                  AND json_extract(a.record,'$.parentId') IS NOT NULL \
                  AND (COALESCE(json_extract(a.record,'$.deletedAt'),0)!=0 \
-                      OR json_extract(a.record,'$.status')='failed')",
+                      OR EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.status='failed'))",
             )
             .map_err(studio_runtime_store::StoreError::from)?;
         owners = statement
