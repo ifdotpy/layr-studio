@@ -64,6 +64,11 @@ pub fn check_project_overlap(root: &Path, project: &Path) -> Result<()> {
     let project = CanonicalPath::missing_tail(project)
         .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the project folder".into()))?
         .into_path_buf();
+    // Compare canonical paths on both sides: /var is a link to /private/var on macOS.
+    let root = CanonicalPath::missing_tail(root)
+        .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the Layr store".into()))?
+        .into_path_buf();
+    let root = root.as_path();
     if root.starts_with(&project) || project.starts_with(root) {
         return Err(NativeLayrError::Refused(
             "The Layr store must be outside the project folder".into(),
