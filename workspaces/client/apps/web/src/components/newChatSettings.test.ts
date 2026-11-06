@@ -31,7 +31,7 @@ test("new chat accepts explicit reviewer Fast mode and rejects malformed review 
       workspaceMode: "worktree",
       review_defaults: { model: null, effort: null, account_key: "reviewer" },
     }),
-  ).toBe(true);
+  ).toBe(false);
   for (const fast_mode of [true, false]) {
     expect(
       isNewChatSettings({
@@ -55,17 +55,6 @@ test("new chat accepts explicit reviewer Fast mode and rejects malformed review 
   }
 });
 
-test("switching the lead account preserves an explicitly selected review account", () => {
-  const review_defaults = {
-    model: "gpt-6-astra",
-    effort: null,
-    account_key: "reviewer",
-  };
-  expect(
-    settingsForNewChatAccount({ review_defaults }, "other").review_defaults,
-  ).toEqual(review_defaults);
-});
-
 test("accepts the actual selector values and rejects receipt overrides", () => {
   const settings = {
     workspaceMode: "layr-native",
@@ -76,7 +65,6 @@ test("accepts the actual selector values and rejects receipt overrides", () => {
       model: null,
       effort: null,
       fast_mode: false,
-      account_key: null,
     },
     review_defaults: { model: null, effort: null },
   };
@@ -120,7 +108,6 @@ test("switching the lead account resets account-relative model choices", () => {
         model: "gpt-6-luna",
         effort: "high",
         fast_mode: false,
-        account_key: null,
       },
       review_defaults: { model: "gpt-6-sol", effort: "high" },
     },
@@ -133,77 +120,27 @@ test("switching the lead account resets account-relative model choices", () => {
     effort: null,
     fast_mode: false,
     daybreak_enabled: false,
-    worker_defaults: undefined,
-    review_defaults: undefined,
+    worker_defaults: { model: "gpt-6-luna", effort: "high", fast_mode: false },
+    review_defaults: { model: "gpt-6-sol", effort: "high" },
   });
 });
 
-test("new project chat settings leave automatic account selection to the project", () => {
-  expect(
-    settingsForNewChatRequest({}, "default", false, "gpt-6-astra"),
-  ).toEqual({
+test("new project chat settings send the displayed lead account", () => {
+  expect(settingsForNewChatRequest({}, "default", "gpt-6-astra")).toEqual({
+    account_key: "default",
     model: "gpt-6-astra",
   });
 });
 
 test("new chat settings retain an explicitly chosen account", () => {
-  expect(
-    settingsForNewChatRequest({}, "alternate", true, "gpt-6-astra"),
-  ).toEqual({ account_key: "alternate", model: "gpt-6-astra" });
-});
-
-test("switching the lead account preserves explicitly account-pinned workers", () => {
-  const workerDefaults = {
-    model: "gpt-6-luna",
-    effort: "high",
-    fast_mode: false,
-    account_key: "worker-codex",
-  };
-  const changed = settingsForNewChatAccount(
-    {
-      model: "claude-sonnet",
-      worker_defaults: workerDefaults,
-      review_defaults: { model: "gpt-6-sol", effort: "high" },
-    },
-    "claude",
-  );
-
-  expect(changed.account_key).toBe("claude");
-  expect(changed.model).toBeUndefined();
-  expect(changed.worker_defaults).toBe(workerDefaults);
-  expect(changed.review_defaults).toBeUndefined();
-});
-
-test("switching accounts resolves a pinned worker's inherited model first", () => {
-  const changed = settingsForNewChatAccount(
-    {
-      model: "gpt-6-sol",
-      worker_defaults: {
-        model: null,
-        effort: "high",
-        fast_mode: false,
-        account_key: "worker-codex",
-      },
-    },
-    "claude",
-    "gpt-6-sol",
-  );
-
-  expect(changed.worker_defaults).toEqual({
-    model: "gpt-6-sol",
-    effort: null,
-    fast_mode: false,
-    account_key: "worker-codex",
+  expect(settingsForNewChatRequest({}, "alternate", "gpt-6-astra")).toEqual({
+    account_key: "alternate",
+    model: "gpt-6-astra",
   });
 });
 
 test("a Claude lead request leaves worker defaults to the server unless explicitly chosen", () => {
-  const request = settingsForNewChatRequest(
-    {},
-    "claude",
-    true,
-    "claude-opus-5-5",
-  );
+  const request = settingsForNewChatRequest({}, "claude", "claude-opus-5-5");
   expect(request).toEqual({ account_key: "claude", model: "claude-opus-5-5" });
   expect(request).not.toHaveProperty("worker_defaults");
   const worker_defaults = {
@@ -212,12 +149,8 @@ test("a Claude lead request leaves worker defaults to the server unless explicit
     fast_mode: false,
   };
   expect(
-    settingsForNewChatRequest(
-      { worker_defaults },
-      "claude",
-      true,
-      "claude-opus-5-5",
-    ).worker_defaults,
+    settingsForNewChatRequest({ worker_defaults }, "claude", "claude-opus-5-5")
+      .worker_defaults,
   ).toEqual(worker_defaults);
 });
 

@@ -1034,7 +1034,7 @@ fn work_docs(
         rows.push(upsert("work", id, seq, summary)?);
     }
     if wanted.contains("workDetail") {
-        let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
+        let refusal = current_submission_refusal(transaction, &item).map_err(work_error)?;
         let mut statuses: BTreeMap<String, WorkStatus> = BTreeMap::new();
         for dependency in item.dependencies() {
             match WorkItemsRepository::work_record(transaction, dependency) {

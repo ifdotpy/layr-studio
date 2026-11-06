@@ -434,12 +434,14 @@ impl crate::managed_host_tools::ComplaintPort for ProductionPorts {
         request_id: &str,
         now: f64,
     ) -> Result<crate::managed_host_tools::OperationResult, crate::managed_host_tools::Error> {
-        let actor = studio_json::to_value(actor.record())
-            .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid complaint actor"))?;
-        let value =
-            crate::notification_dispatch::agent_complaint_action(tx, &actor, args, request_id, now)
-                .map_err(|error| {
-                    match error {
+        let value = crate::notification_dispatch::agent_complaint_action(
+            tx,
+            actor.record(),
+            args,
+            request_id,
+            now,
+        )
+        .map_err(|error| match error {
             crate::notification_dispatch::NotificationDispatchError::Store(error) => {
                 crate::managed_host_tools::Error::Store(error)
             }
@@ -472,10 +474,9 @@ impl crate::managed_host_tools::ComplaintPort for ProductionPorts {
             | crate::notification_dispatch::NotificationDispatchError::Json(_) => {
                 crate::managed_host_tools::Error::Invalid("Complaint action was refused")
             }
-        }
-                })?;
+        })?;
         let should_wake = (args["action"] == "submit" && value["recipient"] == "lead")
-            || (args["action"] == "respond" && value["author"] != actor["id"]);
+            || (args["action"] == "respond" && value["author"] != actor.record().id.as_ref());
         Ok(crate::managed_host_tools::OperationResult {
             signals: if should_wake {
                 vec![crate::managed_host_tools::WakeSignal::new(

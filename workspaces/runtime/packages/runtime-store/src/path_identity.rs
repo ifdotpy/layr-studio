@@ -389,8 +389,21 @@ impl PathEvidence {
 }
 
 // Only this filesystem owner may bypass the runtime-wide Clippy prohibition.
+#[cfg(feature = "test-support")]
+thread_local! {
+    static CANONICALIZE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Reset and return this test thread's filesystem canonicalization count.
+#[cfg(feature = "test-support")]
+pub fn take_canonicalize_calls() -> usize {
+    CANONICALIZE_CALLS.with(|count| count.replace(0))
+}
+
 #[allow(clippy::disallowed_methods)]
 fn canonicalize(path: &Path) -> io::Result<PathBuf> {
+    #[cfg(feature = "test-support")]
+    CANONICALIZE_CALLS.with(|count| count.set(count.get() + 1));
     outside_sql();
     std::fs::canonicalize(path)
 }

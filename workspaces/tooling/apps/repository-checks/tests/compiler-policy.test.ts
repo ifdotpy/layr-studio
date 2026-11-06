@@ -237,15 +237,33 @@ test("generated enum owners reject raw literals in typed positions", async () =>
   }
 });
 
-test("contract gates execute schema compile-fail doctests", () => {
+test("contract gates execute every workspace doctest with the workspace features", () => {
   for (const gate of ["test-fast", "test-comprehensive"]) {
-    const steps = gateSteps(root, gate).filter(
-      (step) => step.id === "schema-doctests",
+    const steps = gateSteps(root, gate).filter((step) =>
+      step.commands?.some(([, args]) => args.includes("--doc")),
     );
-    assert.equal(steps.length, 1, `${gate}: schema doctest owner`);
-    assert.deepEqual(steps[0]?.commands, [
-      ["cargo", ["test", "--locked", "-p", "studio-runtime-schema", "--doc"]],
-    ]);
+    assert.deepEqual(
+      steps.map((step) => [step.id, step.commands]),
+      [
+        [
+          "doctests",
+          [
+            [
+              "cargo",
+              [
+                "test",
+                "--locked",
+                "--workspace",
+                "--exclude",
+                "studio-native-client",
+                "--doc",
+              ],
+            ],
+          ],
+        ],
+      ],
+      gate,
+    );
   }
 });
 
@@ -345,57 +363,6 @@ test("generated component aliases and computed keys reach the enum checker", asy
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
-
-test("contract gates select runtime-services typed owner doctests", () => {
-  const fast = gateSteps(root, "test-fast").filter((step) =>
-    step.id?.startsWith("services-doctests"),
-  );
-  assert.deepEqual(
-    fast.map((step) => step.commands),
-    [
-      [
-        [
-          "cargo",
-          [
-            "test",
-            "--locked",
-            "-p",
-            "studio-runtime-services",
-            "--doc",
-            "ControlInvocation",
-          ],
-        ],
-      ],
-      [
-        [
-          "cargo",
-          [
-            "test",
-            "--locked",
-            "-p",
-            "studio-runtime-services",
-            "--doc",
-            "provider_receipt",
-          ],
-        ],
-      ],
-    ],
-  );
-  const comprehensive = gateSteps(root, "test-comprehensive").filter((step) =>
-    step.id?.startsWith("services-doctests"),
-  );
-  assert.deepEqual(
-    comprehensive.map((step) => step.commands),
-    [
-      [
-        [
-          "cargo",
-          ["test", "--locked", "-p", "studio-runtime-services", "--doc"],
-        ],
-      ],
-    ],
-  );
 });
 
 test("generated types reject duplicate names and handwritten union copies", async () => {

@@ -70,10 +70,9 @@ async fn native_action(
                         .map_err(super::work_items::write_error)?;
                 let episode =
                     agent
-                        .extra
-                        .get("idleCompactionEpisode")
-                        .filter(|value| !value.is_null())
-                        .cloned()
+                        .idle_compaction_episode
+                        .value()
+                        .map(studio_runtime_store::projection_value)
                         .map(
                             studio_json::from_value::<
                                 studio_runtime_services::idle_compaction::Episode,

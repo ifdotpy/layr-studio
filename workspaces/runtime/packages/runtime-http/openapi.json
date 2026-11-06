@@ -19758,6 +19758,18 @@
         "title": "ChangesResponse",
         "type": "object"
       },
+      "ChatAccountExclusions": {
+        "default": [],
+        "items": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "maxItems": 512,
+        "title": "Excluded Account Keys",
+        "type": "array",
+        "uniqueItems": true
+      },
       "ChatEntityDto": {
         "additionalProperties": false,
         "properties": {
@@ -24768,16 +24780,7 @@
             "title": "Effort"
           },
           "excluded_account_keys": {
-            "default": [],
-            "items": {
-              "minLength": 1,
-              "pattern": "\\S",
-              "type": "string"
-            },
-            "maxItems": 512,
-            "title": "Excluded Account Keys",
-            "type": "array",
-            "uniqueItems": true
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "expected_account_key": {
             "default": "default",
@@ -25409,6 +25412,9 @@
             ],
             "default": null,
             "title": "Effort"
+          },
+          "excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "fast_mode": {
             "anyOf": [
@@ -44815,17 +44821,6 @@
       "ReviewDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -44867,12 +44862,6 @@
       "ReviewDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -63990,19 +63979,6 @@
       "WorkerDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Account Key"
-          },
           "daybreak_enabled": {
             "anyOf": [
               {
@@ -64065,18 +64041,6 @@
       "WorkerDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Accountkey"
-          },
           "cyberAccessProgram": {
             "anyOf": [
               {

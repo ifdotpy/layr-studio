@@ -859,7 +859,7 @@ mod tests {
         fs::write(
             &binary,
             format!(
-                "#!/bin/sh\ncase \"$*\" in\n*store-version*) printf '%s\\n' '{{\"binary\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"store\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"compatible\":true,\"state\":\"current\"}}' ;;\n*) printf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]' ;;\nesac\n",
+                "#!/bin/sh\ncase \"$*\" in\n*store-version*) printf '%s\\n' '{{\"binary\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"store\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"compatible\":true,\"state\":\"compatible\"}}' ;;\n*) printf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]' ;;\nesac\n",
                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
             ),
         )

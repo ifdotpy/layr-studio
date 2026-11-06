@@ -117,9 +117,11 @@ impl NotificationDispatchRepository {
         Ok(())
     }
 
-    pub fn agent_record(transaction: &Transaction<'_>, agent: &str) -> StoreResult<Option<Value>> {
+    pub fn agent_record(
+        transaction: &Transaction<'_>,
+        agent: &str,
+    ) -> StoreResult<Option<crate::AgentRecord>> {
         TranscriptRepository::agent(transaction, agent)
-            .map(|record| record.map(crate::AgentRecord::into_value))
             .map_err(|error| map_transcript_error(error, "runtime_agents", agent))
     }
 
@@ -157,12 +159,10 @@ impl NotificationDispatchRepository {
     pub fn put_agent_record(
         transaction: &Transaction<'_>,
         agent: &str,
-        record: &Value,
+        record: &crate::AgentRecord,
     ) -> StoreResult<()> {
-        let typed = crate::AgentRecord::from_value(record.clone())
-            .map_err(|_| invalid_record("runtime_agents", agent))?;
-        if typed.id.0 != agent
-            || !crate::Table::<crate::AgentRecord>::new(transaction).update(&typed)?
+        if record.id.0 != agent
+            || !crate::Table::<crate::AgentRecord>::new(transaction).update(record)?
         {
             return Err(invalid_record("runtime_agents", agent));
         }

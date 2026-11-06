@@ -234,7 +234,6 @@ describe("scale verifier helpers", () => {
         "claude-profile-fixture",
       ]),
     ).toEqual({
-      account_key: "claude-profile-fixture",
       model: "claude-haiku-fixture",
       effort: "low",
       fast_mode: false,
@@ -286,8 +285,8 @@ describe("scale verifier helpers", () => {
     expect(scaleWorkerDefaults("gpt-6-luna", codex, keys)).not.toHaveProperty(
       "account_key",
     );
-    expect(scaleWorkerDefaults("m", codex, ["default"]).account_key).toBe(
-      "default",
+    expect(scaleWorkerDefaults("m", codex, ["default"])).not.toHaveProperty(
+      "account_key",
     );
     expect(scaleAccountKeys(accounts, scaleProfile("claude-sonnet"))).toEqual([
       "claude-profile-fixture",

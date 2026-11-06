@@ -8,7 +8,9 @@ use studio_runtime_schema::complaint_record::{
     ComplaintRecipient, ComplaintSource, ComplaintStatus,
 };
 use studio_runtime_store::CachedSql;
-use studio_runtime_store::{AgentId, AgentRepository, ComplaintRecord, Table, Transaction};
+use studio_runtime_store::{
+    AgentId, AgentRecord, AgentRepository, ComplaintRecord, Table, Transaction,
+};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -34,17 +36,13 @@ fn fields(value: &Value) -> Result<Vec<Value>, NotificationDispatchError> {
 
 pub(crate) fn submit_agent_complaint(
     tx: &Transaction<'_>,
-    agent: &Value,
+    agent: &AgentRecord,
     request_id: &str,
     text: &str,
     at: f64,
 ) -> Result<ComplaintRecord, NotificationDispatchError> {
-    let agent_id = agent["id"]
-        .as_str()
-        .ok_or(NotificationDispatchError::invalid())?;
-    let lead_id = agent["rootId"]
-        .as_str()
-        .ok_or_else(|| stored("runtime_agents", agent_id))?;
+    let agent_id = agent.id.as_ref();
+    let lead_id = agent.root_id.as_ref();
     let lead = AgentRepository::get(tx, &AgentId::from(lead_id))?
         .ok_or_else(|| stored("runtime_agents", lead_id))?;
     if lead.is_lead != Some(true) || lead.is_deleted() {
@@ -93,7 +91,7 @@ pub(crate) fn submit_agent_complaint(
     Table::<ComplaintRecord>::new(tx).put(&typed)?;
     if recipient == ComplaintRecipient::Lead {
         let complaint = ordered_text(
-            &json!({"complaint_id":complaint_id,"author":agent_id,"author_name":agent.get("name").filter(|v| !v.is_null()).unwrap_or(&agent["id"]),"text":text,"status":"open","created":at}),
+            &json!({"complaint_id":complaint_id,"author":agent_id,"author_name":agent.name.as_deref().unwrap_or(agent.id.as_ref()),"text":text,"status":"open","created":at}),
             [
                 "complaint_id",
                 "author",
@@ -138,7 +136,14 @@ pub(super) fn submit_user_message(
     if lead["id"] != lead["rootId"] {
         return Err(NotificationDispatchError::invalid());
     }
-    let mut message = submit_agent_complaint(tx, lead, request_id, text, at)?;
+    // TODO(agent-record-chain r3: authorization slice): services/messages.rs::send_as_actor owns this JSON boundary.
+    let mut message = submit_agent_complaint(
+        tx,
+        &AgentRecord::from_value(lead.clone()).map_err(studio_runtime_store::StoreError::from)?,
+        request_id,
+        text,
+        at,
+    )?;
     message.source_type = Some(ComplaintSource::Message);
     save_complaint(tx, &message)?;
     Ok(message)
@@ -148,17 +153,13 @@ pub(super) fn submit_user_message(
 /// The callback caller owns commit; the response event is durable in this write.
 pub(crate) fn agent_complaint_action(
     tx: &Transaction<'_>,
-    actor: &Value,
+    actor: &AgentRecord,
     args: &Value,
     request_id: &str,
     at: f64,
 ) -> Result<Value, NotificationDispatchError> {
-    let actor_id = actor["id"]
-        .as_str()
-        .ok_or(NotificationDispatchError::invalid())?;
-    let root_id = actor["rootId"]
-        .as_str()
-        .ok_or_else(|| stored("runtime_agents", actor_id))?;
+    let actor_id = actor.id.as_ref();
+    let root_id = actor.root_id.as_ref();
     let root = AgentRepository::get(tx, &AgentId::from(root_id))?
         .ok_or_else(|| stored("runtime_agents", root_id))?;
     if root.is_lead != Some(true) || root.deleted_at.is_some() {
@@ -419,13 +420,13 @@ fn save_complaint(
 
 pub(super) fn completed(
     tx: &Transaction<'_>,
-    agent: &Value,
+    agent: &AgentRecord,
     params: &Value,
     at: f64,
 ) -> Result<(), NotificationDispatchError> {
     let questions = fields(&params["item"]["questions"])?;
     let id = crate::questions_reads::async_question_id(
-        agent["id"].as_str().unwrap_or_default(),
+        agent.id.as_ref(),
         params["item"]["id"].as_str().unwrap_or_default(),
     );
     let approval_id = studio_runtime_schema::approvals::ApprovalId(id.clone());
@@ -435,21 +436,20 @@ pub(super) fn completed(
     {
         return Ok(());
     }
-    if agent["isLead"] == true {
+    if agent.is_lead == Some(true) {
         use studio_runtime_schema::approvals as typed;
         let turn = params
             .get("turnId")
             .filter(|v| !v.is_null() && **v != "")
-            .unwrap_or(&agent["turnId"])
-            .as_str()
+            .map_or(agent.turn_id.as_deref(), Value::as_str)
             .map(|turn| typed::TurnId(turn.to_owned()));
         studio_runtime_store::approvals::create(
             tx,
             studio_runtime_store::approvals::NewApproval {
                 id: approval_id,
-                agent: typed::AgentId(agent["id"].as_str().unwrap_or_default().to_owned()),
+                agent: typed::AgentId(agent.id.as_ref().to_owned()),
                 turn,
-                epoch: agent["epoch"].as_u64(),
+                epoch: u64::try_from(agent.epoch).ok(),
                 request: typed::Request::AgentQuestion {
                     questions: studio_runtime_store::approvals::questions_from_provider(
                         Value::Array(questions),
@@ -488,17 +488,14 @@ pub(super) fn completed(
 
 pub(super) fn resolved(
     tx: &Transaction<'_>,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     params: &Value,
     account: &str,
     generation: u64,
     at: f64,
 ) -> Result<(), NotificationDispatchError> {
     use studio_runtime_schema::approvals as typed;
-    let id = agent["id"]
-        .as_str()
-        .ok_or(NotificationDispatchError::invalid())?
-        .to_owned();
+    let id = agent.id.as_ref().to_owned();
     let rows = studio_runtime_store::approvals::for_agent(tx, &typed::AgentId(id))
         .map_err(studio_runtime_store::StoreError::from)?;
     let wanted = match &params["requestId"] {
@@ -543,12 +540,12 @@ pub(super) fn resolved(
         }
         pending |= matches!(row.state, typed::ApprovalState::Pending);
     }
-    if agent["status"] == "approval"
+    if agent.status == studio_runtime_store::AgentStatus::Approval
         && !pending
-        && agent["inFlight"] == true
-        && agent["autoWake"] == true
+        && agent.in_flight == Some(true)
+        && agent.auto_wake == Some(true)
     {
-        agent["status"] = json!("running");
+        agent.status = studio_runtime_store::AgentStatus::Running;
     }
     Ok(())
 }

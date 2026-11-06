@@ -271,14 +271,13 @@ pub fn stage_capacity_cancel(
 fn capacity_exclusion_reason(snapshot: &Snapshot) -> Option<String> {
     let agent = &snapshot.agent;
     let root_id = text(agent, "rootId");
-    let root = if text(agent, "id") == root_id {
-        agent
-    } else {
-        snapshot
-            .ancestors
-            .iter()
-            .find(|ancestor| text(ancestor, "id") == root_id)?
-    };
+    if text(agent, "id") == root_id {
+        return None;
+    }
+    let root = snapshot
+        .ancestors
+        .iter()
+        .find(|ancestor| text(ancestor, "id") == root_id)?;
     let account_key = account(agent);
     root.get("excludedAccountKeys")
         .and_then(Value::as_array)

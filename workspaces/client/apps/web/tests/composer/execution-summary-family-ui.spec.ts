@@ -51,7 +51,7 @@ test("phone composer keeps the lead model name and discloses other roles", async
         workerDefaults: {
           model: "gpt-6-luna",
           effort: "high",
-          accountKey: "default",
+          fastMode: false,
         },
       } as PartialSettingsFixture);
       snapshot.runtime.agents = snapshot.threads.filter(

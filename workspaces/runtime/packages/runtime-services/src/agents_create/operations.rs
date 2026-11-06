@@ -460,52 +460,6 @@ pub async fn conversation_account_key(
     }
 }
 
-/// Return the currently selected worker account for Python's review-defaults
-/// settings-catalog path (`codex_runtime.py:5487-5491`).
-pub async fn conversation_worker_account_key(
-    context: &Context<'_>,
-    id: &str,
-    expected_account: Option<&str>,
-) -> Result<Option<String>, OperationError> {
-    let store = std::sync::Arc::clone(&context.store);
-    let validate = std::sync::Arc::clone(&context.validate);
-    let id = id.to_owned();
-    let expected = expected_account.map(str::to_owned);
-    store
-        .read_async::<_, OperationError>("runtime-services/agents_create/read", move |read| {
-            let record = AgentRepository::get(read, &AgentId::from(id.as_str()))?
-                .ok_or(MutationError::UnknownAgent)?;
-            if !validate("PersistedAgentRecord", &record.value()) {
-                return Err(MutationError::InvalidStoredObject {
-                    table: "runtime_agents",
-                    id,
-                }
-                .into());
-            }
-            let account = record.account_key.as_str();
-            if expected
-                .as_deref()
-                .is_some_and(|expected| expected != account)
-            {
-                return Err(MutationError::Stale.into());
-            }
-            match record.worker_defaults.value() {
-                Some(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => {
-                    Ok(defaults.account_key.value().cloned())
-                }
-                Some(studio_runtime_store::StoredWorkerDefaults::Unreadable(_)) => {
-                    Err(MutationError::InvalidStoredObject {
-                        table: "runtime_agents",
-                        id,
-                    }
-                    .into())
-                }
-                None => Ok(None),
-            }
-        })
-        .await
-}
-
 pub async fn agent(context: &Context<'_>, request: Creation) -> Result<Value, OperationError> {
     create(context, request, false).await
 }
@@ -783,6 +737,22 @@ async fn create(
             .await?;
         return Ok(replayed);
     }
+    if request
+        .intent
+        .worker_defaults
+        .value()
+        .is_some_and(|value| !value.account_key.is_missing())
+        || request
+            .intent
+            .review_defaults
+            .value()
+            .is_some_and(|value| !value.account_key.is_missing())
+    {
+        return Err(OperationError::Invalid(
+            "Account defaults are no longer supported",
+        ));
+    }
+    validate_chat_exclusions(context, request.intent.excluded_account_keys.as_deref())?;
     let previous_id = request.previous.clone();
     let profile_id = request.profile.clone().filter(|id| !id.is_empty());
     let read_validate = std::sync::Arc::clone(&validate);
@@ -1058,7 +1028,11 @@ async fn create(
                     &account,
                     &identity,
                     &settings.model,
-                    &[],
+                    request
+                        .intent
+                        .excluded_account_keys
+                        .as_deref()
+                        .unwrap_or_default(),
                 )
                 .await?,
             ),
@@ -1068,13 +1042,12 @@ async fn create(
                     request.intent.review_defaults.value(),
                     &account,
                     &identity,
+                    None,
                     request
                         .intent
-                        .worker_defaults
-                        .value()
-                        .and_then(|defaults| defaults.account_key.value())
-                        .map(String::as_str),
-                    &[],
+                        .excluded_account_keys
+                        .as_deref()
+                        .unwrap_or_default(),
                 )
                 .await?,
             ),
@@ -1120,6 +1093,9 @@ async fn create(
         record.worker_defaults =
             Field::Value(studio_runtime_store::StoredWorkerDefaults::Known(defaults));
     }
+    if let Some(excluded) = request.intent.excluded_account_keys.as_ref() {
+        record.excluded_account_keys = Field::Value(excluded.clone());
+    }
     record.review_defaults = review_defaults.map(Box::new);
     mode_fields(&mut record);
     if workspace == "layr-native" {
@@ -1154,6 +1130,7 @@ async fn create(
         || !request.intent.fast_mode.is_missing()
         || !request.intent.daybreak_enabled.is_missing()
         || !request.intent.worker_defaults.is_missing()
+        || request.intent.excluded_account_keys.is_some()
         || !request.intent.review_defaults.is_missing();
     let id_for_write = id.clone();
     let workspace_for_write = workspace.clone();
@@ -1817,6 +1794,29 @@ pub async fn configure(
     })
     .await
 }
+fn validate_chat_exclusions(
+    context: &Context<'_>,
+    excluded: Option<&[String]>,
+) -> Result<(), OperationError> {
+    if let Some(excluded) = excluded {
+        let accounts = context
+            .accounts
+            .ok_or(OperationError::Unavailable("account registry"))?
+            .accounts();
+        if !accounts.accounts.iter().any(|account| {
+            account
+                .id
+                .as_str()
+                .is_some_and(|id| !excluded.iter().any(|key| key == id))
+        }) {
+            return Err(OperationError::Invalid(
+                "Select at least one account for workers and reviewers",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn conversation(
     context: &Context<'_>,
     request: Conversation,
@@ -1896,29 +1896,12 @@ pub async fn conversation(
         };
         let review_defaults = match request.review_defaults.as_ref() {
             Some(value) => {
-                let worker_account_key = request
-                    .worker_defaults
-                    .as_ref()
-                    .and_then(|defaults| defaults.account_key.value())
-                    .map(String::as_str)
-                    .or_else(|| {
-                        request
-                            .worker_defaults
-                            .is_none()
-                            .then(|| match initial.worker_defaults.value() {
-                                Some(studio_runtime_store::StoredWorkerDefaults::Known(
-                                    defaults,
-                                )) => defaults.account_key.value().map(String::as_str),
-                                _ => None,
-                            })
-                            .flatten()
-                    });
                 resolve_review_defaults(
                     context,
                     Some(value),
                     account_key,
                     &identity,
-                    worker_account_key,
+                    None,
                     &excluded_account_keys,
                 )
                 .await?
@@ -2040,6 +2023,7 @@ pub async fn conversation(
         && request.next_turn.flatten().is_none()
         && !request.worker_settings
     {
+        validate_chat_exclusions(context, request.excluded.as_deref())?;
         let validate = std::sync::Arc::clone(&validate);
         return mutate(context, move |tx| {
             let validate = |schema: &str, value: &Value| validate(schema, value);
@@ -2133,6 +2117,7 @@ pub async fn conversation(
             return Ok(reply.agent);
         }
     }
+    validate_chat_exclusions(context, request.excluded.as_deref())?;
     let cwd = request
         .cwd
         .as_deref()
@@ -2415,9 +2400,6 @@ pub async fn conversation(
         if let Some(excluded) = request.excluded.as_ref() {
             if target.is_lead != Some(true) {
                 return Err(MutationError::LeadRequired.into());
-            }
-            if excluded.iter().any(|value| value == &account) {
-                return Err(MutationError::CurrentAccountExcluded.into());
             }
             target.excluded_account_keys = Field::Value(excluded.clone());
         }
@@ -2954,7 +2936,6 @@ async fn resolve_worker_defaults(
             },
         );
     };
-    let requested_account_key = value.account_key.value().map(String::as_str);
     let model = value
         .model
         .as_deref()
@@ -2965,8 +2946,8 @@ async fn resolve_worker_defaults(
             environment
                 .select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
                     parent_account_key: account_key,
-                    requested_account_key,
-                    default_account_key: None,
+                    requested_account_key: None,
+
                     model,
                     excluded_account_keys,
                     project_account_keys: None,
@@ -2982,7 +2963,7 @@ async fn resolve_worker_defaults(
                     ) => OperationError::Unavailable(name),
                 })?
         } else {
-            let worker_account_key = requested_account_key.unwrap_or(account_key);
+            let worker_account_key = account_key;
             let worker_account = if worker_account_key == account_key {
                 account.clone()
             } else {
@@ -3033,11 +3014,6 @@ async fn resolve_worker_defaults(
             daybreak_enabled: Field::Value(settings.daybreak_enabled),
             cyber_access_program: Field::Value(settings.cyber_access_program),
             delegation_depth: Field::Value(depth.try_into().map_err(|_| OperationError::Internal)?),
-            account_key: if requested_account_key.is_some() {
-                Field::Value(worker_account_key)
-            } else {
-                Field::Missing
-            },
             ..Default::default()
         },
     )
@@ -3048,13 +3024,12 @@ async fn resolve_review_defaults(
     value: Option<&ReviewDefaults>,
     account_key: &str,
     account: &AccountIdentity,
-    worker_account_key: Option<&str>,
+    _worker_account_key: Option<&str>,
     excluded_account_keys: &[String],
 ) -> Result<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto, OperationError> {
     let Some(value) = value else {
         return Ok(
             studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                account_key: None,
                 model: None,
                 effort: None,
                 fast_mode: None,
@@ -3062,40 +3037,10 @@ async fn resolve_review_defaults(
         );
     };
     let mut defaults = studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-        account_key: value.account_key.value().cloned(),
         model: None,
         effort: None,
         fast_mode: value.fast_mode,
     };
-    if let Some(key) = defaults.account_key.as_deref() {
-        if excluded_account_keys.iter().any(|excluded| excluded == key) {
-            return Err(OperationError::Invalid(
-                "This account is excluded from subagents",
-            ));
-        }
-        if let Some(driver) = context.driver.clone() {
-            let key = key.to_owned();
-            let (identity, status, native_proof) =
-                studio_runtime_process::blocking_pool::spawn_blocking(
-                    "runtime-services/agents_create/review_account_identity",
-                    move || account_identity_blocking(&driver, &key),
-                )
-                .await
-                .map_err(|_| OperationError::Internal)??;
-            if status != AccountStatus::Ready && !native_proof {
-                return Err(OperationError::Invalid(
-                    "This account is unavailable for review",
-                ));
-            }
-            if identity.provider != studio_runtime_providers::ProviderKind::Codex {
-                return Err(OperationError::Invalid(
-                    "Native review needs a Codex account",
-                ));
-            }
-        } else if value.model.value().is_none() {
-            return Err(OperationError::Internal);
-        }
-    }
     let Some(model) = value.model.value().map(String::as_str) else {
         if value.effort.value().is_some() {
             return Err(OperationError::Invalid(
@@ -3117,12 +3062,8 @@ async fn resolve_review_defaults(
             environment
                 .select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
                     parent_account_key: account_key,
-                    requested_account_key: value
-                        .account_key
-                        .value()
-                        .map(String::as_str)
-                        .or(worker_account_key),
-                    default_account_key: None,
+                    requested_account_key: None,
+
                     model,
                     excluded_account_keys,
                     project_account_keys: None,
@@ -3137,16 +3078,6 @@ async fn resolve_review_defaults(
                         name,
                     ) => OperationError::Unavailable(name),
                 })?
-        } else if let Some(worker_account_key) = value
-            .account_key
-            .value()
-            .map(String::as_str)
-            .or(worker_account_key)
-        {
-            (
-                worker_account_key.to_owned(),
-                account_identity(context, worker_account_key).await?,
-            )
         } else {
             (account_key.to_owned(), account.clone())
         };
@@ -3494,7 +3425,6 @@ pub(crate) fn build_agent_record(
         ));
         record.review_defaults = Some(Box::new(
             studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                account_key: None,
                 model: None,
                 effort: None,
                 fast_mode: None,
@@ -3623,6 +3553,31 @@ mod tests {
         let bytes = studio_json::to_vec(&reply).expect("reply");
         let response: Value = studio_json::from_slice(&bytes).expect("dispatch value");
         assert_eq!(studio_json::to_vec(&response).expect("response"), br#"{"agentMode":"multi","agentModeRevision":2,"concurrency":1,"id":"agent","maxAgents":4}"#);
+    }
+
+    #[tokio::test]
+    async fn chat_exclusions_require_an_allowed_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"lead","accounts":{"lead":{"id":"lead","provider":"codex","home":"/lead","label":"Lead","source":"fixture","status":"ready"},"other":{"id":"other","provider":"codex","home":"/other","label":"Other","source":"fixture","status":"ready"}},"logins":{}});
+        let policy = crate::account_policy::AccountPolicyState::from_startup(
+            Some(registry.to_string().as_bytes()),
+            [],
+        )
+        .unwrap();
+        let context = Context {
+            store,
+            accounts: Some(&policy),
+            driver: None,
+            catalog: None,
+            managed_creation_environment: None,
+            validate: std::sync::Arc::new(|_, _| true),
+        };
+        assert!(validate_chat_exclusions(&context, Some(&["lead".into()])).is_ok());
+        assert!(matches!(
+            validate_chat_exclusions(&context, Some(&["lead".into(), "other".into()])),
+            Err(OperationError::Invalid(_))
+        ));
     }
 
     #[tokio::test]
@@ -4322,29 +4277,6 @@ mod tests {
             )))
         ));
 
-        update_root(
-            json!({"accountKey":"default","model":"gpt-6-luna"}),
-            json!({}),
-            json!([]),
-        )
-        .await;
-        assert!(matches!(
-            agent(
-                &context,
-                request(
-                    "pin-conflict",
-                    "implementer",
-                    CreationIntent {
-                        account_key: Some("claude-local".into()),
-                        ..Default::default()
-                    }
-                )
-            )
-            .await,
-            Err(OperationError::Invalid(
-                "Use the subagent account selected in chat settings"
-            ))
-        ));
         update_root(json!({"model":"opus"}), json!({}), json!(["claude-local"])).await;
         assert!(matches!(
             agent(
@@ -4437,14 +4369,9 @@ mod tests {
             resolved.model.value().map(String::as_str),
             Some("gpt-6-luna")
         );
-        assert_eq!(
-            resolved.account_key.value(),
-            None,
-            "automatic choice stays unpinned"
-        );
 
         let explicit_claude_luna: WorkerDefaults = studio_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-luna","effort":"high","fast_mode":false}"#).unwrap();
-        assert!(matches!(
+        assert!(
             resolve_worker_defaults(
                 &context,
                 Some(&explicit_claude_luna),
@@ -4453,9 +4380,9 @@ mod tests {
                 "default",
                 &[],
             )
-            .await,
-            Err(OperationError::Invalid(_))
-        ));
+            .await
+            .is_ok()
+        );
 
         let cleared_pin: WorkerDefaults = studio_json::from_str(
             r#"{"account_key":null,"model":null,"effort":null,"fast_mode":false}"#,
@@ -4472,11 +4399,6 @@ mod tests {
         .await
         .expect("null model inherits the current lead model");
         assert!(matches!(cleared.model, Field::Null));
-        assert_eq!(
-            cleared.account_key.value(),
-            None,
-            "null clears an old account pin"
-        );
         assert_eq!(
             cleared.cyber_access_program.value().map(String::as_str),
             Some("standard")
@@ -4559,14 +4481,14 @@ mod tests {
             resolve_review_defaults(&context, Some(&defaults), "default", &account, None, &[])
                 .await
                 .unwrap();
-        assert_eq!(result.account_key.as_deref(), Some("default"));
+        assert_eq!(result.model.as_deref(), Some("gpt-6-astra"));
         let invalid: ReviewDefaults =
             studio_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-astra"}"#)
                 .unwrap();
         assert!(
             resolve_review_defaults(&context, Some(&invalid), "default", &account, None, &[])
                 .await
-                .is_err()
+                .is_ok()
         );
     }
 
@@ -4616,10 +4538,6 @@ mod tests {
         )
         .await
         .expect("Codex worker model validates");
-        assert_eq!(
-            workers.account_key.value().map(String::as_str),
-            Some("default")
-        );
         assert_eq!(
             workers.model.value().map(String::as_str),
             Some("gpt-6-luna")

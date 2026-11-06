@@ -427,7 +427,7 @@ pub async fn cancel_checked(
                         && !crate::shell_policy::monitor_cleanup_allowed(tx, &actor.value(), current.record(), crate::idle_compaction::wall_now())?
                     {
                         let report = json!({"id":format!("monitor:{}:{}:cleanup_skipped",current.id(),current.record().shell_pressure_cleanup.as_ref().expect("checked cleanup").generation),"kind":"cleanup_skipped","message":format!("Cleanup checks changed before the stop. Studio left monitor {} running.",current.id())});
-                        crate::shell_policy::observe(tx, &actor.value(), &report, now).map_err(|_| MonitorError::Refused("Could not record the shell cleanup outcome"))?;
+                        crate::shell_policy::observe(tx, &actor, &report, now).map_err(|_| MonitorError::Refused("Could not record the shell cleanup outcome"))?;
                         decision.record.cancel_requested = Some(false);
                         decision.record.cancel_dispatch = None;
                         decision.record.shell_pressure_cleanup = None;

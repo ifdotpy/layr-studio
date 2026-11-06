@@ -1,10 +1,144 @@
 //! Injection seam for effects owned by other notification subsystems.
 use super::{DispatchOutcome, NotificationDispatchError, ProviderDeliveryIdentity};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use studio_json::Value;
-use studio_runtime_store::Transaction;
+use studio_runtime_schema::queue_command::Field;
+use studio_runtime_store::{
+    AgentId, AgentRecord, StoredTransferObject, StoredTransferValue, Transaction,
+};
+
+/// Only the agent fields consumed by notification observations. Borrow strings and
+/// typed historical evidence; never retain or decode unrelated agent extensions.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationAgent<'a> {
+    id: &'a str,
+    root_id: &'a str,
+    account_key: &'a str,
+    epoch: i64,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    name: Field<&'a str>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    parent_id: Field<&'a str>,
+    #[serde(default, borrow, skip_serializing_if = "Field::is_missing")]
+    account_history: Field<
+        Cow<
+            'a,
+            StoredTransferValue<
+                Vec<
+                    StoredTransferObject<
+                        studio_runtime_store::transfer_record::TransferAccountHistoryEntry,
+                    >,
+                >,
+            >,
+        >,
+    >,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    thread_id: Field<&'a str>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub(crate) turn_id: Field<&'a str>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub(crate) in_flight: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    events: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    model: Field<&'a str>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    effort: Field<&'a str>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    fast_mode: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    daybreak_enabled: Field<bool>,
+    #[serde(default, borrow, skip_serializing_if = "Field::is_missing")]
+    cyber_access_program: Field<Cow<'a, StoredTransferValue<String>>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    cwd: Field<&'a str>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    deleted_at: Field<f64>,
+}
+
+impl<'a> From<&'a AgentRecord> for NotificationAgent<'a> {
+    fn from(agent: &'a AgentRecord) -> Self {
+        fn field_ref<'a, T, U>(field: &'a Field<T>, map: impl FnOnce(&'a T) -> U) -> Field<U> {
+            match field {
+                Field::Missing => Field::Missing,
+                Field::Null => Field::Null,
+                Field::Value(value) => Field::Value(map(value)),
+            }
+        }
+        Self {
+            id: agent.id.as_ref(),
+            root_id: agent.root_id.as_ref(),
+            account_key: &agent.account_key,
+            epoch: agent.epoch,
+            name: agent.name.as_deref().map_or(Field::Missing, Field::Value),
+            parent_id: agent
+                .parent_id
+                .as_deref()
+                .map_or(Field::Missing, Field::Value),
+            account_history: field_ref(&agent.account_history, Cow::Borrowed),
+            provider: agent.provider.clone(),
+            thread_id: agent
+                .thread_id
+                .as_deref()
+                .map_or(Field::Missing, Field::Value),
+            turn_id: agent
+                .turn_id
+                .as_deref()
+                .map_or(Field::Missing, Field::Value),
+            in_flight: agent.in_flight.map_or(Field::Missing, Field::Value),
+            events: agent.events.map_or(Field::Missing, Field::Value),
+            model: agent.model.as_deref().map_or(Field::Missing, Field::Value),
+            effort: field_ref(&agent.effort, String::as_str),
+            fast_mode: agent.fast_mode.map_or(Field::Missing, Field::Value),
+            daybreak_enabled: agent.daybreak_enabled.map_or(Field::Missing, Field::Value),
+            cyber_access_program: field_ref(&agent.cyber_access_program, Cow::Borrowed),
+            cwd: agent.cwd.as_deref().map_or(Field::Missing, Field::Value),
+            deleted_at: agent.deleted_at.map_or(Field::Missing, Field::Value),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notification_agent_view_borrows_strings_and_skips_unconsumed_fields() {
+        let mut raw = studio_json::json!({
+            "id":"agent", "rootId":"root", "epoch":1, "accountKey":"default",
+            "events":0, "effort":null, "status":[], "startAttempt":false,
+            "unrelatedTranscript":"untouched".repeat(8192)
+        });
+        let view = NotificationAgent::deserialize(&raw).unwrap();
+        assert_eq!(view.id.as_ptr(), raw["id"].as_str().unwrap().as_ptr());
+        assert_eq!(
+            studio_json::to_string(&SharedJson::agent_projection(&view)).unwrap(),
+            r#"{"accountKey":"default","effort":null,"epoch":1,"events":0,"id":"agent","rootId":"root"}"#
+        );
+        raw["events"] = studio_json::json!("invalid");
+        assert!(NotificationAgent::deserialize(&raw).is_err());
+    }
+
+    #[test]
+    fn notification_agent_view_borrows_typed_history_without_cloning() {
+        let mut agent = AgentRecord::test_defaults();
+        agent.account_history = Field::Value(StoredTransferValue::Known(Vec::new()));
+        let view = NotificationAgent::from(&agent);
+        let Field::Value(Cow::Borrowed(history)) = view.account_history else {
+            panic!("typed history must be borrowed");
+        };
+        assert!(std::ptr::eq(
+            history,
+            agent.account_history.value().unwrap()
+        ));
+    }
+}
 
 /// JSON payload shared by immutable publication observations. Serialization is
 /// transparent so durable journal records retain the same shape.
@@ -16,34 +150,8 @@ impl SharedJson {
         Self(Arc::new(value))
     }
 
-    pub fn agent_projection(agent: &Value) -> Self {
-        let mut projection = studio_json::Map::new();
-        for field in [
-            "id",
-            "name",
-            "rootId",
-            "parentId",
-            "accountKey",
-            "accountHistory",
-            "provider",
-            "threadId",
-            "epoch",
-            "turnId",
-            "inFlight",
-            "events",
-            "model",
-            "effort",
-            "fastMode",
-            "daybreakEnabled",
-            "cyberAccessProgram",
-            "cwd",
-            "deletedAt",
-        ] {
-            if let Some(value) = agent.get(field) {
-                projection.insert(field.to_owned(), value.clone());
-            }
-        }
-        Self::new(Value::Object(projection))
+    pub fn agent_projection(agent: &NotificationAgent<'_>) -> Self {
+        Self::new(studio_runtime_store::projection_value(agent))
     }
 
     pub fn shares_storage_with(&self, other: &Self) -> bool {
@@ -255,8 +363,8 @@ pub trait NotificationEffects {
     /// Pure staging only. A receipt replay never calls this method.
     fn post_commit(
         &self,
-        _before: Option<&Value>,
-        _after: Option<&Value>,
+        _before: Option<&NotificationAgent<'_>>,
+        _after: Option<&NotificationAgent<'_>>,
         _frame: &Value,
         _identity: &ProviderDeliveryIdentity,
         _at: ObservationTime,
@@ -287,7 +395,7 @@ pub trait NotificationEffects {
     fn capture_move_cache(
         &self,
         _tx: &Transaction<'_>,
-        _agent: &Value,
+        _agent: &AgentId,
         _params: &Value,
         _usage: &studio_runtime_schema::usage::UsageObservation,
         _at: f64,

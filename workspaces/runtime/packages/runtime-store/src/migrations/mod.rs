@@ -94,6 +94,7 @@ mod m2026_11_04_chat_read_time;
 mod m2026_11_04_direct_read_time;
 mod m2026_11_04_window_read_time;
 mod m2026_11_04_work_read_time;
+mod m2026_11_05_chat_account_defaults;
 mod m2026_11_05_repair_event_order;
 pub(crate) mod m2026_11_06_idle_unload;
 
@@ -1581,6 +1582,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-05-chat-account-defaults",
+            introduced: NOVEMBER_5,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy worker or reviewer account defaults",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_05_chat_account_defaults::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-11-05-repair-event-order",
             introduced: NOVEMBER_5,
             target: MigrationTarget::Canvas,
@@ -2604,5 +2615,51 @@ mod monitor_active_index_regression {
         step.apply(&context).expect("repeat migration");
         let plan: String = tx.query_row("EXPLAIN QUERY PLAN SELECT id FROM runtime_monitors WHERE monitor_status IN ('running','starting','approval')", [], |row| row.get(3)).expect("plan");
         assert!(plan.contains("runtime_monitor_startup_active"), "{plan}");
+    }
+}
+
+#[cfg(test)]
+mod chat_account_defaults_regression {
+    use super::*;
+
+    #[test]
+    fn migration_removes_legacy_role_account_defaults() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+          INSERT INTO runtime_agents VALUES('lead','{"id":"lead","accountKey":"lead-account","excludedAccountKeys":["excluded"],"workerDefaults":{"accountKey":"worker","model":"m"},"reviewDefaults":{"accountKey":"reviewer","model":"r"}}');
+          INSERT INTO runtime_agents VALUES('implicit','{"id":"implicit","workerDefaults":{"accountKey":null},"reviewDefaults":{"accountKey":null}}');"#).unwrap();
+        let tx = db.transaction().unwrap();
+        let step = CATALOG
+            .iter()
+            .find(|step| step.definition().id == "2026-11-05-chat-account-defaults")
+            .expect("migration");
+        step.apply(&Context::Sql(SqlContext { transaction: &tx }))
+            .unwrap();
+        step.apply(&Context::Sql(SqlContext { transaction: &tx }))
+            .unwrap();
+        let raw: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='lead'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
+        assert_eq!(
+            record,
+            studio_json::json!({"id":"lead","accountKey":"lead-account","excludedAccountKeys":["excluded"],"workerDefaults":{"model":"m"},"reviewDefaults":{"model":"r"}})
+        );
+        let raw: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='implicit'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
+        assert_eq!(
+            record,
+            studio_json::json!({"id":"implicit","workerDefaults":{},"reviewDefaults":{}})
+        );
     }
 }

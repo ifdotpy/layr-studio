@@ -330,11 +330,7 @@ async fn prepare_layr_accept(
         LayrAcceptPreparation::NotLayr => {}
         LayrAcceptPreparation::Merged(result_id) => input.merged_result_id = Some(result_id),
         LayrAcceptPreparation::Call(call) => {
-            let params = studio_json::json!({
-                "agentId": call.lead_id,
-                "sourceAgentId": call.owner_id,
-                "expectedStateId": call.revision,
-            });
+            let expected_revision = call.revision.clone();
             let operation_id = call.request_id.clone();
             let task_id = input.task_id.clone();
             let runtime_state = std::path::PathBuf::from(state.state_dir.clone());
@@ -353,7 +349,7 @@ async fn prepare_layr_accept(
                         &runtime_state,
                         &native_lead,
                         &native_owner,
-                        params["expectedStateId"].as_str().unwrap_or_default(),
+                        &expected_revision,
                         &operation_id,
                     )
                     .map_err(WorkLayrError::Native)
@@ -427,10 +423,7 @@ async fn prepare_layr_submission(
             input.layr_evidence_request_id = Some(request_id);
         }
         LayrSubmissionPreparation::Call(call) => {
-            let params = studio_json::json!({
-                "agentId": call.owner_id,
-                "stateId": call.revision,
-            });
+            let revision = call.revision.clone();
             let request_id = call.request_id.clone();
             input.layr_evidence_request_id = Some(request_id.clone());
             let expected_revision = call.revision.clone();
@@ -445,7 +438,7 @@ async fn prepare_layr_submission(
                     studio_runtime_services::layr_native::evidence(
                         &runtime_state,
                         &native_owner,
-                        params["stateId"].as_str().unwrap_or_default(),
+                        &revision,
                     )
                     .map_err(WorkLayrError::Native)
                 },

@@ -867,7 +867,6 @@ fn agent_role(
 fn bound_review_defaults(
     mut value: studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto,
 ) -> studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-    value.account_key = value.account_key.map(|s| bound_sync_text(&s, "accountKey"));
     value.model = value.model.map(|s| bound_sync_text(&s, "model"));
     value.effort = value.effort.map(|s| bound_sync_text(&s, "effort"));
     value
@@ -882,13 +881,29 @@ fn bound_stall(
     })
 }
 
+fn projected_account_destinations(
+    context: &AgentViewContext,
+    excluded: Option<&[String]>,
+    thread_id: Option<&str>,
+    in_flight: Option<bool>,
+) -> Vec<studio_runtime_schema::account_destination::AccountDestination> {
+    context.account_destinations.iter().cloned().map(|mut destination| {
+        if !(context.empty_lead && thread_id.is_none_or(str::is_empty) && in_flight != Some(true))
+            && crate::account_transfer_driver::account_is_excluded(excluded, destination.account_key.as_str())
+        {
+            destination.eligibility = studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
+                reason: "This account is excluded for this chat's agents. Include it first, or choose another account.".into(),
+            };
+        }
+        destination
+    }).collect()
+}
+
 pub(crate) fn agent_entity_from_record(
     record: studio_runtime_store::AgentRecord,
     context: &AgentViewContext,
 ) -> Option<studio_runtime_schema::generated::AgentEntityDto> {
-    use studio_runtime_schema::agent_progress::{
-        AccountChange, AccountEligibility, AccountTransferProgress,
-    };
+    use studio_runtime_schema::agent_progress::{AccountChange, AccountTransferProgress};
     use studio_runtime_schema::generated::{
         AgentEntityDto, AgentKind, AgentSource, AgentWorktree, JsonValue,
     };
@@ -965,22 +980,12 @@ pub(crate) fn agent_entity_from_record(
         )),
     };
     let account_destinations = if is_lead {
-        let destinations: Vec<_> = context
-            .account_destinations
-            .iter()
-            .cloned()
-            .map(|mut destination| {
-                if crate::account_transfer_driver::account_is_excluded(
-                    record.excluded_account_keys.value().map(Vec::as_slice),
-                    destination.account_key.as_str(),
-                ) {
-                    destination.eligibility = AccountEligibility::Unavailable {
-                        reason: "This account is disabled for this chat".into(),
-                    };
-                }
-                destination
-            })
-            .collect();
+        let destinations = projected_account_destinations(
+            context,
+            record.excluded_account_keys.value().map(Vec::as_slice),
+            record.thread_id.as_deref(),
+            record.in_flight,
+        );
         Some(project_agent_legacy_field(&destinations, "accountDestinations").ok()?)
     } else {
         extra
@@ -1239,9 +1244,12 @@ pub(crate) fn agent_entity_from_record(
             .map(|v| Some(project_agent_property(&v, "nativeSafetyRetry"))),
         native_status: filtered_option(record.native_status.as_ref(), "nativeStatus").ok()?,
         native_thread_block,
-        native_turn_error: extra
-            .remove("nativeTurnError")
-            .map(|v| Some(project_agent_property(&v, "nativeTurnError"))),
+        native_turn_error: (!record.native_turn_error.is_missing()).then(|| {
+            Some(project_agent_property(
+                &studio_runtime_store::projection_value(&record.native_turn_error),
+                "nativeTurnError",
+            ))
+        }),
         next_turn_settings_supported: Some(Some(true)),
         orchestrator_id: extra
             .remove("orchestratorId")
@@ -1456,23 +1464,12 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     }
     let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
     if source.is_lead == Some(true) {
-        let destinations = context
-            .account_destinations
-            .iter()
-            .cloned()
-            .map(|mut destination| {
-                if crate::account_transfer_driver::account_is_excluded(
-                    source.excluded_account_keys.as_deref(),
-                    destination.account_key.as_str(),
-                ) {
-                    destination.eligibility =
-                        studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
-                            reason: "This account is disabled for this chat".into(),
-                        };
-                }
-                destination
-            })
-            .collect::<Vec<_>>();
+        let destinations = projected_account_destinations(
+            context,
+            source.excluded_account_keys.as_deref(),
+            source.thread_id.as_deref(),
+            source.in_flight,
+        );
         view.insert(
             "accountDestinations".into(),
             serde::Serialize::serialize(&destinations, studio_json::value::Serializer).ok()?,
@@ -2340,6 +2337,34 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn native_error_projection_preserves_legacy_shapes() {
+        for error in [
+            json!(null),
+            json!("legacy"),
+            json!({"turnId":"turn","error":{"codexErrorInfo":"misalignmentPolicyViolation"},"future":1}),
+            json!({"turnId":null,"error":false}),
+        ] {
+            let input = json!({"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"threadId":"thread","turnId":"turn","nativeTurnError":error});
+            let record = studio_runtime_store::AgentRecord::from_value(input).unwrap();
+            let source = record.value();
+            let legacy = super::agent_entity_view(&source, &Default::default()).unwrap();
+            let typed = super::agent_entity_from_record(record, &Default::default()).unwrap();
+            // Recreate the former extra-map field projection inside the same DTO:
+            // sync hashes the DTO's serialized bytes, including field order.
+            let mut previous = typed.clone();
+            previous.native_turn_error = source
+                .get("nativeTurnError")
+                .map(|value| Some(super::project_agent_property(value, "nativeTurnError")));
+            assert_eq!(
+                studio_json::to_vec(&typed).unwrap(),
+                studio_json::to_vec(&previous).unwrap()
+            );
+            let projected = studio_runtime_store::projection_value(&typed);
+            assert_eq!(projected, legacy);
+        }
+    }
+
+    #[test]
     fn shared_agent_components_preserve_legacy_projection_values() {
         for native in [json!("idle"), json!({"phase":"safety","message":"waiting"})] {
             let record = json!({"id":"agent", "kind":"agent", "environment":"host",
@@ -2357,7 +2382,7 @@ mod projection_plan_tests {
     #[test]
     fn destination_eligibility_includes_chat_exclusions() {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
-            "provider":"codex","excludedAccountKeys":["blocked"]});
+            "provider":"codex","status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked"]});
         let context = super::AgentViewContext {
             account_destinations: studio_json::from_str(
                 r#"[
@@ -2375,6 +2400,22 @@ mod projection_plan_tests {
         );
         assert_eq!(
             view["accountDestinations"][1]["eligibility"]["kind"],
+            "available"
+        );
+        let empty_context = super::AgentViewContext {
+            empty_lead: true,
+            ..context
+        };
+        let empty = super::agent_entity_view(&lead, &empty_context).unwrap();
+        let stored = studio_runtime_store::AgentRecord::from_value(lead).unwrap();
+        let typed = super::agent_entity_from_record(stored, &empty_context).unwrap();
+        let typed = serde::Serialize::serialize(&typed, studio_json::value::Serializer).unwrap();
+        assert_eq!(
+            typed["accountDestinations"][0]["eligibility"]["kind"],
+            "available"
+        );
+        assert_eq!(
+            empty["accountDestinations"][0]["eligibility"]["kind"],
             "available"
         );
     }

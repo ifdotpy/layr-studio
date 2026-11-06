@@ -23,7 +23,7 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
     let command = args
         .next()
         .map(String::as_str)
-        .ok_or("Use native-layr <configure|map|upgrade-store|migrate|paths>")?;
+        .ok_or("Use native-layr <configure|map|migrate|paths>")?;
     let mut state = None;
     let mut store_root = None;
     let mut mapped_project = None;
@@ -160,16 +160,6 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
                 )?
             );
         }
-        "upgrade-store" => {
-            println!(
-                "{}",
-                studio_runtime_services::layr_native::run(
-                    &state,
-                    &state,
-                    &["store-version", "--upgrade"]
-                )?
-            );
-        }
         "paths" => println!(
             "{}",
             studio_json::json!({
@@ -228,7 +218,7 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
             }
         }
         _ => {
-            return Err("Use native-layr <configure|map|upgrade-store|migrate|paths>".into());
+            return Err("Use native-layr <configure|map|migrate|paths>".into());
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -238,6 +228,21 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
 mod progress_tests {
     use super::*;
     use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+
+    #[test]
+    fn native_layr_upgrade_store_is_not_an_operator_command() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let state = fixture.path().join("absent-state");
+        let error = run(&[
+            "upgrade-store".into(),
+            "--state".into(),
+            state.to_str().expect("state path").into(),
+        ])
+        .expect_err("unsupported command")
+        .to_string();
+        assert_eq!(error, "Use native-layr <configure|map|migrate|paths>");
+        assert!(!state.exists());
+    }
 
     #[test]
     fn final_count_is_printed_inside_throttle_interval() {
