@@ -1097,6 +1097,8 @@ fn workspace_was_cleaned(agent: &Agent) -> bool {
                 .get("layrLine")
                 .and_then(Value::as_str)
                 .is_some())
+        || (agent.record.get("executionMode").and_then(Value::as_str) == Some("vm")
+            && agent.record.get("layrReady").and_then(Value::as_bool) == Some(false))
 }
 
 fn restore_deleted_root(
