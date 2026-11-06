@@ -1133,9 +1133,8 @@ pub(super) async fn draft_initial_snapshot(
             move |connection| {
                 let revision = SyncDocumentsRepository::draft_sequence(connection)
                     .map_err(|_| ApiError::internal())?;
-                let mut rows = SyncDocumentsRepository::drafts_after(
+                let mut rows = SyncDocumentsRepository::live_drafts(
                     connection,
-                    0,
                     SYNC_DRAFT_STREAM_MAX_DOCUMENTS + 1,
                 )
                 .map_err(|_| ApiError::internal())?;
@@ -5415,6 +5414,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn deleted_drafts_do_not_fill_the_initial_draft_snapshot() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store
+            .transaction(|tx| {
+                // Each window session leaves a draft row; cleared ones become deletion marks.
+                for index in 0..600 {
+                    let session = format!("old-{index}");
+                    let id = format!("phone:{session}");
+                    let payload = json!({"id":id,"device":"phone","session":session,"text":"","updated":1}).to_string();
+                    SyncDocumentsRepository::put_draft(tx, &id, &payload, true)?;
+                }
+                let payload = json!({"id":"phone:new","device":"phone","session":"new","text":"kept","updated":2}).to_string();
+                SyncDocumentsRepository::put_draft(tx, "phone:new", &payload, false)?;
+                Ok(())
+            })
+            .await
+            .expect("drafts");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let snapshot = draft_initial_snapshot(state, resource)
+            .await
+            .expect("snapshot")
+            .draft_snapshot
+            .expect("baseline");
+        assert!(snapshot.complete);
+        assert_eq!(snapshot.documents.len(), 1);
+        assert_eq!(snapshot.documents[0].id, "phone:new");
     }
 
     #[tokio::test]
