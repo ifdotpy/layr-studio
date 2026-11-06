@@ -22,5 +22,5 @@ use `just test studio-runtime-services <test-name>`; for package checks, use
 `just check studio-runtime-services`. `just test-plan` prints the native command
 without executing it. See [testing](../../docs/testing.md) for the local gates.
 
-The guest service and desktop helpers retain Python. The removed Python backend,
+Desktop helpers retain Python. The removed Python backend,
 Python oracle runners have no compatibility aliases.
