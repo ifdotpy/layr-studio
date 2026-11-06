@@ -141,7 +141,7 @@ if [ "$in_delivery_unit" != true ] && [ "$test_fixture" != true ]; then
   for name in HOME PATH XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME \
     XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS CODEX_STUDIO_SERVER_ROOT \
     CODEX_STUDIO_DELIVER_UNIT CODEX_STUDIO_DELIVER_INVOCATION_FILE \
-    CARGO_HOME RUSTUP_HOME CARGO_BUILD_JOBS RUSTFLAGS CARGO_ENCODED_RUSTFLAGS \
+    CARGO_HOME RUSTUP_HOME CARGO_BUILD_JOBS RUSTFLAGS CARGO_ENCODED_RUSTFLAGS STUDIO_PERF_REPORTING \
     LAYR_ROOT LAYR_SOCKET LAYR_DIRECT \
     CODEX_NODE PNPM_HOME TMPDIR HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
     http_proxy https_proxy all_proxy no_proxy; do
@@ -211,6 +211,11 @@ if [ -n "${CODEX_STUDIO_DELIVER_INVOCATION_FILE:-}" ]; then
 fi
 
 release=$root/releases/$commit
+features=()
+if [ "${STUDIO_PERF_REPORTING:-0}" = 1 ]; then
+  release=$release-perf-reporting
+  features=(--features perf-reporting)
+fi
 binary=${layout[2]}
 current=$root/${layout[4]}
 dropin=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT.d/zz-delivery.conf
@@ -231,7 +236,7 @@ if [ ! -x "$release/$binary" ]; then
     --filter codex-agents-web... --filter studio-claude-bridge...
   pnpm --dir "$staging" --filter codex-agents-web run build
   (cd "$staging" && cargo build --release --locked \
-    --manifest-path Cargo.toml -p studio-runtime-server)
+    --manifest-path Cargo.toml -p studio-runtime-server "${features[@]}")
   cp "$root/target/release/studio-runtime-server" "$staging/$binary"
   mv "$staging" "$release"
 fi

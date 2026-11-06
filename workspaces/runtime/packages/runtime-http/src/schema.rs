@@ -52,7 +52,34 @@ pub(crate) fn operation_has_etag(method: &str, template: &str) -> bool {
 }
 
 fn document() -> &'static Value {
-    studio_runtime_services::sync_policy::openapi_document()
+    #[cfg(not(feature = "perf-reporting"))]
+    {
+        studio_runtime_services::sync_policy::openapi_document()
+    }
+    #[cfg(feature = "perf-reporting")]
+    {
+        static DOCUMENT: OnceLock<Value> = OnceLock::new();
+        DOCUMENT.get_or_init(|| {
+            let mut document = studio_runtime_services::sync_policy::openapi_document().clone();
+            let fragment: Value =
+                studio_json::from_str(include_str!("../openapi.perf-reporting.json"))
+                    .expect("performance schema parses");
+            for pointer in ["/paths", "/components/schemas"] {
+                document
+                    .pointer_mut(pointer)
+                    .and_then(Value::as_object_mut)
+                    .expect("base schema object")
+                    .extend(
+                        fragment
+                            .pointer(pointer)
+                            .and_then(Value::as_object)
+                            .expect("performance schema object")
+                            .clone(),
+                    );
+            }
+            document
+        })
+    }
 }
 
 pub(crate) fn openapi_document() -> &'static Value {

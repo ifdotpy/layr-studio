@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
+perf-reporting = []
 test-support = []
 bench-support = ["rustix/use-libc-auxv"]
 

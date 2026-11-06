@@ -2,9 +2,9 @@
 //! Native tool arguments, results and compaction metadata belong to the SDK;
 //! this contract owns the Studio envelope without copying those vendor shapes.
 
+use crate::raw_json::RawJson;
 use schemars::JsonSchema;
 use serde::Serialize;
-use studio_json::{Map, Value};
 
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +43,7 @@ pub struct FreshToolFields {
     pub id: String,
     pub status: FreshToolStatus,
     pub tool: String,
-    pub arguments: Map<String, Value>,
+    pub arguments: std::collections::BTreeMap<String, RawJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FreshToolResult")]
     pub result: Option<FreshToolResult>,
@@ -59,8 +59,8 @@ pub struct FreshToolFields {
 pub struct FreshToolResult {
     // A tool result can omit content; preserve that omission rather than null.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Value")]
-    pub content: Option<Value>,
+    #[schemars(with = "RawJson")]
+    pub content: Option<RawJson>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -74,9 +74,9 @@ pub enum FreshFileChangeKind {
 pub struct FreshFileChange {
     // Unvalidated native tool payloads are forwarded without invented strings.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<Value>,
+    pub path: Option<RawJson>,
     pub kind: FreshFileChangeKind,
-    pub diff: Value,
+    pub diff: RawJson,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -88,7 +88,7 @@ pub struct FreshFileChange {
 pub enum FreshItem {
     UserMessage {
         id: String,
-        content: Vec<Value>,
+        content: Vec<RawJson>,
         #[serde(skip_serializing_if = "Option::is_none")]
         #[schemars(with = "String")]
         native_id: Option<String>,
@@ -132,7 +132,7 @@ pub enum FreshItem {
         #[serde(flatten)]
         tool_fields: FreshToolFields,
         #[serde(skip_serializing_if = "Option::is_none")]
-        command: Option<Value>,
+        command: Option<RawJson>,
         cwd: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         #[schemars(with = "String")]
@@ -165,7 +165,7 @@ pub enum FreshItem {
     ContextCompaction {
         id: String,
         status: FreshCompactionStatus,
-        compaction_metadata: Value,
+        compaction_metadata: RawJson,
     },
 }
 
@@ -173,4 +173,37 @@ pub enum FreshItem {
 pub enum FreshCompactionStatus {
     #[serde(rename = "completed")]
     Completed,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_item_serializes_opaque_fields_as_before() {
+        let item = FreshItem::CommandExecution {
+            tool_fields: FreshToolFields {
+                id: "tool".into(),
+                status: FreshToolStatus::Completed,
+                tool: "shell".into(),
+                arguments: studio_json::from_str(r#"{"nested":[1,true]}"#).unwrap(),
+                result: Some(FreshToolResult {
+                    content: Some(studio_json::from_str(r#"{"text":"ok"}"#).unwrap()),
+                }),
+                elapsed_seconds: None,
+                stalled: None,
+            },
+            command: Some(studio_json::from_str(r#"["echo","ok"]"#).unwrap()),
+            cwd: "/work".into(),
+            aggregated_output: None,
+            exit_code: Some(Some(0)),
+            can_move_to_background: None,
+            background_task_id: None,
+            backgrounded_by_user: None,
+        };
+        assert_eq!(
+            studio_json::to_string(&item).unwrap(),
+            r#"{"type":"commandExecution","id":"tool","status":"completed","tool":"shell","arguments":{"nested":[1,true]},"result":{"content":{"text":"ok"}},"command":["echo","ok"],"cwd":"/work","exitCode":0}"#
+        );
+    }
 }

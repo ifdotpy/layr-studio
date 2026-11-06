@@ -66,8 +66,7 @@ mod tests {
     #[test]
     fn reset_request_requires_bounded_identities_and_a_uuid() {
         let schema: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI");
+            studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         for (field, max) in [
             ("account_id", super::RESET_ACCOUNT_ID_MAX_CHARS),
             ("credit_id", super::RESET_CREDIT_ID_MAX_CHARS),

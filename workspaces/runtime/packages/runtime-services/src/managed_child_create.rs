@@ -484,7 +484,18 @@ async fn prepare_reviewer(
             let state = state.to_string();
             let output = studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-services/review-layr-base",
-                move || crate::layr_native::run(&root, &cwd, &["merge-base", "main", &state]),
+                move || {
+                    // workerBaseRef is a Git-worktree setting, not a Layr integration ref.
+                    let main =
+                        if crate::layr_native::run(&root, &cwd, &["rev-parse", "origin/main"])
+                            .is_ok()
+                        {
+                            "origin/main"
+                        } else {
+                            "main"
+                        };
+                    crate::layr_native::run(&root, &cwd, &["merge-base", main, &state])
+                },
             )
             .await
             .map_err(|_| invalid())?
@@ -1607,7 +1618,7 @@ pub(crate) async fn request_review(
         environment,
         &actor_record,
         &root,
-        None,
+        plan.account(),
         model,
         &std::collections::HashMap::new(),
     )

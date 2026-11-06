@@ -517,8 +517,7 @@ mod tests {
     #[test]
     fn receipt_recipient_delivery_schema_matches_nullable_owner() {
         let openapi: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI");
+            studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         let document = studio_json::json!({"$ref":"#/components/schemas/RecipientDelivery","components":openapi["components"]});
         let validator = jsonschema::validator_for(&document).expect("recipient schema");
         let record = RecipientDelivery {

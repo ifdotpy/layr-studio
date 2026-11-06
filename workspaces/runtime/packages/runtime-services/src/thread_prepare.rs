@@ -122,8 +122,7 @@ pub struct Actor {
     /// nativeEffort was absent, persist that selection before native submission.
     pub native_effort_present: bool,
     pub deleted: bool,
-    /// A native review child (Python `nativeReview`): no Studio tools, and
-    /// the native review model is the agent model.
+    /// A legacy pending native review uses the agent model as its review model.
     #[serde(default)]
     pub native_review: bool,
     #[serde(default)]
@@ -435,7 +434,7 @@ pub fn filter_tool_definitions(
     let (managed, voice, layr) = capability_matrix(f.role, f.provider, f.assignment);
     for mut tool in definitions.iter().cloned() {
         let name = tool.name.as_str();
-        if !managed
+        if (!managed && name != "orchestration_read")
             || (!voice && name == "orchestration_speak")
             || (!f.is_lead
                 && matches!(
@@ -1190,6 +1189,12 @@ mod archive_finished_catalog_tests {
                 )
                 .unwrap();
                 assert!(filtered.iter().any(|tool| tool.name == "layr_read"));
+                assert!(
+                    filtered
+                        .iter()
+                        .any(|tool| tool.name == "orchestration_read")
+                );
+                assert_eq!(filtered.len(), 2);
                 let git_tools = filter_tool_definitions(
                     &tools,
                     &CatalogFilter {
@@ -1206,6 +1211,12 @@ mod archive_finished_catalog_tests {
                 )
                 .unwrap();
                 assert!(!git_tools.iter().any(|tool| tool.name == "layr_read"));
+                assert!(
+                    git_tools
+                        .iter()
+                        .any(|tool| tool.name == "orchestration_read")
+                );
+                assert_eq!(git_tools.len(), 1);
             }
         }
     }

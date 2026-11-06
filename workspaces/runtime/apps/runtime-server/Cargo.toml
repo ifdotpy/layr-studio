@@ -41,6 +41,9 @@ tower = { workspace = true }
 [lints]
 workspace = true
 
+[features]
+perf-reporting = ["studio-runtime-http/perf-reporting", "studio-runtime-store/perf-reporting"]
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

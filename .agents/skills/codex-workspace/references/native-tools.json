@@ -889,6 +889,19 @@
     "inputSchema": {
       "type": "object",
       "properties": {
+        "instructions": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "maxLength": 8000,
+          "title": "ReviewInstructions",
+          "type": "string"
+        },
+        "account": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "ReviewAccount",
+          "type": "string"
+        },
         "target": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "oneOf": [

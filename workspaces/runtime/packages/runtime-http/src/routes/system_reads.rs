@@ -41,7 +41,7 @@ const DIAGNOSTICS_RESPONSE_FIELDS: &[&str] = &[
 ];
 
 pub(crate) fn routes() -> RouteGroup {
-    RouteGroup::new(vec![
+    let routes = vec![
         get(
             "/api/directories",
             OperationStatus::Implemented,
@@ -53,7 +53,38 @@ pub(crate) fn routes() -> RouteGroup {
             diagnostics,
         ),
         get("/api/ui-summary", OperationStatus::Implemented, ui_summary),
-    ])
+    ];
+    #[cfg(feature = "perf-reporting")]
+    let routes = {
+        let mut routes = routes;
+        routes.push(get(
+            "/api/perf-reporting",
+            OperationStatus::Implemented,
+            perf_reporting,
+        ));
+        routes.push(super::manifest::post(
+            "/api/perf-reporting/client",
+            OperationStatus::Implemented,
+            perf_client_report,
+        ));
+        routes
+    };
+    RouteGroup::new(routes)
+}
+
+#[cfg(feature = "perf-reporting")]
+async fn perf_reporting() -> Json<studio_runtime_store::perf_reporting::Snapshot> {
+    Json(studio_runtime_store::perf_reporting::snapshot())
+}
+
+#[cfg(feature = "perf-reporting")]
+async fn perf_client_report(
+    super::extractors::ApiJson(report): super::extractors::ApiJson<
+        studio_runtime_schema::perf_reporting::PerfClientReport,
+    >,
+) -> StatusCode {
+    studio_runtime_store::perf_reporting::record_client(report);
+    StatusCode::NO_CONTENT
 }
 
 /// Maximum directory request ID length in Unicode code points.

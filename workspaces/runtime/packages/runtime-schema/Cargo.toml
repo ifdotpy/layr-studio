@@ -29,6 +29,7 @@ studio-json = { path = "../json" }
 studio-client-domain = { path = "../../../client/packages/client-domain" }
 
 [features]
+perf-reporting = []
 sqlite = ["dep:rusqlite"]
 
 [lints]
