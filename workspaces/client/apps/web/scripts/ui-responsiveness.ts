@@ -85,6 +85,12 @@ const recorder = () => {
   Object.assign(window, { __perf: state });
 };
 type Sample = { frames: number[]; long: number[] };
+declare global {
+  interface Window {
+    /** The page recorder state of this measurement script. */
+    __perf: Sample & { on: boolean };
+  }
+}
 const profiled = new Set(values.profile.split(",").filter(Boolean));
 const traced = new Set(values.trace.split(",").filter(Boolean));
 /** Main-thread time per trace event name (style, layout, paint, script). */
@@ -161,8 +167,7 @@ async function measure(
     await profileSession!.send("Profiler.start");
   }
   await page.evaluate(() => {
-    const state = (window as unknown as { __perf: Sample & { on: boolean } })
-      .__perf;
+    const state = window.__perf;
     state.frames = [];
     state.long = [];
     state.on = true;
@@ -186,8 +191,7 @@ async function measure(
       console.error(`  ${time.toFixed(0).padStart(6)} ms  ${fn}`);
   }
   const sample = await page.evaluate(() => {
-    const state = (window as unknown as { __perf: Sample & { on: boolean } })
-      .__perf;
+    const state = window.__perf;
     state.on = false;
     return { frames: state.frames, long: state.long };
   });
