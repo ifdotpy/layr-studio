@@ -1191,7 +1191,7 @@ async fn create(
                 .unwrap_or("worktree")
                 == workspace_for_write.as_str()
             && prior.provider.value().map(|kind| kind.key()) == Some(provider.as_str())
-            && crate::sync_entity_context::agent_view_context(tx, &prior.value(), None)?.empty_lead
+            && crate::sync_entity_context::agent_view_context(tx, &prior, None)?.empty_lead
         {
             let mut reused = prior;
             let previous_account = reused.account_key.clone();

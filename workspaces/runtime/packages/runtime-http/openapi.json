@@ -4307,13 +4307,10 @@
           "error": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NativeProviderError"
+                "$ref": "#/components/schemas/AgentError"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Error"
@@ -4532,10 +4529,7 @@
           "nativeStatus": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentNativeStatus"
-              },
-              {
-                "$ref": "#/components/schemas/AgentNativeStatusValue"
+                "$ref": "#/components/schemas/AgentNativeState"
               },
               {
                 "type": "null"
@@ -4656,14 +4650,7 @@
           "permissionMode": {
             "anyOf": [
               {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "auto",
-                  "plan",
-                  "bypassPermissions"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentPermissionMode"
               },
               {
                 "type": "null"
@@ -4868,13 +4855,10 @@
           "worktree": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/AgentWorktree"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Worktree"
@@ -4882,11 +4866,7 @@
           "worktreePreparation": {
             "anyOf": [
               {
-                "enum": [
-                  "waiting",
-                  "preparing"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentWorktreePreparation"
               },
               {
                 "type": "null"
@@ -5416,13 +5396,10 @@
           "error": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NativeProviderError"
+                "$ref": "#/components/schemas/AgentError"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Error"
@@ -5544,8 +5521,7 @@
           "kind": {
             "anyOf": [
               {
-                "const": "agent",
-                "type": "string"
+                "$ref": "#/components/schemas/AgentKind"
               },
               {
                 "type": "null"
@@ -5785,10 +5761,7 @@
           "nativeStatus": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentNativeStatus"
-              },
-              {
-                "$ref": "#/components/schemas/AgentNativeStatusValue"
+                "$ref": "#/components/schemas/AgentNativeState"
               },
               {
                 "type": "null"
@@ -5931,14 +5904,7 @@
           "permissionMode": {
             "anyOf": [
               {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "auto",
-                  "plan",
-                  "bypassPermissions"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentPermissionMode"
               },
               {
                 "type": "null"
@@ -6001,6 +5967,17 @@
               }
             ],
             "title": "Projectid"
+          },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
           },
           "projectServerId": {
             "anyOf": [
@@ -6260,6 +6237,19 @@
             ],
             "title": "Threadid"
           },
+          "tokensUsed": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokensused"
+          },
           "turnId": {
             "anyOf": [
               {
@@ -6370,13 +6360,10 @@
           "worktree": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/AgentWorktree"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Worktree"
@@ -6384,11 +6371,7 @@
           "worktreePreparation": {
             "anyOf": [
               {
-                "enum": [
-                  "waiting",
-                  "preparing"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentWorktreePreparation"
               },
               {
                 "type": "null"
@@ -6794,6 +6777,16 @@
         "title": "AgentEntityUsageResumeDto",
         "type": "object"
       },
+      "AgentError": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/NativeProviderError"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
       "AgentId": {
         "description": "Identity of the agent that owns the turn.",
         "type": "string"
@@ -6832,6 +6825,10 @@
         ],
         "title": "AgentInboxEntry",
         "type": "object"
+      },
+      "AgentKind": {
+        "const": "agent",
+        "type": "string"
       },
       "AgentLimitProjection": {
         "additionalProperties": false,
@@ -6901,6 +6898,16 @@
         },
         "title": "AgentNativeRelease",
         "type": "object"
+      },
+      "AgentNativeState": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/AgentNativeStatus"
+          },
+          {
+            "$ref": "#/components/schemas/AgentNativeStatusValue"
+          }
+        ]
       },
       "AgentNativeStatus": {
         "additionalProperties": false,
@@ -7114,6 +7121,16 @@
         },
         "title": "AgentOverview",
         "type": "object"
+      },
+      "AgentPermissionMode": {
+        "enum": [
+          "default",
+          "acceptEdits",
+          "auto",
+          "plan",
+          "bypassPermissions"
+        ],
+        "type": "string"
       },
       "AgentProvider": {
         "$ref": "#/components/schemas/ProviderKind"
@@ -9509,6 +9526,17 @@
             "default": null,
             "title": "Projectid"
           },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
+          },
           "projectServerId": {
             "anyOf": [
               {
@@ -9790,6 +9818,19 @@
             ],
             "default": null,
             "title": "Threadid"
+          },
+          "tokensUsed": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokensused"
           },
           "turnId": {
             "anyOf": [
@@ -10233,8 +10274,7 @@
           "kind": {
             "anyOf": [
               {
-                "const": "agent",
-                "type": "string"
+                "$ref": "#/components/schemas/AgentKind"
               },
               {
                 "type": "null"
@@ -10674,6 +10714,23 @@
         ],
         "title": "AgentWorkspaceModeResponse",
         "type": "object"
+      },
+      "AgentWorktree": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "AgentWorktreePreparation": {
+        "enum": [
+          "waiting",
+          "preparing"
+        ],
+        "type": "string"
       },
       "AmbiguousToolRequestResponse": {
         "additionalProperties": {

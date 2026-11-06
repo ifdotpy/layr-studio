@@ -110,7 +110,7 @@ pub(super) async fn wake(
     wake: Wake,
     start: impl FnOnce(TurnIntent, Option<String>) -> Run + Send,
 ) -> Box<Done> {
-    let outcome = match stage("turn_preparation.claim", claim(&wake)).await {
+    let outcome = match claim_stage(&wake).await {
         Ok(Ok(intent)) => return Box::pin(run(start(intent, wake.effect))).await,
         Ok(Err(Unclaimed::NativeReview)) => {
             // The driver saves every outcome on the child before it returns.
@@ -137,6 +137,13 @@ pub(super) async fn wake(
         effect: wake.effect,
         outcome,
     })
+}
+
+fn claim_stage(
+    wake: &Wake,
+) -> impl std::future::Future<Output = Result<Result<TurnIntent, Unclaimed>, WorkerError>> + Send + '_
+{
+    Box::pin(stage("turn_preparation.claim", claim(wake)))
 }
 
 /// Commit a prepared request in the agent's task. A ready commit deleted
@@ -691,4 +698,42 @@ async fn require_account_auth(run: &Run) -> Result<bool, WorkerError> {
     )
     .await
     .map_err(|error| WorkerError::PreparationRefused(error.to_string()))
+}
+
+#[cfg(test)]
+mod future_size_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn review_regression_claim_stage_future_stays_below_clippy_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let bridge = StoreBridge::new(store).await.unwrap();
+        let resources = Arc::new(
+            preparation::PreparationResources::bundled(
+                String::new(),
+                crate::model_catalog::ModelCatalogService::new(),
+            )
+            .unwrap(),
+        );
+        let wake = Wake {
+            bridge,
+            driver: None,
+            account: "default".into(),
+            agent_id: "agent".into(),
+            epoch: 0,
+            claude_steer_receipts: false,
+            effect: None,
+            resources,
+        };
+        let future = claim_stage(&wake);
+        let limit: usize = include_str!("../../../../clippy.toml")
+            .lines()
+            .find_map(|line| line.strip_prefix("future-size-threshold = "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        let size = std::mem::size_of_val(&future);
+        assert!(size <= limit, "claim stage future is {size} bytes");
+    }
 }

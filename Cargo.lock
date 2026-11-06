@@ -6945,6 +6945,7 @@ dependencies = [
  "studio-client-domain",
  "studio-json",
  "studio-request-signing",
+ "syn 2.0.119",
  "thiserror 2.0.21",
  "unicode-general-category",
  "uuid",

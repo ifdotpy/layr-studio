@@ -24,6 +24,7 @@ rusqlite = { workspace = true, optional = true }
 
 [build-dependencies]
 openapi-to-rust = { version = "=0.22.0", default-features = false }
+syn = { version = "=2.0.119", features = ["full", "extra-traits"] }
 studio-json = { path = "../json" }
 studio-client-domain = { path = "../../../client/packages/client-domain" }
 

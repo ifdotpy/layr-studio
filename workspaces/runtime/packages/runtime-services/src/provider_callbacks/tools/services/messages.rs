@@ -700,7 +700,8 @@ fn send_as_actor(
         let recipient =
             records::get(tx, "runtime_agents", recipient_id)?.ok_or(CallbackError::Stale)?;
         let active = recipient["autoWake"] == true
-            && !crate::sync_entity_context::agent_view_context(tx, &recipient, None)?.empty_lead
+            && !crate::sync_entity_context::agent_view_context_value_adapter(tx, &recipient, None)?
+                .empty_lead
             && !(target == "broadcast"
                 && (studio_runtime_store::truthy(recipient.get("nativeFailureHold"))
                     || !matches!(

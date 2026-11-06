@@ -718,8 +718,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     let modes = studio_json::json!(crate::claude_permissions::PERMISSION_MODES);
     for path in [
         "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
-        "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
-        "/components/schemas/AgentDetailEntityDto/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentPermissionMode/enum",
         "/components/schemas/AgentResponse/properties/permissionMode/anyOf/0/enum",
         "/components/schemas/AgentRecordResponse/properties/permissionMode/anyOf/0/enum",
         "/components/schemas/ClaudeSettings/properties/permissionMode/enum",
@@ -2479,8 +2478,7 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             read_json(&root, ACCOUNT_TRANSFER_SCHEMA_PATH).expect("account transfer schema");
         for path in [
             "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
-            "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
-            "/components/schemas/AgentDetailEntityDto/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentPermissionMode/enum",
             "/components/schemas/AgentResponse/properties/permissionMode/anyOf/0/enum",
             "/components/schemas/AgentRecordResponse/properties/permissionMode/anyOf/0/enum",
             "/components/schemas/ClaudeSettings/properties/permissionMode/enum",

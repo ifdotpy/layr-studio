@@ -978,10 +978,10 @@ pub(crate) fn publish_agent_projection(
 /// `agent` DTO and `retainedWorktree`, each a value or None for a delete. None when the
 /// agent row is gone.
 pub(crate) struct AgentViewDocuments {
-    pub summary: Option<Value>,
-    pub detail: Option<Value>,
-    pub agent: Option<Value>,
-    pub retained_worktree: Option<Value>,
+    pub summary: Option<RawValue>,
+    pub detail: Option<RawValue>,
+    pub agent: Option<RawValue>,
+    pub retained_worktree: Option<RawValue>,
 }
 
 pub(crate) fn agent_view_documents(
@@ -997,6 +997,7 @@ pub(crate) fn agent_view_documents(
         return Ok(None);
     };
     let raw = agent_volatile::merged_text(connection, id, raw)?;
+<<<<<<< head
     let (record, view, legacy_vm_workspace) =
         match studio_runtime_store::decode_agent_record(connection, id, &raw) {
             Ok(record) => {
@@ -1031,6 +1032,68 @@ pub(crate) fn agent_view_documents(
                 (parsed, view, false)
             }
         };
+=======
+    let (record, view) = match studio_runtime_store::decode_agent_record(connection, id, &raw) {
+        Ok(record) => {
+            let context = crate::sync_entity_context::agent_view_context(
+                connection,
+                &record,
+                project_server_id,
+            )?;
+            let retained = crate::sync_views::retained_worktree_from_record(&record)
+                .map(|value| studio_json::to_raw_value(&value))
+                .transpose()?;
+            if record.is_deleted() {
+                return Ok(Some(AgentViewDocuments {
+                    summary: None,
+                    detail: None,
+                    agent: None,
+                    retained_worktree: retained,
+                }));
+            }
+            let Some(mut full) = crate::sync_views::agent_entity_from_record(record, &context)
+            else {
+                return Ok(Some(AgentViewDocuments {
+                    summary: None,
+                    detail: None,
+                    agent: None,
+                    retained_worktree: retained,
+                }));
+            };
+            let summary = studio_runtime_schema::generated::AgentSummaryEntityDto::from(&full);
+            let detail = studio_runtime_schema::generated::AgentDetailEntityDto::from(&full);
+            full.team_counts = None;
+            full.has_question = None;
+            full.has_approval = None;
+            full.has_background_work = None;
+            return Ok(Some(AgentViewDocuments {
+                summary: Some(studio_json::to_raw_value(&summary)?),
+                detail: Some(studio_json::to_raw_value(&detail)?),
+                agent: Some(studio_json::to_raw_value(&full)?),
+                retained_worktree: retained,
+            }));
+        }
+        // Repair-only exception: arbitrary corrupt records require the tolerant Value fallback.
+        Err(error) => {
+            let parsed: Value = studio_json::from_str(&raw).unwrap_or_else(|_| json!({"id": id}));
+            let diagnostic = incident
+                .or_else(|| {
+                    parsed
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| error.to_string());
+            let public = crate::sync_views::invalid_agent_view(id, &parsed, &diagnostic);
+            let context = crate::sync_views::AgentViewContext {
+                project_server_id: project_server_id.map(str::to_owned),
+                ..Default::default()
+            };
+            let view = crate::sync_views::agent_entity_view(&public, &context);
+            (parsed, view)
+        }
+    };
+>>>>>>> origin/main
     let retained_worktree = crate::sync_views::retained_worktree_entity(&record);
     let view = view.filter(|_| !truthy(record.get("deletedAt")));
     let Some(view) = view else {
@@ -1038,7 +1101,9 @@ pub(crate) fn agent_view_documents(
             summary: None,
             detail: None,
             agent: None,
-            retained_worktree,
+            retained_worktree: retained_worktree
+                .map(|value| studio_json::to_raw_value(&value))
+                .transpose()?,
         }));
     };
     let mut summary = project_persisted_record("agentSummary", &view);
@@ -1054,10 +1119,16 @@ pub(crate) fn agent_view_documents(
         }
     }
     Ok(Some(AgentViewDocuments {
-        summary,
-        detail,
-        agent: Some(agent),
-        retained_worktree,
+        summary: summary
+            .map(|value| studio_json::to_raw_value(&value))
+            .transpose()?,
+        detail: detail
+            .map(|value| studio_json::to_raw_value(&value))
+            .transpose()?,
+        agent: Some(studio_json::to_raw_value(&agent)?),
+        retained_worktree: retained_worktree
+            .map(|value| studio_json::to_raw_value(&value))
+            .transpose()?,
     }))
 }
 
@@ -4426,7 +4497,7 @@ mod work_parity_tests {
                 let mut out = BTreeMap::new();
                 for (collection, view) in work_views(&item, &record, refusal, &BTreeMap::new())? {
                     let id = match &view {
-                        WorkView::Entry(entry) => entry["id"].as_str().unwrap().to_owned(),
+                        WorkView::Entry(entry) => entry.id().to_owned(),
                         WorkView::Summary(_) | WorkView::Detail(_) => "w".to_owned(),
                     };
                     out.insert((collection.to_owned(), id), studio_json::to_string(&view)?);

@@ -1,3 +1,4 @@
+import { AgentWorktreePreparation } from "../../generated/api";
 import { AgentStatus } from "../../generated/api";
 import { RetainedWorktree } from "./RetainedWorktrees";
 import { providerLabel } from "../../generated/providerKind.ts";
@@ -208,7 +209,7 @@ const WorkerCardView = memo(function WorkerCardView({
           : awaitingAnswer
             ? "Needs your answer"
             : agent.status === AgentStatus.starting && agent.worktreePreparation
-              ? agent.worktreePreparation === "waiting"
+              ? agent.worktreePreparation === AgentWorktreePreparation["waiting"]
                 ? "Waiting to prepare folder"
                 : "Preparing folder"
               : deferred && agent.status === AgentStatus.approval
