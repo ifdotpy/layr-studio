@@ -314,6 +314,8 @@ impl ProjectsRepository {
                 worker_environment_revision,
                 workspace_policy,
                 workspace_policy_revision,
+                layr_store_root,
+                layr_store_root_revision,
                 location_intents,
                 registration
             );

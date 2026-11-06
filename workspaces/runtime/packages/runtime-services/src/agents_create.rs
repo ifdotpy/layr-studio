@@ -464,6 +464,8 @@ pub(crate) fn ensure_project(
         worker_environment_revision: Field::Missing,
         workspace_policy: Field::Missing,
         workspace_policy_revision: Field::Missing,
+        layr_store_root: Field::Missing,
+        layr_store_root_revision: Field::Missing,
         location_intents: Field::Missing,
         registration: Field::Missing,
     };

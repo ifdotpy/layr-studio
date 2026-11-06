@@ -45,27 +45,27 @@ async fn set_settings(
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let projects = store
         .read_async("native-layr/settings/projects", |db| {
-            studio_runtime_store::ProjectsRepository::list_records(db)
+            studio_runtime_store::ProjectsRepository::owned(db)
         })
         .await
         .map_err(|_| ApiError::internal())?;
+    let local = store.local_server_id().map_err(|_| ApiError::internal())?;
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/native_layr_settings/write",
         move || {
-            let requested = body.store_root.as_deref().filter(|s| !s.is_empty());
+            let requested = body
+                .store_root
+                .as_ref()
+                .and_then(Option::as_deref)
+                .filter(|s| !s.is_empty());
             let default_root = store_path(&state_dir);
             let root = settings::validate_root(
                 &state_dir,
                 requested.map(std::path::Path::new).unwrap_or(&default_root),
             )
             .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
-            for (_, project) in &projects {
-                let project_path = std::path::Path::new(&project.path);
-                if project_path.is_absolute() {
-                    settings::check_project_overlap(root.as_path(), project_path)
-                        .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
-                }
-            }
+            settings::check_projects_overlap(root.as_path(), &projects, local.as_deref())
+                .map_err(|e| ApiError::native_layr_store(e.to_string()))?;
             settings::configure_resolved(&state_dir, &root, requested.is_none()).map_err(|e| {
                 match e {
                     studio_runtime_services::layr_native::NativeLayrError::Refused(_) => {
@@ -133,6 +133,7 @@ pub(super) fn settings_response(
         Err(error) => (None, Some(error.to_string())),
     };
     NativeLayrSettingsResponse {
+        configured: settings::configured_store(state).ok().flatten().is_some(),
         readiness: Some(capability::for_store(state, &root)),
         version,
         store_root,

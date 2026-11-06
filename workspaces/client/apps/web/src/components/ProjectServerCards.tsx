@@ -8,7 +8,6 @@ import {
 } from "../servers/projectLocations";
 import "./project-locations.css";
 import NewChatModelSettings from "./NewChatModelSettings";
-import { defaultSubscriptions } from "../sync/subscriptions/events";
 import type { ServerServices } from "../servers/serverServices";
 import {
   projectAllowsWorktree,
@@ -76,22 +75,6 @@ export default function ProjectServerCards({
     server?.nativeLayr ??
     (fetched?.key === connectionKey ? fetched.nativeLayr : undefined);
   const nativeAvailable = !!nativeLayr && nativeLayr.status !== "notInstalled";
-  const [storeRoot, setStoreRoot] = useState("");
-  const [defaultStore, setDefaultStore] = useState("");
-  useEffect(() => {
-    setStoreRoot("");
-    setDefaultStore("");
-    if (!server || server.disabled) return;
-    const resources =
-      servicesFor?.(selected)?.resources ?? defaultSubscriptions;
-    return resources.watchResourceChanges(
-      { kind: "native-layr-settings" },
-      (version) => {
-        if (version?.nativeLayrSettings)
-          setDefaultStore(version.nativeLayrSettings.storeRoot ?? "");
-      },
-    );
-  }, [connectionKey]);
   const nativeReason =
     server?.nativeLayrMessage ??
     (fetched?.key === connectionKey ? fetched.nativeLayrMessage : undefined);
@@ -246,16 +229,6 @@ export default function ProjectServerCards({
           )}
         </div>
       )}
-      {mode === "layr-native" && (
-        <label>
-          Store directory (optional)
-          <input
-            value={storeRoot}
-            placeholder={defaultStore}
-            onChange={(event) => setStoreRoot(event.currentTarget.value)}
-          />
-        </label>
-      )}
       {platformError && (
         <Text role="alert" c="red">
           {platformError}
@@ -294,9 +267,6 @@ export default function ProjectServerCards({
               {
                 ...models,
                 workspaceMode: mode,
-                ...(mode === "layr-native" && storeRoot.trim()
-                  ? { layrStoreRoot: storeRoot.trim() }
-                  : {}),
               },
             )
           }

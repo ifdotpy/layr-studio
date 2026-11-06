@@ -6,6 +6,8 @@ import {
 } from "@mantine/core";
 import { FolderOpen } from "lucide-react";
 import { useState } from "react";
+import { errorText } from "../api";
+import { useServerFileDialogs } from "../servers/ServerServicesContext";
 import ProjectDirectoryPicker from "./ProjectDirectoryPicker";
 import "./directory-field.css";
 
@@ -28,6 +30,8 @@ export default function DirectoryField({
   ...input
 }: Props) {
   const [choosing, setChoosing] = useState(false);
+  const [error, setError] = useState("");
+  const { canPickDirectory, pickDirectory } = useServerFileDialogs();
   return (
     <>
       <TextInput
@@ -45,13 +49,25 @@ export default function DirectoryField({
               aria-label={`Choose ${label.toLowerCase()}`}
               title="Choose a folder"
               disabled={!!disabled}
-              onClick={() => setChoosing(true)}
+              onClick={() => {
+                if (!canPickDirectory()) {
+                  setChoosing(true);
+                  return;
+                }
+                setError("");
+                void pickDirectory()
+                  .then((path) => {
+                    if (path) onChange(path);
+                  })
+                  .catch((failure) => setError(errorText(failure)));
+              }}
             >
               <FolderOpen size={16} />
             </ActionIcon>
           )
         }
       />
+      {error && <p role="alert">{error}</p>}
       <Modal
         opened={choosing}
         onClose={() => setChoosing(false)}
