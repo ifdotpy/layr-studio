@@ -59,7 +59,7 @@ test("composer keeps one tools row and readable mixed-provider execution summary
       workerDefaults: {
         model: "gpt-6.1-sol",
         effort: "medium",
-        accountKey: "default",
+        fastMode: false,
       },
     } as PartialSettingsFixture);
     const { workspaceId } = await fixtureGetResult(

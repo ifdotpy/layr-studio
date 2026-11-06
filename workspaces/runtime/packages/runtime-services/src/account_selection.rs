@@ -44,17 +44,6 @@ impl SelectionSnapshot {
     ) -> Result<Value, TransferError> {
         let mut agent = self.agent.clone();
         let truthy = crate::event_write::truthy;
-        if agent
-            .get("excludedAccountKeys")
-            .and_then(Value::as_array)
-            .is_some_and(|keys| {
-                keys.iter().all(Value::is_string) && keys.iter().any(|key| key == target)
-            })
-        {
-            return Err(TransferError::Refused(
-                "This account is disabled for this chat",
-            ));
-        }
         let source = agent
             .get("accountKey")
             .and_then(Value::as_str)

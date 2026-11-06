@@ -286,7 +286,7 @@ function assertDesiredAgent(
   agent: AgentEntityDto,
   id: string,
   leadAccountKey: string,
-  workerAccountKey: string,
+  _workerAccountKey: string,
 ) {
   assert.equal(agent?.id, id, "Server returned another chat identity.");
   assert.equal(agent?.isLead, true, "Created chat is not a lead.");
@@ -301,11 +301,7 @@ function assertDesiredAgent(
     LEAD_MODEL,
     "Lead model is not the default Claude model.",
   );
-  assert.equal(
-    agent?.workerDefaults?.accountKey,
-    workerAccountKey,
-    "Worker account does not match the requested account.",
-  );
+  assert.ok(!agent?.workerDefaults || !("accountKey" in agent.workerDefaults));
   assert.equal(
     agent?.workerDefaults?.model,
     WORKER_MODEL,
@@ -862,33 +858,6 @@ async function main() {
       exact: true,
     });
     await roles.getByRole("button", { name: "Worker", exact: true }).click();
-    const workerAccount = subagentDialog.getByRole("group", {
-      name: "Subagent account",
-      exact: true,
-    });
-    await workerAccount
-      .getByLabel("Subagent account provider", { exact: true })
-      .locator("label")
-      .filter({ hasText: "Codex" })
-      .click();
-    const codexAccount = workerAccount.locator(
-      `[data-account-key="${workerAccountKey}"]`,
-    );
-    assert.equal(
-      await codexAccount.count(),
-      1,
-      "Default Codex account tile is missing or duplicated.",
-    );
-    await codexAccount.click();
-    const selectedCodexAccount = workerAccount.locator(
-      `[data-account-key="${workerAccountKey}"][aria-pressed="true"]`,
-    );
-    await selectedCodexAccount.waitFor();
-    assert.equal(
-      await selectedCodexAccount.getAttribute("aria-pressed"),
-      "true",
-      "Worker account is not pinned to Default.",
-    );
     const workerModel = subagentDialog.getByRole("listbox", {
       name: "Default subagent model",
       exact: true,

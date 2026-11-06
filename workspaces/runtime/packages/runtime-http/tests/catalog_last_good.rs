@@ -143,7 +143,6 @@ impl Fixture {
             .select_worker_account(WorkerAccountRequest {
                 parent_account_key: ACCOUNT,
                 requested_account_key: Some(ACCOUNT),
-                default_account_key: None,
                 model,
                 excluded_account_keys: &[],
                 project_account_keys: None,

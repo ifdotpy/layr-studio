@@ -4351,10 +4351,7 @@ mod tests {
             record.worker_defaults.value(),
             Some(super::StoredWorkerDefaults::Known(_))
         ));
-        assert_eq!(
-            record.value().get("workerDefaults"),
-            Some(&json!({"accountKey":"source"}))
-        );
+        assert_eq!(record.value().get("workerDefaults"), Some(&json!({})));
     }
 
     #[test]

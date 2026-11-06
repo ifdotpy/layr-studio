@@ -124,6 +124,8 @@ pub struct CreationIntent {
         skip_serializing_if = "Option::is_none"
     )]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_account_keys: Option<Vec<String>>,
     #[serde(
         rename = "layrStoreRoot",
         default,
@@ -275,6 +277,7 @@ pub struct WorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    /// Historical request identity only; new requests must leave this missing.
     pub account_key: Field<String>,
     #[serde(
         default,
@@ -288,6 +291,7 @@ pub struct WorkerDefaults {
 #[serde(deny_unknown_fields)]
 pub struct ReviewDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    /// Historical request identity only; new requests must leave this missing.
     pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub model: Field<String>,
@@ -321,6 +325,13 @@ mod tests {
         let absent: CreationIntent = studio_json::from_str("{}").unwrap();
         let cleared: CreationIntent = studio_json::from_str(r#"{"effort":null}"#).unwrap();
         assert_ne!(absent, cleared);
+    }
+
+    #[test]
+    fn historical_account_defaults_preserve_request_identity_bytes() {
+        let raw = r#"{"review_defaults":{"account_key":"reviewer","model":"gpt-6-astra","effort":"high"},"worker_defaults":{"model":"gpt-6-luna","effort":"high","fast_mode":false,"account_key":"worker"}}"#;
+        let intent: CreationIntent = studio_json::from_str(raw).unwrap();
+        assert_eq!(studio_json::to_string(&intent).unwrap(), raw);
     }
 
     #[test]

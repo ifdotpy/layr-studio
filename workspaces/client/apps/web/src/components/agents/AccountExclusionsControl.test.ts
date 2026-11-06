@@ -1,54 +1,53 @@
-import { required } from "../componentTestFixtures";
-import assert from "node:assert/strict";
-import { it } from "vitest";
-import { MantineProvider } from "@mantine/core";
 import { createElement } from "react";
+import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AccountExclusionsControl } from "./AccountExclusionsControl.tsx";
-import { theme } from "../../theme";
+import { expect, test, vi } from "vitest";
+import NewChatModelSettings from "../NewChatModelSettings";
 
-it("lists chat account exclusions as toggles, leaving new accounts enabled", () => {
-  const html = renderToStaticMarkup(
+const chooser = vi.hoisted(() => vi.fn());
+vi.mock("./ExecutionSettings", () => ({
+  ExecutionSettings: (props: unknown) => {
+    chooser(props);
+    return null;
+  },
+  settingsFor: () => ({
+    model: null,
+    effort: null,
+    fast_mode: false,
+    daybreak_enabled: false,
+  }),
+}));
+vi.mock("./WorkerModelPicker", async (load) => ({
+  ...(await load<typeof import("./WorkerModelPicker")>()),
+  useWorkerModels: () => ({
+    models: [],
+    loading: false,
+    error: "",
+    retry: () => {},
+  }),
+}));
+vi.mock("../models/modelChoices", () => ({
+  useModelChoices: () => ({}),
+  isModelEnabled: () => true,
+}));
+
+test("new chat renders the shared chooser with lead and exclusion handlers", () => {
+  renderToStaticMarkup(
     createElement(
       MantineProvider,
-      { theme },
-      createElement(AccountExclusionsControl, {
-        lead: {
-          id: "lead",
-          provider: "codex",
-          isLead: true,
-          accountKey: "enabled",
-          excludedAccountKeys: ["disabled"],
-        } as never,
-        accounts: {
-          accounts: [
-            {
-              id: "disabled",
-              provider: "codex",
-              label: "Disabled",
-              email: "a@example.test",
-            },
-            {
-              id: "enabled",
-              provider: "codex",
-              label: "Enabled",
-              email: "b@example.test",
-            },
-          ],
-        } as never,
-        refresh: async () => {},
-        onError: () => {},
+      null,
+      createElement(NewChatModelSettings, {
+        projectId: "p",
+        path: "/project",
+        onChange: () => {},
       }),
     ),
   );
-  assert.match(html, /Accounts enabled for this chat/);
-  assert.match(html, /Disabled/);
-  assert.match(html, /Enabled/);
-  assert.match(html, /Current account/);
-  assert.match(html, /New accounts are enabled by default/);
-  const checkboxes = html.match(/<input[^>]*type="checkbox"[^>]*>/g) || [];
-  assert.equal(checkboxes.length, 2);
-  assert.doesNotMatch(required(checkboxes[0]), /checked/);
-  assert.match(required(checkboxes[1]), /checked/);
-  assert.match(required(checkboxes[1]), /disabled/);
+  expect(chooser).toHaveBeenCalledWith(
+    expect.objectContaining({
+      excludedAccountKeys: [],
+      onExcludedAccountKeysChange: expect.any(Function),
+      onAccountChange: expect.any(Function),
+    }),
+  );
 });

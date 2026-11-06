@@ -36,14 +36,14 @@ fn worker_defaults(value: &generated::WorkerDefaults) -> WorkerDefaults {
         effort: value.effort.clone(),
         fast_mode: value.fast_mode,
         daybreak_enabled: nullable_field!(value.daybreak_enabled),
-        account_key: nullable_field!(value.account_key.clone()),
+        account_key: Field::Missing,
         delegation_depth: value.delegation_depth,
     }
 }
 
 fn review_defaults(value: &generated::ReviewDefaults) -> ReviewDefaults {
     ReviewDefaults {
-        account_key: nullable_field!(value.account_key.clone()),
+        account_key: Field::Missing,
         model: value.model.clone().map_or(Field::Null, Field::Value),
         effort: value.effort.clone().map_or(Field::Null, Field::Value),
         fast_mode: value.fast_mode,
@@ -54,6 +54,7 @@ fn lead_intent(body: &generated::CreateLeadRequest) -> CreationIntent {
     CreationIntent {
         account_key: body.account_key.clone(),
         cwd: body.cwd.clone(),
+        excluded_account_keys: body.excluded_account_keys.clone(),
         layr_store_root: body.layr_store_root.clone(),
         daybreak_enabled: nullable_field!(body.daybreak_enabled),
         effort: match &body.effort {
@@ -351,6 +352,24 @@ mod workspace_admission_tests {
         }))
         .unwrap();
         assert!(prepare_parent_workspace(&parent).is_err());
+    }
+
+    #[test]
+    fn lead_request_refuses_multiple_accounts() {
+        assert!(
+            studio_json::from_str::<generated::CreateLeadRequest>(r#"{"account_key":["a","b"]}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn lead_request_keeps_chat_exclusions_in_creation_identity() {
+        let request: generated::CreateLeadRequest =
+            studio_json::from_str(r#"{"account_key":"lead","excluded_account_keys":["lead"]}"#)
+                .unwrap();
+        let intent = lead_intent(&request);
+        assert_eq!(intent.account_key.as_deref(), Some("lead"));
+        assert_eq!(intent.excluded_account_keys, Some(vec!["lead".into()]));
     }
 
     #[test]
@@ -869,25 +888,6 @@ async fn conversation_catalog_account(
     .map_err(operation_error)
 }
 
-async fn conversation_worker_catalog_account(
-    state: &HttpState,
-    id: String,
-    expected_account: Option<String>,
-) -> Result<Option<String>, ApiError> {
-    let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let context = Context {
-        store,
-        accounts: state.account_policy.as_deref(),
-        driver: state.account_driver.clone(),
-        catalog: None,
-        managed_creation_environment: None,
-        validate: validation_callback(state),
-    };
-    agents_create::conversation_worker_account_key(&context, &id, expected_account.as_deref())
-        .await
-        .map_err(operation_error)
-}
-
 async fn create_lead(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<generated::CreateLeadRequest>,
@@ -947,54 +947,43 @@ async fn create_lead_with_model(
         AgentCatalogWaitRequest {
             parent_id: None,
             preferred_parent_account: None,
+            draft_excluded: None,
             requested_account: catalog_account.as_deref(),
             requested_model,
             needs_catalog,
-            ignore_stored_worker_account: false,
+            ignore_stored_worker_model: false,
             require_model_match: requested_model.is_some(),
         },
     )
     .await?;
     if let Some(Some(defaults)) = body.worker_defaults.as_ref() {
         let worker_model = defaults.model.as_deref().or(requested_model);
-        let worker_account = defaults.account_key.as_ref().and_then(Option::as_deref);
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
                 parent_id: None,
                 preferred_parent_account: catalog_account.as_deref(),
-                requested_account: worker_account,
+                draft_excluded: body.excluded_account_keys.as_deref(),
+                requested_account: None,
                 requested_model: worker_model,
                 needs_catalog: true,
-                ignore_stored_worker_account: true,
+                ignore_stored_worker_model: true,
                 require_model_match: true,
             },
         )
         .await?;
     }
     if let Some(Some(review)) = body.review_defaults.as_ref() {
-        let review_account = body
-            .review_defaults
-            .as_ref()
-            .and_then(Option::as_ref)
-            .and_then(|defaults| defaults.account_key.as_ref())
-            .and_then(Option::as_deref)
-            .or_else(|| {
-                body.worker_defaults
-                    .as_ref()
-                    .and_then(Option::as_ref)
-                    .and_then(|defaults| defaults.account_key.as_ref())
-                    .and_then(Option::as_deref)
-            });
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
                 parent_id: None,
                 preferred_parent_account: catalog_account.as_deref(),
-                requested_account: review_account,
+                draft_excluded: body.excluded_account_keys.as_deref(),
+                requested_account: None,
                 requested_model: review.model.as_deref(),
                 needs_catalog: true,
-                ignore_stored_worker_account: true,
+                ignore_stored_worker_model: true,
                 require_model_match: review.model.is_some(),
             },
         )
@@ -1058,10 +1047,11 @@ async fn create_agent(
             AgentCatalogWaitRequest {
                 parent_id: None,
                 preferred_parent_account: None,
+                draft_excluded: None,
                 requested_account: admission.account.as_deref().or(request.account.as_deref()),
                 requested_model: admission.model.as_deref(),
                 needs_catalog: admission.needs_catalog,
-                ignore_stored_worker_account: false,
+                ignore_stored_worker_model: false,
                 require_model_match: admission.model.is_some(),
             },
         )
@@ -1108,10 +1098,11 @@ fn catalog_admission_candidates(
 struct AgentCatalogWaitRequest<'a> {
     parent_id: Option<&'a str>,
     preferred_parent_account: Option<&'a str>,
+    draft_excluded: Option<&'a [String]>,
     requested_account: Option<&'a str>,
     requested_model: Option<&'a str>,
     needs_catalog: bool,
-    ignore_stored_worker_account: bool,
+    ignore_stored_worker_model: bool,
     require_model_match: bool,
 }
 
@@ -1119,7 +1110,6 @@ struct AgentCatalogWaitRequest<'a> {
 #[derive(Default)]
 struct StoredParentDefaults {
     parent_account: Option<String>,
-    selected_account: Option<String>,
     root_model: Option<String>,
     worker_model: Option<String>,
     excluded: std::collections::HashSet<String>,
@@ -1129,7 +1119,7 @@ struct StoredParentDefaults {
 fn stored_parent_defaults(
     connection: &studio_runtime_store::Connection,
     parent_id: &str,
-    ignore_stored_worker_account: bool,
+    ignore_stored_worker_model: bool,
 ) -> studio_runtime_store::StoreResult<Option<StoredParentDefaults>> {
     let Some(parent) =
         studio_runtime_store::WorkspaceViewsRepository::agent(connection, parent_id)?
@@ -1143,11 +1133,7 @@ fn stored_parent_defaults(
     let root =
         studio_runtime_store::system_reads::get(connection, "runtime_agents", &parent.root_id.0)?
             .unwrap_or_else(|| parent.value());
-    if !ignore_stored_worker_account {
-        defaults.selected_account = root
-            .pointer("/workerDefaults/accountKey")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+    if !ignore_stored_worker_model {
         defaults.worker_model = root
             .pointer("/workerDefaults/model")
             .and_then(Value::as_str)
@@ -1223,7 +1209,8 @@ async fn wait_for_agent_catalog(
     let requested_account = request.requested_account.map(str::to_owned);
     let requested_model = request.requested_model.map(str::to_owned);
     let preferred_parent_account = request.preferred_parent_account.map(str::to_owned);
-    let ignore_stored_worker_account = request.ignore_stored_worker_account;
+    let draft_excluded = request.draft_excluded.unwrap_or_default().to_vec();
+    let ignore_stored_worker_model = request.ignore_stored_worker_model;
     let require_model_match = request.require_model_match;
     let candidate_data = tokio::time::timeout_at(deadline, async move {
         let stored = match parent_id {
@@ -1231,7 +1218,7 @@ async fn wait_for_agent_catalog(
                 let store = store.ok_or(())?;
                 store
                     .read_async("runtime-http/routes/agents_create", move |tx| {
-                        stored_parent_defaults(tx, &parent_id, ignore_stored_worker_account)
+                        stored_parent_defaults(tx, &parent_id, ignore_stored_worker_model)
                     })
                     .await
                     .map_err(|_| ())?
@@ -1248,11 +1235,11 @@ async fn wait_for_agent_catalog(
                 let snapshot = driver.listing_snapshot().map_err(|_| ())?;
                 let StoredParentDefaults {
                     parent_account,
-                    selected_account,
                     root_model,
                     worker_model,
-                    excluded,
+                    mut excluded,
                 } = stored;
+                excluded.extend(draft_excluded);
                 let explicit_account = requested_account.is_some();
                 let explicit = requested_account;
                 let model = requested_model
@@ -1260,7 +1247,7 @@ async fn wait_for_agent_catalog(
                     .or(root_model)
                     .unwrap_or_else(|| "gpt-6-astra".to_owned());
                 let provider = model_provider(&model);
-                let pinned = explicit.or(selected_account);
+                let pinned = explicit;
                 let mut keys = Vec::new();
                 let mut add = |key: Option<&str>, expected_provider: Option<ProviderKind>| {
                     if let Some(key) = key.filter(|key| !excluded.contains(*key))
@@ -1515,10 +1502,11 @@ async fn conversation(
         AgentCatalogWaitRequest {
             parent_id,
             preferred_parent_account: None,
+            draft_excluded: None,
             requested_account: catalog_account.as_deref(),
             requested_model,
             needs_catalog: needs_conversation_catalog,
-            ignore_stored_worker_account: false,
+            ignore_stored_worker_model: false,
             require_model_match: requested_model.is_some(),
         },
     )
@@ -1527,17 +1515,17 @@ async fn conversation(
         // Python resolves worker_defaults against settings_catalog after the
         // target account is known (`codex_runtime.py:5484-5486`).
         let worker_model = defaults.model.as_deref();
-        let worker_account = worker_settings_catalog_account(defaults);
-        if worker_model.is_some() || worker_account.is_some() {
+        if worker_model.is_some() {
             wait_for_agent_catalog(
                 &state,
                 AgentCatalogWaitRequest {
                     parent_id: Some(&request.id),
                     preferred_parent_account: None,
-                    requested_account: worker_account.as_deref(),
+                    draft_excluded: None,
+                    requested_account: None,
                     requested_model: worker_model,
                     needs_catalog: true,
-                    ignore_stored_worker_account: true,
+                    ignore_stored_worker_model: true,
                     require_model_match: true,
                 },
             )
@@ -1545,30 +1533,6 @@ async fn conversation(
         }
     }
     if request.review_defaults.is_some() {
-        // Runtime.update calls settings_catalog for review defaults even when
-        // model is null; its account comes from supplied worker_defaults or
-        // the target's stored worker account (`codex_runtime.py:5487-5491`).
-        let stored_worker_account = if request.worker_defaults.is_none() {
-            conversation_worker_catalog_account(
-                &state,
-                request.id.clone(),
-                request.expected_account.clone(),
-            )
-            .await?
-        } else {
-            None
-        };
-        let review_account = request
-            .review_defaults
-            .as_ref()
-            .and_then(|defaults| defaults.account_key.value())
-            .cloned()
-            .or_else(|| {
-                review_settings_catalog_account(
-                    request.worker_defaults.as_ref(),
-                    stored_worker_account.as_deref(),
-                )
-            });
         let review_model = request
             .review_defaults
             .as_ref()
@@ -1579,10 +1543,11 @@ async fn conversation(
             AgentCatalogWaitRequest {
                 parent_id: Some(&request.id),
                 preferred_parent_account: None,
-                requested_account: review_account.as_deref(),
+                draft_excluded: None,
+                requested_account: None,
                 requested_model: review_model,
                 needs_catalog: true,
-                ignore_stored_worker_account: true,
+                ignore_stored_worker_model: true,
                 require_model_match: review_model.is_some(),
             },
         )
@@ -1729,18 +1694,7 @@ fn conversation_needs_catalog(body: &generated::ConversationRequest) -> bool {
 }
 
 fn conversation_settings_need_conversation_account(body: &generated::ConversationRequest) -> bool {
-    body.review_defaults.is_some()
-        || body
-            .worker_defaults
-            .as_ref()
-            .and_then(Option::as_ref)
-            .is_some_and(|defaults| {
-                defaults
-                    .account_key
-                    .as_ref()
-                    .and_then(Option::as_ref)
-                    .is_none()
-            })
+    body.review_defaults.is_some() || body.worker_defaults.is_some()
 }
 
 fn catalog_cwd_for_conversation(
@@ -2062,20 +2016,6 @@ mod creation_catalog_flow_tests {
     }
 }
 
-fn worker_settings_catalog_account(defaults: &WorkerDefaults) -> Option<String> {
-    defaults.account_key.value().cloned()
-}
-
-fn review_settings_catalog_account(
-    request_worker_defaults: Option<&WorkerDefaults>,
-    stored_worker_account: Option<&str>,
-) -> Option<String> {
-    request_worker_defaults.map_or_else(
-        || stored_worker_account.map(str::to_owned),
-        worker_settings_catalog_account,
-    )
-}
-
 #[cfg(test)]
 mod stale_revision_tests {
     use super::operation_error;
@@ -2097,24 +2037,9 @@ mod stale_revision_tests {
 
 #[cfg(test)]
 mod conversation_catalog_admission_tests {
-    use super::{
-        catalog_cwd_for_conversation, conversation_needs_catalog,
-        conversation_settings_need_conversation_account, review_settings_catalog_account,
-        worker_settings_catalog_account,
-    };
+    use super::{catalog_cwd_for_conversation, conversation_needs_catalog};
     use studio_json::json;
-    use studio_runtime_schema::{creation_intent::WorkerDefaults, queue_command::Field};
-
-    fn typed_defaults(account_key: Field<String>) -> WorkerDefaults {
-        WorkerDefaults {
-            account_key,
-            model: None,
-            effort: None,
-            fast_mode: false,
-            daybreak_enabled: Field::Missing,
-            delegation_depth: None,
-        }
-    }
+    use studio_runtime_schema::queue_command::Field;
 
     fn parse_request(mut value: studio_json::Value) -> crate::generated::ConversationRequest {
         value["id"] = json!("agent");
@@ -2164,7 +2089,6 @@ mod conversation_catalog_admission_tests {
     fn worker_defaults_only_update_does_not_require_conversation_catalog() {
         assert!(!conversation_needs_catalog(&parse_request(json!({
             "worker_defaults": {
-                "account_key": "worker-account",
                 "model": "gpt-6-luna", "effort": null, "fast_mode": false
             }
         }))));
@@ -2174,78 +2098,6 @@ mod conversation_catalog_admission_tests {
         assert!(conversation_needs_catalog(&parse_request(
             json!({"model": "gpt-6-astra"})
         )));
-    }
-
-    #[test]
-    fn review_defaults_admission_uses_the_effective_worker_account() {
-        let request = json!({
-            "review_defaults": {"model": "gpt-6-astra", "effort": "medium"}
-        });
-        assert!(conversation_settings_need_conversation_account(
-            &parse_request(request.clone())
-        ));
-        assert!(!conversation_needs_catalog(&parse_request(request)));
-        assert_eq!(
-            review_settings_catalog_account(None, Some("worker-account")).as_deref(),
-            Some("worker-account")
-        );
-        assert_eq!(
-            review_settings_catalog_account(
-                Some(&typed_defaults(Field::Value("selected-worker".into()))),
-                Some("stored-worker")
-            )
-            .as_deref(),
-            Some("selected-worker")
-        );
-        assert_eq!(
-            review_settings_catalog_account(Some(&typed_defaults(Field::Null)), None),
-            None
-        );
-        assert_eq!(review_settings_catalog_account(None, None), None);
-    }
-
-    #[test]
-    fn lead_worker_and_review_catalogs_follow_the_selected_worker_account() {
-        let worker = typed_defaults(Field::Value("default".into()));
-        let worker_account = worker_settings_catalog_account(&worker);
-        assert_eq!(worker_account.as_deref(), Some("default"));
-        assert_eq!(
-            review_settings_catalog_account(Some(&worker), None).as_deref(),
-            Some("default")
-        );
-    }
-
-    #[test]
-    fn unpinned_worker_defaults_admission_uses_automatic_account_selection() {
-        for (account_key, typed_key) in [(None, Field::Missing), (Some(json!(null)), Field::Null)] {
-            let mut defaults = json!({"model": null, "effort": null, "fast_mode": false});
-            if let Some(account_key) = account_key {
-                defaults["account_key"] = account_key;
-            }
-            assert!(conversation_settings_need_conversation_account(
-                &parse_request(json!({
-                    "worker_defaults": defaults
-                }))
-            ));
-            assert_eq!(
-                worker_settings_catalog_account(&typed_defaults(typed_key)),
-                None
-            );
-        }
-        let request = json!({
-            "worker_defaults": {
-                "account_key": "worker-account",
-                "model": "gpt-6-luna", "effort": null, "fast_mode": false
-            }
-        });
-        assert!(!conversation_settings_need_conversation_account(
-            &parse_request(request)
-        ));
-        assert_eq!(
-            worker_settings_catalog_account(&typed_defaults(Field::Value("worker-account".into())))
-                .as_deref(),
-            Some("worker-account")
-        );
     }
 
     #[test]

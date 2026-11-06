@@ -384,11 +384,7 @@ function assertDesiredDefaults(
     workerDefaults && typeof workerDefaults === "object",
     "Worker defaults are missing from the authoritative snapshot.",
   );
-  assert.equal(
-    workerDefaults.accountKey ?? null,
-    null,
-    "Worker account is pinned; expected Automatic.",
-  );
+  assert.ok(!("accountKey" in workerDefaults));
   assert.equal(
     workerDefaults.model,
     WORKER_MODEL,
@@ -419,11 +415,7 @@ function assertWritePreflight(
     workerDefaults && typeof workerDefaults === "object",
     "Worker defaults are missing from the authoritative snapshot.",
   );
-  assert.equal(
-    workerDefaults.accountKey ?? null,
-    null,
-    "Worker account is already pinned; verifier will not change it.",
-  );
+  assert.ok(!("accountKey" in workerDefaults));
   assert.equal(
     workerDefaults.effort,
     WORKER_EFFORT,
@@ -469,21 +461,10 @@ function expectedRequest(
   );
   assert.deepEqual(
     Object.keys(defaults).sort(),
-    [
-      "account_key",
-      "daybreak_enabled",
-      "delegation_depth",
-      "effort",
-      "fast_mode",
-      "model",
-    ],
+    ["daybreak_enabled", "delegation_depth", "effort", "fast_mode", "model"],
     "Settings request has unexpected worker-default fields.",
   );
-  assert.equal(
-    defaults.account_key,
-    null,
-    "Settings request pins a worker account.",
-  );
+  assert.ok(!("account_key" in defaults));
   assert.equal(
     defaults.model,
     WORKER_MODEL,

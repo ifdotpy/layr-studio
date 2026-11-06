@@ -805,7 +805,7 @@ fn unavailable_provider_model_list_names_the_missing_dependency() {
             request: crate::provider_callbacks::WorkerAccountRequest {
                 parent_account_key: "primary",
                 requested_account_key: None,
-                default_account_key: None,
+
                 model: "gpt-5",
                 excluded_account_keys: &[],
                 project_account_keys: None,
@@ -2145,32 +2145,24 @@ impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnviron
         let crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key,
             requested_account_key,
-            default_account_key,
             model,
             excluded_account_keys,
             project_account_keys,
             ..
         } = request;
-        if requested_account_key
-            .is_some_and(|key| default_account_key.is_some_and(|default| default != key))
-        {
-            return Err(
-                crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
-                    "Worker account differs from team defaults",
-                ),
-            );
-        }
-        let key = requested_account_key
-            .or(default_account_key)
-            .unwrap_or_else(|| {
-                if model.starts_with("claude") {
-                    "test-claude"
-                } else if model == "gpt-6-luna" {
-                    "alternate"
-                } else {
-                    parent_account_key
-                }
-            });
+        let key = requested_account_key.unwrap_or_else(|| {
+            if model.starts_with("claude") {
+                "test-claude"
+            } else if model == "gpt-6-luna"
+                || excluded_account_keys
+                    .iter()
+                    .any(|key| key == parent_account_key)
+            {
+                "alternate"
+            } else {
+                parent_account_key
+            }
+        });
         if excluded_account_keys.iter().any(|excluded| excluded == key)
             || project_account_keys.is_some_and(|keys| {
                 !keys.is_empty() && !keys.iter().any(|candidate| candidate == key)
@@ -2564,8 +2556,8 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
         ),
         (
             "explicit-review-account",
-            json!({}),
-            json!({"model":"gpt-6-astra","effort":"high","accountKey":"alternate"}),
+            json!({"account_key":"alternate"}),
+            json!({"model":"gpt-6-astra","effort":"high"}),
             "gpt-6-astra",
             Some("high"),
             true,
@@ -2604,7 +2596,6 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
                 } else {
                     vec![]
                 });
-                parent["workerDefaults"]["accountKey"] = json!("default");
                 parent["workerDefaults"]["fastMode"] = json!(true);
                 if defaults.is_null() {
                     parent.as_object_mut().unwrap().remove("reviewDefaults");
@@ -2634,10 +2625,7 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             if tool == "orchestration_spawn"
                 && matches!(
                     label,
-                    "claude-review-default"
-                        | "claude-lead"
-                        | "explicit-review-account"
-                        | "caller-account"
+                    "claude-review-default" | "claude-lead" | "caller-account"
                 )
             {
                 continue;
@@ -2707,7 +2695,7 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             assert_eq!(child["provider"], expected_provider, "{label}/{tool}");
             let expected_account = match label {
                 "claude-review-default" => "test-claude",
-                "explicit-review-account" => "alternate",
+                "caller-account" | "explicit-review-account" | "implementer" => "alternate",
                 _ => "default",
             };
             assert_eq!(child["accountKey"], expected_account, "{label}/{tool}");
@@ -3033,7 +3021,7 @@ async fn review_selects_an_account_that_offers_the_model() {
         .unwrap()
         .unwrap()
         .value();
-    value["reviewDefaults"] = json!({"model":"gpt-6-luna","accountKey":null});
+    value["reviewDefaults"] = json!({"model":"gpt-6-luna"});
     let saved = value.clone();
     store
         .transaction(move |tx| AgentRepository::put(tx, &AgentRecord::from_value(saved)?))
@@ -3063,14 +3051,13 @@ async fn review_selects_an_account_that_offers_the_model() {
 }
 
 #[tokio::test]
-async fn spawned_reviewer_prefers_caller_over_worker_default() {
+async fn spawned_reviewer_prefers_eligible_caller() {
     let (_state, _repo, store, _id, base) = spawned_git_review().await;
     let mut value = AgentRepository::get(&store.test_reader().unwrap(), &AgentId::from(LEAD))
         .unwrap()
         .unwrap()
         .value();
-    value["workerDefaults"]["accountKey"] = json!("alternate");
-    value["reviewDefaults"] = json!({"model":"gpt-6-astra","accountKey":null});
+    value["reviewDefaults"] = json!({"model":"gpt-6-astra"});
     let head = run_git_output(
         std::path::Path::new(value["cwd"].as_str().unwrap()),
         &["rev-parse", "HEAD"],
@@ -3622,7 +3609,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     assert_eq!(child["nativeReview"]["status"], "ordinaryTurn");
     assert_eq!(child["reviewAssignment"]["head"], head_commit);
     assert_eq!(child["nativeReview"]["sourceCwd"], json!(project_path));
-    assert_eq!(child["accountKey"], "default");
+    assert_eq!(child["accountKey"], "alternate");
     drop(read);
 
     let root_id = context.agent.clone();
@@ -3631,7 +3618,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
             let mut root = AgentRepository::get(tx, &AgentId::from(root_id.as_str()))?
                 .unwrap()
                 .value();
-            root["reviewDefaults"] = json!({"model":null,"accountKey":"alternate"});
+            root["reviewDefaults"] = json!({"model":null});
             AgentRepository::put(tx, &AgentRecord::from_value(root).unwrap())
         })
         .await
@@ -3663,6 +3650,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         .unwrap()
         .unwrap()
         .value();
+    // The chat exclusion remains effective for subsequent review requests.
     assert_eq!(child["accountKey"], "alternate");
     drop(read);
 
@@ -4687,38 +4675,25 @@ async fn null_and_absent_model_select_the_same_provider_default() {
 }
 
 #[tokio::test]
-async fn reviewer_account_selection_respects_precedence() {
+async fn reviewer_account_selection_uses_eligible_resolver() {
     let (_dir, store, _) = fixture().await;
     let load = std::collections::HashMap::new();
     let spec = studio_runtime_schema::creation_intent::CreationIntent::default();
-    for (review, explicit, expected) in [
-        (Some("alternate"), None, "alternate"),
-        (None, None, "default"),
-        (Some("alternate"), Some("default"), "default"),
-    ] {
-        let review_json = if review.is_some() {
-            "\"alternate\""
-        } else {
-            "null"
-        };
-        let root: AgentRecord = studio_json::from_str(&format!(
-            r#"{{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","workerDefaults":{{"accountKey":"default"}},"reviewDefaults":{{"model":"gpt-6-astra","accountKey":{review_json}}}}}"#
-        )).expect("typed reviewer fixture");
-        let settings = crate::managed_child_create::resolve_worker_settings(
-            &store,
-            &CreationEnvironment,
-            crate::managed_child_create::WorkerSettingsRequest {
-                parent: &root,
-                root: &root,
-                spec: &spec,
-                profile: None,
-                role: "reviewer",
-                requested_account_key: explicit,
-                account_load: &load,
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(settings.account_key, expected);
-    }
+    let root: AgentRecord = studio_json::from_str(r#"{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","excludedAccountKeys":["default"],"workerDefaults":{},"reviewDefaults":{"model":"gpt-6-luna"}}"#).unwrap();
+    let settings = crate::managed_child_create::resolve_worker_settings(
+        &store,
+        &CreationEnvironment,
+        crate::managed_child_create::WorkerSettingsRequest {
+            parent: &root,
+            root: &root,
+            spec: &spec,
+            profile: None,
+            role: "reviewer",
+            requested_account_key: None,
+            account_load: &load,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(settings.account_key, "alternate");
 }

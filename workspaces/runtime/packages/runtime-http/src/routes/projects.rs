@@ -295,7 +295,6 @@ fn radio_create_error(error: CreateError) -> ProjectsError {
         | CreateError::BaseUnresolved
         | CreateError::ModelUnavailable
         | CreateError::Stale
-        | CreateError::CurrentAccountExcluded
         | CreateError::InFlight => {
             ProjectsError::Invalid("radio participant creation was rejected")
         }

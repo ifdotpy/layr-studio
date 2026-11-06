@@ -30,11 +30,7 @@ export function ExecutionSummaryTrigger({
   const main = settingsFor(agent, false);
   const defaults = settingsFor(root, true);
   const catalog = useWorkerModels(agent.accountKey || "default", true);
-  const workers = useWorkerModels(
-    defaults.account_key || root.accountKey || "default",
-    true,
-    !defaults.account_key,
-  );
+  const workers = useWorkerModels(root.accountKey || "default", true, true);
   const summary = (
     model: string | null | undefined,
     effort: string | null | undefined,
@@ -112,7 +108,7 @@ export function ExecutionSummaryTrigger({
         ({ label, value, fast }) =>
           (value
             ? `${label} ${value.name} ${value.effort} (${value.provider})`.trim()
-            : `${label} same as caller`) + (fast ? " Fast" : ""),
+            : `${label} uses caller’s model`) + (fast ? " Fast" : ""),
       )
       .join("; ");
   return (
@@ -137,7 +133,9 @@ export function ExecutionSummaryTrigger({
             {value ? (
               <span className="execution-model">{value.name}</span>
             ) : (
-              <span className="execution-inherited-label">Same as caller</span>
+              <span className="execution-inherited-label">
+                Use caller’s model
+              </span>
             )}
             {fast && <span className="execution-effort">Fast</span>}
           </span>

@@ -139,6 +139,7 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
     null,
   );
   const [accountKey, setAccountKey] = useState("");
+  const [excludedAccountKeys, setExcludedAccountKeys] = useState<string[]>([]);
   const [settings, setSettings] = useState<
     Omit<NewChatSettings, "workspaceMode">
   >({});
@@ -218,11 +219,9 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
         worker?.effort === undefined ? defaultWorker.effort : worker.effort,
       fastMode: !!worker?.fast_mode,
       daybreakEnabled: !!worker?.daybreak_enabled,
-      accountKey: worker?.account_key,
     },
     reviewDefaults: settings.review_defaults
       ? {
-          accountKey: settings.review_defaults.account_key,
           model: settings.review_defaults.model,
           effort: settings.review_defaults.effort,
           ...(settings.review_defaults.fast_mode !== undefined
@@ -247,18 +246,28 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
   useEffect(() => {
     onChange(
       ready
-        ? settingsForNewChatRequest(
-            {
-              ...settings,
-              ...(defaultEffort ? { effort: defaultEffort } : {}),
-            },
-            accountKey,
-            settings.account_key !== undefined,
-            model,
-          )
+        ? {
+            ...settingsForNewChatRequest(
+              {
+                ...settings,
+                ...(defaultEffort ? { effort: defaultEffort } : {}),
+              },
+              accountKey,
+              model,
+            ),
+            excluded_account_keys: excludedAccountKeys,
+          }
         : null,
     );
-  }, [ready, settings, defaultEffort, accountKey, model, onChange]);
+  }, [
+    ready,
+    settings,
+    defaultEffort,
+    accountKey,
+    model,
+    excludedAccountKeys,
+    onChange,
+  ]);
   const patch = useCallback(
     (value: Partial<import("../api").PostBody<"/api/conversation">>) => {
       const { id: _id, expected_account_key: _expected, ...values } = value;
@@ -280,12 +289,12 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
         presentation="panel"
         settingsRow
         showAccountSummary
+        excludedAccountKeys={excludedAccountKeys}
+        onExcludedAccountKeysChange={setExcludedAccountKeys}
         onDraftChange={patch}
         onAccountChange={(key) => {
           setAccountKey(key);
-          setSettings((previous) =>
-            settingsForNewChatAccount(previous, key, model),
-          );
+          setSettings((previous) => settingsForNewChatAccount(previous, key));
         }}
       />
       {(error || modelError) && (

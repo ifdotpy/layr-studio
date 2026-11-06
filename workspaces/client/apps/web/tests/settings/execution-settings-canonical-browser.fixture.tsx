@@ -192,10 +192,6 @@ window.fetch = async (input, options) => {
     };
     window.pendingTransferProjection = partialAgent({
       ...window.agent,
-      workerDefaults: {
-        ...window.agent.workerDefaults,
-        accountKey: body.account_key,
-      },
     });
     return fixtureResponse(result);
   }

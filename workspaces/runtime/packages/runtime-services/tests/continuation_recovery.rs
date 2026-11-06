@@ -92,6 +92,26 @@ fn observation() -> usage_resume::LimitsObservation {
 }
 
 #[tokio::test]
+async fn usage_resume_allows_the_excluded_lead_account() {
+    let (_dir, store) = seeded("usage").await;
+    store.transaction_with(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.excludedAccountKeys',json('[\"default\"]')) WHERE id='a'", [])?;
+        Ok::<_, studio_runtime_store::StoreError>(())
+    }).await.unwrap();
+    continuation_driver::drive(
+        &store,
+        "a",
+        ContinuationTable::Usage,
+        Some("resume"),
+        1000.0,
+        |s| usage_resume::tick(s, &observation(), 1000.0),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read(&store)["record"]["status"], "started");
+}
+
+#[tokio::test]
 async fn oversized_proposed_reason_is_rejected_only_during_apply_without_writes() {
     let (_dir, store) = seeded("capacity").await;
     let before = {
@@ -554,7 +574,7 @@ async fn capacity_claim_commits_record_agent_and_followup_together() {
 }
 
 #[tokio::test]
-async fn automatic_capacity_retry_cancels_an_excluded_account_with_a_permanent_hold() {
+async fn automatic_capacity_retry_allows_the_excluded_lead_account() {
     let (_root, store) = seeded("capacity").await;
     store
         .transaction_with(|tx| {
@@ -571,24 +591,33 @@ async fn automatic_capacity_retry_cancels_an_excluded_account_with_a_permanent_h
                 tx, "a", "retry", 1000.0, true,
             )
             .map_err(|error| studio_runtime_store::StoreError::SchemaMismatch(error.to_string()))?;
-            assert!(!followup(stage.effects()));
+            assert!(followup(stage.effects()));
             Ok::<_, studio_runtime_store::StoreError>(())
         })
         .await
         .expect("atomic exclusion settlement");
     let state = capacity_state(&store);
-    assert_eq!(state["record"]["status"], "cancelled");
-    assert_eq!(state["record"]["dueAt"], Value::Null);
-    assert_eq!(
-        state["record"]["reason"],
-        "Account default is disabled for this chat"
-    );
-    assert_eq!(state["agent"]["status"], "failed");
-    assert_eq!(state["agent"]["inFlight"], false);
-    assert_eq!(
-        state["agent"]["error"],
-        "Account default is disabled for this chat"
-    );
+    assert_ne!(state["record"]["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn automatic_capacity_retry_stops_an_excluded_worker() {
+    let (_root, store) = seeded("capacity").await;
+    store.transaction_with(|tx| {
+        let raw: String = tx.query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |row| row.get(0))?;
+        let mut agent: Value = studio_json::from_str(&raw)?;
+        agent["rootId"] = json!("root");
+        agent["parentId"] = json!("root");
+        agent["isLead"] = json!(false);
+        studio_runtime_store::ContinuationRepository::put_agent(tx, &agent)?;
+        let root = json!({"id":"root","rootId":"root","epoch":1,"status":"idle","compactions":0,"provider":"codex","accountKey":"default","isLead":true,"autoWake":true,"excludedAccountKeys":["default"]});
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(root)?)?;
+        let stage = studio_runtime_services::continuation_runtime::stage_capacity_retry(tx, "a", "retry", 1000.0, true)
+            .map_err(|error| studio_runtime_store::StoreError::SchemaMismatch(error.to_string()))?;
+        assert!(!followup(stage.effects()));
+        Ok::<_, studio_runtime_store::StoreError>(())
+    }).await.unwrap();
+    assert_eq!(capacity_state(&store)["record"]["status"], "cancelled");
 }
 
 const MIB: u64 = 1024 * 1024;

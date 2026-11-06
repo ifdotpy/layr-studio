@@ -2,14 +2,14 @@ import { useServerApi } from "../../servers/ServerServicesContext";
 import "../../api";
 import Accounts, { type useAccounts } from "../Accounts";
 import { ExecutionSettings } from "./ExecutionSettings";
-import { AccountExclusionsControl } from "./AccountExclusionsControl";
+import { errorText } from "../../api";
 import { useCallback, useState, type ComponentProps } from "react";
 
 export function UnifiedAgentSettings({
   state,
   notify,
   onAccountModalOpenChange,
-  showAccountExclusions = false,
+  showAccountExclusions,
   showTransferStatus = true,
   ...settings
 }: Omit<
@@ -25,6 +25,8 @@ export function UnifiedAgentSettings({
   const { post } = useServerApi();
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [exclusionsSaving, setExclusionsSaving] = useState(false);
+  const showExclusions = showAccountExclusions ?? settings.agent.isLead;
   const updateAccountModalOpen = useCallback(
     (opened: boolean) => {
       setAccountModalOpen(opened);
@@ -52,17 +54,28 @@ export function UnifiedAgentSettings({
             {...settings}
             accounts={state.data.accounts}
             onAccountChange={selectAccount}
-            accountDisabled={disabled}
+            accountDisabled={disabled || exclusionsSaving}
             accountModalOpen={accountModalOpen}
+            excludedAccountKeys={
+              showExclusions
+                ? settings.agent.excludedAccountKeys || []
+                : undefined
+            }
+            onExcludedAccountKeysChange={
+              showExclusions
+                ? (keys) => {
+                    setExclusionsSaving(true);
+                    void post("/api/conversation", {
+                      id: settings.agent.id,
+                      excluded_account_keys: keys,
+                    })
+                      .then(() => settings.refresh())
+                      .catch((error) => notify(errorText(error)))
+                      .finally(() => setExclusionsSaving(false));
+                  }
+                : undefined
+            }
           />
-          {showAccountExclusions && (
-            <AccountExclusionsControl
-              lead={settings.agent}
-              accounts={state.data}
-              refresh={settings.refresh}
-              onError={notify}
-            />
-          )}
         </>
       )}
     />

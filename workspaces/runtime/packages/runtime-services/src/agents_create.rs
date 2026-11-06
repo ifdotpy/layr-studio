@@ -47,8 +47,6 @@ pub enum MutationError {
     Internal,
     #[error("The team changed. Reload before saving")]
     Stale,
-    #[error("Switch this chat to another account before disabling its current account")]
-    CurrentAccountExcluded,
     #[error("Wait for this turn to end before changing execution settings")]
     InFlight,
     #[error("invalid stored object {table}/{id}")]
@@ -625,13 +623,6 @@ fn update_exclusions(
     if record.get("isLead").and_then(Value::as_bool) != Some(true) {
         return Err(SettingsError::LeadRequired);
     }
-    let account = record
-        .get("accountKey")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
-    if excluded.iter().any(|value| value == account) {
-        return Err(SettingsError::CurrentAccountExcluded);
-    }
     record["excludedAccountKeys"] = json!(excluded);
     save_agent(transaction, &record, &validate)
 }
@@ -817,6 +808,24 @@ mod tests {
     #[test]
     fn legacy_lead_signature_is_not_equivalent_to_new_bytes() {
         assert!(!super::same_intent(r#"{"id": "lead"}"#, r#"{"id":"lead"}"#));
+    }
+
+    #[test]
+    fn lead_account_can_be_excluded_from_worker_selection() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let record = json!({"id":"lead","rootId":"lead","isLead":true,"epoch":0,"status":"idle","accountKey":"lead-account","provider":"codex","compactions":0});
+        super::save_agent(&tx, &record, &|_, _| true).unwrap();
+        let result = super::update_exclusions(
+            &tx,
+            "lead",
+            None,
+            Some(&["lead-account".into()]),
+            false,
+            |_, _| true,
+        )
+        .unwrap();
+        assert_eq!(result["excludedAccountKeys"], json!(["lead-account"]));
     }
 
     #[test]
