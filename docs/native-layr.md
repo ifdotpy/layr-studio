@@ -140,7 +140,7 @@ It then permits the owner to save directly in protected main.
 No tar archive is created.
 
 Build output becomes a warm Layr cache outside history.
-The shared build-folder owner is `vm_preparation::regenerable_path`.
+The shared build-folder owner is `workspace_paths::regenerable_path`.
 It covers `node_modules`, `.venv`, `venv`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.turbo`, and `.next`.
 A `target` folder becomes a cache only beside `Cargo.toml`.
 Studio omits cache content from the initial state, registers each cache, clones its files, and saves the warm caches.
@@ -222,7 +222,7 @@ Known Layr limits, last checked on 0.5.1:
   A directory attribute change alone can be absent from the saved head.
   A successful metadata fixture does not establish support for this case.
 
-Layr 0.11.0 includes Studio's earlier fixes for private directory metadata and warm cache copies.
+Layr includes Studio's earlier fixes for private directory metadata and warm cache copies.
 It keeps private directories writable until metadata updates finish.
 The final state and line retain source directory and file modes, including `0555` and `0444`.
 The source modes stay unchanged.

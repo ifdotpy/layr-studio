@@ -77,8 +77,7 @@ to populate all target dependencies before an offline check. `deny.toml` permits
 `studio-json` and named third-party direct dependents of `serde_json`; when a
 dependency adds one, inspect `cargo tree --locked --target all --all-features -i serde_json -e
 normal,build,dev --workspace --depth 1` and deliberately add the third-party crate to the wrappers
-list. Workspace crates must use the facade. The separate vendored Layr workspace
-is excluded by the root Cargo workspace.
+list. Workspace crates must use the facade.
 
 | Purpose                                              | Command                                  |
 | ---------------------------------------------------- | ---------------------------------------- |
@@ -335,8 +334,7 @@ switch is on.
 - Owner of the switch name: `RETEST_ENV` in
   `workspaces/tooling/apps/repository-checks/gate-config.ts`.
 - Safety: no Studio Rust test reads `LAYR_ROOT` from the gate or starts `layr` from
-  `PATH`. The tests that mention `LAYR_ROOT` build an environment for a guest or
-  use fake scripts. Still, with the switch on, the facade gives the step an empty
+  `PATH`. The tests that mention `LAYR_ROOT` use fake scripts. Still, with the switch on, the facade gives the step an empty
   temporary `LAYR_ROOT`. A shim first on `PATH` runs the real `layr` with the real
   store only for calls that layr-retest itself makes (no
   `LAYR_RETEST_PROFILE_DIR` is set for those), and a test never gets it.
