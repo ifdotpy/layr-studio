@@ -195,6 +195,11 @@ test("nextest selects stale crates with a filter so the workspace feature set an
     selectCrates([["cargo", ["test", "--workspace"]]], ["studio-a"]),
     [["cargo", ["test", "-p", "studio-a"]]],
   );
+  // Doctests keep the workspace features: every crate runs.
+  assert.deepEqual(
+    selectCrates([["cargo", ["test", "--workspace", "--doc"]]], ["studio-a"]),
+    [["cargo", ["test", "--workspace", "--doc"]]],
+  );
 });
 
 test("excluded workspace packages do not prevent reuse", () => {

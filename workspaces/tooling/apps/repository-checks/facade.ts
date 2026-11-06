@@ -1022,34 +1022,19 @@ export function gateSteps(root: string, name: string): GateStep[] {
         ]),
       ),
       {
-        ...cargo("schema-doctests", "Schema compile-fail doctests", [
+        // `--workspace` keeps the feature set of the workspace build, so the doctests
+        // link the warm units; `-p` resolves other features and rebuilds the dependencies.
+        ...cargo("doctests", "Rust doctests", [
           "test",
           "--locked",
-          "-p",
-          "studio-runtime-schema",
+          "--workspace",
+          "--exclude",
+          NATIVE_PACKAGE,
           "--doc",
         ]),
         requires: "workspace",
         crateReuse: true,
       },
-      ...(fast ? ["ControlInvocation", "provider_receipt"] : [""]).map(
-        (filter) => ({
-          ...cargo(
-            `services-doctests${filter ? `-${filter}` : ""}`,
-            "Runtime services doctests",
-            [
-              "test",
-              "--locked",
-              "-p",
-              "studio-runtime-services",
-              "--doc",
-              ...(filter ? [filter] : []),
-            ],
-          ),
-          requires: "workspace",
-          crateReuse: true,
-        }),
-      ),
       ...(!fast
         ? [
             {
