@@ -1862,6 +1862,14 @@ export function createSyncClient(options: SyncClientOptions) {
                 );
               if (remoteScope === SYNC_ENTITY_SCOPE && result.maxSeq == null)
                 throw new Error("The server omitted the sync sequence limit.");
+              if (
+                remoteScope === SYNC_ENTITY_SCOPE &&
+                result.checkpoint.seq < result.maxSeq! &&
+                result.checkpoint.seq <= after
+              )
+                throw new Error(
+                  "The server did not advance the sync checkpoint.",
+                );
               const entityBatch: SyncDocument[] = [];
               for (const wireDocument of result.documents) {
                 if (remoteScope === SYNC_ENTITY_SCOPE) {
@@ -1998,9 +2006,8 @@ export function createSyncClient(options: SyncClientOptions) {
                   "initial checkpoint",
                 );
                 more =
-                  result.documents.length === ENTITY_BATCH_SIZE &&
                   result.checkpoint.seq <
-                    requiredSyncNumber(result.maxSeq, "maximum sequence");
+                  requiredSyncNumber(result.maxSeq, "maximum sequence");
               } else {
                 more = false;
               }

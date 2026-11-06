@@ -49,6 +49,31 @@ async fn write_entity(
     Ok(axum::Json(studio_json::json!({"seq":sequence})))
 }
 
+async fn fresh_entity_page(
+    axum::extract::State(store): axum::extract::State<Arc<RuntimeStore>>,
+    axum::Json(body): axum::Json<studio_json::Value>,
+) -> Result<axum::Json<studio_json::Value>, axum::http::StatusCode> {
+    let after = body["after"].as_i64().unwrap_or(0);
+    let initial_high = body["initialHigh"].as_i64().unwrap_or(0);
+    let limit = body["limit"].as_i64().unwrap_or(500);
+    let priority = body["priorityId"].as_str().map(str::to_owned);
+    let page = store
+        .read_async("fresh entity fixture", move |tx| {
+            studio_runtime_services::entity_scope::pull_global_fresh(
+                tx,
+                after,
+                limit,
+                initial_high,
+                priority.as_deref(),
+            )
+        })
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(axum::Json(
+        studio_json::json!({"checkpoint":page.checkpoint,"maxSeq":page.max_sequence,"initialHigh":page.initial_high,"documents":page.rows.iter().map(|row| studio_json::json!({"collection":row.collection,"id":row.id})).collect::<Vec<_>>() }),
+    ))
+}
+
 /// Terminal source writes are opt-in and isolated to this test server.
 async fn write_terminal(
     axum::extract::State(store): axum::extract::State<Arc<RuntimeStore>>,
@@ -88,13 +113,22 @@ async fn main() {
     let directory = std::path::PathBuf::from(std::env::args_os().nth(1).expect("state directory"));
     let store = Arc::new(RuntimeStore::open(Some(&directory)).await.expect("store"));
     let terminals = std::env::args().any(|arg| arg == "--terminal-live");
-    let entities = std::env::args().any(|arg| arg == "--entity-live");
+    let small_entities = std::env::args().any(|arg| arg == "--entity-small");
+    let entities = small_entities || std::env::args().any(|arg| arg == "--entity-live");
     if entities {
         studio_runtime_services::entity_publication::install(&store)
             .await
             .expect("entity publisher");
-        store.transaction_with(|tx| {
-            for index in 0..=studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+        store.transaction_with(move |tx| {
+            for index in 0..81 {
+                tx.execute("INSERT INTO runtime_plans(id,record) VALUES(?1,'{}')", [format!("invalid-{index}")])?;
+            }
+            let count = if small_entities { 10 } else { studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS };
+            for index in 0..=count {
+                let id = format!("deleted-{index}");
+                AgentRepository::put(tx, &AgentRecord::from_value(studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"idle","accountKey":"default","name":id,"compactions":0,"deletedAt":1}))?)?;
+            }
+            for index in 0..=count {
                 let id = format!("older-{index}");
                 AgentRepository::put(tx, &AgentRecord::from_value(studio_json::json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":1,"status":"idle","accountKey":"default","name":id,"compactions":0}))?)?;
             }
@@ -161,6 +195,7 @@ async fn main() {
         app = app.merge(
             axum::Router::new()
                 .route("/fixture/entity", axum::routing::post(write_entity))
+                .route("/fixture/fresh", axum::routing::post(fresh_entity_page))
                 .with_state(store),
         );
     }
