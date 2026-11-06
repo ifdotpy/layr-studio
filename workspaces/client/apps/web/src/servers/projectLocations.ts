@@ -12,6 +12,8 @@ export type LocationProject = {
   path: string;
   name: string;
   workspacePolicy?: string | null | undefined;
+  layrStoreRoot?: components["schemas"]["Project"]["layrStoreRoot"];
+  layrStoreRootRevision?: components["schemas"]["Project"]["layrStoreRootRevision"];
   homeServerId?: string | null | undefined;
   compact?: boolean | undefined;
   locations?: ProjectLocation[] | null | undefined;

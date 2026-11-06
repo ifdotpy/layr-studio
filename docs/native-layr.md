@@ -9,8 +9,8 @@ The chat selector calls this mode **Layr**.
 Studio defaults to the host store at `<Studio state>/layr-native/store`. The built-in default resolves at use time.
 An operator can select an existing host store with `native-layr configure --store-root`.
 Studio saves this setting in `<Studio state>/layr-native/settings.json`.
-The general Studio settings can select the same default, and the new-chat dialog offers an optional store override when Layr is selected. The override wins over the default. Each prepared chat records its store in `layrStoreRoot`.
-A root switch changes the destination for new chats. Existing chats retain their store and line.
+The general Studio settings can select the same default. Project settings can select a store override, which takes precedence over the global default and built-in store. Each prepared chat records its store in `layrStoreRoot`.
+A root switch changes the destination for new independent chats. Existing chats and their descendants retain their store and line.
 The agent's `PATH` selects the managed Git guard, which refuses Git writes in native lines.
 `NATIVE_LAYR_DIRECTORY` in `runtime-store/src/path.rs` owns the native metadata directory.
 `STORE_DIRECTORY` in `layr_native.rs` owns the store subdirectory.

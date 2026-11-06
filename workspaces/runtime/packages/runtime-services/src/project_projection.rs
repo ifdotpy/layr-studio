@@ -54,6 +54,10 @@ pub struct ProjectProjection {
     worker_environment: Field<String>,
     #[serde(skip_serializing_if = "Field::is_missing")]
     worker_environment_revision: Field<u64>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    layr_store_root: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    layr_store_root_revision: Field<u64>,
 }
 
 fn text(field: &mut Field<String>, name: &str) {
@@ -113,6 +117,7 @@ pub fn project_record(
         (&mut project.home_server_id, "homeServerId"),
         (&mut project.worker_base_ref, "workerBaseRef"),
         (&mut project.worker_environment, "workerEnvironment"),
+        (&mut project.layr_store_root, "layrStoreRoot"),
     ] {
         text(value, name);
     }
@@ -179,6 +184,8 @@ pub fn project_record(
         worker_base_revision: project.worker_base_revision,
         worker_environment: project.worker_environment,
         worker_environment_revision: project.worker_environment_revision,
+        layr_store_root: project.layr_store_root,
+        layr_store_root_revision: project.layr_store_root_revision,
     })
 }
 

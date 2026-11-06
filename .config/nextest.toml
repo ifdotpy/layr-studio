@@ -86,6 +86,8 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(account_worker::store::deleted_command_query_tests::)) |
     (package(=studio-runtime-services) & kind(lib) & test(/account_worker::tests::stop_after_reattach::(late_interrupt_confirmation_|late_cleanup_confirmation_|disconnected_late_interrupt_confirmation_|remote_delete_waits_|deletion_reports_success_when_|deletion_lost_interrupt_reply_|disconnected_delete_refused_cleanup_|delete_settled_turn_cleans_|project_delete_stops_settled_|deleted_command_without_process_id_|deletion_of_unreachable_remote_worker_|completed_interrupted_turn_|delete_after_worker_reattach_|delete_before_worker_reattach_)/)) |
     (package(=studio-runtime-http) & kind(lib) & test(delete_removes_the_chat_tree_once_and_replays_the_same_list)) |
+    (package(=studio-runtime-http) & kind(lib) & test(workspace_policy_http_sets_replays_and_clears_with_revision)) |
+    (package(=studio-runtime-http) & kind(lib) & test(lead_intent_preserves_native_store_override_for_replay)) |
     (package(=studio-runtime-schema) & kind(lib) & test(json_compat::serialization_tests::)) |
     (package(=studio-json) & binary(=parity) & test(serde_raw_marker_matches_backend)) |
     (package(=studio-runtime-http) & kind(lib) & (test(=json_body::tests::serde_private_number_key_remains_an_object_in_raw_json) | test(=validation::tests::parsed_numbers_follow_json_schema_and_object_keys_remain_data))) |
@@ -509,6 +511,8 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(account_worker::store::deleted_command_query_tests::)) |
     (package(=studio-runtime-services) & kind(lib) & test(/account_worker::tests::stop_after_reattach::(late_interrupt_confirmation_|late_cleanup_confirmation_|disconnected_late_interrupt_confirmation_|remote_delete_waits_|deletion_reports_success_when_|deletion_lost_interrupt_reply_|disconnected_delete_refused_cleanup_|delete_settled_turn_cleans_|project_delete_stops_settled_|deleted_command_without_process_id_|deletion_of_unreachable_remote_worker_|completed_interrupted_turn_|delete_after_worker_reattach_|delete_before_worker_reattach_)/)) |
     (package(=studio-runtime-http) & kind(lib) & test(delete_removes_the_chat_tree_once_and_replays_the_same_list)) |
+    (package(=studio-runtime-http) & kind(lib) & test(workspace_policy_http_sets_replays_and_clears_with_revision)) |
+    (package(=studio-runtime-http) & kind(lib) & test(lead_intent_preserves_native_store_override_for_replay)) |
     (package(=studio-runtime-schema) & kind(lib) & test(json_compat::serialization_tests::)) |
     (package(=studio-json) & binary(=parity) & test(serde_raw_marker_matches_backend)) |
     (package(=studio-runtime-http) & kind(lib) & (test(=json_body::tests::serde_private_number_key_remains_an_object_in_raw_json) | test(=validation::tests::parsed_numbers_follow_json_schema_and_object_keys_remain_data))) |
