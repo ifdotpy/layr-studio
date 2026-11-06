@@ -874,6 +874,8 @@ mod tests {
         assert_eq!(body["checkpoints"][0]["future"]["kept"], true);
         assert!(body["checkpoints"][0].get("items").is_none());
         store.transaction_with(|tx| {
+            // A row changed outside Studio: the fixture removes the immutability check first.
+            tx.execute_batch("DROP TRIGGER IF EXISTS runtime_checkpoints_immutable")?;
             tx.execute("UPDATE runtime_checkpoints SET record=json_set(record,'$.id','wrong') WHERE id='good'", [])?;
             Ok::<_, StoreError>(())
         }).await.unwrap();

@@ -472,6 +472,8 @@ async fn invalid_checkpoint_tree_refuses_before_provider_or_file_effects() {
     let checkpoint = restore["checkpoint"].as_str().unwrap().to_owned();
     store
         .transaction(move |tx| {
+            // A row changed outside Studio: the fixture removes the immutability check first.
+            tx.execute_batch("DROP TRIGGER IF EXISTS runtime_checkpoints_immutable")?;
             tx.execute(
                 "UPDATE runtime_checkpoints SET record=json_set(record,'$.tree',?1) WHERE id=?2",
                 ["0000000000000000000000000000000000000000", &checkpoint],
