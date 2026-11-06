@@ -83,6 +83,7 @@ async fn command(
         | Command::Stop { .. }
         | Command::Resolve { .. }
         | Command::Pause { .. }
+        | Command::RestoreDeletedRoot { .. }
         | Command::LeadMessage { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, request) = (ports.clone(), request.clone());
