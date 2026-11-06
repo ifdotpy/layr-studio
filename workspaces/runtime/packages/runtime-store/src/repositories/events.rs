@@ -4,6 +4,21 @@ use crate::StoreResult;
 use crate::records::{AgentId, QueueEvent, QueueEventId, QueueEventRepository};
 use crate::schema::{SchemaRequirements, TableRequirement};
 
+/// The status of a queued event. `sync_schema.sql` refuses a write outside these
+/// values (`runtime_events_status_insert`, `runtime_events_status_update`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, strum::VariantNames, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum EventStatus {
+    Pending,
+    Reserved,
+    Dispatching,
+    Uncertain,
+    Delivered,
+    Cancelled,
+    Failed,
+    StoredOnly,
+}
+
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[TableRequirement {
         name: "runtime_events",
@@ -104,5 +119,39 @@ mod tests {
             .expect("retained event");
         assert_eq!(event.epoch, 0);
         assert_eq!(event.text, "private-input");
+    }
+
+    #[test]
+    fn the_status_check_lists_every_event_status() {
+        use strum::VariantNames;
+        let schema = include_str!("../sync_schema.sql");
+        let list = EventStatus::VARIANTS
+            .iter()
+            .map(|status| format!("'{status}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            schema
+                .matches(&format!("NEW.status NOT IN ({list})"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn an_unknown_event_status_is_refused() {
+        let db = crate::fresh_state::test_canvas();
+        let insert = |id: &str, status: &str| {
+            db.execute(
+                "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES(?1,'a','user','t',?2,1,0)",
+                [id, status],
+            )
+        };
+        assert!(insert("ok", "pending").is_ok());
+        assert!(insert("bad", "sent").is_err());
+        assert!(
+            db.execute("UPDATE runtime_events SET status='bogus' WHERE id='ok'", [])
+                .is_err()
+        );
     }
 }

@@ -152,6 +152,13 @@ WHERE NOT EXISTS (SELECT 1 FROM sync_identity);
 -- The event window is built at read time (`entity_scope` in runtime-services): the
 -- newest events by this index, numbered by their `durable_rows` entries.
 CREATE INDEX IF NOT EXISTS runtime_event_created_id ON runtime_events(created DESC,id);
+-- Refuse an event status outside `EventStatus` (repositories/events.rs).
+CREATE TRIGGER IF NOT EXISTS runtime_events_status_insert BEFORE INSERT ON runtime_events
+  WHEN NEW.status NOT IN ('pending','reserved','dispatching','uncertain','delivered','cancelled','failed','stored_only')
+  BEGIN SELECT RAISE(ABORT,'invalid runtime_events status'); END;
+CREATE TRIGGER IF NOT EXISTS runtime_events_status_update BEFORE UPDATE OF status ON runtime_events
+  WHEN NEW.status NOT IN ('pending','reserved','dispatching','uncertain','delivered','cancelled','failed','stored_only')
+  BEGIN SELECT RAISE(ABORT,'invalid runtime_events status'); END;
 
 -- section: runtime_agents
 CREATE TABLE IF NOT EXISTS runtime_transcript_revisions(
