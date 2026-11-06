@@ -1139,9 +1139,18 @@ fn restore_deleted_root(
     if workspace_was_cleaned(root) {
         return Err(ManagementError::Invalid("The root workspace was cleaned"));
     }
+    let mut skipped = BTreeSet::new();
+    for agent in agents.iter().filter(|agent| workspace_was_cleaned(agent)) {
+        skipped.extend(
+            snapshot
+                .descendants(agent.id(), true)?
+                .into_iter()
+                .map(Agent::id),
+        );
+    }
     let agents: Vec<_> = agents
         .into_iter()
-        .filter(|agent| !workspace_was_cleaned(agent))
+        .filter(|agent| !skipped.contains(agent.id()))
         .collect();
     let mut decision = Decision::result(
         json!({"restored": agents.iter().map(|agent| agent.id()).collect::<Vec<_>>()}),
@@ -1702,6 +1711,31 @@ mod lifecycle_scope_parity_tests {
                 .iter()
                 .all(|write| write.record.get("deletedAt").is_none())
         );
+    }
+
+    #[test]
+    fn owner_restore_keeps_descendants_of_cleaned_worker_deleted() {
+        let mut root = agent("lead", "lead", None, true);
+        let mut child = agent("child", "lead", Some("lead"), false);
+        let mut grandchild = agent("grandchild", "lead", Some("child"), false);
+        for record in [&mut root, &mut child, &mut grandchild] {
+            record["deletedAt"] = json!(10.0);
+        }
+        child["cleanedWorktree"] = json!({"root":"/removed"});
+        let snapshot = ManagementSnapshot::from_records(Records {
+            tables: BTreeMap::from([("runtime_agents".to_owned(), vec![root, child, grandchild])]),
+        })
+        .expect("snapshot");
+        let decision = decide_with_effects(
+            &snapshot,
+            &Action::RestoreDeletedRoot {
+                target: "lead".into(),
+            },
+            20.0,
+        )
+        .expect("restore");
+        assert_eq!(decision.writes.len(), 1);
+        assert_eq!(decision.writes[0].record["id"], "lead");
     }
 
     #[test]
