@@ -1628,6 +1628,9 @@ mod replay_identity_tests {
             let mut agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent-1","rootId":"agent-1","epoch":7,"threadId":"thread-1","status":"idle","autoWake":true}))?;
             AgentRepository::put(tx,&agent)?;
             assert!(authorize(tx,&request).expect("eligible handoff"));
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode','layr') WHERE id='agent-1'", [])?;
+            assert!(!authorize(tx,&request).expect("legacy handoff refused"));
+            AgentRepository::put(tx,&agent)?;
             agent.in_flight = Some(true); AgentRepository::put(tx,&agent)?;
             assert!(!authorize(tx,&request).expect("active handoff refused"));
             agent.in_flight = Some(false); AgentRepository::put(tx,&agent)?;
