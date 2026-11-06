@@ -41,7 +41,10 @@ installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 
 config = installer.recovery.load_config(config_path, state)
-updates, _vm = installer.load_updates(config["resources"])
+# Build N may predate the removed virtual machine helpers (#937): such a build
+# returns (updates, vm), a later build returns the updates module itself.
+loaded = installer.load_updates(config["resources"])
+updates = loaded[0] if isinstance(loaded, tuple) else loaded
 
 
 def run(argv, timeout):
