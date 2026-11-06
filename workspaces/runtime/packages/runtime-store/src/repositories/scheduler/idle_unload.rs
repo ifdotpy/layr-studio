@@ -28,9 +28,9 @@ fn agent_in_use(connection: &Connection) -> StoreResult<String> {
             crate::agent_volatile::field_sql("runtime_agents", "activeTools")
         ),
         "workspace_operation IS NOT NULL".to_owned(),
-        "COALESCE(json_extract(record,'$.accountTransferId'),'')!=''".to_owned(),
+        "COALESCE(account_transfer_id,'')!=''".to_owned(),
         "COALESCE(native_tool_refresh_id,'')!=''".to_owned(),
-        "COALESCE(json_extract(record,'$.nativeRelease.resetPending'),0)!=0".to_owned(),
+        "COALESCE(native_release_reset_pending,0)!=0".to_owned(),
         format!("context_repair_phase IN ({ACTIVE_CONTEXT_REPAIR_PHASES})"),
         format!("({})", unresolved_sql()),
         format!(
@@ -38,14 +38,18 @@ fn agent_in_use(connection: &Connection) -> StoreResult<String> {
              AND e.status IN ({UNSETTLED_EVENT_STATUSES}))"
         ),
     ];
-    for (table, predicate) in [
-        ("runtime_monitors", active_monitor_predicate()),
-        ("runtime_tool_requests", unsettled_tool_request_predicate()),
+    for (table, predicate, agent) in [
+        ("runtime_monitors", active_monitor_predicate(), "agent"),
+        (
+            "runtime_tool_requests",
+            unsettled_tool_request_predicate(),
+            "json_extract(record,'$.agent')",
+        ),
     ] {
         if table_exists(connection, table)? {
             checks.push(format!(
                 "EXISTS(SELECT 1 FROM {table} WHERE {predicate} \
-                 AND json_extract(record,'$.agent')=runtime_agents.id)"
+                 AND {agent}=runtime_agents.id)"
             ));
         }
     }
@@ -76,7 +80,7 @@ fn transfer_pending(connection: &Connection, account: &str) -> StoreResult<bool>
     exists(
         connection,
         "SELECT 1 FROM runtime_account_transfers t WHERE json_extract(t.record,'$.status')='pending' \
-         AND (json_extract(t.record,'$.targetAccountKey')=?1 OR EXISTS(SELECT 1 FROM \
+         AND (t.target_account_key=?1 OR EXISTS(SELECT 1 FROM \
          json_each(t.record,'$.members') m WHERE json_extract(m.value,'$.sourceAccountKey')=?1))",
         &[account],
     )
@@ -88,7 +92,7 @@ fn transfer_pending_predicate(connection: &Connection) -> StoreResult<String> {
     }
     Ok("EXISTS(SELECT 1 FROM runtime_account_transfers t \
         WHERE json_extract(t.record,'$.status')='pending' \
-        AND (json_extract(t.record,'$.targetAccountKey')=?1 OR EXISTS(SELECT 1 FROM \
+        AND (t.target_account_key=?1 OR EXISTS(SELECT 1 FROM \
         json_each(t.record,'$.members') m WHERE json_extract(m.value,'$.sourceAccountKey')=?1)))"
         .to_owned())
 }
@@ -99,11 +103,10 @@ fn monitor_source_in_use(connection: &Connection) -> StoreResult<Option<String>>
     if !table_exists(connection, "runtime_monitors")? {
         return Ok(None);
     }
-    // Reuse the startup owner's partial active-monitor index, so old command
-    // history is not decoded on every provider idle decision.
+    // The partial source-account index excludes settled command history.
     Ok(Some(format!(
         "EXISTS(SELECT 1 FROM runtime_monitors WHERE {} \
-        AND COALESCE(json_extract(record,'$.operation.accountKey'),json_extract(record,'$.accountKey'))=?1)",
+        AND source_account_key=?1)",
         active_monitor_predicate()
     )))
 }
@@ -120,22 +123,21 @@ const SETTLED_WORK_STATUSES: &str = "'accepted','cancelled'";
 /// the ordinary idle timer.
 fn finished_worker_sql(connection: &Connection) -> StoreResult<String> {
     let mut predicate = format!(
-        "COALESCE(json_extract(record,'$.isLead'),0)=0 \
+        "COALESCE(is_lead,0)=0 \
          AND COALESCE({},'')!='waiting'",
         crate::domain::chat_status_sql("runtime_agents.id")
     );
     if table_exists(connection, "runtime_work")? {
         predicate.push_str(&format!(
             " AND NOT EXISTS(SELECT 1 FROM runtime_work w \
-             WHERE json_extract(w.record,'$.owner')=runtime_agents.id \
+             WHERE w.owner=runtime_agents.id \
              AND json_extract(w.record,'$.status') NOT IN ({SETTLED_WORK_STATUSES}))"
         ));
     }
     Ok(predicate)
 }
 
-const ACCOUNT_AGENT_SQL: &str =
-    "SELECT 1 FROM runtime_agents WHERE account_key=?1 AND deleted_at IS NULL";
+const ACCOUNT_AGENT_SQL: &str = "SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload WHERE account_key=?1 AND deleted_at IS NULL";
 
 impl SchedulerRepository {
     /// Read the durable status of known loaded threads and the account in one
@@ -214,7 +216,7 @@ impl SchedulerRepository {
         let encoded_threads = studio_json::to_string(threads)?;
         let finished = finished_worker_sql(connection)?;
         let mut statement = connection.prepare_cached(&format!(
-            "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS(SELECT 1 FROM runtime_agents \
+            "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS(SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload \
              WHERE account_key=?1 AND deleted_at IS NULL AND NOT ({finished}) \
              AND id IN (SELECT chat FROM sessions WHERE thread_id=c.value AND state<>'ended'))"
         ))?;
@@ -276,12 +278,15 @@ impl SchedulerRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::{SchedulerRepository, monitor_source_in_use};
+    use super::{
+        ACCOUNT_AGENT_SQL, SchedulerRepository, agent_in_use, finished_worker_sql,
+        monitor_source_in_use, transfer_pending_predicate,
+    };
     use rusqlite::Connection;
     use studio_json::{Value, json};
 
     fn database() -> Connection {
-        let connection = Connection::open_in_memory().expect("memory database opens");
+        let mut connection = Connection::open_in_memory().expect("memory database opens");
         connection
             .execute_batch(crate::agent_columns::agent_table_sql())
             .expect("agents table creates");
@@ -289,7 +294,7 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, kind TEXT, text TEXT,
                    status TEXT, created REAL, epoch INTEGER, turn_id TEXT, error TEXT);
-                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT); CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(json_extract(record,'$.agent'),json_extract(record,'$.status'));
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL);",
             )
@@ -301,6 +306,11 @@ mod tests {
         connection
             .execute_batch(&crate::domain::tables_sql())
             .expect("domain tables create");
+        {
+            let tx = connection.transaction().expect("migration transaction");
+            crate::migrations::m2026_11_06_idle_unload::apply(&tx).expect("idle indexes");
+            tx.commit().expect("migration commit");
+        }
         connection
     }
 
@@ -325,6 +335,57 @@ mod tests {
 
     fn account_in_use(connection: &Connection) -> bool {
         SchedulerRepository::idle_unload_account_in_use(connection, "acct").expect("reads")
+    }
+
+    #[test]
+    fn idle_query_plans_use_their_indexes() {
+        let db = database();
+        db.execute_batch("CREATE INDEX runtime_work_owner_status ON runtime_work(json_extract(record,'$.owner'),json_extract(record,'$.status'));").unwrap();
+        let plans = [
+            (
+                format!(
+                    "SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload WHERE account_key=?1 AND deleted_at IS NULL AND ({})",
+                    agent_in_use(&db).unwrap()
+                ),
+                vec![
+                    "runtime_agent_idle_unload",
+                    "runtime_monitor_idle_agent",
+                    "runtime_event_idle_agent_status",
+                ],
+            ),
+            (
+                format!(
+                    "{ACCOUNT_AGENT_SQL} AND NOT ({})",
+                    finished_worker_sql(&db).unwrap()
+                ),
+                vec!["runtime_agent_idle_unload", "runtime_work_idle_owner"],
+            ),
+            (
+                format!("SELECT {}", transfer_pending_predicate(&db).unwrap()),
+                vec!["runtime_transfer_target_account_key"],
+            ),
+            (
+                format!("SELECT {}", monitor_source_in_use(&db).unwrap().unwrap()),
+                vec!["runtime_monitor_idle_account"],
+            ),
+        ];
+        for (sql, indexes) in plans {
+            let mut statement = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan = statement
+                .query_map(["acct"], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .join("\n");
+            eprintln!("{plan}");
+            for index in indexes {
+                assert!(
+                    plan.lines()
+                        .any(|line| line.contains("SEARCH") && line.contains(index)),
+                    "missing indexed search {index}: {plan}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -362,7 +423,7 @@ mod tests {
             .expect("collect source plan")
             .join("\n");
         assert!(
-            plan.contains("USING INDEX runtime_monitor_startup_active"),
+            plan.contains("USING INDEX runtime_monitor_idle_account"),
             "{plan}"
         );
         agent(&connection, "a", json!({"accountKey":"target"}));

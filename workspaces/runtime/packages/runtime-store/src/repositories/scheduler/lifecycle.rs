@@ -3332,8 +3332,12 @@ mod account_scope_tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("plan text");
         assert!(
-            plan.iter()
-                .any(|step| step.contains("USING INDEX runtime_agent_account ")),
+            plan.iter().any(|step| {
+                step.starts_with("SEARCH runtime_agents USING INDEX ")
+                    && step.contains("(account_key=?")
+            }) && plan
+                .iter()
+                .all(|step| !step.contains("SCAN ") && !step.contains("TEMP B-TREE")),
             "{plan:?}"
         );
     }

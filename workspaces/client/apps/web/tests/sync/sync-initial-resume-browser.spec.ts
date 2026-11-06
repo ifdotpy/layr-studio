@@ -63,6 +63,7 @@ test("sync initial resume browser", async ({ page }) => {
               seq: 601,
             },
           ],
+          complete: true,
           checkpoint: { seq: 601 },
           maxSeq: 601,
           initialHigh: 600,
