@@ -24,9 +24,10 @@ mod questions;
 #[path = "notification_dispatch/snapshot.rs"]
 mod snapshot;
 pub use effects::{
-    NotificationDependency, NotificationEffects, NotificationHourMetrics, NotificationObservation,
-    NotificationPostCommit, NotificationPublicationBatch, NotificationStreamMetrics,
-    ObservationTime, RecoveredNotificationObservation, SharedJson, UnavailableNotificationEffects,
+    NotificationAgent, NotificationDependency, NotificationEffects, NotificationHourMetrics,
+    NotificationObservation, NotificationPostCommit, NotificationPublicationBatch,
+    NotificationStreamMetrics, ObservationTime, RecoveredNotificationObservation, SharedJson,
+    UnavailableNotificationEffects,
 };
 
 #[path = "notification_dispatch/stream.rs"]
@@ -150,7 +151,8 @@ impl PublicationContext {
         {
             return Err(NotificationDispatchError::invalid());
         }
-        let agent = NotificationDispatchRepository::agent_record(tx, actor)?
+        let agent = NotificationDispatchRepository::agent_record(tx, actor)
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
             .ok_or(NotificationDispatchError::invalid())?;
         self.validate_actor(&agent, actor)?;
         Ok(Some(ProviderDeliveryIdentity {
@@ -493,7 +495,8 @@ pub fn dispatch_notification_with_effects(
             }
             if kind == "provider/generationStarted" {
                 let Some(agent) =
-                    NotificationDispatchRepository::agent_record(transaction, agent_id)?
+                    NotificationDispatchRepository::agent_record(transaction, agent_id)
+                        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
                 else {
                     // Python applies generationStarted to the account/thread rate
                     // table and returns when no active rate entry exists. A
@@ -527,7 +530,8 @@ pub fn dispatch_notification_with_effects(
                     DispatchOutcome::Written,
                 );
             }
-            let mut agent = NotificationDispatchRepository::agent_record(transaction, agent_id)?
+            let mut agent = NotificationDispatchRepository::agent_record(transaction, agent_id)
+                .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
                 .ok_or_else(|| stored("runtime_agents", agent_id))?;
             publication.validate_actor(&agent, agent_id)?;
             if agent.get("deletedAt").is_some_and(|value| !value.is_null()) {
@@ -569,9 +573,12 @@ pub fn dispatch_notification_with_effects(
                 let key = command_key(agent_id, identity, params)?;
                 let mut key = key;
                 key.method = kind.to_owned();
+                // dispatch still Value; see follow-up. Decode once for both effect views.
+                let effect_agent =
+                    NotificationAgent::deserialize(&agent).map_err(StoreError::from)?;
                 for effect in effects.post_commit(
-                    Some(&agent),
-                    Some(&agent),
+                    Some(&effect_agent),
+                    Some(&effect_agent),
                     &notification_payload(notification),
                     delivery,
                     ObservationTime::new(observed_at)
@@ -821,9 +828,10 @@ pub fn dispatch_notification_with_effects(
                     if let TokenUsageObservation::Typed(usage) = &observation
                         && crate::event_write::truthy(agent.get("movedFrom"))
                     {
+                        let effect_agent = studio_runtime_store::AgentId::from(agent_id);
                         effects.capture_move_cache(
                             transaction,
-                            &agent,
+                            &effect_agent,
                             params,
                             usage,
                             observed_at,
@@ -862,7 +870,8 @@ pub fn dispatch_notification_with_effects(
             let stored = match after_known {
                 AfterAgent::Stored(agent) => Some(agent),
                 AfterAgent::Unknown if before.is_some() => {
-                    NotificationDispatchRepository::agent_record(transaction, agent_id)?
+                    NotificationDispatchRepository::agent_record(transaction, agent_id)
+                        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
                 }
                 AfterAgent::Unchanged | AfterAgent::Unknown => None,
             };
@@ -876,7 +885,9 @@ pub fn dispatch_notification_with_effects(
             if before.is_some() {
                 assert_eq!(
                     after,
-                    NotificationDispatchRepository::agent_record(transaction, agent_id)?.as_ref(),
+                    NotificationDispatchRepository::agent_record(transaction, agent_id)
+                        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
+                        .as_ref(),
                     "tracked agent after {kind} differs from the stored row"
                 );
             }
@@ -888,12 +899,30 @@ pub fn dispatch_notification_with_effects(
                 let mut key = command_key(agent_id, identity, params)?;
                 key.method = kind.to_owned();
                 if let Some(agent) = &before {
-                    next_streams.flush_analytics(&key, agent);
+                    next_streams.flush_analytics(&key, agent)?;
                 }
             }
+            // dispatch still Value; see follow-up. Unchanged effects share one decode.
+            let effect_before = before
+                .as_ref()
+                .map(NotificationAgent::deserialize)
+                .transpose()
+                .map_err(StoreError::from)?;
+            let effect_after = if unchanged {
+                None
+            } else {
+                after
+                    .map(NotificationAgent::deserialize)
+                    .transpose()
+                    .map_err(StoreError::from)?
+            };
             let mut current = effects.post_commit(
-                before.as_ref(),
-                after,
+                effect_before.as_ref(),
+                if unchanged {
+                    effect_before.as_ref()
+                } else {
+                    effect_after.as_ref()
+                },
                 &notification_payload(notification),
                 delivery,
                 ObservationTime::new(observed_at).ok_or_else(NotificationDispatchError::invalid)?,
@@ -998,7 +1027,8 @@ pub fn recover_task_in_transaction(
             agent["id"]
                 .as_str()
                 .ok_or(NotificationDispatchError::invalid())?,
-        )?;
+        )
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?;
         if current.as_ref() != Some(previous) || stored_agent.as_ref() != Some(agent) {
             return Err(NotificationDispatchError::invalid());
         }
@@ -1558,7 +1588,8 @@ pub fn flush_notification_streams(
 ) -> Result<Option<NotificationStreamBuffer>, NotificationDispatchError> {
     let mut next = streams.clone();
     in_savepoint(transaction, || {
-        let mut agent = NotificationDispatchRepository::agent_record(transaction, agent_id)?
+        let mut agent = NotificationDispatchRepository::agent_record(transaction, agent_id)
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
             .ok_or_else(|| stored("runtime_agents", agent_id))?;
         validate_agent_write_fields(&agent, agent_id)?;
         let before = agent.clone();
@@ -1831,7 +1862,7 @@ fn flush_keys(
         if agent.get("deletedAt").is_none_or(Value::is_null)
             && key.method != "item/commandExecution/outputDelta"
         {
-            streams.flush_analytics(&key, agent);
+            streams.flush_analytics(&key, agent)?;
         }
         if agent.get("deletedAt").is_some_and(|v| !v.is_null())
             || (key.method != "item/commandExecution/outputDelta"
@@ -1891,7 +1922,7 @@ fn flush_text_stream(
     observed_at: f64,
     delta: Option<&str>,
 ) -> Result<(), NotificationDispatchError> {
-    streams.flush_analytics(key, agent);
+    streams.flush_analytics(key, agent)?;
     if delta.is_none() && !streams.has_pending(key) {
         return Ok(());
     }
@@ -2154,8 +2185,7 @@ fn persist_agent(
         studio_runtime_store::AgentRecord::from_value(agent.clone()).map_err(StoreError::from)?;
     crate::agents_create::mode_fields(&mut typed);
     let normalized = typed.value();
-    let agent = &normalized;
-    NotificationDispatchRepository::put_agent_record(transaction, agent_id, agent)?;
+    NotificationDispatchRepository::put_agent_record(transaction, agent_id, &typed)?;
     Ok(normalized)
 }
 
@@ -3775,6 +3805,31 @@ mod tests {
 
     /// A new agent has no event counter yet; its first notification counts from zero.
     #[test]
+    fn notification_agent_write_preserves_legacy_row_bytes() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
+            .unwrap()
+            .unwrap();
+        agent["idleCompactionEpisode"] = json!({"id":"legacy","future":{"count":1}});
+        agent["nativeTurnError"] = json!({"turnId":null,"error":{"vendor":true}});
+        let typed = studio_runtime_store::AgentRecord::from_value(agent).unwrap();
+        NotificationDispatchRepository::put_agent_record(&tx, "agent", &typed).unwrap();
+        let before = studio_runtime_store::AgentRepository::get_raw(&tx, &"agent".into())
+            .unwrap()
+            .unwrap();
+        let current = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        NotificationDispatchRepository::put_agent_record(&tx, "agent", &current).unwrap();
+        let after = studio_runtime_store::AgentRepository::get_raw(&tx, &"agent".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.as_bytes(), after.as_bytes());
+    }
+
+    #[test]
     fn agent_without_event_counter_accepts_first_notification() {
         let mut connection = database();
         connection
@@ -3797,6 +3852,7 @@ mod tests {
             DispatchOutcome::Written
         );
         let agent = NotificationDispatchRepository::agent_record(&transaction, "agent")
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
             .expect("agent reads")
             .expect("agent exists");
         assert_eq!(agent["events"], 1);
@@ -3842,6 +3898,7 @@ mod tests {
                 .expect("read transaction begins"),
             "agent",
         )
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
         .expect("agent reads")
         .expect("agent exists");
         assert_eq!(agent["events"], 1);
@@ -4006,6 +4063,7 @@ mod tests {
                 .expect("read transaction begins"),
             "agent",
         )
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
         .expect("agent reads")
         .expect("agent exists");
         assert_eq!(agent["events"], 0);

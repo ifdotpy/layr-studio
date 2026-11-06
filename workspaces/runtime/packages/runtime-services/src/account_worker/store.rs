@@ -5,7 +5,7 @@ use super::*;
 use crate::continuation_runtime::CapacityStartOutcome;
 use crate::diagnostics::measure_runtime_stage as stage;
 use crate::notification_dispatch::{
-    NotificationEffects, NotificationPublicationBatch, PreparedSubmission,
+    NotificationAgent, NotificationEffects, NotificationPublicationBatch, PreparedSubmission,
     ProviderDeliveryIdentity, dispatch_notification_with_effects, flush_notification_streams,
 };
 use rusqlite::{OptionalExtension, params};
@@ -2843,11 +2843,12 @@ fn journal_one(
                                 generation: entry.generation.0,
                                 cursor: entry.cursor.0,
                             };
+                            let observation_agent = NotificationAgent::from(&agent);
                             next.queue_effects(
                                 crate::notification_runtime_effects::RuntimeNotificationEffects
                                     .post_commit(
-                                        Some(&agent),
-                                        Some(&agent),
+                                        Some(&observation_agent),
+                                        Some(&observation_agent),
                                         &frame,
                                         &delivery,
                                         crate::notification_dispatch::ObservationTime::new(now())
@@ -2895,7 +2896,13 @@ fn journal_one(
                             NotificationDispatchRepository::agent_record(tx, &identity.agent_id)?
                                 .ok_or_else(|| invalid(&identity.agent_id))?;
                         if scheduler::settle_terminal_in_transaction(tx, &identity, params)? {
-                            if agent_before["lastCompletedTurn"] != params["turn"]["id"] {
+                            if agent_before
+                                .last_completed_turn
+                                .value()
+                                .map_or(!params["turn"]["id"].is_null(), |last| {
+                                    params["turn"]["id"] != last.as_str()
+                                })
+                            {
                                 crate::shell_policy::note_activity(tx, &identity.agent_id, now())?;
                             }
                             invalidate_auth_on_failure(
@@ -2930,8 +2937,8 @@ fn journal_one(
                             next.queue_effects(
                                 crate::notification_runtime_effects::RuntimeNotificationEffects
                                     .post_commit(
-                                        Some(&agent_before),
-                                        Some(&agent_after),
+                                        Some(&NotificationAgent::from(&agent_before)),
+                                        Some(&NotificationAgent::from(&agent_after)),
                                         &frame,
                                         &delivery,
                                         crate::notification_dispatch::ObservationTime::new(now())
@@ -4556,9 +4563,9 @@ mod pending_preparation_scan_tests {
 /// A failed turn whose error proves the account's credentials rejected ends
 /// the account's cached auth status, for every provider; the next read probes
 /// once. `account_pin` is the worker account's auth pin (provider and home).
-fn invalidate_auth_on_failure(agent: &Value, account_pin: &Value, turn: &Value) {
+fn invalidate_auth_on_failure(agent: &AgentRecord, account_pin: &Value, turn: &Value) {
     use crate::account_driver::{AuthProfile, ProviderAuthReader, SystemProviderAuthReader};
-    let Ok(provider) = studio_runtime_providers::ProviderKind::of_record(agent) else {
+    let Some(provider) = agent.provider.value().copied() else {
         return;
     };
     if turn["status"] != "failed"

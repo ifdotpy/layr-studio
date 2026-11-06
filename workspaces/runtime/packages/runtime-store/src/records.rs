@@ -788,6 +788,89 @@ pub struct AgentRecord {
     )]
     pub connection_check:
         studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub idle_summary_prepared:
+        studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub idle_compaction_episode:
+        studio_runtime_schema::queue_command::Field<StoredTransferObject<IdleCompactionEpisode>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub idle_cache: studio_runtime_schema::queue_command::Field<StoredTransferObject<IdleCache>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_thread_block:
+        studio_runtime_schema::queue_command::Field<StoredTransferObject<NativeThreadBlock>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_turn_error:
+        studio_runtime_schema::queue_command::Field<StoredTransferObject<NativeTurnError>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// The episode identity is read by the runtime; other fields retain their wire representation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleCompactionEpisode {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleCache {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub ttl: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub request_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeThreadBlock {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub thread_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeTurnError {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub turn_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -1354,6 +1437,11 @@ impl AgentRecord {
             task_default_gate: studio_runtime_schema::queue_command::Field::Missing,
             moved_from: studio_runtime_schema::queue_command::Field::Missing,
             connection_check: studio_runtime_schema::queue_command::Field::Missing,
+            idle_summary_prepared: studio_runtime_schema::queue_command::Field::Missing,
+            idle_compaction_episode: studio_runtime_schema::queue_command::Field::Missing,
+            idle_cache: studio_runtime_schema::queue_command::Field::Missing,
+            native_thread_block: studio_runtime_schema::queue_command::Field::Missing,
+            native_turn_error: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
     }
@@ -5298,6 +5386,55 @@ mod agent_projection_tests {
         let value = record.into_value();
         for (key, expected) in raw.as_object().unwrap() {
             assert_eq!(&value[key], expected);
+        }
+    }
+
+    #[test]
+    fn stored_agent_private_fields_preserve_legacy_bytes() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            .unwrap();
+        db.execute_batch(crate::agent_volatile::agent_volatile_table_sql())
+            .unwrap();
+        for fields in [
+            json!({}),
+            json!({"idleCompactionEpisode":{"id":"episode","future":1},"idleSummaryPrepared":"episode","idleCache":{"ttl":"1h","requestId":"r"},"nativeThreadBlock":{"threadId":"t","error":{"future":true}},"nativeTurnError":{"turnId":"u","error":"legacy"},"workspaceCleanupIntent":{"phase":"queued","future":1}}),
+            json!({"idleCompactionEpisode":null,"idleSummaryPrepared":null,"idleCache":null,"nativeThreadBlock":null,"nativeTurnError":null,"workspaceCleanupIntent":null}),
+            json!({"idleCompactionEpisode":false,"idleSummaryPrepared":42,"idleCache":[1],"nativeThreadBlock":"legacy","nativeTurnError":{"turnId":null,"extra":true},"workspaceCleanupIntent":false}),
+        ] {
+            let mut raw = json!({"id":"a","rootId":"r","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic"});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let bytes = raw.to_string();
+            db.execute(
+                "INSERT OR REPLACE INTO runtime_agents(id,record) VALUES('a',?1)",
+                [&bytes],
+            )
+            .unwrap();
+            let stored: String = db
+                .query_row(
+                    "SELECT record FROM runtime_agents WHERE id='a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let record = Table::<AgentRecord>::new(&db)
+                .get(&AgentId::from("a"))
+                .unwrap()
+                .unwrap();
+            if fields["idleSummaryPrepared"] == "episode" {
+                assert!(
+                    matches!(record.idle_summary_prepared.value(), Some(StoredTransferValue::Known(value)) if value == "episode")
+                );
+                assert!(
+                    matches!(record.idle_compaction_episode.value(), Some(StoredTransferObject::Known(value)) if matches!(value.id.value(), Some(StoredTransferValue::Known(id)) if id == "episode"))
+                );
+                assert!(
+                    matches!(record.native_thread_block.value(), Some(StoredTransferObject::Known(value)) if matches!(value.thread_id.value(), Some(StoredTransferValue::Known(id)) if id == "t"))
+                );
+            }
+            assert_eq!(record.into_value().to_string(), stored);
         }
     }
 

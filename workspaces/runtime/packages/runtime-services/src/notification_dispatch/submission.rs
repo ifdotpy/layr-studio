@@ -87,7 +87,8 @@ pub(super) fn record_submission(
                     .ok_or_else(|| stored("runtime_execution_attempts", attempt_id))?,
             ),
             SubmissionAuthorization::Current => {
-                let current = NotificationDispatchRepository::agent_record(tx, agent)?
+                let current = NotificationDispatchRepository::agent_record(tx, agent)
+                    .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
                     .ok_or_else(|| stored("runtime_agents", agent))?;
                 let attempt = current
                     .pointer("/activeExecution/attemptId")
@@ -208,7 +209,8 @@ pub(super) fn validate_submission(
     {
         return Err(NotificationDispatchError::invalid());
     }
-    let agent = NotificationDispatchRepository::agent_record(transaction, agent_id)?
+    let agent = NotificationDispatchRepository::agent_record(transaction, agent_id)
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
         .ok_or_else(|| stored("runtime_agents", agent_id))?;
     validate_agent_write_fields(&agent, agent_id)?;
     if agent.get("deletedAt").is_some_and(|value| !value.is_null()) {

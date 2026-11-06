@@ -631,12 +631,19 @@ impl NotificationStreamBuffer {
         }
         Ok(())
     }
-    pub(super) fn flush_analytics(&mut self, key: &StreamKey, agent: &Value) {
+    pub(super) fn flush_analytics(
+        &mut self,
+        key: &StreamKey,
+        agent: &Value,
+    ) -> Result<(), super::NotificationDispatchError> {
         self.analytics_skipped
             .retain(|sample_key| **sample_key != *key);
         if let Some(index) = self.indexes.analytics.get(key).copied() {
+            // dispatch still Value; see follow-up. Decode only when a capture exists.
+            let agent = <super::NotificationAgent<'_> as serde::Deserialize>::deserialize(agent)
+                .map_err(studio_runtime_store::StoreError::from)?;
             let mut capture = self.analytics.remove(index).into_owned();
-            capture.observation.agent = Some(super::SharedJson::agent_projection(agent));
+            capture.observation.agent = Some(super::SharedJson::agent_projection(&agent));
             self.queue_effect(NotificationPostCommit::AnalyticsStream {
                 observation: capture.observation,
                 metrics: capture.metrics,
@@ -646,6 +653,7 @@ impl NotificationStreamBuffer {
         } else {
             self.rebuild_indexes();
         }
+        Ok(())
     }
     /// Metadata and entries with pending deltas (`None` when nothing is pending).
     pub(crate) fn persisted_parts(&self) -> (Self, Option<NotificationPendingStreams>) {
@@ -1563,7 +1571,7 @@ mod tests {
         let mut restored: NotificationStreamBuffer = studio_json::from_str(&raw).unwrap();
         assert_eq!(restored.analytics_bytes, streams.analytics_bytes);
         assert_eq!(restored.indexes.analytics.get(&key), Some(&0));
-        restored.flush_analytics(&key, &json!({"id":"agent"}));
+        restored.flush_analytics(&key, &json!({"id":"agent","rootId":"agent","status":"idle","epoch":1,"accountKey":"default","compactions":0})).unwrap();
         assert!(restored.analytics.is_empty());
         assert_eq!(restored.analytics_bytes, 0);
         assert_eq!(restored.post_commit_analytics_count, 1);
