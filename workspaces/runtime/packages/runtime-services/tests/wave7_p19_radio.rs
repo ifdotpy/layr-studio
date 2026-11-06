@@ -414,6 +414,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             studio_runtime_store::migrations::migrate_room_record(db)?;
             studio_runtime_store::migrations::migrate_project_teams(db)?;
             studio_runtime_store::migrations::migrate_project_record_kind(db)?;
+            studio_runtime_store::migrations::migrate_start_attempts_to_turns(db)?;
             for id in completed_turns {
                 let (chat, turn) = id.split_once(':').expect("completed turn id");
                 studio_runtime_store::domain::complete_turn(db, chat, turn)?;
@@ -540,6 +541,26 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
             .collect::<Result<Vec<_>, _>>()
             .expect("rows read");
         let mut rows = rows;
+        if table == "agents" {
+            // The start attempt lives on the chat's turn row; the oracle keeps it in the record.
+            use rusqlite::OptionalExtension;
+            for row in &mut rows {
+                let (Some(id), Some(record)) = (row["id"].as_str(), row["record"].as_str()) else {
+                    continue;
+                };
+                if let Some(merged) = db
+                    .query_row(
+                        "SELECT json_set(?1,'$.startAttempt',json(attempt)) FROM turns WHERE chat=?2 AND attempt IS NOT NULL",
+                        [record, id],
+                        |merged| merged.get::<_, String>(0),
+                    )
+                    .optional()
+                    .expect("attempt")
+                {
+                    row["record"] = json!(merged);
+                }
+            }
+        }
         if table == "sync_entities" {
             // The agent views are built at read time; compare them as the old copies.
             for row in super::agent_view_fixtures::read_time_rows(&db) {

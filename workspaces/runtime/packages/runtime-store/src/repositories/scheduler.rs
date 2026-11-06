@@ -753,7 +753,7 @@ mod tests {
             .expect("claim executes");
         transaction
             .execute(
-                "UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.submitted',json('true'))",
+                "UPDATE turns SET attempt=json_set(attempt,'$.submitted',json('true')) WHERE attempt IS NOT NULL",
                 [],
             )
             .expect("submitted marker writes");
@@ -1066,7 +1066,7 @@ mod tests {
             .expect("claim executes");
         transaction
             .execute(
-                "UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.events',json('[\"first\",null]'))",
+                "UPDATE turns SET attempt=json_set(attempt,'$.events',json('[\"first\",null]')) WHERE attempt IS NOT NULL",
                 [],
             )
             .expect("malformed attempt writes");
@@ -1075,9 +1075,11 @@ mod tests {
         let transaction = connection
             .transaction()
             .expect("recovery transaction begins");
+        // The attempt does not decode, so the recovery refuses it.
         assert!(matches!(
             SchedulerRepository::recover_unsubmitted(&transaction),
-            Err(crate::StoreError::InvalidSyncObjectField { .. })
+            Err(crate::StoreError::InvalidSyncObjectField { .. }
+                | crate::StoreError::InvalidStoredObject { .. })
         ));
         transaction.rollback().expect("refused recovery rolls back");
         let status: String = connection

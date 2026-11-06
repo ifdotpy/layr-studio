@@ -639,7 +639,7 @@ pub(super) async fn recover(
         // receipt-pending hold and let the next generation interrupt the
         // finished agent again. Openness is read before reconciliation, which
         // can continue an interrupted turn and so close its receipt.
-        let mut statement = tx.prepare("SELECT a.id FROM runtime_agents a WHERE a.account_key=?1 AND json_extract(a.record,'$.startAttempt') IS NULL AND COALESCE(json_extract(a.record,'$.disconnectRecovery.startAttempt.connectionGeneration'),json_extract(a.record,'$.restartRecovery.startAttempt.connectionGeneration'))=?2 AND a.hold_status='clear'")?;
+        let mut statement = tx.prepare("SELECT a.id FROM runtime_agents a WHERE a.account_key=?1 AND NOT EXISTS(SELECT 1 FROM turns ta WHERE ta.chat=a.id AND ta.attempt IS NOT NULL) AND COALESCE(json_extract(a.record,'$.disconnectRecovery.startAttempt.connectionGeneration'),json_extract(a.record,'$.restartRecovery.startAttempt.connectionGeneration'))=?2 AND a.hold_status='clear'")?;
         let ids = statement
             .query_map(
                 params![
@@ -4332,7 +4332,7 @@ pub(super) fn pending_preparations(
 ) -> Result<Vec<(String, i64)>, WorkerError> {
     // Python persists deferred preparation on startAttempt.prepareError and
     // clears it when preparation resumes (codex_runtime.py:7316, 7502-7505).
-    let mut query = db.prepare("SELECT r.id FROM chats ch CROSS JOIN runtime_agents r ON r.id=ch.id WHERE ch.auto_wake=1 AND r.account_key=?1 AND r.deleted_at IS NULL AND COALESCE(json_extract(r.record,'$.accountKey'),'default')=?1 AND (json_type(r.record,'$.startAttempt.prepareError')='text' OR (json_type(r.record,'$.startAttempt') IS NULL AND json_type(r.record,'$.lastWorkspaceWait.attemptId')='text')) ORDER BY r.id")?;
+    let mut query = db.prepare("SELECT r.id FROM chats ch CROSS JOIN runtime_agents r ON r.id=ch.id WHERE ch.auto_wake=1 AND r.account_key=?1 AND r.deleted_at IS NULL AND COALESCE(json_extract(r.record,'$.accountKey'),'default')=?1 AND ((SELECT json_type(ta.attempt,'$.prepareError') FROM turns ta WHERE ta.chat=r.id AND ta.attempt IS NOT NULL)='text' OR (NOT EXISTS(SELECT 1 FROM turns ta WHERE ta.chat=r.id AND ta.attempt IS NOT NULL) AND json_type(r.record,'$.lastWorkspaceWait.attemptId')='text')) ORDER BY r.id")?;
     let ids = query
         .query_map([account], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -4505,10 +4505,19 @@ mod pending_preparation_scan_tests {
                 rusqlite::params![id, auto_wake],
             )
             .unwrap();
+            // The start attempt lives on a turn row of the chat, not in the record.
+            if let Some(attempt) = extra.get("startAttempt").filter(|value| value.is_object()) {
+                db.execute(
+                    "INSERT INTO turns(id,chat,state,attempt) VALUES(?1,?1,'interrupted',?2)",
+                    rusqlite::params![id, attempt.to_string()],
+                )
+                .unwrap();
+            }
         }
+        // A null attempt is no attempt: `c` has a legacy wait like `b`.
         assert_eq!(
             super::pending_preparations(&db, "default").unwrap(),
-            vec![("a".into(), 2), ("b".into(), 2)]
+            vec![("a".into(), 2), ("b".into(), 2), ("c".into(), 2)]
         );
     }
 }

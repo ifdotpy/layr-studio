@@ -43,6 +43,78 @@ pub const AGENT_VOLATILE_FIELDS: [&str; 9] = [
     "tokenUsageAccounting",
 ];
 
+/// The start attempt of a chat. Only its turn row stores it (`turns.attempt`, written by
+/// `domain::project` on every agent write); the agent record never does. Readers get it
+/// back together with the volatile fields (#630 item 63).
+pub const START_ATTEMPT_FIELD: &str = "startAttempt";
+
+/// The start attempt JSON of chat `id`, from its turn row. A database without the domain
+/// tables (a reduced test schema) has none.
+fn stored_attempt(connection: &Connection, id: &str) -> StoreResult<Option<String>> {
+    match connection.query_row_cached(
+        "SELECT attempt FROM turns WHERE chat=?1 AND attempt IS NOT NULL",
+        [id],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(attempt) => Ok(Some(attempt)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+            if message.starts_with("no such table: turns") =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Add the start attempt of chat `id` to its record fields. A record from before the move
+/// keeps its own copy until the migration strips it.
+fn merge_attempt_fields(
+    connection: &Connection,
+    id: &str,
+    fields: &mut Map<String, Value>,
+) -> StoreResult<bool> {
+    let Some(attempt) = stored_attempt(connection, id)? else {
+        return Ok(false);
+    };
+    let value = studio_json::from_str(&attempt).map_err(|_| invalid(id))?;
+    fields.insert(START_ATTEMPT_FIELD.to_owned(), value);
+    Ok(true)
+}
+
+/// SQL for the start attempt JSON of the `runtime_agents a` row, for bulk agent reads.
+pub(crate) const ATTEMPT_COLUMN_SQL: &str =
+    "(SELECT attempt FROM turns WHERE chat=a.id AND attempt IS NOT NULL)";
+
+/// Add the start attempt that column `index` of a bulk agent read holds.
+pub(crate) fn merge_attempt_column(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+    id: &str,
+    agent: &mut crate::AgentRecord,
+) -> StoreResult<()> {
+    if let Some(attempt) = row.get::<_, Option<String>>(index)? {
+        agent.start_attempt = Some(Box::new(
+            studio_json::from_str(&attempt).map_err(|_| invalid(id))?,
+        ));
+    }
+    Ok(())
+}
+
+/// Add the start attempt of chat `id` to its typed record.
+pub(crate) fn merge_agent_attempt(
+    connection: &Connection,
+    id: &str,
+    agent: &mut crate::AgentRecord,
+) -> StoreResult<()> {
+    if let Some(attempt) = stored_attempt(connection, id)? {
+        agent.start_attempt = Some(Box::new(
+            studio_json::from_str(&attempt).map_err(|_| invalid(id))?,
+        ));
+    }
+    Ok(())
+}
+
 /// Whether `key` is one of [`AGENT_VOLATILE_FIELDS`].
 pub fn is_volatile_field(key: &str) -> bool {
     AGENT_VOLATILE_FIELDS.contains(&key)
@@ -264,6 +336,7 @@ pub fn merge(connection: &Connection, id: &str, record: &mut Value) -> StoreResu
     if let Some(row) = rows.next()? {
         merge_row(row, id, fields)?;
     }
+    merge_attempt_fields(connection, id, fields)?;
     Ok(())
 }
 
@@ -280,7 +353,7 @@ pub(crate) fn merge_agent(
     if let Some(row) = rows.next()? {
         merge_agent_row(row, id, agent)?;
     }
-    Ok(())
+    merge_agent_attempt(connection, id, agent)
 }
 
 pub(crate) fn merge_agent_row(
@@ -385,17 +458,25 @@ pub fn merge_if_agent(
 pub fn merged_text(connection: &Connection, id: &str, raw: String) -> StoreResult<String> {
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::VolatileLoad);
+    let attempt = stored_attempt(connection, id)?;
     let mut statement = connection.prepare_cached(&SELECT_SQL)?;
     let mut rows = statement.query([id])?;
-    let Some(row) = rows.next()? else {
+    let row = rows.next()?;
+    if row.is_none() && attempt.is_none() {
         return Ok(raw);
-    };
+    }
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::Decode);
     let Ok(Value::Object(mut fields)) = studio_json::from_str::<Value>(&raw) else {
         return Ok(raw);
     };
-    merge_row(row, id, &mut fields)?;
+    if let Some(row) = row {
+        merge_row(row, id, &mut fields)?;
+    }
+    if let Some(attempt) = attempt {
+        let value = studio_json::from_str(&attempt).map_err(|_| invalid(id))?;
+        fields.insert(START_ATTEMPT_FIELD.to_owned(), value);
+    }
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::TextRoundTrip);
     Ok(studio_json::to_string(&fields)?)
@@ -450,7 +531,7 @@ impl Serialize for StoredRecord<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(None)?;
         for (key, value) in self.0 {
-            if !is_volatile_field(key) {
+            if !is_volatile_field(key) && key != START_ATTEMPT_FIELD {
                 map.serialize_entry(key, value)?;
             }
         }

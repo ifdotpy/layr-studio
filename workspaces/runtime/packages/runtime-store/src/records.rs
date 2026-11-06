@@ -1405,11 +1405,17 @@ impl JsonRecord for AgentRecord {
         encoded: &str,
         row: &rusqlite::Row<'_>,
     ) -> StoreResult<Self> {
-        let _ = connection;
         let mut agent = parse_agent_record(row_id, encoded)?;
         if row.get::<_, bool>(crate::agent_volatile::AGENT_VOLATILE_FIELDS.len() + 2)? {
             crate::agent_volatile::merge_agent_row(row, row_id, &mut agent)?;
         }
+        let _ = connection;
+        crate::agent_volatile::merge_attempt_column(
+            row,
+            crate::agent_volatile::AGENT_VOLATILE_FIELDS.len() + 3,
+            row_id,
+            &mut agent,
+        )?;
         Ok(agent)
     }
 
@@ -2618,8 +2624,9 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
         let where_clause = where_sql.map_or_else(String::new, |sql| format!(" WHERE {sql}"));
         let sql = if R::TABLE == AgentRecord::TABLE {
             format!(
-                "SELECT {},a.id,a.record,v.id IS NOT NULL FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
-                crate::agent_volatile::columns("v.")
+                "SELECT {},a.id,a.record,v.id IS NOT NULL,{} FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
+                crate::agent_volatile::columns("v."),
+                crate::agent_volatile::ATTEMPT_COLUMN_SQL
             )
         } else {
             format!(
@@ -4595,7 +4602,10 @@ mod tests {
         use crate::agent_volatile::publication_work;
         let connection = Connection::open_in_memory().unwrap();
         connection
-            .execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+            .execute_batch(
+                "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 CREATE TABLE turns(chat TEXT, attempt TEXT);",
+            )
             .unwrap();
         connection
             .execute_batch(&crate::agent_volatile::TABLE_SQL)

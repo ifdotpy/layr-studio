@@ -565,7 +565,7 @@ fn ended_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
 /// turn is an ended turn; the turn rows decide busy, not the agent `in_flight` column.
 fn stopped_turn_candidates_sql() -> String {
     format!(
-        "SELECT id FROM runtime_agents WHERE account_key=?1 AND ((EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=0) AND has_disconnect_recovery=1 AND NOT {busy}) OR json_extract(record,'$.startAttempt.interrupt.outcome') IN ('unknown','unsent'))",
+        "SELECT id FROM runtime_agents WHERE account_key=?1 AND ((EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=0) AND has_disconnect_recovery=1 AND NOT {busy}) OR (SELECT json_extract(ta.attempt,'$.interrupt.outcome') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL) IN ('unknown','unsent'))",
         busy = studio_runtime_store::domain::chat_busy_sql("runtime_agents.id"),
     )
 }

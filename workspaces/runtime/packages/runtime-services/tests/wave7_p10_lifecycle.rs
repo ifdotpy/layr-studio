@@ -984,7 +984,7 @@ impl LifecyclePorts for InterruptFixture {
         assert_eq!(stopped["autoWake"], false);
         let saved: String = tx
             .query_row(
-                "SELECT record FROM runtime_agents WHERE id=?1",
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                 [stopped["id"].as_str()],
                 |r| r.get(0),
             )
@@ -1472,7 +1472,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                     .expect("intent is committed before dispatch");
                 let raw: String = reader
                     .query_row(
-                        "SELECT record FROM runtime_agents WHERE id='lead'",
+                        "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='lead'",
                         [],
                         |row| row.get(0),
                     )
@@ -1598,7 +1598,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             let reader = store.test_reader().expect("settled receipt");
             let raw: String = reader
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id='lead'",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='lead'",
                     [],
                     |row| row.get(0),
                 )
@@ -2154,7 +2154,7 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
     let reader = store.test_reader().expect("reader");
     let raw: String = reader
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id='lead'",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='lead'",
             [],
             |row| row.get(0),
         )

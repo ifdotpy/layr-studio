@@ -998,7 +998,7 @@ fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
                 tx.commit().unwrap();
                 let raw: String = db
                     .query_row(
-                        "SELECT record FROM runtime_agents WHERE id=?1",
+                        "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                         [native_review::worker_id("review-request")],
                         |r| r.get(0),
                     )
@@ -1051,7 +1051,7 @@ fn review_reservation_rolls_back_and_replays_without_second_child() {
     );
     let raw: String = db
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id=?1",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
             [native_review::worker_id("review-request")],
             |r| r.get(0),
         )
@@ -1564,7 +1564,7 @@ fn python_failed_and_unknown_receipt_errors_are_not_lost() {
 
 fn stored_agent(db: &Connection, id: &str) -> Value {
     studio_json::from_str(
-        &db.query_row("SELECT record FROM runtime_agents WHERE id=?1", [id], |r| {
+        &db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1", [id], |r| {
             r.get::<_, String>(0)
         })
         .expect("stored agent"),

@@ -367,14 +367,28 @@ mod tests {
         ]
     }
 
-    fn rows(connection: &Connection) -> Vec<(i64, String, String)> {
+    /// Each agent row with its start attempt, which may live in the record or on its turn.
+    fn rows(connection: &Connection) -> Vec<(i64, String, Value)> {
         connection
             .prepare("SELECT rowid,id,record FROM runtime_agents ORDER BY rowid")
             .expect("rows prepare")
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
             .expect("rows read")
-            .collect::<Result<_, _>>()
+            .collect::<Result<Vec<_>, _>>()
             .expect("rows decode")
+            .into_iter()
+            .map(|(rowid, id, raw)| {
+                let mut record: Value = studio_json::from_str(&raw).expect("record JSON");
+                crate::agent_volatile::merge(connection, &id, &mut record).expect("attempt");
+                (rowid, id, record)
+            })
+            .collect()
     }
 
     fn catalog(connection: &Connection, kind: &str) -> Vec<String> {
@@ -455,6 +469,9 @@ mod tests {
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                     rusqlite::params![agent.get("id").and_then(Value::as_str), agent.to_string()])?;
             }
+            // Current stores keep the start attempt on its turn row; the fixture starts there,
+            // so this test sees only the retired columns change.
+            crate::migrations::migrate_start_attempts_to_turns(tx)?;
             let triggers = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='runtime_agents'")?
                 .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
             let old_table = table_sql("runtime_agents_legacy_start_fixture").replace(

@@ -42,10 +42,10 @@ pub fn reserved_turn_input() -> &'static str {
                WHERE {unfinished} \
              UNION SELECT a.id,a.root_id FROM turns t JOIN runtime_agents a ON a.id=t.chat \
                WHERE t.attempt_active_at_reservation=1 AND EXISTS (\
-               SELECT 1 FROM json_each(a.record,'$.startAttempt.events') AS input \
+               SELECT 1 FROM json_each(t.attempt,'$.events') AS input \
                JOIN runtime_events AS event ON event.id=input.value \
                WHERE event.agent=a.id \
-               AND event.epoch=json_extract(a.record,'$.startAttempt.epoch') \
+               AND event.epoch=json_extract(t.attempt,'$.epoch') \
                AND event.status IN ('reserved','dispatching','uncertain')) ORDER BY 1",
             unfinished = unfinished_turn_sql("t."),
         )

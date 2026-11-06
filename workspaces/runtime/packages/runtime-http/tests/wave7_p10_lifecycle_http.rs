@@ -47,7 +47,7 @@ impl AccountSessionPort for InterruptBroker {
         let reader = self.store.test_reader().expect("committed store read");
         let raw: String = reader
             .query_row(
-                "SELECT record FROM runtime_agents WHERE id='agent'",
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
                 [],
                 |row| row.get(0),
             )
@@ -188,7 +188,7 @@ async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route()
     let state = store.test_reader().expect("diagnostic store read");
     let raw: Option<String> = state
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id='agent'",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )
@@ -219,7 +219,7 @@ async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route()
     let reader = store.test_reader().expect("final state");
     let raw: String = reader
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id='agent'",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )
@@ -337,7 +337,7 @@ async fn production_delete_route_interrupts_and_settles_active_turn() {
     let reader = store.test_reader().expect("diagnostic store read");
     let raw: String = reader
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id='agent'",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )

@@ -73,7 +73,7 @@ impl SchedulerRepository {
 
     pub fn hold_unclean_starts(transaction: &Transaction<'_>) -> StoreResult<usize> {
         let mut query = transaction.prepare_cached(
-            "SELECT id FROM runtime_agents WHERE json_extract(record,'$.startAttempt.submitted')=0 AND EXISTS(SELECT 1 FROM runtime_events WHERE agent=runtime_agents.id AND status='reserved')",
+            "SELECT id FROM runtime_agents WHERE (SELECT json_extract(ta.attempt,'$.submitted') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL)=0 AND EXISTS(SELECT 1 FROM runtime_events WHERE agent=runtime_agents.id AND status='reserved')",
         )?;
         let ids = query
             .query_map([], |row| row.get::<_, String>(0))?
@@ -700,7 +700,7 @@ impl SchedulerRepository {
             .map_err(|_| StoreError::SchemaMismatch("invalid provider generation".into()))?;
         let records = select_agents(
             tx,
-            "SELECT id,record FROM runtime_agents WHERE json_extract(record,'$.startAttempt.interrupt.requestTicket')=?1 AND json_extract(record,'$.startAttempt.interrupt.generation')=?2",
+            "SELECT id,record FROM runtime_agents WHERE (SELECT json_extract(ta.attempt,'$.interrupt.requestTicket') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL)=?1 AND (SELECT json_extract(ta.attempt,'$.interrupt.generation') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL)=?2",
             params![ticket, generation],
         )?;
         for mut agent in records {
@@ -1179,7 +1179,7 @@ impl SchedulerRepository {
     /// Restore Python-shaped scoped receipts; the account worker will reattach without replay.
     pub fn recover_submitted(transaction: &Transaction<'_>) -> StoreResult<usize> {
         let query = format!(
-            "SELECT id,record FROM runtime_agents WHERE COALESCE(json_extract(record,'$.remoteWorker'),0)=0 AND COALESCE(json_extract(record,'$.remoteAnchor'),0)=0 AND ((json_extract(record,'$.startAttempt.submitted')=1 AND COALESCE(json_extract(record,'$.startAttempt.executionOutcome'),'unknown')='unknown') OR (json_extract(record,'$.startAttempt') IS NULL AND (json_extract(record,'$.inFlight')=1 OR json_extract(record,'$.status') IN ('running','starting','approval')))) AND NOT ({COMPLETED_START_SQL}) AND NOT ({SETTLED_IDLE_TURN_SQL})"
+            "SELECT id,record FROM runtime_agents WHERE COALESCE(json_extract(record,'$.remoteWorker'),0)=0 AND COALESCE(json_extract(record,'$.remoteAnchor'),0)=0 AND (((SELECT json_extract(ta.attempt,'$.submitted') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL)=1 AND COALESCE((SELECT json_extract(ta.attempt,'$.executionOutcome') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),'unknown')='unknown') OR (NOT EXISTS(SELECT 1 FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL) AND (json_extract(record,'$.inFlight')=1 OR json_extract(record,'$.status') IN ('running','starting','approval')))) AND NOT ({COMPLETED_START_SQL}) AND NOT ({SETTLED_IDLE_TURN_SQL})"
         );
         let mut statement = transaction.prepare_cached(&query)?;
         let rows = statement
@@ -2223,7 +2223,7 @@ const OPEN_RESTART_MARKER_STAGES: [&str; 2] = ["pending", "superseded"];
 fn unresolved_base_sql() -> String {
     let attempt = |field: &str| {
         format!(
-            "json_extract(record,'$.startAttempt.{field}'),\
+            "(SELECT json_extract(ta.attempt,'$.{field}') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),\
              CASE WHEN {OPEN_DISCONNECT_RECEIPT_SQL} \
                THEN json_extract(record,'$.disconnectRecovery.startAttempt.{field}') END,\
              CASE WHEN {OPEN_RESTART_MARKER_SQL} \
@@ -2238,7 +2238,7 @@ fn unresolved_base_sql() -> String {
 }
 // A queued agent whose saved attempt completed has new input but no new claim:
 // its earlier turn is settled, so a new provider generation must not interrupt it.
-const COMPLETED_START_SQL: &str = "COALESCE(json_extract(record,'$.status'),'') IN ('completed','waiting','waiting_on_monitor','paused','parked','queued') AND COALESCE(json_extract(record,'$.inFlight'),0)=0 AND COALESCE(json_extract(record,'$.startAttempt.submitted'),0)=1 AND json_extract(record,'$.startAttempt.action') IS NULL AND COALESCE(json_extract(record,'$.startAttempt.activeAtReservation'),0)=0 AND json_extract(record,'$.startOutcomeHold') IS NULL AND COALESCE(json_extract(record,'$.startAttempt.responseError'),'')='' AND COALESCE(json_extract(record,'$.startAttempt.executionOutcome'),'')!='unknown' AND COALESCE(json_type(record,'$.startAttempt.turnId'),'')='text' AND COALESCE(json_extract(record,'$.startAttempt.turnId'),'')!='' AND json_extract(record,'$.startAttempt.turnId')=COALESCE(json_extract(record,'$.lastCompletedTurn'),'') AND COALESCE(json_extract(record,'$.lastCompletedTurnStatus'),'')='completed'";
+const COMPLETED_START_SQL: &str = "COALESCE(json_extract(record,'$.status'),'') IN ('completed','waiting','waiting_on_monitor','paused','parked','queued') AND COALESCE(json_extract(record,'$.inFlight'),0)=0 AND COALESCE((SELECT json_extract(ta.attempt,'$.submitted') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),0)=1 AND (SELECT json_extract(ta.attempt,'$.action') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL) IS NULL AND COALESCE((SELECT json_extract(ta.attempt,'$.activeAtReservation') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),0)=0 AND json_extract(record,'$.startOutcomeHold') IS NULL AND COALESCE((SELECT json_extract(ta.attempt,'$.responseError') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),'')='' AND COALESCE((SELECT json_extract(ta.attempt,'$.executionOutcome') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),'')!='unknown' AND COALESCE((SELECT json_type(ta.attempt,'$.turnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),'')='text' AND COALESCE((SELECT json_extract(ta.attempt,'$.turnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),'')!='' AND (SELECT json_extract(ta.attempt,'$.turnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL)=COALESCE(json_extract(record,'$.lastCompletedTurn'),'') AND COALESCE(json_extract(record,'$.lastCompletedTurnStatus'),'')='completed'";
 // An idle agent whose attempt turn is its last finished turn has nothing to
 // recover, also when the attempt was reserved during an active turn
 // (`activeAtReservation`). Python restart recovery never touches an idle agent.
@@ -2246,7 +2246,7 @@ const COMPLETED_START_SQL: &str = "COALESCE(json_extract(record,'$.status'),'') 
 // stop or provider generation must not interrupt it again or replace its error
 // (rehearsal 11, agent 841ebc0e). The startup scan and every disconnect path
 // select through this rule.
-const SETTLED_IDLE_TURN_SQL: &str = "COALESCE(json_extract(record,'$.status'),'') IN ('completed','waiting','waiting_on_monitor','paused','parked','queued','failed','interrupted') AND COALESCE(json_extract(record,'$.inFlight'),0)=0 AND COALESCE(json_extract(record,'$.startAttempt.turnId'),json_extract(record,'$.startAttempt.observedTurnId'),'')!='' AND COALESCE(json_extract(record,'$.startAttempt.turnId'),json_extract(record,'$.startAttempt.observedTurnId'))=json_extract(record,'$.lastCompletedTurn') AND COALESCE(json_extract(record,'$.lastCompletedTurnStatus'),'') IN ('completed','failed','interrupted')";
+const SETTLED_IDLE_TURN_SQL: &str = "COALESCE(json_extract(record,'$.status'),'') IN ('completed','waiting','waiting_on_monitor','paused','parked','queued','failed','interrupted') AND COALESCE(json_extract(record,'$.inFlight'),0)=0 AND COALESCE((SELECT json_extract(ta.attempt,'$.turnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),(SELECT json_extract(ta.attempt,'$.observedTurnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),'')!='' AND COALESCE((SELECT json_extract(ta.attempt,'$.turnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL),(SELECT json_extract(ta.attempt,'$.observedTurnId') FROM turns ta WHERE ta.chat=runtime_agents.id AND ta.attempt IS NOT NULL))=json_extract(record,'$.lastCompletedTurn') AND COALESCE(json_extract(record,'$.lastCompletedTurnStatus'),'') IN ('completed','failed','interrupted')";
 pub(super) fn unresolved_sql() -> String {
     format!(
         "{} AND NOT ({COMPLETED_START_SQL}) AND NOT ({SETTLED_IDLE_TURN_SQL})",

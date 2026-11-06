@@ -1131,7 +1131,7 @@ async fn production_reconcile_admits_radio_queue_event_to_retained_worker() {
             .unwrap();
         let agent: String = db
             .query_row(
-                "SELECT record FROM runtime_agents WHERE id='a'",
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='a'",
                 [],
                 |row| row.get(0),
             )
@@ -1387,7 +1387,7 @@ async fn legacy_image_rows_finish_without_provider_launch_or_row_loss() {
     let record = || {
         let db = fixture.store.test_reader().unwrap();
         db.query_row(
-            "SELECT record FROM runtime_agents WHERE id=?1",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
             [agent_id.as_str()],
             |row| row.get::<_, String>(0),
         )
@@ -1855,7 +1855,7 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
                 .unwrap()
                 .collect::<Result<_, _>>()
                 .unwrap();
-            let actor: String = db.query_row("SELECT record FROM runtime_agents WHERE id='managed-actor'", [], |row| row.get(0)).unwrap();
+            let actor: String = db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='managed-actor'", [], |row| row.get(0)).unwrap();
             panic!("the saved callback reply is missing; phases={phases:?}, actor={actor}")
         })
         .unwrap();
@@ -1876,7 +1876,7 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
         .test_reader()
         .unwrap()
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id='managed-actor'",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='managed-actor'",
             [],
             |row| row.get(0),
         )
@@ -2011,7 +2011,7 @@ async fn recovery_selection_matches_frozen_scheduler_roster_without_changing_sto
         fixture.agents["selected"]
     );
     let db = fixture.store.test_reader().unwrap();
-    let mut query = db.prepare("SELECT id,record FROM runtime_agents").unwrap();
+    let mut query = db.prepare("SELECT id,CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents").unwrap();
     let mut stored = query
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -2161,11 +2161,11 @@ fn seed_backlog_rows(
                 SELECT 0 WHERE ?1 > 0
                 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?1
             ), source(record) AS (
-                SELECT record FROM runtime_agents WHERE id = ?2
+                SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id = ?2
             )";
     // Seed the current split storage format; migration is not under test.
     let record: String = tx.query_row(
-        "SELECT record FROM runtime_agents WHERE id=?1",
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
         [&source],
         |row| row.get(0),
     )?;
@@ -2307,10 +2307,10 @@ async fn account_backlog_rejects_invalid_stored_account() {
     let source = fixture.agents[0]["id"].as_str().unwrap();
     let source = source.to_owned();
     fixture.store.transaction(move |tx| {
-        let raw: String = tx.query_row("SELECT record FROM runtime_agents WHERE id=?1", [&source], |row| row.get(0))?;
+        let raw: String = tx.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1", [&source], |row| row.get(0))?;
         tx.execute("INSERT INTO runtime_agents(id,record) VALUES('bad-account-key',json_set(?1,'$.id','bad-account-key','$.accountKey',7))", [raw])?;
         tx.execute("INSERT INTO chats(id,state,status,auto_wake,usage_resume_enabled,execution_mode,turn_epoch) SELECT 'bad-account-key',state,status,auto_wake,usage_resume_enabled,execution_mode,turn_epoch FROM chats WHERE id=?1", [&source])?;
-        tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('bad-account-key-event','bad-account-key','user','fixture','pending',0,json_extract((SELECT record FROM runtime_agents WHERE id='bad-account-key'),'$.epoch'))", [])?;
+        tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('bad-account-key-event','bad-account-key','user','fixture','pending',0,json_extract((SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='bad-account-key'),'$.epoch'))", [])?;
         Ok(())
     }).await.unwrap();
     assert!(matches!(
@@ -3385,7 +3385,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -3725,7 +3725,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [&agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -3959,7 +3959,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [&agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4176,7 +4176,7 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4512,7 +4512,7 @@ async fn direct_child_sigkill_settles_unknown_without_resend() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4673,7 +4673,7 @@ async fn direct_child_crash_before_turn_write_retries_queued_input_once() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4752,7 +4752,7 @@ async fn make_direct_agent_runnable(store: &RuntimeStore, agent_id: &str, accoun
     store
         .transaction_with(move |tx| {
             let raw: String = tx.query_row(
-                "SELECT record FROM runtime_agents WHERE id=?1",
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                 [&agent_id],
                 |row| row.get(0),
             )?;
@@ -4776,7 +4776,7 @@ fn direct_agent_debug(store: &RuntimeStore, agent_id: &str) -> String {
     let db = store.test_reader().unwrap();
     let raw = db
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id=?1",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
             [agent_id],
             |row| row.get::<_, String>(0),
         )
@@ -4850,7 +4850,7 @@ async fn wait_for_direct_completion<T: Clone + Send + Sync + 'static>(
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4961,7 +4961,7 @@ fn restart_agent(store: &RuntimeStore, id: &str) -> Value {
         .test_reader()
         .unwrap()
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id=?1",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
             [id],
             |row| row.get(0),
         )

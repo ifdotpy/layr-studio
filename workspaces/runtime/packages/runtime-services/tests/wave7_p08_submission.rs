@@ -156,7 +156,9 @@ fn state(db: &rusqlite::Connection) -> Value {
         "runtime_item_fulltext",
     ] {
         let columns = match table {
-            "runtime_agents" => "id,record",
+            "runtime_agents" => {
+                "id,CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END AS record"
+            }
             "runtime_execution_runs" => "id,agent,account,epoch,thread,turn,created,record",
             "runtime_execution_attempts" => "id,run,record",
             "runtime_execution_inputs" => "run,event",
@@ -482,7 +484,7 @@ async fn real_submission_transaction_matches_python_complete_rows_and_crash_boun
             continue;
         }
         if case.fault.as_deref() == Some("bind") {
-            store.transaction(|tx| { tx.execute_batch("CREATE TRIGGER cut BEFORE UPDATE ON runtime_agents WHEN json_extract(NEW.record,'$.startAttempt.connectionId')='connection' AND json_extract(NEW.record,'$.startAttempt.submitted')=1 BEGIN SELECT RAISE(ABORT,'bind cut'); END")?; Ok(()) }).await.expect("fault");
+            store.transaction(|tx| { tx.execute_batch("CREATE TRIGGER cut BEFORE UPDATE ON turns WHEN json_extract(NEW.attempt,'$.connectionId')='connection' AND json_extract(NEW.attempt,'$.submitted')=1 BEGIN SELECT RAISE(ABORT,'bind cut'); END")?; Ok(()) }).await.expect("fault");
         }
         let result = submit(
             &store,
@@ -540,9 +542,9 @@ async fn initial_binding_refuses_wrong_or_missing_prepared_generation_and_foreig
             assert!(commit_prepared_turn(tx,&intent(&snapshot),"request:attempt",7,"test-connection",&submission(&snapshot,150.0))?);
             match fault {
                 "saved_generation" => { tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.connectionGeneration',8)",[])?; }
-                "missing_generation" => { tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.connectionGeneration')",[])?; }
-                "foreign_connection" => { tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.connectionId','foreign')",[])?; tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.connectionId','foreign')",[])?; }
-                "foreign_supervisor" => { tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.supervisorIdentity',json('{\"stateDir\":\"/foreign\",\"handle\":\"foreign\",\"generation\":1}'))",[])?; tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.supervisorIdentity',json('{\"stateDir\":\"/foreign\",\"handle\":\"foreign\",\"generation\":1}'))",[])?; }
+                "missing_generation" => { tx.execute("UPDATE turns SET attempt=json_remove(attempt,'$.connectionGeneration') WHERE attempt IS NOT NULL",[])?; }
+                "foreign_connection" => { tx.execute("UPDATE turns SET attempt=json_set(attempt,'$.connectionId','foreign') WHERE attempt IS NOT NULL",[])?; tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.connectionId','foreign')",[])?; }
+                "foreign_supervisor" => { tx.execute("UPDATE turns SET attempt=json_set(attempt,'$.supervisorIdentity',json('{\"stateDir\":\"/foreign\",\"handle\":\"foreign\",\"generation\":1}')) WHERE attempt IS NOT NULL",[])?; tx.execute("UPDATE runtime_execution_attempts SET record=json_set(record,'$.supervisorIdentity',json('{\"stateDir\":\"/foreign\",\"handle\":\"foreign\",\"generation\":1}'))",[])?; }
                 _ => {}
             }
             let unbound = state(tx);
@@ -584,14 +586,14 @@ async fn submission_write_failpoints_restore_every_row_before_a_safe_retry() {
         (
             "freeze_agent",
             "UPDATE",
-            "runtime_agents",
-            "json_extract(NEW.record,'$.startAttempt.submitted')=0",
+            "turns",
+            "json_extract(NEW.attempt,'$.submitted')=0",
         ),
         (
             "submitted",
             "UPDATE",
-            "runtime_agents",
-            "json_extract(NEW.record,'$.startAttempt.submitted')=1",
+            "turns",
+            "json_extract(NEW.attempt,'$.submitted')=1",
         ),
         ("event", "UPDATE", "runtime_events", "1"),
         ("transcript", "INSERT", "runtime_items", "1"),
@@ -606,8 +608,8 @@ async fn submission_write_failpoints_restore_every_row_before_a_safe_retry() {
         (
             "bind_agent",
             "UPDATE",
-            "runtime_agents",
-            "json_extract(NEW.record,'$.startAttempt.submitted')=1 AND json_extract(NEW.record,'$.startAttempt.connectionId')='connection'",
+            "turns",
+            "json_extract(NEW.attempt,'$.submitted')=1 AND json_extract(NEW.attempt,'$.connectionId')='connection'",
         ),
     ];
     for (stage, action, table, condition) in stages {

@@ -42,7 +42,7 @@ async fn record_of(state: &State, id: &str) -> Value {
         .bridge
         .run(move |store| async move {
             let raw: String = store.test_reader()?.query_row(
-                "SELECT record FROM runtime_agents WHERE id=?1",
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
                 [id],
                 |r| r.get(0),
             )?;
@@ -123,7 +123,7 @@ async fn invalid_record_of_one_agent_in_a_journal_frame_keeps_the_other_agent_wo
     corrupt(
         &state,
         &a,
-        "UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.events',json('[]')) WHERE id=?1",
+        "UPDATE turns SET attempt=json_set(attempt,'$.events',json('[]')) WHERE chat=?1 AND attempt IS NOT NULL",
     )
     .await;
     let started = peer
@@ -252,7 +252,13 @@ async fn invalid_record_of_one_agent_in_a_provider_reply_retires_the_request_and
     corrupt(
         &state,
         &a,
-        "UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.events',json('[]'),'$.workspaceMode','layr-native','$.layrStoreRoot','relative') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode','layr-native','$.layrStoreRoot','relative') WHERE id=?1",
+    )
+    .await;
+    corrupt(
+        &state,
+        &a,
+        "UPDATE turns SET attempt=json_set(attempt,'$.events',json('[]')) WHERE chat=?1 AND attempt IS NOT NULL",
     )
     .await;
     let reply = peer
@@ -479,7 +485,7 @@ async fn journal_keeps_reading_behind_a_completion_no_request_can_bind() {
     corrupt(
         &state,
         &a,
-        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.turnId') WHERE id=?1",
+        "UPDATE turns SET attempt=json_remove(attempt,'$.turnId') WHERE chat=?1 AND attempt IS NOT NULL",
     )
     .await;
     let progress = async {
@@ -515,8 +521,14 @@ async fn uncorrelated_completion_fails_without_holding_or_replaying_input() {
     let mut worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
+    corrupt(
+        &state,
+        &agent,
+        "UPDATE runtime_agents SET record=json_remove(record,'$.turnId') WHERE id=?1",
+    )
+    .await;
     corrupt(&state, &agent,
-        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.turnId','$.turnId') WHERE id=?1").await;
+        "UPDATE turns SET attempt=json_remove(attempt,'$.turnId') WHERE chat=?1 AND attempt IS NOT NULL").await;
     corrupt(&state, &agent,
         "UPDATE runtime_execution_attempts SET record=json_remove(record,'$.turnId') WHERE run IN (SELECT id FROM runtime_execution_runs WHERE agent=?1)").await;
     corrupt(
@@ -616,10 +628,12 @@ async fn a_faulting_frame_keeps_the_earlier_frames_of_its_batch() {
     peer.reply(&b_start, json!({"turn":{"id":"turn-b"}})).await;
     worker_barrier(&worker).await;
     worker.shutdown().await.unwrap();
+    // The stopped worker moved A's attempt into its recovery marker; a stale writer
+    // leaves a new attempt with an empty input list on A's latest turn.
     corrupt(
         &state,
         &a,
-        "UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.events',json('[]')) WHERE id=?1",
+        "UPDATE turns SET attempt=json_set(COALESCE(attempt,'{}'),'$.events',json('[]')) WHERE id=(SELECT id FROM turns WHERE chat=?1 ORDER BY rowid DESC LIMIT 1)",
     )
     .await;
     let before = publications(&state).await;
@@ -785,7 +799,7 @@ async fn invalid_attempt_identity_is_a_terminal_error_with_input_preserved() {
     corrupt(
         &state,
         &id,
-        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.id') WHERE id=?1",
+        "UPDATE turns SET attempt=json_remove(attempt,'$.id') WHERE chat=?1 AND attempt IS NOT NULL",
     )
     .await;
     let fault_id = id.clone();
@@ -818,8 +832,8 @@ async fn invalid_attempt_identity_is_a_terminal_error_with_input_preserved() {
 #[tokio::test]
 async fn orphaned_reservation_is_a_terminal_error() {
     for sql in [
-        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt') WHERE id=?1",
-        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.submitted') WHERE id=?1",
+        "UPDATE turns SET attempt=NULL,interrupt_ticket=NULL WHERE chat=?1 AND attempt IS NOT NULL",
+        "UPDATE turns SET attempt=json_remove(attempt,'$.submitted') WHERE chat=?1 AND attempt IS NOT NULL",
     ] {
         let state = State::new().await;
         let id = state.agent.clone();

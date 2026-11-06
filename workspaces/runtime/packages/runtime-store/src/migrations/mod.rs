@@ -99,6 +99,7 @@ mod m2026_11_06_immutable_rows;
 mod m2026_11_06_item_hidden_by;
 mod m2026_11_06_one_draft_per_chat;
 mod m2026_11_06_process_exit_check;
+pub(crate) mod m2026_11_06_start_attempt_on_turns;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -124,6 +125,7 @@ pub use m2026_10_31_message_send_projections::apply as migrate_message_send_proj
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_room_record::apply as migrate_room_record;
+pub use m2026_11_06_start_attempt_on_turns::apply as migrate_start_attempts_to_turns;
 
 /// Normalize historical agent fixtures inserted after the database was opened.
 #[cfg(any(test, feature = "test-support"))]
@@ -1626,6 +1628,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_immutable_rows::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-start-attempt-on-turns",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with startAttempt inside agent records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_start_attempt_on_turns::apply(c.transaction),
     },
 ];
 

@@ -148,7 +148,8 @@ async fn freeze_failpoints_roll_back_and_restart_without_losing_the_original_inp
             drop(db);
             let table = match boundary {
                 "attempt" => Some("runtime_execution_attempts"),
-                "agent" => Some("runtime_agents"),
+                // The frozen input is part of the start attempt, which its turn row holds.
+                "agent" => Some("turns"),
                 _ => None,
             };
             if let Some(table) = table {
@@ -211,7 +212,7 @@ async fn changed_configuration_submitted_attempt_and_unbound_events_are_never_fr
             let mut changed = case.clone();
             match fault {
                 "submitted" => {
-                    store.transaction(|tx| {tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.submitted',json('true'))",[])?; Ok(())}).await.expect("submitted");
+                    store.transaction(|tx| {tx.execute("UPDATE turns SET attempt=json_set(attempt,'$.submitted',json('true')) WHERE attempt IS NOT NULL",[])?; Ok(())}).await.expect("submitted");
                 }
                 "event_epoch" => {
                     store
@@ -289,7 +290,7 @@ async fn retry_attempt_owner_preserves_nullable_identity_and_frozen_receipt() {
                     [&raw],
                 )?;
                 if fault == "empty" {
-                    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.startAttempt.events',json('[]')) WHERE id='agent'", [])?;
+                    tx.execute("UPDATE turns SET attempt=json_set(attempt,'$.events',json('[]')) WHERE chat='agent' AND attempt IS NOT NULL", [])?;
                 }
                 let result = ClaudeRetryRepository::load(tx, "agent", "attempt");
                 match fault {

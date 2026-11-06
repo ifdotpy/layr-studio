@@ -1149,7 +1149,7 @@ async fn accepted_start_after_concurrent_stop_stages_interrupt_then_commits_life
     store
         .transaction_with(|tx| {
             let raw: String = tx.query_row(
-                "SELECT record FROM runtime_agents WHERE id='agent'",
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
                 [],
                 |row| row.get(0),
             )?;
@@ -1234,7 +1234,7 @@ async fn rejected_safety_start_settles_the_empty_event_attempt() {
     let db = store.test_reader().expect("state read");
     let raw: String = db
         .query_row(
-            "SELECT record FROM runtime_agents WHERE id='agent'",
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )
@@ -1878,17 +1878,10 @@ async fn restart_applies_persisted_written_receipt_without_redispatch() {
                         .expect("start operation id");
                     operation["requestId"] = json!(request_id);
                     operation["requestGeneration"] = json!(1);
-                    let raw: String = tx.query_row(
-                        "SELECT record FROM runtime_agents WHERE id='agent'",
-                        [],
-                        |row| row.get(0),
-                    )?;
-                    let mut agent: Value = studio_json::from_str(&raw).expect("agent record");
-                    agent["startAttempt"]["requestTicket"] = json!(request_id);
-                    agent["startAttempt"]["connectionGeneration"] = json!(1);
+                    // The start attempt lives on the turn row of the chat.
                     tx.execute(
-                        "UPDATE runtime_agents SET record=?1 WHERE id='agent'",
-                        [agent.to_string()],
+                        "UPDATE turns SET attempt=json_set(attempt,'$.requestTicket',?1,'$.connectionGeneration',1) WHERE chat='agent' AND attempt IS NOT NULL",
+                        [&request_id],
                     )?;
                 }
                 tx.execute(
