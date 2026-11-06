@@ -45,11 +45,12 @@ by external APIs may document a narrow exception.
 
 ## Deferred Clippy lints
 
-`just clippy-runtime` runs the workspace Clippy gate and checks deferred lint
-findings against the shared ratchet baseline. The Value conversion restrictions
-apply to runtime services and store; generated HTTP types are allowed at their
+`just clippy-runtime` runs the workspace Clippy gate excluding the native client,
+which requires a built web bundle, and checks deferred lint findings against the
+shared ratchet baseline. Hosted Clippy also checks the native client. The Value
+conversion restrictions apply to runtime services and store; generated HTTP types are allowed at their
 module because the schema determines their shape. After fixing findings, run
-`node workspaces/tooling/apps/repository-checks/clippy-ratchet.ts --shrink` and
+`node workspaces/tooling/apps/repository-checks/clippy-ratchet.ts --shrink --exclude-native` and
 review the baseline diff. This command removes fixed entries but cannot add new
 ones. Fingerprints use the lint and whitespace-normalized diagnostic span, with
 an occurrence index per file; changing a span is treated as a new finding.

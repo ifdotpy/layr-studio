@@ -193,7 +193,6 @@ export async function run(
     }
   }
   const [status] = await exit;
-  if (status !== 0) throw new Error(`cargo clippy exited ${status}`);
   if (failures.length)
     throw new Error(
       failures
@@ -202,6 +201,7 @@ export async function run(
         )
         .join("\n\n"),
     );
+  if (status !== 0) throw new Error(`cargo clippy exited ${status}`);
   const found = scan.finish();
   const baseline = readBaseline();
   if (shrink) {

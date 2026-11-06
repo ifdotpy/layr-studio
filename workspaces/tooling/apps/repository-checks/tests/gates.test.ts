@@ -591,6 +591,28 @@ test("local Clippy excludes native while the hosted command includes it", () => 
     };
     assert.ok(args(["--exclude-native"]).includes("studio-native-client"));
     assert.ok(!args([]).includes("studio-native-client"));
+    rmSync(capture);
+    spawnSync("just", ["clippy-runtime"], {
+      env: {
+        ...process.env,
+        PATH: `${directory}:${process.env.PATH}`,
+        CAPTURE: capture,
+      },
+    });
+    const focused: unknown = JSON.parse(readFileSync(capture, "utf8"));
+    assert.ok(Array.isArray(focused));
+    assert.ok(focused.includes("studio-native-client"));
+    writeFileSync(
+      path.join(directory, "cargo"),
+      `#!${process.execPath}\nconsole.log(JSON.stringify({reason: 'compiler-message', message: {level: 'error', message: 'missing web bundle', spans: []}}));\nprocess.exitCode = 1;\n`,
+      { mode: 0o755 },
+    );
+    const failed = spawnSync("just", ["clippy-runtime"], {
+      env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+      encoding: "utf8",
+    });
+    assert.notEqual(failed.status, 0);
+    assert.match(failed.stderr, /missing web bundle/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
