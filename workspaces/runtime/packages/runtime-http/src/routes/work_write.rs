@@ -189,6 +189,7 @@ async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
     let mut command =
         work_write::task_command(command, agent.clone(), state.state_dir.clone().into())
             .map_err(|error| write_error(WorkWriteError::Event(error)))?;
+    let mut replayed_submission = false;
     if is_accept || matches!(command, WorkWrite::Submit(_)) {
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let receipt = work_write::read_work_receipt(
@@ -200,7 +201,10 @@ async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
         .await
         .map_err(write_error)?;
         if let Some(receipt) = receipt {
-            return Ok(receipt);
+            if is_accept {
+                return Ok(receipt);
+            }
+            replayed_submission = true;
         }
     }
     if let WorkWrite::Accept(input) = &command
@@ -211,7 +215,7 @@ async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
             "Field must not be empty",
         ));
     }
-    if matches!(command, WorkWrite::Submit(_) | WorkWrite::Accept(_)) {
+    if !replayed_submission && matches!(command, WorkWrite::Submit(_) | WorkWrite::Accept(_)) {
         let task_id = match &command {
             WorkWrite::Submit(input) => input.task_id.clone(),
             WorkWrite::Accept(input) => input.task_id.clone(),

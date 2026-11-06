@@ -11,6 +11,34 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn summary_marks_legacy_vm_records() {
+    for extra in [
+        json!({"workspaceMode":"layr"}),
+        json!({"layrReady":true}),
+        json!({"layrLine":"old-line"}),
+        json!({"executionMode":"vm"}),
+    ] {
+        let (_dir, store) = store().await;
+        seed_chat(&store, chat(extra.clone())).await;
+        assert_eq!(
+            client_entity(&store, "agentSummary", CHAT).unwrap().1["legacyVmWorkspace"],
+            true,
+            "{extra}"
+        );
+    }
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"workspaceMode":"layr-native", "layrReady":true})),
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).unwrap().1["legacyVmWorkspace"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn unreadable_limits_do_not_block_publication_or_startup() {
     let (_dir, store) = store().await;
     store

@@ -5674,6 +5674,9 @@
             ],
             "title": "Layrstateid"
           },
+          "legacyVmWorkspace": {
+            "type": "boolean"
+          },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
           },
@@ -9151,6 +9154,9 @@
             "default": null,
             "title": "Layrstateid"
           },
+          "legacyVmWorkspace": {
+            "type": "boolean"
+          },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
           },
@@ -10268,6 +10274,9 @@
               }
             ],
             "title": "Lastreadat"
+          },
+          "legacyVmWorkspace": {
+            "type": "boolean"
           },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
