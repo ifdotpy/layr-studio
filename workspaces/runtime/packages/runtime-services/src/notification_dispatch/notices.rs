@@ -155,7 +155,12 @@ pub(super) fn decide(
         }
         return Ok(decision);
     }
-    if !captures_analytics(original, method, params) {
+    if !captures_analytics(
+        original["turnId"].as_str(),
+        original["inFlight"] == true,
+        method,
+        params,
+    ) {
         return Ok(decision);
     }
     let mut agent = original.clone();
@@ -541,7 +546,12 @@ pub(crate) fn is_notice(method: &str) -> bool {
     NoticeKind::parse(method).is_some()
 }
 
-pub(crate) fn captures_analytics(agent: &Value, method: &str, params: &Value) -> bool {
+pub(crate) fn captures_analytics(
+    agent_turn: Option<&str>,
+    in_flight: bool,
+    method: &str,
+    params: &Value,
+) -> bool {
     let Some(kind) = NoticeKind::parse(method) else {
         return false;
     };
@@ -549,7 +559,7 @@ pub(crate) fn captures_analytics(agent: &Value, method: &str, params: &Value) ->
     let turn = params["turnId"].as_str().filter(|s| !s.is_empty());
     !matches!(kind, NoticeKind::HookStarted | NoticeKind::HookCompleted)
         && !(thread.is_none() && kind.is_account_notice())
-        && !turn.is_some_and(|turn| agent["turnId"] != turn || agent["inFlight"] != true)
+        && !turn.is_some_and(|turn| agent_turn != Some(turn) || !in_flight)
         && !(matches!(
             kind,
             NoticeKind::Safety

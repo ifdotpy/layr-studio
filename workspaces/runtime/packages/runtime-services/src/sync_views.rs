@@ -1239,9 +1239,12 @@ pub(crate) fn agent_entity_from_record(
             .map(|v| Some(project_agent_property(&v, "nativeSafetyRetry"))),
         native_status: filtered_option(record.native_status.as_ref(), "nativeStatus").ok()?,
         native_thread_block,
-        native_turn_error: extra
-            .remove("nativeTurnError")
-            .map(|v| Some(project_agent_property(&v, "nativeTurnError"))),
+        native_turn_error: (!record.native_turn_error.is_missing()).then(|| {
+            Some(project_agent_property(
+                &studio_runtime_store::projection_value(&record.native_turn_error),
+                "nativeTurnError",
+            ))
+        }),
         next_turn_settings_supported: Some(Some(true)),
         orchestrator_id: extra
             .remove("orchestratorId")
@@ -2337,6 +2340,34 @@ mod projection_plan_tests {
         );
         assert_eq!(full["projectPath"].as_str().unwrap().len(), 12_001);
         assert_eq!(summary["projectPath"].as_str().unwrap().len(), 12_000);
+    }
+
+    #[test]
+    fn native_error_projection_preserves_legacy_shapes() {
+        for error in [
+            json!(null),
+            json!("legacy"),
+            json!({"turnId":"turn","error":{"codexErrorInfo":"misalignmentPolicyViolation"},"future":1}),
+            json!({"turnId":null,"error":false}),
+        ] {
+            let input = json!({"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"threadId":"thread","turnId":"turn","nativeTurnError":error});
+            let record = studio_runtime_store::AgentRecord::from_value(input).unwrap();
+            let source = record.value();
+            let legacy = super::agent_entity_view(&source, &Default::default()).unwrap();
+            let typed = super::agent_entity_from_record(record, &Default::default()).unwrap();
+            // Recreate the former extra-map field projection inside the same DTO:
+            // sync hashes the DTO's serialized bytes, including field order.
+            let mut previous = typed.clone();
+            previous.native_turn_error = source
+                .get("nativeTurnError")
+                .map(|value| Some(super::project_agent_property(value, "nativeTurnError")));
+            assert_eq!(
+                studio_json::to_vec(&typed).unwrap(),
+                studio_json::to_vec(&previous).unwrap()
+            );
+            let projected = studio_runtime_store::projection_value(&typed);
+            assert_eq!(projected, legacy);
+        }
     }
 
     #[test]

@@ -229,9 +229,9 @@ impl OrchestrationSettingsRepository {
     /// The setting with the default mode resolved for a lead or a worker chat.
     pub fn idle_compaction_for(
         connection: &Connection,
-        agent: &studio_json::Value,
+        is_lead: bool,
     ) -> StoreResult<studio_runtime_schema::idle_compaction::Settings> {
-        Ok(Self::idle_compaction(connection)?.resolved(agent["isLead"] == true))
+        Ok(Self::idle_compaction(connection)?.resolved(is_lead))
     }
 
     pub fn set_idle_compaction(

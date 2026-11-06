@@ -150,9 +150,10 @@ async fn fixture(path: &std::path::Path, mode: Mode) -> (Arc<RuntimeStore>, Epis
     let store = Arc::new(RuntimeStore::open(Some(path)).await.unwrap());
     let episode=store.transaction(move|tx| {
         OrchestrationSettingsRepository::set_idle_compaction(tx,&Settings { mode,min_tokens:200000 })?;
-        let mut agent=json!({"compactions":0,"id":"claude","rootId":"claude","epoch":1,"events":0,"provider":"claude","status":"idle","autoWake":true,"inFlight":false,"cwd":"/work","accountKey":"default","threadId":"thread","startAttempt":{"id":"previous"}});
-        idle::observe(tx,&mut agent,&json!({"requestId":"response","ttl":"1h","warm":true,"lastActivityAt":(idle::wall_now()-3240.0)*1000.0,"contextTokens":210000,"prefix":"prefix"}), None)?;
-        AgentRepository::put(tx,&AgentRecord::from_value(agent.clone()).unwrap())?;
+        let mut agent=AgentRecord::from_value(json!({"compactions":0,"id":"claude","rootId":"claude","epoch":1,"events":0,"provider":"claude","status":"idle","autoWake":true,"inFlight":false,"cwd":"/work","accountKey":"default","threadId":"thread","startAttempt":{"id":"previous"}})).unwrap();
+        idle::observe(tx,&mut agent,&json!({"requestId":"response","ttl":"1h","warm":true,"lastActivityAt":(idle::wall_now()-3240.0)*1000.0,"contextTokens":210000,"prefix":"prefix"}))?;
+        AgentRepository::put(tx,&agent)?;
+        let agent = agent.into_value();
         Episode::deserialize(&agent["idleCompactionEpisode"]).map_err(|error|StoreError::SchemaMismatch(error.to_string()))
     }).await.unwrap();
     (store, episode)
@@ -164,16 +165,14 @@ async fn five_minute_sleep_episode_uses_actual_ttl_and_unload_deadline() {
     let (store, _) = fixture(root.path(), Mode::Compact).await;
     store
         .transaction(|tx| {
-            let mut agent = AgentRepository::get(tx, &AgentId::from("claude"))?
-                .unwrap()
-                .value();
+            let mut agent = AgentRepository::get(tx, &AgentId::from("claude"))?.unwrap();
             idle::observe(
                 tx,
                 &mut agent,
                 &json!({"requestId":"short", "ttl":"5m", "warm":true,
             "lastActivityAt":100000.0,"contextTokens":150000,"prefix":"prefix"}),
-                None,
             )?;
+            let mut agent = agent.into_value();
             let episode: Episode = Episode::deserialize(&agent["idleCompactionEpisode"]).unwrap();
             assert_eq!(episode.expires_at, 400.0);
             assert_eq!(episode.fire_at, 370.0);
@@ -200,17 +199,14 @@ async fn actual_unload_deadline_advances_one_episode_and_its_receipt_releases_un
     let now = idle::wall_now();
     let episode = store
         .transaction(move |tx| {
-            let mut agent = AgentRepository::get(tx, &AgentId::from("claude"))?
-                .unwrap()
-                .value();
+            let mut agent = AgentRepository::get(tx, &AgentId::from("claude"))?.unwrap();
             idle::observe(
                 tx,
                 &mut agent,
                 &json!({"requestId":"warm", "ttl":"1h", "warm":true,
             "lastActivityAt":now*1000.0,"contextTokens":210000,"prefix":"prefix"}),
-                None,
             )?;
-            AgentRepository::put(tx, &AgentRecord::from_value(agent).unwrap())?;
+            AgentRepository::put(tx, &agent)?;
             let deadlines = BTreeMap::from([("thread".into(), now + 120.0)]);
             idle::sync_unload_deadlines(tx, "default", &deadlines, now)?;
             let agent = AgentRepository::get(tx, &AgentId::from("claude"))?
@@ -702,9 +698,9 @@ async fn default_mode_arms_leads_only_and_an_explicit_mode_wins() {
         let store = store.clone();
         async move {
             store.transaction(move |tx| {
-                let mut agent = json!({"compactions":0,"id":"claude","rootId":"claude","epoch":1,"events":0,"provider":"claude","status":"idle","autoWake":true,"inFlight":false,"cwd":"/work","accountKey":"default","threadId":"thread","isLead":lead,"startAttempt":{"id":"previous"}});
-                idle::observe(tx,&mut agent,&json!({"requestId":"response","ttl":"1h","warm":true,"lastActivityAt":(idle::wall_now()-3240.0)*1000.0,"contextTokens":210000,"prefix":"prefix"}),None)?;
-                Ok(agent["idleCompactionEpisode"].is_object())
+                let mut agent = AgentRecord::from_value(json!({"compactions":0,"id":"claude","rootId":"claude","epoch":1,"events":0,"provider":"claude","status":"idle","autoWake":true,"inFlight":false,"cwd":"/work","accountKey":"default","threadId":"thread","isLead":lead,"startAttempt":{"id":"previous"}})).unwrap();
+                idle::observe(tx,&mut agent,&json!({"requestId":"response","ttl":"1h","warm":true,"lastActivityAt":(idle::wall_now()-3240.0)*1000.0,"contextTokens":210000,"prefix":"prefix"}))?;
+                Ok(agent.idle_compaction_episode.is_some())
             }).await.unwrap()
         }
     };

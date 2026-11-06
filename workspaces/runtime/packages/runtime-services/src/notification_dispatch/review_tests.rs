@@ -53,7 +53,7 @@ fn p06_empty_deltas_arm_timer_and_coalesce_without_refusal() {
     );
     let mut restored: NotificationStreamBuffer =
         studio_json::from_slice(&serialized).expect("test invariant");
-    restored.flush_analytics(&key, &json!({"id":"agent"}));
+    restored.flush_analytics(&key, &json!({"id":"agent","rootId":"agent","status":"idle","epoch":1,"accountKey":"default","compactions":0})).unwrap();
     let batch = restored.take_post_commit().expect("test invariant");
     assert_eq!(batch.sequence, 1);
     assert_eq!(batch.analytics_overflow, 0);
@@ -128,7 +128,9 @@ fn failed_notification_transaction_discards_staged_stream_changes() {
     }));
 
     let before_streams = studio_json::to_value(&streams).expect("serialize original buffer");
-    let before_agent = NotificationDispatchRepository::agent_record(&tx, "agent").unwrap();
+    let before_agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
+        .unwrap();
     assert!(
         dispatch_notification(
             &tx,
@@ -148,7 +150,9 @@ fn failed_notification_transaction_discards_staged_stream_changes() {
     assert_eq!(studio_json::to_value(&streams).unwrap(), before_streams);
     assert_eq!(streams.clone().flush(&key, "").unwrap().0, "old");
     assert_eq!(
-        NotificationDispatchRepository::agent_record(&tx, "agent").unwrap(),
+        NotificationDispatchRepository::agent_record(&tx, "agent")
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
+            .unwrap(),
         before_agent
     );
     for table in ["runtime_items", "runtime_outbox", "request_results"] {
@@ -188,6 +192,7 @@ fn p06_recovery_message_retains_buffered_text_questions_and_atomicity() {
     .expect("test invariant");
     let streams = staged.stream_update.expect("test invariant");
     let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
         .expect("test invariant")
         .expect("test invariant");
     let original = agent.clone();

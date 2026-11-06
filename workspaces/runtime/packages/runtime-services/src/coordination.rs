@@ -728,31 +728,23 @@ fn assert_native_thread_open(
     agent: &studio_runtime_store::AgentRecord,
 ) -> Result<(), CoordinationError> {
     let thread = agent.thread_id.as_deref();
-    let block = agent
-        .extra
-        .get("nativeThreadBlock")
-        .and_then(Value::as_object);
-    let blocked = block
-        .filter(|block| {
-            block
-                .get("threadId")
-                .and_then(Value::as_str)
-                .is_some_and(|id| Some(id) == thread)
-        })
-        .is_some()
+    use studio_runtime_store::{StoredTransferObject, StoredTransferValue};
+    let blocked = agent.native_thread_block.value().is_some_and(|block| {
+        matches!(block, StoredTransferObject::Known(block)
+            if matches!(block.thread_id.value(), Some(StoredTransferValue::Known(id)) if Some(id.as_str()) == thread))
+    })
         || (thread.is_some()
             && agent.error.value().is_some_and(|error| error.known_kind() == Some(studio_runtime_schema::provider_errors::KnownCodexErrorKind::MisalignmentPolicyViolation)))
         || (thread.is_some()
-            && agent
-                .extra
-                .get("nativeTurnError")
-                .and_then(Value::as_object)
-                .is_some_and(|previous| {
-                    previous.get("turnId").and_then(Value::as_str) == agent.turn_id.as_deref()
-                        && previous
-                            .get("error")
-                            .is_some_and(is_misalignment_policy_violation)
-                }));
+            && agent.native_turn_error.value().is_some_and(|previous| {
+                let StoredTransferObject::Known(previous) = previous else { return false };
+                let turn_id = match previous.turn_id.value() {
+                    Some(StoredTransferValue::Known(id)) => Some(id.as_str()),
+                    _ => None,
+                };
+                turn_id == agent.turn_id.as_deref()
+                    && previous.extra.get("error").is_some_and(is_misalignment_policy_violation)
+            }));
     if blocked {
         return Err(CoordinationError::InvalidRequest(
             "This chat is stopped as a precaution. Start or resume another chat.",

@@ -7,13 +7,16 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc, time::Dura
 use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::persistence::{IdleEpisodeOutcome, RequestIdentity};
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_schema::usage_limits::UsageLimitsResponse;
 use studio_runtime_schema::{
     idle_compaction::{Mode, Settings},
     shared_values::*,
 };
 use studio_runtime_store::{
-    AgentId, AgentRepository, OrchestrationSettingsRepository, RuntimeStore, StoreError,
+    AgentId, AgentRecord, AgentRepository, IdleCache, IdleCompactionEpisode,
+    OrchestrationSettingsRepository, RuntimeStore, StoreError, StoredTransferObject,
+    StoredTransferValue,
 };
 use tokio::sync::{Notify, watch};
 
@@ -96,13 +99,13 @@ fn prefix_inputs(agent: &Value) -> Value {
 /// assistant usage can arm a timer; a cumulative SDK result cannot arm it.
 pub fn observe(
     connection: &Connection,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     raw: &Value,
-    previous: Option<&Episode>,
 ) -> Result<(), StoreError> {
-    if agent["provider"] != ProviderKind::Claude.key() {
+    if agent.provider.value() != Some(&ProviderKind::Claude) {
         return Ok(());
     }
+    let previous = episode_view(agent)?;
     let cache: CacheReport = CacheReport::deserialize(raw)
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     if cache.request_id.is_empty()
@@ -114,44 +117,106 @@ pub fn observe(
             "invalid idle cache observation".into(),
         ));
     }
-    agent["idleCache"] = json!(cache);
+    // The cache's consumed keys stay typed; the remainder retains its stored shape.
+    let Value::Object(mut cache_fields) = json!(cache) else {
+        unreachable!("cache object")
+    };
+    cache_fields.remove("ttl");
+    cache_fields.remove("requestId");
+    agent.idle_cache = Field::Value(StoredTransferObject::Known(IdleCache {
+        ttl: Field::Value(StoredTransferValue::Known(cache.ttl.clone())),
+        request_id: Field::Value(StoredTransferValue::Known(cache.request_id.clone())),
+        extra: cache_fields.into_iter().collect(),
+    }));
+    let current_identity =
+        json!({"accountKey":agent.account_key,"threadId":agent.thread_id,"epoch":agent.epoch});
     if let Some(previous) = previous
         && previous.cache.request_id == cache.request_id
         && previous.cache.ttl == cache.ttl
-        && previous.identity == identity(agent)
+        && previous.identity == current_identity
     {
         return Ok(());
     }
-    if let Some(fields) = agent.as_object_mut() {
-        fields.remove("idleSummaryPrepared");
-    }
-    let settings = OrchestrationSettingsRepository::idle_compaction_for(connection, agent)?;
+    agent.idle_summary_prepared = Field::Missing;
+    let settings = OrchestrationSettingsRepository::idle_compaction_for(
+        connection,
+        agent.is_lead == Some(true),
+    )?;
     let lifetime = cache_seconds(&cache.ttl);
     if lifetime.is_none() || settings.mode == Mode::Off {
-        if let Some(fields) = agent.as_object_mut() {
-            fields.remove("idleCompactionEpisode");
-        }
+        agent.idle_compaction_episode = Field::Missing;
         return Ok(());
     }
     let activity = cache.last_activity_at / 1000.0;
     let expiry = activity + lifetime.unwrap_or_default();
     let id = RequestIdentity::issue_root();
-    agent["idleCompactionEpisode"] = json!(Episode {
-        id,
+    let episode = Episode {
+        id: id.clone(),
         cache,
         fire_at: fire_at(activity, expiry, IDLE_COMPACTION_FIRE_FRACTION),
         expires_at: expiry,
-        identity: identity(agent),
-        prefix_inputs: prefix_inputs(agent),
-        attempt: agent["startAttempt"]["id"].clone(),
+        identity: current_identity,
+        // These values are opaque prefix identity evidence, never interpreted here.
+        prefix_inputs: json!([
+            agent.cwd,
+            agent.model,
+            agent.effort,
+            agent.fast_mode,
+            agent.extra.get("claude"),
+            agent.extra.get("claudeSettings"),
+            agent.profile_instructions,
+            agent.extra.get("developerInstructions"),
+            agent.permission_mode,
+            agent.pending_settings,
+            agent.extra.get("capabilityProfile"),
+            agent.extra.get("dynamicTools")
+        ]),
+        attempt: json!(
+            agent
+                .start_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.id.as_deref())
+        ),
         fired: false,
         outcome: None,
         fired_at: None,
         before: None,
         limits: None,
         unload_at: None,
-    });
+    };
+    let Value::Object(mut fields) = json!(episode) else {
+        unreachable!("episode object")
+    };
+    fields.remove("id");
+    agent.idle_compaction_episode =
+        Field::Value(StoredTransferObject::Known(IdleCompactionEpisode {
+            id: Field::Value(StoredTransferValue::Known(id)),
+            extra: fields.into_iter().collect(),
+        }));
     Ok(())
+}
+
+/// Decode the episode remainder once at its consumer, without reading the row again.
+/// Unknown episode fields remain in the agent and are never rewritten by this view.
+fn episode_view(agent: &AgentRecord) -> Result<Option<Episode>, StoreError> {
+    match &agent.idle_compaction_episode {
+        Field::Missing => Ok(None),
+        Field::Value(StoredTransferObject::Known(stored)) => {
+            let id = studio_runtime_store::projection_value(&stored.id);
+            let fields = std::iter::once(("id", &id)).chain(
+                stored
+                    .extra
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value)),
+            );
+            Episode::deserialize(serde::de::value::MapDeserializer::new(fields))
+                .map(Some)
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))
+        }
+        Field::Null | Field::Value(StoredTransferObject::Unreadable(_)) => Err(
+            StoreError::SchemaMismatch("invalid idle compaction episode".into()),
+        ),
+    }
 }
 
 /// The pure Claude skip checks. `now` is a supplied clock, in Unix seconds.
@@ -403,7 +468,8 @@ pub fn handoff_refusal(
     if reason.is_some() {
         return Ok(reason);
     }
-    let settings = OrchestrationSettingsRepository::idle_compaction_for(tx, agent)?;
+    let settings =
+        OrchestrationSettingsRepository::idle_compaction_for(tx, agent["isLead"] == true)?;
     Ok((settings.mode == Mode::Log).then_some(IdleEpisodeOutcome::WouldCompact))
 }
 
@@ -423,7 +489,8 @@ fn check(
     now: f64,
 ) -> Result<Option<IdleEpisodeOutcome>, StoreError> {
     let settings =
-        OrchestrationSettingsRepository::idle_compaction_for(connection, agent)?.with_environment();
+        OrchestrationSettingsRepository::idle_compaction_for(connection, agent["isLead"] == true)?
+            .with_environment();
     Ok(refusal(
         &settings,
         episode,
@@ -499,8 +566,9 @@ pub async fn fire(
                 return Ok(false);
             };
             let agent = agent.value();
-            let settings = OrchestrationSettingsRepository::idle_compaction_for(tx, &agent)?
-                .with_environment();
+            let settings =
+                OrchestrationSettingsRepository::idle_compaction_for(tx, agent["isLead"] == true)?
+                    .with_environment();
             let reason = check(tx, &candidate, &agent, &observation, now)?;
             if let Some(reason) = reason {
                 record(tx, &candidate, reason, now)?;
@@ -619,6 +687,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn repeated_idle_observation_preserves_persisted_legacy_bytes() {
+        let db = studio_runtime_store::test_canvas();
+        let (settings, episode, mut agent, _) = fixture();
+        agent["rootId"] = json!("agent");
+        agent["idleCompactionEpisode"] = json!(episode);
+        agent["idleCompactionEpisode"]["future"] = json!({"vendor":[1,null,{"kept":true}]});
+        agent["idleSummaryPrepared"] = json!(episode.id);
+        agent["idleCache"] = json!(episode.cache);
+        OrchestrationSettingsRepository::set_idle_compaction(&db, &settings).unwrap();
+        AgentRepository::put(
+            &db,
+            &studio_runtime_store::AgentRecord::from_value(agent).unwrap(),
+        )
+        .unwrap();
+        let before = AgentRepository::get_raw(&db, &"agent".into())
+            .unwrap()
+            .unwrap();
+        let mut agent = AgentRepository::get(&db, &"agent".into()).unwrap().unwrap();
+        observe(&db, &mut agent, &json!(episode.cache)).unwrap();
+        AgentRepository::put(&db, &agent).unwrap();
+        let after = AgentRepository::get_raw(&db, &"agent".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.as_bytes(), after.as_bytes());
+    }
+
+    #[test]
+    fn typed_idle_observation_preserves_prefix_evidence_and_untouched_storage() {
+        let db = studio_runtime_store::test_canvas();
+        let (settings, episode, mut source, _) = fixture();
+        source["rootId"] = json!("agent");
+        source["claude"] = json!({"vendor":[null,1,"kept"]});
+        source["pendingSettings"] = json!({"future":{"kept":true}});
+        source["profileInstructions"] = json!("instructions");
+        source["future"] = json!("untouched".repeat(1024));
+        let expected_identity = identity(&source);
+        let expected_prefix = prefix_inputs(&source);
+        let mut agent = AgentRecord::from_value(source).unwrap();
+        let untouched = agent.extra["future"].as_str().unwrap().as_ptr();
+        OrchestrationSettingsRepository::set_idle_compaction(&db, &settings).unwrap();
+        observe(&db, &mut agent, &json!(episode.cache)).unwrap();
+        let current = episode_view(&agent).unwrap().unwrap();
+        assert_eq!(current.identity, expected_identity);
+        assert_eq!(current.prefix_inputs, expected_prefix);
+        assert_eq!(agent.extra["future"].as_str().unwrap().as_ptr(), untouched);
+    }
+
+    #[test]
     fn idle_limit_admission_uses_typed_observation_and_agent() {
         let _: fn(
             &studio_runtime_schema::usage_limits::UsageLimitsResponse,
@@ -708,26 +824,34 @@ mod tests {
     fn receipt_domain_idle_repeat_keeps_fired_episode_through_disabled_observation() {
         let db = studio_runtime_store::test_canvas();
         let (settings, episode, mut agent, _) = fixture();
+        agent["rootId"] = json!("agent");
+        let mut agent = AgentRecord::from_value(agent).unwrap();
         OrchestrationSettingsRepository::set_idle_compaction(&db, &settings).expect("settings");
-        observe(&db, &mut agent, &json!(episode.cache), None).expect("first observation");
-        let root = agent["idleCompactionEpisode"]["id"].clone();
-        agent["idleCompactionEpisode"]["fired"] = json!(true);
-        agent["idleCompactionEpisode"]["outcome"] = json!(IdleEpisodeOutcome::Started);
+        observe(&db, &mut agent, &json!(episode.cache)).expect("first observation");
+        let root = episode_view(&agent).unwrap().unwrap().id;
+        let Field::Value(StoredTransferObject::Known(stored)) = &mut agent.idle_compaction_episode
+        else {
+            panic!("episode")
+        };
+        stored.extra.insert("fired".into(), json!(true));
+        stored
+            .extra
+            .insert("outcome".into(), json!(IdleEpisodeOutcome::Started));
         let mut disabled = settings;
         disabled.mode = Mode::Off;
         OrchestrationSettingsRepository::set_idle_compaction(&db, &disabled).expect("disable");
-        observe(&db, &mut agent, &json!(episode.cache), Some(&episode)).expect("same episode");
-        assert_eq!(agent["idleCompactionEpisode"]["id"], root);
-        assert_eq!(agent["idleCompactionEpisode"]["fired"], true);
+        observe(&db, &mut agent, &json!(episode.cache)).expect("same episode");
+        assert_eq!(episode_view(&agent).unwrap().unwrap().id, root);
+        assert!(episode_view(&agent).unwrap().unwrap().fired);
         disabled.mode = Mode::Compact;
         OrchestrationSettingsRepository::set_idle_compaction(&db, &disabled).expect("enable");
-        observe(&db, &mut agent, &json!(episode.cache), Some(&episode)).expect("repeat");
-        assert_eq!(agent["idleCompactionEpisode"]["id"], root);
-        assert_eq!(agent["idleCompactionEpisode"]["fired"], true);
+        observe(&db, &mut agent, &json!(episode.cache)).expect("repeat");
+        assert_eq!(episode_view(&agent).unwrap().unwrap().id, root);
+        assert!(episode_view(&agent).unwrap().unwrap().fired);
         let tx = db.unchecked_transaction().expect("tx");
-        agent["idleCompactionEpisode"] = Value::Null;
+        agent.idle_compaction_episode = Field::Null;
         assert_eq!(
-            handoff_refusal(&tx, &agent, root.as_str().expect("root")).expect("superseded"),
+            handoff_refusal(&tx, &agent.into_value(), &root).expect("superseded"),
             Some(IdleEpisodeOutcome::NewerRequest)
         );
     }

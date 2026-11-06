@@ -45,29 +45,13 @@ pub(super) fn apply(
             }
             return Ok(Some(DispatchOutcome::Written));
         }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct StoredEpisode {
-            idle_compaction_episode: crate::idle_compaction::Episode,
-        }
-        let previous = if agent["provider"] == studio_runtime_providers::ProviderKind::Claude.key()
-            && agent.get("idleCompactionEpisode").is_some()
-        {
-            let raw =
-                studio_runtime_store::AgentRepository::get_raw(tx, &AgentId::from(id.as_str()))?
-                    .ok_or_else(|| {
-                        StoreError::SchemaMismatch("missing idle compaction agent".into())
-                    })?;
-            Some(
-                studio_json::from_str::<StoredEpisode>(&raw)
-                    .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
-                    .idle_compaction_episode,
-            )
-        } else {
-            None
-        };
-        crate::idle_compaction::observe(tx, agent, &p["report"], previous.as_ref())?;
-        persist_agent(tx, &id, agent)?;
+        // dispatch still Value; see follow-up. Move once into the typed idle consumer.
+        let mut typed = studio_runtime_store::AgentRecord::from_value(std::mem::take(agent))
+            .map_err(StoreError::from)?;
+        crate::idle_compaction::observe(tx, &mut typed, &p["report"])?;
+        crate::agents_create::mode_fields(&mut typed);
+        NotificationDispatchRepository::put_agent_record(tx, &id, &typed)?;
+        *agent = typed.into_value();
         return Ok(Some(DispatchOutcome::Written));
     }
     if method == "command/exec/outputDelta" {
@@ -232,7 +216,8 @@ pub(super) fn apply(
                     }));
                 }
                 let Some(accepted_agent) =
-                    super::NotificationDispatchRepository::agent_record(tx, &id)?
+                    super::NotificationDispatchRepository::agent_record(tx, &id)
+                        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))?
                 else {
                     return Err(NotificationDispatchError::InvalidStoredObject {
                         table: "runtime_agents".into(),
@@ -525,7 +510,7 @@ pub(super) fn flush_command(
         .turn
         .as_deref()
         .is_some_and(|turn| agent["turnId"] != turn);
-    streams.flush_analytics(key, agent);
+    streams.flush_analytics(key, agent)?;
     if stale
         && !task.as_ref().is_some_and(|task| {
             task.kind() == studio_runtime_schema::task_record::TaskKind::Command

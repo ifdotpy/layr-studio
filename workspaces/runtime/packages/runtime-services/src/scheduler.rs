@@ -556,8 +556,12 @@ pub(crate) fn settle_terminal_in_transaction(
             scope: "runtime_agents".into(),
             id: identity.agent_id.clone(),
         })?;
-    let saved_error = agent.as_ref().and_then(|a| a.extra.get("nativeTurnError"));
-    let Some((native_status, status, error)) = terminal_outcome(&params["turn"], saved_error)
+    let saved_error = agent.as_ref().and_then(|a| {
+        (!a.native_turn_error.is_missing())
+            .then(|| studio_runtime_store::projection_value(&a.native_turn_error))
+    });
+    let Some((native_status, status, error)) =
+        terminal_outcome(&params["turn"], saved_error.as_ref())
     else {
         return Ok(false);
     };
