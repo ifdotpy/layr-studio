@@ -2002,6 +2002,13 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         generator.subschema_for::<studio_client_domain::drafts::DraftSnapshot>();
         generator.subschema_for::<studio_client_domain::markdown::MarkdownBlock>();
         let mut schemas = generator.take_definitions(true);
+        let untagged = untagged_unions(&schemas);
+        if untagged != UNTAGGED_CONTRACT_UNIONS {
+            return Err(format!(
+                "Rust-owned contract unions without a tag changed: {untagged:?}; \
+                 use #[serde(tag = \"kind\")] (UNTAGGED_CONTRACT_UNIONS lists the old debt)"
+            ));
+        }
         schemas.insert(
             "SupervisorHandshakeV2Result".into(),
             supervisor_handshake_schema(),
@@ -2024,6 +2031,75 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         });
     }
     Ok(rendered)
+}
+
+/// Rust-owned contract unions whose object variants carry no tag. The decision of
+/// 2026-10-28 allows internally tagged enums only (`#[serde(tag = "kind")]`), because
+/// other forms produce poor TypeScript types. This list is the remaining debt; it may
+/// only shrink, and a new untagged union fails the contract render.
+const UNTAGGED_CONTRACT_UNIONS: &[&str] = &[
+    // The wasm markdown parser output; native UIs (Attar) decode the same shape.
+    "MarkdownBlock",
+];
+
+/// Names of `schemas` that hold a union with an object variant that has no constant
+/// tag field. A union of scalars or a nullable value is not a tagged-enum question.
+fn untagged_unions(schemas: &studio_json::Map<String, studio_json::Value>) -> Vec<String> {
+    use studio_json::Value;
+    fn resolve<'a>(schemas: &'a studio_json::Map<String, Value>, branch: &'a Value) -> &'a Value {
+        branch
+            .get("$ref")
+            .and_then(Value::as_str)
+            .and_then(|path| path.rsplit('/').next())
+            .and_then(|name| schemas.get(name))
+            .unwrap_or(branch)
+    }
+    fn object_like(branch: &Value) -> bool {
+        branch.get("properties").is_some()
+            || branch.get("type").and_then(Value::as_str) == Some("object")
+    }
+    fn tagged(branch: &Value) -> bool {
+        branch["properties"].as_object().is_some_and(|properties| {
+            properties.values().any(|property| {
+                property.get("const").is_some()
+                    || property["enum"]
+                        .as_array()
+                        .is_some_and(|values| values.len() == 1)
+            })
+        })
+    }
+    fn untagged(schemas: &studio_json::Map<String, Value>, value: &Value) -> bool {
+        match value {
+            Value::Object(object) => {
+                let union_untagged = ["oneOf", "anyOf"].iter().any(|key| {
+                    object
+                        .get(*key)
+                        .and_then(Value::as_array)
+                        .is_some_and(|branches| {
+                            let branches: Vec<&Value> = branches
+                                .iter()
+                                .map(|branch| resolve(schemas, branch))
+                                .filter(|branch| {
+                                    branch.get("type").and_then(Value::as_str) != Some("null")
+                                })
+                                .collect();
+                            branches.len() > 1
+                                && branches
+                                    .iter()
+                                    .any(|branch| object_like(branch) && !tagged(branch))
+                        })
+                });
+                union_untagged || object.values().any(|child| untagged(schemas, child))
+            }
+            Value::Array(items) => items.iter().any(|child| untagged(schemas, child)),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
+        }
+    }
+    schemas
+        .iter()
+        .filter(|(_, schema)| untagged(schemas, schema))
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 /// Repository-relative paths whose committed text differs from `rendered`.
@@ -2512,5 +2588,34 @@ mod previous_hash_tests {
         assert_eq!(next.lines().count(), PEER_HASH_HISTORY_LEN);
         assert!(next.starts_with(OLD));
         assert!(!next.contains(&format!("{:064x}", PEER_HASH_HISTORY_LEN - 1)));
+    }
+}
+
+#[cfg(test)]
+mod untagged_union_tests {
+    use super::untagged_unions;
+    use studio_json::json;
+
+    #[test]
+    fn only_object_unions_without_a_tag_are_reported() {
+        let schemas = json!({
+            "Tagged": {"oneOf": [
+                {"type":"object","properties":{"kind":{"const":"a"}}},
+                {"type":"object","properties":{"kind":{"type":"string","enum":["b"]}}}
+            ]},
+            "Scalar": {"anyOf": [{"type":"string"}, {"type":"integer"}]},
+            "Nullable": {"anyOf": [{"$ref":"#/components/schemas/Plain"}, {"type":"null"}]},
+            "Plain": {"type":"object","properties":{"x":{"type":"string"}}},
+            "Untagged": {"anyOf": [
+                {"$ref":"#/components/schemas/Plain"},
+                {"type":"object","properties":{"y":{"type":"string"}}}
+            ]},
+            "Nested": {"type":"object","properties":{"inner":{"oneOf": [
+                {"type":"object","properties":{"x":{"type":"string"}}},
+                {"type":"string"}
+            ]}}}
+        });
+        let schemas = schemas.as_object().expect("object");
+        assert_eq!(untagged_unions(schemas), ["Nested", "Untagged"]);
     }
 }
