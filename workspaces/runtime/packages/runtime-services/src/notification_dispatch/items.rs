@@ -3,36 +3,16 @@ use super::notices::{json_text, remove};
 use super::{NotificationDispatchError, suffix};
 use serde::Deserialize;
 use studio_json::{Value, json};
+use studio_runtime_schema::provider_item::{ProviderItem, ProviderItemKind as Kind};
 use studio_runtime_schema::task_record::{NonnegativeNumber, ProcessId, TaskStatus, TaskType};
 use studio_runtime_store::TaskRecord;
 
 pub(super) const TOOL_OUTPUT_CHARS: usize = 12_000;
 
-/// Provider item kinds Studio handles by name. Owner of the list: this module.
-/// Any other kind is stored with its raw provider item as `providerUnknown`.
-const KNOWN_ITEM_KINDS: &[&str] = &[
-    "userMessage",
-    "agentMessage",
-    "reasoning",
-    "plan",
-    "commandExecution",
-    "fileChange",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "collabAgentToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-    "enteredReviewMode",
-    "exitedReviewMode",
-    "contextCompaction",
-    "hookPrompt",
-];
-
 /// Adds `providerUnknown: {kind, raw}` to an item record of a kind Studio does not know.
 /// `raw` is the provider item as JSON text, opaque to Studio (never decoded as a typed value).
-pub(super) fn item_metadata(kind: &str, raw: &Value, mut metadata: Value) -> Value {
-    if !KNOWN_ITEM_KINDS.contains(&kind) {
+pub(super) fn item_metadata(item: ProviderItem<'_>, mut metadata: Value) -> Value {
+    if let ProviderItem::Unknown { kind, raw } = item {
         metadata["providerUnknown"] = json!({"kind": kind, "raw": raw.to_string()});
     }
     metadata
@@ -285,20 +265,19 @@ pub(super) fn non_text(
     at: f64,
 ) -> Result<ItemDecision, NotificationDispatchError> {
     let item = &params["item"];
-    let kind = item["type"]
-        .as_str()
-        .ok_or(NotificationDispatchError::invalid())?;
+    let typed = ProviderItem::of(item).ok_or(NotificationDispatchError::invalid())?;
+    let kind = typed.name();
     let started = method == "item/started" || item["status"] == "inProgress";
     let task = task_transition(agent, method, params, previous_task, false, at)?;
     let mut decision = ItemDecision {
         task,
         ..ItemDecision::default()
     };
-    if kind == "reasoning" {
+    if typed.is(Kind::Reasoning) {
         agent["activity"] = json!({"phase":"thinking","at":at});
         return Ok(decision);
     }
-    if kind == "userMessage" {
+    if typed.is(Kind::UserMessage) {
         return Ok(decision);
     }
     let mut active: Vec<Value> = agent["activeTools"]
@@ -314,7 +293,7 @@ pub(super) fn non_text(
     agent["activity"] =
         json!({"phase":if active.is_empty(){"thinking"}else{"tool"},"tools":active,"at":at});
     agent["activeTools"] = json!(active);
-    if kind == "contextCompaction" && !started && !already_compacted {
+    if typed.is(Kind::ContextCompaction) && !started && !already_compacted {
         decision.compacted = true;
         agent["compactions"] = json!(
             agent["compactions"]
@@ -324,7 +303,7 @@ pub(super) fn non_text(
         );
         agent["contextUsage"] = Value::Null;
     }
-    if kind == "exitedReviewMode"
+    if typed.is(Kind::ExitedReviewMode)
         && !started
         && let Some(review) = item["review"].as_str()
     {
@@ -332,7 +311,7 @@ pub(super) fn non_text(
         agent["tail"] = json!(suffix(review, 300));
     }
     let mut displayed = item.clone();
-    if kind == "commandExecution"
+    if typed.is(Kind::CommandExecution)
         && !started
         && item["aggregatedOutput"].is_null()
         && let Some(task) = &decision.task

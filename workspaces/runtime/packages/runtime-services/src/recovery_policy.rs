@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
+use studio_runtime_schema::provider_item::{ProviderItem, ProviderItemKind as Kind};
 use studio_runtime_schema::recovery_record::{RecoveryAgentRecord, RecoveryFields, RecoverySource};
 use studio_runtime_schema::shared_values::LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR;
 use studio_runtime_schema::start_attempt::StartAttemptView;
@@ -742,19 +743,21 @@ fn eligibility(a: &Value, typed: &RecoveryAgentRecord) -> Eligibility {
 pub fn native_operations_settled(turn: &Value) -> bool {
     turn.get("items").is_none()
         || turn["items"].as_array().is_some_and(|items| {
-            items.iter().all(|item| match item["type"].as_str() {
-                Some("commandExecution") => {
-                    one(&item["status"], &["completed", "failed", "declined"])
-                        && (item["status"] == "declined"
-                            || item["exitCode"].is_i64()
-                            || item["exitCode"].is_u64())
-                }
-                Some("dynamicToolCall") => item["status"] == "completed",
-                Some("mcpToolCall" | "fileChange" | "computerToolCall") => {
-                    one(&item["status"], &["completed", "failed", "declined"])
-                }
-                _ => true,
-            })
+            items.iter().all(
+                |item| match ProviderItem::of(item).and_then(ProviderItem::known) {
+                    Some(Kind::CommandExecution) => {
+                        one(&item["status"], &["completed", "failed", "declined"])
+                            && (item["status"] == "declined"
+                                || item["exitCode"].is_i64()
+                                || item["exitCode"].is_u64())
+                    }
+                    Some(Kind::DynamicToolCall) => item["status"] == "completed",
+                    Some(Kind::McpToolCall | Kind::FileChange | Kind::ComputerToolCall) => {
+                        one(&item["status"], &["completed", "failed", "declined"])
+                    }
+                    _ => true,
+                },
+            )
         })
 }
 

@@ -331,9 +331,9 @@ pub(super) fn apply(
                     .as_str()
                     .filter(|s| !s.is_empty())
                     .ok_or(NotificationDispatchError::invalid())?;
-                let kind = p["item"]["type"]
-                    .as_str()
+                let typed = studio_runtime_schema::provider_item::ProviderItem::of(&p["item"])
                     .ok_or(NotificationDispatchError::invalid())?;
+                let kind = typed.name();
                 write_item(
                     tx,
                     &id,
@@ -357,8 +357,7 @@ pub(super) fn apply(
                             ),
                     ),
                     items::item_metadata(
-                        kind,
-                        &p["item"],
+                        typed,
                         json!({"toolStatus":items::tool_status(&item,method=="item/started"),"turnId":turn(agent,p)}),
                     ),
                     at,

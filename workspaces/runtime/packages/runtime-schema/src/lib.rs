@@ -63,6 +63,7 @@ pub mod provider_call_contract;
 pub mod provider_diagnostics;
 pub mod provider_errors;
 pub mod provider_input;
+pub mod provider_item;
 pub mod provider_kind;
 pub mod provider_lifecycle;
 pub mod provider_method_policy;

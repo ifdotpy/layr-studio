@@ -122,7 +122,7 @@ impl TaskRecoverySnapshot {
     ) -> TaskRecoveryDecision {
         let a = self.agent.record();
         let t = &self.task;
-        let kind = t.task_type().as_str();
+        let kind = t.task_type();
         if !self.agent.eligibility().task_owner
             || t.status() != TaskStatus::Running
             || Some(t.agent()) != a["id"].as_str()
@@ -130,10 +130,13 @@ impl TaskRecoverySnapshot {
                 != format!("{}:{}", a["id"].as_str().unwrap_or_default(), t.item_id())
             || !matches!(
                 kind,
-                "commandExecution" | "fileChange" | "dynamicToolCall" | "mcpToolCall"
+                TaskType::CommandExecution
+                    | TaskType::FileChange
+                    | TaskType::DynamicToolCall
+                    | TaskType::McpToolCall
             )
             || t.kind()
-                != if kind == "commandExecution" {
+                != if kind == TaskType::CommandExecution {
                     TaskKind::Command
                 } else {
                     TaskKind::Tool
@@ -190,7 +193,7 @@ impl TaskRecoverySnapshot {
             return TaskRecoveryDecision::Unconfirmed;
         };
         if matches.next().is_some()
-            || item["type"].as_str() != Some(kind)
+            || item["type"].as_str() != Some(kind.as_str())
             || item.get("threadId").is_some_and(|v| v != &a["threadId"])
             || item
                 .get("turnId")
@@ -199,7 +202,8 @@ impl TaskRecoverySnapshot {
             return TaskRecoveryDecision::Unconfirmed;
         }
         let terminal = matches!(item["status"].as_str(), Some("completed" | "failed"))
-            || (matches!(kind, "commandExecution" | "fileChange") && item["status"] == "declined");
+            || (matches!(kind, TaskType::CommandExecution | TaskType::FileChange)
+                && item["status"] == "declined");
         if terminal {
             TaskRecoveryDecision::Complete(item.clone())
         } else {

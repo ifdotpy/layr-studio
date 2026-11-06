@@ -8,6 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_schema::json_compat::python_json_compact_serialized;
+use studio_runtime_schema::provider_item::{ProviderItem, ProviderItemKind as Kind};
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::ledger::{
     UsageCorrection, UsageIdentity, UsageLedgerRow, correction,
@@ -1024,7 +1025,7 @@ pub fn decide(
             _ => {
                 if (method == "item/agentMessage/delta"
                     && studio_runtime_store::truthy(Some(&p["delta"]))
-                    || p["item"]["type"] == "agentMessage"
+                    || ProviderItem::of(&p["item"]).is_some_and(|i| i.is(Kind::AgentMessage))
                         && studio_runtime_store::truthy(Some(&p["item"]["text"])))
                     && row["firstOutputAt"].is_null()
                 {
@@ -1141,15 +1142,17 @@ fn protocol_item(
             let kind = first(&[&item["type"], &row["type"], &json!("unknown")]);
             let kind_name = kind.as_str().unwrap_or("unknown");
             row["name"] = first(&[&item["tool"], &item["name"], &kind]);
-            row["isTool"] = json!(!matches!(
-                kind_name,
-                "userMessage"
-                    | "agentMessage"
-                    | "reasoning"
-                    | "plan"
-                    | "contextCompaction"
-                    | "compactionSnapshot"
-            ));
+            row["isTool"] = json!(
+                kind_name != "compactionSnapshot"
+                    && !matches!(
+                        kind_name.parse(),
+                        Ok(Kind::UserMessage
+                            | Kind::AgentMessage
+                            | Kind::Reasoning
+                            | Kind::Plan
+                            | Kind::ContextCompaction)
+                    )
+            );
             row["type"] = kind;
             row["recordedAt"] = json!(q.recorded_at);
             row["source"] = json!(q.source.name());
