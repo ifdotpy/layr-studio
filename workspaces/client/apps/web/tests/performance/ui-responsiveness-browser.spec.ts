@@ -1,6 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { standaloneCommand } from "../../src/commands.ts";
 import { cacheFixture } from "../cacheFixture.ts";
 import {
@@ -123,7 +124,76 @@ test("composer latency with server history and streaming @performance", async ({
   await page.evaluate(() => {
     window.metrics.phase = "idle-input";
   });
-  await page.keyboard.type("Typing with a long transcript.", { delay: 35 });
+  if (process.env.STUDIO_LATENCY_NO_TRACE) {
+    await page.keyboard.type("Typing with a long transcript.", { delay: 35 });
+  } else {
+    await cdp.send("Tracing.start", {
+      categories: "devtools.timeline",
+      transferMode: "ReturnAsStream",
+    });
+    await page.keyboard.type("Typing with a long transcript.", { delay: 35 });
+    const complete = new Promise<string>((resolve) =>
+      cdp.once("Tracing.tracingComplete", (event) => resolve(event.stream!)),
+    );
+    await cdp.send("Tracing.end");
+    const stream = await complete;
+    let trace = "";
+    for (;;) {
+      const chunk = await cdp.send("IO.read", { handle: stream });
+      trace += chunk.data;
+      if (chunk.eof) break;
+    }
+    const decoded: unknown = JSON.parse(trace);
+    const events = z
+      .object({
+        traceEvents: z.array(
+          z.object({
+            name: z.string(),
+            ts: z.number(),
+            dur: z.number().optional(),
+            tid: z.number(),
+            args: z
+              .object({
+                data: z.object({ type: z.string().optional() }).optional(),
+                elementCount: z.number().optional(),
+              })
+              .optional(),
+          }),
+        ),
+      })
+      .parse(decoded).traceEvents;
+    const inputs = events.filter(
+      (event) =>
+        event.name === "EventDispatch" &&
+        event.args?.data?.type === "textInput",
+    );
+    expect(inputs.length).toBeGreaterThan(20);
+    const counts = inputs
+      .map((input) => {
+        const recalculations = events.filter(
+          (event) =>
+            event.name === "UpdateLayoutTree" &&
+            input.tid === event.tid &&
+            input.ts <= event.ts &&
+            input.ts + (input.dur ?? 0) >= event.ts + (event.dur ?? 0),
+        );
+        expect(recalculations.length).toBeGreaterThan(0);
+        return recalculations.map((event) =>
+          required(event.args?.elementCount),
+        );
+      })
+      .flat();
+    const maxElements = Math.max(...counts);
+    console.log(
+      "TEXT_INPUT_STYLE",
+      JSON.stringify({
+        inputs: inputs.length,
+        recalculations: counts.length,
+        maxElements,
+      }),
+    );
+    expect(maxElements).toBeLessThan(500);
+  }
   await page.waitForTimeout(150);
   await send("Benchmark live");
   await page
@@ -133,7 +203,7 @@ test("composer latency with server history and streaming @performance", async ({
   await page.evaluate(() => {
     window.metrics.phase = "stream-and-input";
   });
-  const stream = async () => {
+  const sendStream = async () => {
     for (let i = 0; i < 20; i++) {
       required(fixture.stdin).write(
         JSON.stringify({
@@ -148,11 +218,10 @@ test("composer latency with server history and streaming @performance", async ({
     }
   };
   await Promise.all([
-    stream(),
+    sendStream(),
     page.keyboard.type(" Typing while tokens arrive.", { delay: 35 }),
   ]);
   await expect(page.getByText(/token 19/).last()).toBeVisible();
-  await page.waitForTimeout(300);
   await page.evaluate(() => {
     window.metrics.phase = "stream-only";
   });
@@ -166,7 +235,6 @@ test("composer latency with server history and streaming @performance", async ({
     }) + "\n",
   );
   await expect(page.getByText(/stream-only-marker/).last()).toBeVisible();
-  await page.waitForTimeout(150);
   const metrics = await page.evaluate(() => window.metrics);
   for (const phase of ["idle-input", "stream-and-input"]) {
     const durations = metrics.input
@@ -207,9 +275,35 @@ test("composer latency with server history and streaming @performance", async ({
   console.log(
     "IDLE_CONTROL_RENDERS",
     JSON.stringify(
-      metrics.renderProbe.filter((entry) => entry.phase === "idle-control"),
+      metrics.renderProbe.filter(
+        (entry) =>
+          entry.phase === "idle-control" && entry.component !== "history-row",
+      ),
     ),
   );
+  const marker = metrics.renderProbe.findIndex(
+    (entry) =>
+      entry.component === "history-row" &&
+      entry.text?.includes("stream-only-marker"),
+  );
+  expect(marker).toBeGreaterThanOrEqual(0);
+  const start = metrics.renderProbe.findLastIndex(
+    (entry, index) => index < marker && entry.component === "turn-history",
+  );
+  expect(start).toBeGreaterThanOrEqual(0);
+  const deltaRenders = metrics.renderProbe.slice(start, marker + 1);
+  console.log(
+    "DELTA_WRAPPERS",
+    deltaRenders.filter((entry) => entry.component === "history-window-row")
+      .length,
+  );
+  if (!process.env.STUDIO_LATENCY_BASE)
+    expect(
+      deltaRenders.filter((entry) => entry.component === "history-window-row"),
+    ).toHaveLength(1);
+  expect(
+    deltaRenders.filter((entry) => entry.component === "history-row"),
+  ).toHaveLength(1);
   expect(
     metrics.renderProbe.filter(
       (entry) =>

@@ -1,22 +1,6 @@
 use super::storage::{Replay, replay, submitted};
 use super::*;
 
-async fn wait_vm_ready(
-    status: &mut tokio::sync::watch::Receiver<crate::provider_session_task::SessionStatus>,
-) -> bool {
-    loop {
-        match status.borrow().initialization {
-            InitializationStatus::Ready => return true,
-            InitializationStatus::Refused | InitializationStatus::Unknown => return false,
-            InitializationStatus::AwaitingReply | InitializationStatus::InitializedWritePending => {
-            }
-        }
-        if status.changed().await.is_err() {
-            return false;
-        }
-    }
-}
-
 impl Worker {
     fn retained_scope(&self) -> ConnectionScope {
         ConnectionScope {
@@ -61,7 +45,6 @@ impl Worker {
         {
             self.forget_thread_proofs(thread);
         }
-        let deferred_request = request.clone();
         let volatile = request.is_volatile_read();
         let call = Call {
             root_request_id: request.root_request_id,
@@ -122,99 +105,8 @@ impl Worker {
             }
             Ok(Replay::Retry(ticket)) => Some(ticket),
         };
-        let actor_id = call.actor.as_ref().map(|actor| actor.agent.clone());
-        let actor_lookup = actor_id.clone();
-        let is_vm_actor = if let Some(actor) = actor_lookup {
-            self.db("retained_actor_mode", move |store| async move {
-                store
-                    .read_async("runtime-services/account_worker_read", move |connection| {
-                        super::storage::vm_actor(connection, &actor)
-                    })
-                    .await
-            })
-            .await?
-        } else {
-            false
-        };
-        if is_vm_actor
-            && let Some(actor) = actor_id.as_deref()
-            && !self.vm_sessions.contains_key(actor)
-            && self.resolving_vm_actors.contains(actor)
-        {
-            if self.queued_commands.len() >= COMMAND_CAPACITY {
-                let _ignored = reply.send(Err(PortError::Capacity));
-            } else {
-                self.queued_commands
-                    .push_back(AccountCommand::RetainedRequest(Box::new(RequestCommand {
-                        request: deferred_request,
-                        reply,
-                    })));
-            }
-            return Ok(());
-        }
-        if is_vm_actor
-            && let Some(actor) = actor_id.as_deref()
-            && !self.vm_sessions.contains_key(actor)
-        {
-            self.restore_existing_vm_actor(actor).await;
-        }
-        if is_vm_actor
-            && let Some(actor) = actor_id.as_deref()
-            && let Some(session) = self.vm_sessions.get(actor)
-        {
-            let mut status = session.session.status.clone();
-            #[cfg(test)]
-            if status.borrow().initialization != InitializationStatus::Ready {
-                self.bridge.faults.vm_readiness_waiting.notify_one();
-            }
-            let deadline = tokio::time::Instant::from_std(request.deadline);
-            // Reattachment installs the session before its cached initialization
-            // finishes. Keep processing its journal while waiting for readiness.
-            let ready = self
-                .pump_until(async move {
-                    tokio::time::timeout_at(deadline, wait_vm_ready(&mut status))
-                        .await
-                        .unwrap_or(false)
-                })
-                .await;
-            let ready = match ready {
-                Ok(ready) => ready,
-                Err(WorkerError::Closed) if *self.stop.borrow() => {
-                    // Cancellation before preparation cannot have sent a request.
-                    self.closing = true;
-                    false
-                }
-                Err(error) => return Err(error),
-            };
-            if !ready {
-                let _ignored = reply.send(Err(PortError::NotSent("vm-not-ready".into())));
-                return Ok(());
-            }
-        }
-        if is_vm_actor
-            && let Some(actor) = actor_id.as_deref()
-            && let Some(actor_identity) = call.actor.as_ref()
-            && !self
-                .vm_session_matches_actor(actor, &call.scope.account, actor_identity.epoch)
-                .await?
-        {
-            let _ignored = reply.send(Err(PortError::NotSent("vm-session-mismatch".into())));
-            return Ok(());
-        }
-        let control = if is_vm_actor {
-            let Some(control) = actor_id
-                .as_deref()
-                .and_then(|actor| self.vm_sessions.get(actor))
-                .map(|session| session.control.clone())
-            else {
-                let _ignored = reply.send(Err(PortError::NotSent("vm-session-missing".into())));
-                return Ok(());
-            };
-            control
-        } else {
-            self.control.clone()
-        };
-        let journal_actor_id = if is_vm_actor { actor_id.clone() } else { None };
+        let control = self.control.clone();
+        let journal_actor_id: Option<String> = None;
         let remaining = tokio::time::Instant::from_std(request.deadline)
             .saturating_duration_since(tokio::time::Instant::now());
         let deadline = tokio::time::Instant::from_std(request.deadline);
@@ -471,15 +363,15 @@ impl Worker {
         let mut scopes: BTreeSet<String> = self
             .retained_requests
             .values()
-            .map(|pending| self.journal_scope(pending.actor_id.as_deref()))
+            .map(|_| account.clone())
             .collect();
         // A journal barrier always belongs to the host session, including when
         // no retained requests are currently waiting.
         scopes.insert(account.clone());
         let request_scopes: BTreeMap<_, _> = self
             .retained_requests
-            .iter()
-            .map(|(id, pending)| (id.clone(), self.journal_scope(pending.actor_id.as_deref())))
+            .keys()
+            .map(|id| (id.clone(), account.clone()))
             .collect();
         let candidates: BTreeSet<(String, u64)> =
             self.retained_requests
@@ -501,12 +393,7 @@ impl Worker {
                             },
                         )
                 })
-                .map(|pending| {
-                    (
-                        self.journal_scope(pending.actor_id.as_deref()),
-                        pending.result_cursor,
-                    )
-                })
+                .map(|pending| (account.clone(), pending.result_cursor))
                 .collect();
         let (checkpoints, committed_replies) = self
             .db("retained_barrier", move |s| async move {

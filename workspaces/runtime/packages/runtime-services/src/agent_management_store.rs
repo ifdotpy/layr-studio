@@ -542,10 +542,9 @@ fn execute_decision(
             .into_iter()
             .map(|(_, id, _)| id)
             .collect(),
-        requests: written_ids(&decision.writes, "approvals"),
+        team_roots: Default::default(),
         work: changed_work,
         checked_agents: Vec::new(),
-        ..Default::default()
     };
     let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
     crate::sync_policy::publish_entity_changes(

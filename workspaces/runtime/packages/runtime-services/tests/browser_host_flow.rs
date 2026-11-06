@@ -1,5 +1,5 @@
 //! The whole sign-in path of a native chat on a Rust server, as a phone uses it
-//! (docs/vm-browser-bridge.md, section 6): the launcher, the host bridge sockets, the card
+//! the launcher, the host bridge sockets, the card
 //! poll, paste mode, the pasted redirect and the one relayed GET. A fake OIDC provider and a
 //! fake tool in the measured kubelogin and AWS shapes stand in for real ones; a test HTTP
 //! client is the phone browser, which cannot reach the tool's loopback port.
@@ -20,7 +20,7 @@ use studio_runtime_services::browser_cards::{self, CardSource};
 use studio_runtime_services::browser_host::{
     self, HostBridgeOptions, HostBridgeService, StoreChats,
 };
-use studio_runtime_services::linux_vm_guest::{GuestRpc, UnixSocketGuestRpc};
+use studio_runtime_services::browser_rpc::{BrowserRpc, UnixSocketBrowserRpc};
 use studio_runtime_services::sign_in;
 
 fn read_request(stream: &mut TcpStream) -> String {
@@ -201,11 +201,13 @@ fn card(store: &studio_runtime_store::RuntimeStore) -> Card {
     one
 }
 
-fn answer_context(guest: Arc<dyn GuestRpc>, providers: &BTreeSet<String>) -> BrowserAnswerContext {
+fn answer_context(
+    guest: Arc<dyn BrowserRpc>,
+    providers: &BTreeSet<String>,
+) -> BrowserAnswerContext {
     BrowserAnswerContext {
         local_window: false,
         guest,
-        local_forwarder: None,
         now: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("test step")
@@ -244,8 +246,8 @@ async fn a_phone_signs_in_a_kubelogin_style_command_with_a_pasted_redirect() {
     assert_eq!(code, 0, "{message}");
     assert!(message.contains("127.0.0.1"), "{message}");
 
-    let guest: Arc<dyn GuestRpc> =
-        Arc::new(UnixSocketGuestRpc::new(service.control_socket.clone()));
+    let guest: Arc<dyn BrowserRpc> =
+        Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let source = CardSource {
         source: "host",
         guest: Arc::clone(&guest),
@@ -417,8 +419,8 @@ async fn an_aws_style_device_code_card_shows_the_code_and_needs_no_forward() {
     .await
     .expect("test step");
     assert_eq!(code, 0, "{message}");
-    let guest: Arc<dyn GuestRpc> =
-        Arc::new(UnixSocketGuestRpc::new(service.control_socket.clone()));
+    let guest: Arc<dyn BrowserRpc> =
+        Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let source = CardSource {
         source: "host",
         guest: Arc::clone(&guest),
@@ -610,8 +612,8 @@ async fn a_link_from_the_tool_and_from_the_message_gets_one_card() {
         None,
     )
     .expect("test step");
-    let guest: Arc<dyn GuestRpc> =
-        Arc::new(UnixSocketGuestRpc::new(service.control_socket.clone()));
+    let guest: Arc<dyn BrowserRpc> =
+        Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let sources = sign_in::SignInSources::new(vec![CardSource {
         source: "host",
         guest,
@@ -666,11 +668,6 @@ async fn a_link_from_the_tool_and_from_the_message_gets_one_card() {
     .await
     .expect_err("refused");
     assert!(scheme.contains("Only https sign-in links"), "{scheme}");
-    let vm = json!({"id": agent, "executionMode": "vm"});
-    let missing = sign_in::tool(&store, &sources, &vm, Some(device), "call-4")
-        .await
-        .expect_err("refused");
-    assert!(missing.contains("VM chats"), "{missing}");
     assert_eq!(cards(&store).len(), 2);
     service.stop().await;
 }
@@ -752,8 +749,8 @@ async fn a_new_host_card_is_published_to_clients_and_pushed_to_the_phone() {
     .await
     .expect("test step");
     assert_eq!(code, 0, "{message}");
-    let guest: Arc<dyn GuestRpc> =
-        Arc::new(UnixSocketGuestRpc::new(service.control_socket.clone()));
+    let guest: Arc<dyn BrowserRpc> =
+        Arc::new(UnixSocketBrowserRpc::new(service.control_socket.clone()));
     let source = CardSource {
         source: "host",
         guest,
@@ -811,9 +808,8 @@ async fn a_new_host_card_is_published_to_clients_and_pushed_to_the_phone() {
 
     // Published: the clients read requests as sync entities.
     let connection = store.test_reader().expect("test step");
-    let entities =
-        studio_runtime_store::SyncDocumentsRepository::entities_after(&connection, 0, 100)
-            .expect("test step");
+    let (entities, _) =
+        studio_runtime_services::entity_scope::delta_after(&connection, 0, 100).expect("test step");
     assert!(
         entities
             .iter()

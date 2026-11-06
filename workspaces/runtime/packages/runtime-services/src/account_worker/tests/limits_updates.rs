@@ -37,7 +37,6 @@ async fn live_limits_journal_pins_both_providers_and_suppresses_replay() {
                 &streams,
                 vec![entry],
                 &pin,
-                None,
                 Some(source.clone()),
                 Vec::new(),
                 None,

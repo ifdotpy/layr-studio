@@ -1070,7 +1070,9 @@ async fn copy_branch_history(
             let source_inputs = source_record.inputs().value();
             let mut inputs = Vec::new();
             if let Some(source_inputs) = source_inputs {
-                let mut remaining = 20_000usize;
+                let mut remaining = studio_runtime_store::text_blobs::input_budget(
+                    source_record.text().value().map(String::as_str).unwrap_or_default(),
+                );
                 for input in source_inputs {
                     let timestamp = input.created_or_at()?;
                     if input.id().is_none() || input.kind().is_none() || timestamp.is_none() || input.text().is_none() || input.assets().value().is_none() {
@@ -1092,14 +1094,14 @@ async fn copy_branch_history(
                 }
             }
             let text = source_record.text().value().map(String::as_str).unwrap_or_default();
-            let visible_text = text.chars().take(20_000).collect::<String>();
+            let (visible_text, truncated) = studio_runtime_store::text_blobs::item_preview(text);
             let copied_at = unix_time();
             let mut record = json!({
                 "id":id,
                 "role":role,
                 "title":title,
                 "text":visible_text,
-                "truncated":text.chars().count() > 20_000,
+                "truncated":truncated,
                 "at":copied_at,
                 "turnId":source_record.turn_id().value(),
                 "streaming":false,

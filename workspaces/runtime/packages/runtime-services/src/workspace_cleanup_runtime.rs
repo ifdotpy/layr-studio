@@ -6,7 +6,6 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use studio_runtime_store::path_identity::{CanonicalPath, LexicalPath};
 
-use crate::linux_vm_guest::GuestRpc;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use studio_json::{Value, json};
@@ -30,7 +29,6 @@ fn cleanup_archive(agent: &Value) -> Option<&Value> {
 }
 
 const INTENT_FIELD: &str = "workspaceCleanupIntent";
-const GUEST_TIMEOUT: Duration = Duration::from_secs(3_600);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -116,8 +114,37 @@ fn retained_worktree_effect_tags_match_cleanup_effect_serialization() {
 #[derive(Clone, Debug, PartialEq)]
 pub enum EffectFailure {
     NotSent,
+    Unavailable,
     UnsafeSubmodule(String),
     Unknown,
+}
+
+#[cfg(test)]
+#[test]
+fn persisted_vm_cleanup_effect_is_unavailable() {
+    let persisted = json!({"action":"archive", "phase":"written", "requestId":"request",
+        "effect":{"kind":"release_vm_line", "method":"line.remove"},
+        "receipt":{"state":"released"}});
+    let intent = CleanupIntent::decode(persisted.clone()).expect("historical receipt decodes");
+    assert!(matches!(
+        intent.progress,
+        CleanupProgress::Written {
+            effect: CompletedEffect::ReleaseVmLine,
+            ..
+        }
+    ));
+    let effect: CleanupEffect = studio_json::from_str(&persisted["effect"].to_string()).unwrap();
+    let ports = ProductionPorts {
+        state_dir: PathBuf::new(),
+    };
+    assert_eq!(
+        ports.perform(&json!({}), &effect, "request"),
+        Err(EffectFailure::Unavailable)
+    );
+    let unknown = CleanupIntent::decode(json!({"action":"archive", "phase":"unknown",
+        "effect":{"kind":"save_vm_turn", "turn_id":"turn"}}))
+    .expect("uncertain historical intent decodes");
+    assert!(matches!(unknown.progress, CleanupProgress::Unknown));
 }
 
 /// Injectable boundary for deterministic corpus and fail-point tests.
@@ -212,7 +239,7 @@ pub async fn cleanup_agent_workspace_with_ports(
                     workspace = Some(receipt);
                 }
             }
-            Err(EffectFailure::NotSent) => {
+            Err(EffectFailure::NotSent | EffectFailure::Unavailable) => {
                 mark_effect(&store, &agent_id, &request_id, "not_sent", Value::Null).await?;
                 return Err(WorkspaceCleanupError::NotSent);
             }
@@ -1125,25 +1152,6 @@ fn result(
     }
 }
 
-fn guest_failure(error: crate::linux_vm_guest::GuestError) -> EffectFailure {
-    use crate::linux_vm_guest::GuestError;
-
-    match error {
-        GuestError::InvalidRequest | GuestError::Identity => EffectFailure::NotSent,
-        GuestError::Transport {
-            uncertain: false, ..
-        }
-        | GuestError::Protocol {
-            uncertain: false, ..
-        } => EffectFailure::NotSent,
-        GuestError::SpacePreflight { .. }
-        | GuestError::Transport { .. }
-        | GuestError::Protocol { .. }
-        | GuestError::Rejected { .. }
-        | GuestError::FrameCallback { .. } => EffectFailure::Unknown,
-    }
-}
-
 struct ProductionPorts {
     state_dir: PathBuf,
 }
@@ -1167,36 +1175,9 @@ impl CleanupPorts for ProductionPorts {
             CleanupEffect::ArchiveImage | CleanupEffect::RemoveImage => {
                 Ok(json!({"state":"kept","reason":"legacy image workspace"}))
             }
-            CleanupEffect::SaveVmTurn { turn_id } => {
-                let client =
-                    crate::linux_vm_guest::UnixGuestRpc::for_runtime_state(&self.state_dir);
-                let id = agent["id"].as_str().ok_or(EffectFailure::NotSent)?;
-                let value = client
-                    .call(
-                        "line.save",
-                        &json!({"agentId":id,"turnId":turn_id}),
-                        Some(request_id),
-                        GUEST_TIMEOUT,
-                    )
-                    .map_err(guest_failure)?;
-                let state_id = value
-                    .get("stateId")
-                    .and_then(Value::as_str)
-                    .filter(|state_id| !state_id.is_empty())
-                    .ok_or(EffectFailure::Unknown)?;
-                Ok(json!({"stateId":state_id}))
-            }
-            CleanupEffect::ReleaseVmLine { method } => {
-                let client =
-                    crate::linux_vm_guest::UnixGuestRpc::for_runtime_state(&self.state_dir);
-                client
-                    .call(
-                        method,
-                        &json!({"agentId":agent["id"]}),
-                        Some(request_id),
-                        GUEST_TIMEOUT,
-                    )
-                    .map_err(guest_failure)
+            // Old cleanup receipts remain readable, but no VM command can be sent.
+            CleanupEffect::SaveVmTurn { .. } | CleanupEffect::ReleaseVmLine { .. } => {
+                Err(EffectFailure::NotSent)
             }
             CleanupEffect::SaveWorktreeRef { identity } => {
                 save_worktree_archive_ref(identity)?;
@@ -1480,6 +1461,26 @@ mod tests {
         reconcile_pending_cleanup,
     };
 
+    #[test]
+    fn production_refuses_legacy_vm_cleanup_effects() {
+        let ports = super::ProductionPorts {
+            state_dir: PathBuf::from("/unused"),
+        };
+        for effect in [
+            CleanupEffect::SaveVmTurn {
+                turn_id: "old".into(),
+            },
+            CleanupEffect::ReleaseVmLine {
+                method: "line.remove".into(),
+            },
+        ] {
+            assert_eq!(
+                ports.perform(&json!({"id":"old"}), &effect, "request"),
+                Err(EffectFailure::NotSent)
+            );
+        }
+    }
+
     struct FakePorts {
         outcomes: Mutex<Vec<Result<Value, EffectFailure>>>,
         calls: Mutex<Vec<(CleanupEffect, String)>>,
@@ -1674,153 +1675,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_orders_workspace_effects_and_clears_cleanup_pending() {
-        let (_directory, store) = fixture().await;
-        put_agent(
-            &store,
-            json!({
-                "executionMode":"vm", "layrReady":true,
-                "layrTurnSaves":{"turn-1":{"status":"pending"}},
-                "agentArchive":{"cleanupPending":true}
-            }),
-        )
-        .await;
-        let ports = Arc::new(FakePorts::new(vec![
-            Ok(json!({"stateId":"state-1"})),
-            Ok(json!({"stateId":"state-2"})),
-        ]));
-        let result = cleanup_agent_workspace_with_ports(
-            Arc::clone(&store),
-            "cleanup-agent".to_owned(),
-            CleanupAction::Archive,
-            ports.clone(),
-        )
-        .await
-        .expect("archive cleanup completes");
-        assert!(!result.held);
-        let calls = ports.calls.lock().expect("calls mutex");
-        assert!(matches!(calls[0].0, CleanupEffect::SaveVmTurn { .. }));
-        assert!(matches!(calls[1].0, CleanupEffect::ReleaseVmLine { .. }));
-        assert_ne!(calls[0].1, calls[1].1);
-        let saved = agent(&store);
-        assert_eq!(saved.pointer("/layrReady"), Some(&json!(false)));
-        assert_eq!(
-            saved.pointer("/agentArchive/cleanupPending"),
-            Some(&json!(false))
-        );
-        assert_eq!(
-            saved.pointer("/layrTurnSaves/turn-1/status"),
-            Some(&json!("saved"))
-        );
-    }
-
-    #[tokio::test]
-    async fn unknown_effect_is_held_after_restart_and_never_resent() {
-        let (_directory, store) = fixture().await;
-        put_agent(
-            &store,
-            json!({
-                "executionMode":"vm", "layrReady":true,
-                "layrTurnSaves":{"turn-1":{"status":"pending"}},
-                "agentArchive":{"cleanupPending":true}
-            }),
-        )
-        .await;
-        let ports = Arc::new(FakePorts::new(vec![Err(EffectFailure::Unknown)]));
-        assert!(matches!(
-            cleanup_agent_workspace_with_ports(
-                Arc::clone(&store),
-                "cleanup-agent".to_owned(),
-                CleanupAction::Archive,
-                ports.clone()
-            )
-            .await,
-            Err(WorkspaceCleanupError::Held)
-        ));
-        drop(store);
-        let store = Arc::new(
-            RuntimeStore::open(Some(_directory.path()))
-                .await
-                .expect("store restarts"),
-        );
-        let held = reconcile_pending_cleanup(Arc::clone(&store))
-            .await
-            .expect("unknown intent reconciles");
-        assert_eq!(held.len(), 1);
-        assert!(held[0].held);
-        assert_eq!(
-            cleanup_agent_workspace_with_ports(
-                Arc::clone(&store),
-                "cleanup-agent".to_owned(),
-                CleanupAction::Archive,
-                ports.clone()
-            )
-            .await
-            .expect_err("unknown blocks replay")
-            .to_string(),
-            "Workspace cleanup is held for inspection"
-        );
-        assert_eq!(ports.calls.lock().expect("calls mutex").len(), 1);
-        assert_eq!(
-            agent(&store).pointer("/workspaceCleanupIntent/phase"),
-            Some(&json!("unknown"))
-        );
-    }
-
-    #[tokio::test]
-    async fn panicking_effect_is_marked_unknown_and_stays_held_after_reopen() {
-        struct CrashPort;
-        impl CleanupPorts for CrashPort {
-            fn perform(
-                &self,
-                _agent: &Value,
-                _effect: &CleanupEffect,
-                _request_id: &str,
-            ) -> Result<Value, EffectFailure> {
-                panic!("simulated response loss after the durable pending write");
-            }
-        }
-
-        let (directory, store) = fixture().await;
-        put_agent(
-            &store,
-            json!({"executionMode":"vm", "layrReady":true,
-                "layrTurnSaves":{"turn-1":{"status":"pending"}},
-                "agentArchive":{"cleanupPending":true}}),
-        )
-        .await;
-        assert!(matches!(
-            cleanup_agent_workspace_with_ports(
-                Arc::clone(&store),
-                "cleanup-agent".to_owned(),
-                CleanupAction::Archive,
-                Arc::new(CrashPort),
-            )
-            .await,
-            Err(WorkspaceCleanupError::Held)
-        ));
-        assert_eq!(
-            agent(&store).pointer("/workspaceCleanupIntent/phase"),
-            Some(&json!("unknown"))
-        );
-        drop(store);
-        let store = Arc::new(
-            RuntimeStore::open(Some(directory.path()))
-                .await
-                .expect("state reopens"),
-        );
-        let held = reconcile_pending_cleanup(Arc::clone(&store))
-            .await
-            .expect("pending effect reconciles");
-        assert_eq!(held.len(), 1);
-        assert!(held[0].held);
-        assert_eq!(
-            agent(&store).pointer("/workspaceCleanupIntent/phase"),
-            Some(&json!("unknown"))
-        );
-    }
-
-    #[tokio::test]
     async fn legacy_image_cleanup_preserves_files_and_record_fields() {
         let (_directory, store) = fixture().await;
         put_agent(
@@ -1845,60 +1699,6 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(agent(&store)["imageWorkspaceReady"], true);
-    }
-
-    #[tokio::test]
-    async fn written_retry_replays_the_persisted_attempt_without_resending() {
-        let (_directory, store) = fixture().await;
-        put_agent(
-            &store,
-            json!({
-                "executionMode":"vm", "layrReady":true,
-                "agentArchive":{"cleanupPending":true}
-            }),
-        )
-        .await;
-        let action = CleanupAction::Archive;
-        let effect = CleanupEffect::ReleaseVmLine {
-            method: "line.remove".into(),
-        };
-        let request_id = uuid::Uuid::new_v5(
-            &uuid::Uuid::NAMESPACE_OID,
-            json!(["cleanup-agent", action, effect, 1_u64])
-                .to_string()
-                .as_bytes(),
-        )
-        .to_string();
-        let mut record = agent(&store);
-        record["workspaceCleanupIntent"] = json!({
-            "requestId":request_id,
-            "attempt":1,
-            "action":action,
-            "effect":effect,
-            "identity":super::lifecycle_identity(&record),
-            "phase":"written",
-            "receipt":{"state":"released"}
-        });
-        store
-            .transaction(move |tx| {
-                AgentRepository::put(tx, &AgentRecord::from_value(record).expect("record parses"))
-            })
-            .await
-            .expect("written effect stages");
-
-        let ports = Arc::new(FakePorts::new(vec![]));
-        cleanup_agent_workspace_with_ports(
-            Arc::clone(&store),
-            "cleanup-agent".to_owned(),
-            action,
-            ports.clone(),
-        )
-        .await
-        .expect("written release replays from its receipt");
-        assert!(ports.calls.lock().expect("calls mutex").is_empty());
-        let saved = agent(&store);
-        assert_eq!(saved["agentArchive"]["cleanupPending"], false);
-        assert!(saved.get("workspaceCleanupIntent").is_none());
     }
 
     #[tokio::test]
@@ -2010,35 +1810,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_vm_save_receipt_holds_before_release() {
-        let (_directory, store) = fixture().await;
-        put_agent(
-            &store,
-            json!({
-                "executionMode":"vm", "layrReady":true,
-                "layrTurnSaves":{"turn-1":{"status":"pending"}},
-                "agentArchive":{"cleanupPending":true}
-            }),
-        )
-        .await;
-        let ports = Arc::new(FakePorts::new(vec![Ok(json!({"stateId":""}))]));
-        assert!(matches!(
-            cleanup_agent_workspace_with_ports(
-                Arc::clone(&store),
-                "cleanup-agent".to_owned(),
-                CleanupAction::Archive,
-                ports.clone()
-            )
-            .await,
-            Err(WorkspaceCleanupError::Held)
-        ));
-        assert_eq!(ports.calls.lock().expect("calls mutex").len(), 1);
-        let saved = agent(&store);
-        assert_eq!(saved["layrReady"], true);
-        assert_eq!(saved["workspaceCleanupIntent"]["phase"], "unknown");
-    }
-
-    #[tokio::test]
     async fn no_effect_completion_preserves_a_replacement_lifecycle_and_intent() {
         let (_directory, store) = fixture().await;
         put_agent(&store, json!({"agentArchive":{"cleanupPending":true}})).await;
@@ -2081,41 +1852,6 @@ mod tests {
         assert_eq!(
             saved["workspaceCleanupIntent"]["operationId"],
             "replacement-operation"
-        );
-    }
-
-    #[tokio::test]
-    async fn guest_failures_are_retryable_only_when_proven_pre_send() {
-        use crate::linux_vm_guest::GuestError;
-
-        assert_eq!(
-            super::guest_failure(GuestError::Transport {
-                message: "guest socket is unavailable".into(),
-                uncertain: false,
-            }),
-            EffectFailure::NotSent
-        );
-        assert_eq!(
-            super::guest_failure(GuestError::Protocol {
-                message: "request exceeds the frame limit",
-                uncertain: false,
-            }),
-            EffectFailure::NotSent
-        );
-        assert_eq!(
-            super::guest_failure(GuestError::Rejected {
-                code: Some("line_release_failed".into()),
-                detail: None,
-                uncertain: false,
-            }),
-            EffectFailure::Unknown
-        );
-        assert_eq!(
-            super::guest_failure(GuestError::Transport {
-                message: "response lost".into(),
-                uncertain: true,
-            }),
-            EffectFailure::Unknown
         );
     }
 

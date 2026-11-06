@@ -13,7 +13,7 @@ export type NewChatModeUsesRequestOwner = AssertNever<
       NonNullable<PostBody<"/api/leads">["workspaceMode"]>
     >
   | Exclude<
-      NonNullable<PostBody<"/api/leads">["workspaceMode"]>,
+      Exclude<NonNullable<PostBody<"/api/leads">["workspaceMode"]>, "layr">,
       NewChatWorkspaceMode
     >
 >;

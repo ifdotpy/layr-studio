@@ -424,13 +424,20 @@ impl RetainedMonitorPort {
         if generation != Some(scope.generation) {
             return Ok(None);
         }
-        // A VM actor's command runs in its guest provider, which answers
-        // operation status itself and has its own generation.
+        // Historical actor ownership cannot prove this host operation is running.
         let agent = snapshot.agent().to_owned();
         let vm_owner = self
             .store
             .read_async("runtime-server/monitor-reattach-owner", move |db| {
-                retained::vm_actor(db, &agent)
+                Ok::<_, WorkerError>(
+                    studio_runtime_store::AgentRepository::get(
+                        db,
+                        &studio_runtime_store::AgentId::from(agent.as_str()),
+                    )?
+                    .is_some_and(|actor| {
+                        studio_runtime_services::workspace_ready::legacy_vm_record(&actor)
+                    }),
+                )
             })
             .await;
         match vm_owner {
@@ -789,12 +796,8 @@ impl RetainedMonitorPort {
             }
         };
         let command = monitor.command.as_str();
-        let argv = monitor_command(
-            command,
-            &config,
-            actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm),
-        )
-        .map_err(|_| MonitorError::Refused("Monitor command preparation was refused"))?;
+        let argv = monitor_command(command, &config)
+            .map_err(|_| MonitorError::Refused("Monitor command preparation was refused"))?;
         let mut params = json!({
             "command":argv,
             "cwd":cwd,
@@ -1039,11 +1042,7 @@ impl RetainedMonitorPort {
         if !config.is_object() {
             return Err("Monitor configuration is invalid".into());
         }
-        let command = monitor_command(
-            &check.command,
-            &config,
-            actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm),
-        )?;
+        let command = monitor_command(&check.command, &config)?;
         let mut params = json!({
             "command":command,
             "cwd":cwd,
@@ -1545,7 +1544,7 @@ impl MonitorPort for RetainedMonitorPort {
                     ).await.map_err(|error|match error {
                         studio_runtime_services::account_worker::WorkerError::Store(error)=>MonitorError::Store(error),
                         studio_runtime_services::account_worker::WorkerError::Expired=>MonitorError::Expired,
-                        studio_runtime_services::account_worker::WorkerError::Recovery(_) | studio_runtime_services::account_worker::WorkerError::Scheduler(_) | studio_runtime_services::account_worker::WorkerError::Session(_) | studio_runtime_services::account_worker::WorkerError::Notification(_) | studio_runtime_services::account_worker::WorkerError::PreparationRefused(_) | studio_runtime_services::account_worker::WorkerError::StaleVmActor | studio_runtime_services::account_worker::WorkerError::PreparationPending(_) | studio_runtime_services::account_worker::WorkerError::PreparationAwaitsAgent(_) | studio_runtime_services::account_worker::WorkerError::CleanupUnconfirmed(_) | studio_runtime_services::account_worker::WorkerError::AlreadyRunning | studio_runtime_services::account_worker::WorkerError::Closed | studio_runtime_services::account_worker::WorkerError::ShutdownTimeout | studio_runtime_services::account_worker::WorkerError::TaskFailed | studio_runtime_services::account_worker::WorkerError::Capacity | studio_runtime_services::account_worker::WorkerError::CallbackUnknown=>MonitorError::Refused("Retained monitor ownership changed"),
+                        studio_runtime_services::account_worker::WorkerError::Recovery(_) | studio_runtime_services::account_worker::WorkerError::Scheduler(_) | studio_runtime_services::account_worker::WorkerError::Session(_) | studio_runtime_services::account_worker::WorkerError::Notification(_) | studio_runtime_services::account_worker::WorkerError::PreparationRefused(_) | studio_runtime_services::account_worker::WorkerError::UnavailableActor | studio_runtime_services::account_worker::WorkerError::PreparationPending(_) | studio_runtime_services::account_worker::WorkerError::PreparationAwaitsAgent(_) | studio_runtime_services::account_worker::WorkerError::CleanupUnconfirmed(_) | studio_runtime_services::account_worker::WorkerError::AlreadyRunning | studio_runtime_services::account_worker::WorkerError::Closed | studio_runtime_services::account_worker::WorkerError::ShutdownTimeout | studio_runtime_services::account_worker::WorkerError::TaskFailed | studio_runtime_services::account_worker::WorkerError::Capacity | studio_runtime_services::account_worker::WorkerError::CallbackUnknown=>MonitorError::Refused("Retained monitor ownership changed"),
                     })?.is_none() {
                         return Ok(ReattachOutcome::Pending);
                     }
@@ -1898,8 +1897,7 @@ async fn run_probe(
     if !config.is_object() {
         return Err("Provider configuration is invalid; liveness command was not submitted".into());
     }
-    let guest = actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm);
-    let argv = monitor_command(command, &config, guest)?;
+    let argv = monitor_command(command, &config)?;
     let mut params = json!({
         "command":argv,
         "cwd":cwd,

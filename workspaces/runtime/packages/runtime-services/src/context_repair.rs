@@ -957,6 +957,9 @@ fn apply(
 
 /// The scheduler and explicit repair route share the same unresolved-receipt gate.
 pub fn assert_available(agent: &Value) -> Result<(), RepairError> {
+    if agent["executionMode"] == "vm" {
+        return Err(RepairError::AccountSession);
+    }
     validate_agent(agent)?;
     if active_repair(agent) || studio_runtime_store::truthy(agent.get("contextRepairWait")) {
         return Err(RepairError::ReceiptHold);
@@ -980,20 +983,8 @@ pub async fn repair_idle(
 ) -> Result<Value, RepairError> {
     let id = id.to_owned();
     store.transaction_with(move |db| {
-        let mut agent = ContextRepairRepository::agent(db, &id)?.ok_or(RepairError::MissingAgent)?;
+        let agent = ContextRepairRepository::agent(db, &id)?.ok_or(RepairError::MissingAgent)?;
         assert_available(&agent)?;
-        if agent["executionMode"] == "vm"
-        {
-            const NOTE: &str = "Automatic context repair is skipped for VM workers. The rollout stays in the guest. The next turn can proceed.";
-            if agent.get("contextRepairNote").and_then(Value::as_str) != Some(NOTE) {
-                agent["contextRepairNote"] = json!(NOTE);
-                ContextRepairRepository::put_agent(db, &agent)?;
-            }
-            return Ok(json!({
-                "id": &id,
-                "repair": agent.get("contextRepair").cloned().unwrap_or(Value::Null)
-            }));
-        }
         if !crate::provider_adapter::native_history(&agent)
             || agent["threadId"].is_null()
             || agent["threadId"] == ""
@@ -1108,12 +1099,14 @@ async fn repair_idle_with_broker_inner(
             ContextRepairRepository::agent(db, &stage_id)?.ok_or(RepairError::MissingAgent)
         })
         .await?;
+    if initial["executionMode"] == "vm" {
+        return Err(RepairError::AccountSession);
+    }
     let initial_account = string_default(&initial, "accountKey", "default")?.to_owned();
     let scope_before = if crate::provider_adapter::native_history(&initial)
         && initial["threadId"]
             .as_str()
             .is_some_and(|thread| !thread.is_empty())
-        && initial["executionMode"] != "vm"
     {
         broker.current_scope(&initial_account)
     } else {
@@ -1123,7 +1116,6 @@ async fn repair_idle_with_broker_inner(
         && initial["threadId"]
             .as_str()
             .is_some_and(|thread| !thread.is_empty())
-        && initial["executionMode"] != "vm"
     {
         let receipt_id = id.to_owned();
         let rows = store
@@ -1169,13 +1161,6 @@ async fn repair_idle_with_broker_inner(
             return Err(RepairError::ReceiptHold);
         }
         assert_available(&agent)?;
-        if agent["executionMode"] == "vm"
-        {
-            const NOTE: &str = "Automatic context repair is skipped for VM workers. The rollout stays in the guest. The next turn can proceed.";
-            agent["contextRepairNote"] = json!(NOTE);
-            ContextRepairRepository::put_agent(tx, &agent)?;
-            return Ok((agent, Vec::new(), Vec::new(), Vec::new(), None, String::new()));
-        }
         if !crate::provider_adapter::native_history(&agent)
             || agent["threadId"].as_str().is_none_or(str::is_empty)
         {
@@ -2190,8 +2175,10 @@ fn ensure_local_idle(tx: &Transaction<'_>, agent: &Value) -> Result<(), RepairEr
     }
     Ok(())
 }
+const VERIFIED_REPAIR_EVENTS_SQL: &str = "SELECT e.id,e.kind,e.text,e.turn_id,m.record FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id WHERE e.agent=?1 AND e.status='delivered' AND e.kind IN ('monitor_exit','agent_message','work_review','work_decision') AND ((length(CAST(e.text AS BLOB))>3000 AND coalesce(json_extract(m.record,'$.modelEventProjection'),0)!=1) OR json_extract(m.record,'$.contextManifest.versions.roleSkill') IS NOT NULL) ORDER BY e.created,e.id";
+
 fn verified_repair_events(tx: &Transaction<'_>, agent: &Value) -> Result<Vec<Value>, RepairError> {
-    let mut statement=tx.prepare("SELECT e.id,e.kind,e.text,e.turn_id,m.record FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id WHERE e.agent=?1 AND e.status='delivered' AND e.kind IN ('monitor_exit','agent_message','work_review','work_decision') AND ((length(CAST(e.text AS BLOB))>3000 AND coalesce(json_extract(m.record,'$.modelEventProjection'),0)!=1) OR json_extract(m.record,'$.contextManifest.versions.roleSkill') IS NOT NULL) ORDER BY e.created,e.id")?;
+    let mut statement = tx.prepare(VERIFIED_REPAIR_EVENTS_SQL)?;
     let rows = statement.query_map([agent["id"].as_str()], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -2233,6 +2220,57 @@ fn verified_repair_events(tx: &Transaction<'_>, agent: &Value) -> Result<Vec<Val
         }
     }
     Ok(events)
+}
+
+#[cfg(test)]
+mod repair_event_query_tests {
+    use super::VERIFIED_REPAIR_EVENTS_SQL;
+
+    #[test]
+    fn repair_events_use_ordered_index_without_a_temp_sort() {
+        let db = studio_runtime_store::test_canvas();
+        let mut plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {VERIFIED_REPAIR_EVENTS_SQL}"))
+            .unwrap();
+        let steps: Vec<String> = plan
+            .query_map(["agent"], |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("runtime_event_repair_candidates_v3")),
+            "{steps:?}"
+        );
+        assert!(
+            !steps.iter().any(|step| step.contains("TEMP B-TREE")),
+            "{steps:?}"
+        );
+    }
+
+    #[test]
+    fn repair_event_order_preserves_id_ties() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,status TEXT,kind TEXT,text TEXT,turn_id TEXT,created REAL); CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT); CREATE INDEX runtime_event_repair_candidates_v3 ON runtime_events(agent,created,id) WHERE status='delivered' AND kind IN ('monitor_exit','agent_message','work_review','work_decision');").unwrap();
+        for (id, created) in [("z", 1), ("b", 2), ("a", 2)] {
+            db.execute("INSERT INTO runtime_events VALUES(?1,'agent','delivered','monitor_exit',?2,'turn',?3)", rusqlite::params![id,"x".repeat(3001),created]).unwrap();
+            db.execute("INSERT INTO runtime_event_meta VALUES(?1,'{}')", [id])
+                .unwrap();
+        }
+        let ids = |sql: &str| -> Vec<String> {
+            db.prepare(sql)
+                .unwrap()
+                .query_map(["agent"], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let baseline = VERIFIED_REPAIR_EVENTS_SQL
+            .replace("runtime_events e LEFT", "runtime_events e NOT INDEXED LEFT");
+        assert_eq!(ids(VERIFIED_REPAIR_EVENTS_SQL), ids(&baseline));
+        assert_eq!(ids(VERIFIED_REPAIR_EVENTS_SQL), ["z", "a", "b"]);
+    }
 }
 fn repair_receipt(receipt: &crate::context_repair_files::HistoryRewriteReceipt) -> Value {
     json!({"sourcePath":receipt.source_path,"sourceSha256":receipt.source_sha256,"sourceBytes":receipt.source_bytes,

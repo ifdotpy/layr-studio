@@ -5,7 +5,6 @@
 //! Rows decode straight into the types; an unknown value is an error.
 //! An answer is never inferred: a turn end or a lost session closes a pending
 //! approval and marks an answering one unknown.
-use std::collections::HashSet;
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Deserialize;
@@ -135,8 +134,43 @@ pub fn create_schema(tx: &Connection) -> rusqlite::Result<()> {
             tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}; {wanted};"))?;
         }
     }
+    // A deleted chat closes its open approvals; an answer on its way becomes unknown.
+    // The agents table owns the chat; a database without it has no chats to delete.
+    let agents: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='runtime_agents')",
+        [],
+        |row| row.get(0),
+    )?;
+    if agents {
+        let wanted = format!(
+            "CREATE TRIGGER {CHAT_DELETE_TRIGGER} AFTER DELETE ON runtime_agents BEGIN
+               UPDATE approvals SET state='unknown',command=NULL,since={NOW_SQL}
+                 WHERE agent=OLD.id AND state='answering';
+               UPDATE approvals SET state='closed',reason='chat_deleted',at={NOW_SQL},fire_at=NULL
+                 WHERE agent=OLD.id AND state='pending';
+             END"
+        );
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?1",
+                [CHAT_DELETE_TRIGGER],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current.as_deref() != Some(wanted.as_str()) {
+            tx.execute_batch(&format!(
+                "DROP TRIGGER IF EXISTS {CHAT_DELETE_TRIGGER}; {wanted};"
+            ))?;
+        }
+    }
     Ok(())
 }
+
+/// Trigger that settles the open approvals of a deleted chat.
+pub const CHAT_DELETE_TRIGGER: &str = "approvals_chat_delete";
+
+/// Unix time in seconds, in SQL.
+const NOW_SQL: &str = "((julianday('now')-2440587.5)*86400.0)";
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -718,21 +752,6 @@ pub fn session_lost(tx: &Connection, agent: &AgentId, now: Timestamp) -> Approva
     settle_open(tx, &open, CloseReason::SessionLost, now)
 }
 
-/// After a server restart. An agent whose provider process still runs under
-/// the supervisor keeps its open approvals (attached again, no expiry). The
-/// others lose their session.
-pub fn reconcile_after_restart(
-    tx: &Connection,
-    live: &HashSet<AgentId>,
-    now: Timestamp,
-) -> ApprovalResult<usize> {
-    let open = select(tx, "state IN ('pending','answering')", [])?
-        .into_iter()
-        .filter(|row| !live.contains(&row.agent))
-        .collect::<Vec<_>>();
-    settle_open(tx, &open, CloseReason::SessionLost, now)
-}
-
 /// Close one pending approval, for example when the monitor it asks about stops.
 /// Other states stay: an answer is never replaced by a close.
 pub fn close(
@@ -1008,53 +1027,6 @@ mod tests {
                 CommandId("c".into())
             ),
             Err(ApprovalError::Closed(_))
-        ));
-    }
-
-    #[test]
-    fn restart_keeps_pending_for_live_supervisor_sessions() {
-        let mut db = db();
-        let tx = db.transaction().unwrap();
-        create(
-            &tx,
-            new("live", "A", "t1", exec(), Some(100.0)),
-            Timestamp(1.0),
-        )
-        .unwrap();
-        create(&tx, new("gone", "B", "t2", exec(), None), Timestamp(1.0)).unwrap();
-        create(
-            &tx,
-            new("gone-answering", "B", "t2", exec(), None),
-            Timestamp(1.0),
-        )
-        .unwrap();
-        answer(
-            &tx,
-            &ApprovalId("gone-answering".into()),
-            accept(),
-            CommandId("c".into()),
-        )
-        .unwrap();
-        let live = HashSet::from([AgentId("A".into())]);
-        reconcile_after_restart(&tx, &live, Timestamp(10.0)).unwrap();
-        assert_eq!(state(&tx, "live"), ApprovalState::Pending);
-        assert!(
-            get(&tx, &ApprovalId("live".into()))
-                .unwrap()
-                .unwrap()
-                .fire_at
-                .is_some()
-        );
-        assert_eq!(
-            state(&tx, "gone"),
-            ApprovalState::Closed {
-                reason: CloseReason::SessionLost,
-                at: Timestamp(10.0)
-            }
-        );
-        assert!(matches!(
-            state(&tx, "gone-answering"),
-            ApprovalState::Unknown { .. }
         ));
     }
 

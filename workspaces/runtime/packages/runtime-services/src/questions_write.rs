@@ -18,7 +18,6 @@ use studio_runtime_store::{
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::approval_sync;
 use crate::event_write::{self, EventWriteError};
 use crate::{
     coordination::{self, CoordinationError, SystemFollowup},
@@ -286,7 +285,6 @@ pub fn answer_async_question(
         deferral.active = false;
         approvals::put(transaction, &answered)?;
     }
-    approval_sync::publish(transaction, &answered)?;
     Ok(AsyncQuestionAnswerResult {
         response: json!({"status":"answered"}),
         event_inserted,
@@ -369,7 +367,6 @@ pub fn defer_question(
             by: Principal::Owner,
         });
         approvals::put(transaction, &row)?;
-        approval_sync::publish(transaction, &row)?;
     }
     Ok(json!({"id":id,"status":PENDING,"deferred":deferred}))
 }
@@ -386,7 +383,6 @@ pub fn delete_question(
     }
     hide(&mut row, unix_time()?);
     approvals::put(transaction, &row)?;
-    approval_sync::publish(transaction, &row)?;
     Ok(json!({"id":id,"status":"deleted"}))
 }
 

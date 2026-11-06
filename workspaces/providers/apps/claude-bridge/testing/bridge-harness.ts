@@ -137,7 +137,7 @@ export async function startBridge(
     if (!/\.(mjs|mts|ts)$/.test(name) || /\.test\.(mjs|mts|ts)$/.test(name))
       continue;
     const destination = path.join(root, name);
-    if (name === "bridge.ts" || name === "refresh-auth.ts") {
+    if (name === "bridge.ts") {
       const source = await fs.readFile(path.join(BRIDGE, name), "utf8");
       await fs.writeFile(
         destination,

@@ -235,7 +235,7 @@ impl MultiServerToolPort for ResumeFetching {
                     Step::Store(error) => Error::Store(error),
                     Step::Refused(message) | Step::Failed(message) => Error::StoredAt(message),
                 })?;
-            let first = self.tools.fetch(actor, args, key, PEER).await;
+            let first = Box::pin(self.tools.fetch(actor, args, key, PEER)).await;
             if self.input.is_none() {
                 return settle(first);
             }
@@ -255,7 +255,7 @@ impl MultiServerToolPort for ResumeFetching {
                 })
                 .await
                 .unwrap();
-            settle(self.tools.fetch(actor, args, key, PEER).await)
+            settle(Box::pin(self.tools.fetch(actor, args, key, PEER)).await)
         })
     }
     fn worker_call<'a>(
@@ -1199,6 +1199,29 @@ async fn peer_store(home: &str) -> (tempfile::TempDir, Arc<RuntimeStore>) {
 }
 
 #[tokio::test]
+async fn fetch_future_stays_below_clippy_limit() {
+    let (_directory, home, seed) = seeded_store().await;
+    let transport = Arc::new(LostExportReply::default());
+    let driver = Arc::new(OrchestrationDriver::new(
+        home.clone(),
+        transport,
+        Arc::new(RuntimeOrchestrationEffects::new(home.clone())),
+    ));
+    let tools = ServerTools::new(home, driver, false);
+    let actor = Actor::from_record(&seed["lead"], LEAD, 3).unwrap();
+    let args = json!({});
+    let future = tools.fetch(&actor, &args, "request", PEER);
+    let limit: usize = include_str!("../../../../clippy.toml")
+        .lines()
+        .find_map(|line| line.strip_prefix("future-size-threshold = "))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let size = std::mem::size_of_val(&future);
+    assert!(size <= limit, "fetch future is {size} bytes");
+}
+
+#[tokio::test]
 #[allow(clippy::disallowed_methods)]
 async fn fetching_reuses_original_export_inputs_and_missing_inputs_never_send() {
     let (_directory, home, seed) = seeded_store().await;
@@ -1467,7 +1490,6 @@ async fn ready_voice_session(store: &RuntimeStore, lead: &Value) {
     crate::account_worker::store::attach_provider_stream_for_test(
         store,
         "default",
-        None,
         7,
         "connection",
     )
@@ -1487,7 +1509,7 @@ async fn ready_voice_session(store: &RuntimeStore, lead: &Value) {
         .unwrap();
 }
 
-/// `orchestration_sign_in` (docs/vm-browser-bridge.md, section 7) through the managed-tool
+/// `orchestration_sign_in` through the managed-tool
 /// dispatcher: the host bridge queues the link and the card is written at once; a second call
 /// with the same link returns the same card; without the attached bridges the tool refuses.
 #[cfg(unix)]
@@ -1504,8 +1526,8 @@ async fn sign_in_shows_one_card_through_the_chat_bridge() {
         None,
     )
     .unwrap();
-    let guest: Arc<dyn crate::linux_vm_guest::GuestRpc> = Arc::new(
-        crate::linux_vm_guest::UnixSocketGuestRpc::new(service.control_socket.clone()),
+    let guest: Arc<dyn crate::browser_rpc::BrowserRpc> = Arc::new(
+        crate::browser_rpc::UnixSocketBrowserRpc::new(service.control_socket.clone()),
     );
     let sources = crate::sign_in::SignInSources::new(vec![crate::browser_cards::CardSource {
         source: "host",

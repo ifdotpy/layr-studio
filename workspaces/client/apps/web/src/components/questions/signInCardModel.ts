@@ -1,7 +1,7 @@
 import type { Json } from "../../types";
 import type { BrowserOpenDetails } from "./requestData";
 
-/** The kind of sign-in that a `browser/open` card asks for (docs/vm-browser-bridge.md, 6.2). */
+/** The kind of sign-in that a `browser/open` card asks for. */
 export type SignInFlow = "redirect" | "device" | "page";
 
 export function signInFlow(details: BrowserOpenDetails): SignInFlow {
@@ -41,8 +41,6 @@ export function resultTarget(
 ): string {
   if (details.port === undefined) return "No result to forward";
   const server = serverName || "the chat's server";
-  if (details.source === "vm")
-    return `The VM on ${server}${details.linuxUser ? `, user ${details.linuxUser}` : ""}, port ${details.port}`;
   return `${server}, port ${details.port}`;
 }
 

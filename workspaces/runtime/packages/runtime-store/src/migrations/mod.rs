@@ -87,7 +87,14 @@ pub(crate) mod m2026_11_02_project_grant_peer_label;
 mod m2026_11_02_project_grants;
 mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;
+mod m2026_11_03_drop_completed_turns;
 mod m2026_11_03_request_signature_digest;
+mod m2026_11_04_agent_views_read_time;
+mod m2026_11_04_chat_read_time;
+mod m2026_11_04_direct_read_time;
+mod m2026_11_04_window_read_time;
+mod m2026_11_04_work_read_time;
+mod m2026_11_05_repair_event_order;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -192,6 +199,16 @@ const NOVEMBER_3: MigrationDate = MigrationDate {
     year: 2026,
     month: 11,
     day: 3,
+};
+const NOVEMBER_4: MigrationDate = MigrationDate {
+    year: 2026,
+    month: 11,
+    day: 4,
+};
+const NOVEMBER_5: MigrationDate = MigrationDate {
+    year: 2026,
+    month: 11,
+    day: 5,
 };
 const OCTOBER_30: MigrationDate = MigrationDate {
     year: 2026,
@@ -1495,6 +1512,76 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_03_request_signature_digest::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-03-drop-completed-turns",
+            introduced: NOVEMBER_3,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the legacy runtime_completed_turns table",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_03_drop_completed_turns::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-work-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with work document copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_work_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-direct-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with plan, annotation, rule or approval copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_direct_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-agent-views-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with agent view copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_agent_views_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-chat-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with complaint, edge or chat copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_chat_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-04-window-read-time",
+            introduced: NOVEMBER_4,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with task or monitor copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_04_window_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-05-repair-event-order",
+            introduced: NOVEMBER_5,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the repair event candidate index",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_05_repair_event_order::apply(c.transaction),
     },
 ];
 

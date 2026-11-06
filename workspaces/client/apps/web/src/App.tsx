@@ -103,7 +103,6 @@ import { useMediaQuery } from "@mantine/hooks";
 import {
   Activity,
   ArrowLeft,
-  HardDriveDownload,
   Layers,
   Terminal,
   BookOpen,
@@ -209,7 +208,6 @@ import ProjectFolderDialog from "./components/ProjectFolderDialog";
 import SessionActivity from "./components/agents/SessionActivity";
 import { useWorkerModels } from "./components/agents/WorkerModelPicker";
 import { FederationSettings } from "./components/FederationSettings";
-import { LinuxVMSettings } from "./components/LinuxVMSettings";
 import { LayrWorktreesSettings } from "./components/LayrWorktreesSettings";
 import { SignInPushSettings } from "./components/SignInPushSettings";
 import { OrchestrationSettings } from "./components/OrchestrationSettings";
@@ -617,6 +615,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const {
       data,
       error,
+      transportError,
       refresh,
       workspaceId,
       rememberCreated,
@@ -953,6 +952,15 @@ export default function App({ active = true }: { active?: boolean }) {
     agent?.source === GeneratedApiAgentSource.managed && !room
       ? scopedConversationData
       : data;
+  // An open managed chat shows the connection state in its activity row
+  // (useMessages), so the workspace notice does not repeat it.
+  const workspaceError =
+    error === transportError &&
+    agent?.source === GeneratedApiAgentSource.managed &&
+    !room &&
+    !(mobileClient && sidebar)
+      ? ""
+      : error;
   const conversationSelector = useMemo(createConversationDataSelector, []);
   const conversationData = conversationSelector(conversationSnapshot);
   const chatWaitSource = useMemo(() => new ChatWaitSource(), []);
@@ -1810,7 +1818,7 @@ export default function App({ active = true }: { active?: boolean }) {
               );
               setModal(null);
               void deleteConversation(
-                post,
+                (chat, signal) => serverCommand.delete(chat, { signal }),
                 id,
                 finishConversationDelete,
                 controller.signal,
@@ -2084,7 +2092,11 @@ export default function App({ active = true }: { active?: boolean }) {
     return schemaMismatch ? (
       schemaMismatchDialog
     ) : (
-      <main className="startup" aria-label="Studio startup">
+      <main
+        className="startup"
+        aria-label="Studio startup"
+        data-connecting={!error || undefined}
+      >
         <p
           role={error ? "alert" : "status"}
           className={error ? "studio-recovery-banner" : undefined}
@@ -2356,28 +2368,6 @@ export default function App({ active = true }: { active?: boolean }) {
                 </small>
               </Menu.Item>
             )}
-          {agent.executionMode === "vm" && (
-            <Menu.Item
-              data-action="move-to-device"
-              leftSection={<HardDriveDownload size={14} />}
-              disabled={busy.has(agent.status ?? "") || !!agent.inFlight}
-              onClick={() => {
-                void run(() =>
-                  post(
-                    "/api/agents/move-to-host",
-                    { id: agent.id, request_id: randomUUID() },
-                    { timeoutMs: 3600000 },
-                  ),
-                );
-              }}
-            >
-              Move to this device
-              <small className="menu-action-help">
-                Keeps this chat and its history. Moves the project files and the
-                chat history from the virtual machine to this device.
-              </small>
-            </Menu.Item>
-          )}
           <Menu.Divider />
           <Menu.Label>Model actions</Menu.Label>
           {(
@@ -2560,6 +2550,7 @@ export default function App({ active = true }: { active?: boolean }) {
               )}
               {!compactHeader && hasTeam && (
                 <Button
+                  variant="subtle"
                   leftSection={<Users size={16} />}
                   id="team-toggle"
                   aria-label="Team"
@@ -2576,6 +2567,7 @@ export default function App({ active = true }: { active?: boolean }) {
               )}
               {!room?.radio && (!compactHeader || attentionCount > 0) && (
                 <Button
+                  variant="subtle"
                   id="messages-toggle"
                   aria-label="Messages"
                   title={
@@ -2612,7 +2604,9 @@ export default function App({ active = true }: { active?: boolean }) {
                       <MoreHorizontal size={18} />
                     </ActionIcon>
                   </Menu.Target>
-                  <Menu.Dropdown>{chatActionsMenu}</Menu.Dropdown>
+                  <Menu.Dropdown className="chat-actions-menu">
+                    {chatActionsMenu}
+                  </Menu.Dropdown>
                 </Menu>
               )}
             </header>
@@ -2678,113 +2672,128 @@ export default function App({ active = true }: { active?: boolean }) {
                 onClose={() => setCodexLoginKey("")}
               />
             )}
-          {[
-            ...accounts.data.accounts,
-            ...(accounts.data.archivedAccounts || []),
-          ]
-            .filter(
-              (account) =>
-                account.id === accountKey ||
-                agents.some(
-                  (item) =>
-                    item.rootId === lead?.id &&
-                    !item.deletedAt &&
-                    (item.accountKey || "default") === account.id &&
-                    item.status === GeneratedApiAgentStatus.failed,
-                ),
-            )
-            .map((account) => (
-              <AccountSignInNotice
-                key={account.id}
-                account={account}
-                errors={agents
-                  .filter(
-                    (item) =>
-                      (item.id === agent?.id || item.rootId === lead?.id) &&
-                      (item.accountKey || "default") === account.id,
-                  )
-                  .flatMap((item) => {
-                    const nativeStatus = item.nativeStatus;
-                    const nativeError =
-                      nativeStatus &&
-                      typeof nativeStatus === "object" &&
-                      "error" in nativeStatus
-                        ? nativeStatus.error
-                        : undefined;
-                    return [item.error, nativeError];
-                  })
-                  .filter(
-                    (value): value is string => typeof value === "string",
-                  )}
-                onSignIn={
-                  (
-                    {
-                      [ProviderKind.Codex]: setCodexLoginKey,
-                      [ProviderKind.Claude]: setClaudeLoginKey,
-                    } satisfies Record<ProviderKind, (key: string) => void>
-                  )[account.provider]
-                }
-              />
-            ))}
-          {error && !offlineSendFeedback.owns(error) && (
-            <div id="error" role="alert">
-              {error}
-            </div>
-          )}
-          <div className="sync-notices">
-            {!creating &&
-              pendingCreations.filter(isLeadCreateRequest).map((request) => (
-                <div className="sync-status" key={request.id}>
-                  <p>
-                    Studio lost confirmation for this chat request in{" "}
-                    {request.cwd || "default project"}
-                    {request.project_folder
-                      ? ` (${request.project_folder})`
-                      : ""}
-                    . Retrying uses the saved request ID to check whether the
-                    chat was created. Dismissing stops checking; a chat this
-                    request created still appears in the chat list.
-                  </p>
-                  <Button
-                    onClick={() =>
-                      void newChat(
-                        request.cwd,
-                        request.project_folder,
-                        request.id,
+          {/* Transient notices float under the header over the transcript, so
+              their arrival and dismissal never move the conversation. */}
+          <div className="workspace-notices">
+            <div className="workspace-notices-stack">
+              {[
+                ...accounts.data.accounts,
+                ...(accounts.data.archivedAccounts || []),
+              ]
+                .filter(
+                  (account) =>
+                    account.id === accountKey ||
+                    agents.some(
+                      (item) =>
+                        item.rootId === lead?.id &&
+                        !item.deletedAt &&
+                        (item.accountKey || "default") === account.id &&
+                        item.status === GeneratedApiAgentStatus.failed,
+                    ),
+                )
+                .map((account) => (
+                  <AccountSignInNotice
+                    key={account.id}
+                    account={account}
+                    errors={agents
+                      .filter(
+                        (item) =>
+                          (item.id === agent?.id || item.rootId === lead?.id) &&
+                          (item.accountKey || "default") === account.id,
                       )
+                      .flatMap((item) => {
+                        const nativeStatus = item.nativeStatus;
+                        const nativeError =
+                          nativeStatus &&
+                          typeof nativeStatus === "object" &&
+                          "error" in nativeStatus
+                            ? nativeStatus.error
+                            : undefined;
+                        return [item.error, nativeError];
+                      })
+                      .filter(
+                        (value): value is string => typeof value === "string",
+                      )}
+                    onSignIn={
+                      (
+                        {
+                          [ProviderKind.Codex]: setCodexLoginKey,
+                          [ProviderKind.Claude]: setClaudeLoginKey,
+                        } satisfies Record<ProviderKind, (key: string) => void>
+                      )[account.provider]
                     }
-                  >
-                    Retry chat request
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      try {
-                        dismissChatCreation(creationKey, request.id);
-                        if (creation.current?.id === request.id)
-                          creation.current = null;
-                        setPendingCreations(pendingChatCreations(creationKey));
-                      } catch (error) {
-                        notify(
-                          "Cannot dismiss the saved chat request: " +
-                            errorText(error),
-                        );
-                      }
-                    }}
-                  >
-                    Dismiss
-                  </Button>
+                  />
+                ))}
+              {workspaceError && !offlineSendFeedback.owns(workspaceError) && (
+                <div id="error" role="alert">
+                  {workspaceError}
                 </div>
-              ))}
-            {draftError && !offlineSendFeedback.owns(draftError) && (
-              <p className="sync-status" role="status" data-draft-sync-status>
-                {draftError}
-              </p>
-            )}
-            {outbox.error && !offlineSendFeedback.owns(outbox.error) && (
-              <p className="sync-status" role="alert">
-                {outbox.error}
-              </p>
-            )}
+              )}
+              <div className="sync-notices">
+                {!creating &&
+                  pendingCreations
+                    .filter(isLeadCreateRequest)
+                    .map((request) => (
+                      <div className="sync-status" key={request.id}>
+                        <p>
+                          Studio lost confirmation for this chat request in{" "}
+                          {request.cwd || "default project"}
+                          {request.project_folder
+                            ? ` (${request.project_folder})`
+                            : ""}
+                          . Retrying uses the saved request ID to check whether
+                          the chat was created. Dismissing stops checking; a
+                          chat this request created still appears in the chat
+                          list.
+                        </p>
+                        <Button
+                          onClick={() =>
+                            void newChat(
+                              request.cwd,
+                              request.project_folder,
+                              request.id,
+                            )
+                          }
+                        >
+                          Retry chat request
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            try {
+                              dismissChatCreation(creationKey, request.id);
+                              if (creation.current?.id === request.id)
+                                creation.current = null;
+                              setPendingCreations(
+                                pendingChatCreations(creationKey),
+                              );
+                            } catch (error) {
+                              notify(
+                                "Cannot dismiss the saved chat request: " +
+                                  errorText(error),
+                              );
+                            }
+                          }}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    ))}
+                {draftError && !offlineSendFeedback.owns(draftError) && (
+                  <p
+                    className="sync-status"
+                    role="status"
+                    data-draft-sync-status
+                  >
+                    {draftError}
+                  </p>
+                )}
+                {outbox.error && !offlineSendFeedback.owns(outbox.error) && (
+                  <p className="sync-status" role="alert">
+                    {outbox.error}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
           <UIErrorBoundary label="this conversation" resetKey={opened}>
             {opened && projectDeleteScope.has(opened) ? (
@@ -3338,8 +3347,8 @@ export default function App({ active = true }: { active?: boolean }) {
                             }
                           />
                           <small>
-                            Applies to messages and composer. Narrow screens use
-                            the full available width.
+                            Sets the reading width of messages. The composer
+                            keeps its width. Narrow screens use the full width.
                           </small>
                         </div>
                       </SettingsRow>
@@ -3411,9 +3420,6 @@ export default function App({ active = true }: { active?: boolean }) {
               <OrchestrationSettings
                 active={studioSettingsOpen && studioSettingsTab === "agents"}
               />
-            </Tabs.Panel>
-            <Tabs.Panel value="linux-vm" pt="md">
-              <LinuxVMSettings active={studioSettingsOpen} />
             </Tabs.Panel>
             <Tabs.Panel value="layr-worktrees" pt="md">
               <LayrWorktreesSettings active={studioSettingsOpen} />

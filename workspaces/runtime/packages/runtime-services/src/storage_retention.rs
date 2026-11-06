@@ -195,15 +195,7 @@ mod tests {
         let (behind, current) = store
             .transaction(move |transaction| {
                 let pull = |after| {
-                    SyncDocumentsRepository::pull_entities(
-                        transaction,
-                        after,
-                        10,
-                        false,
-                        0,
-                        true,
-                        None,
-                    )
+                    SyncDocumentsRepository::pull_entities(transaction, after, 10, false, 0, true)
                 };
                 Ok((pull(1_000)?, pull(floor)?))
             })

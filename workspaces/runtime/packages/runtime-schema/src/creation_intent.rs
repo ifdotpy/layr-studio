@@ -261,6 +261,8 @@ pub struct WorkerDefaults {
 #[serde(deny_unknown_fields)]
 pub struct ReviewDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub account_key: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub model: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub effort: Field<String>,

@@ -52,15 +52,30 @@ test("Foundation content width and fleet geometry", async ({ page }) => {
                 document.querySelector(".workspace")!,
               ).getPropertyValue("--chat-gutter"),
             ),
+            chatWidth:
+              parseFloat(
+                getComputedStyle(document.querySelector("#composer")!).maxWidth,
+              ) || Infinity,
             scrollWidth: document.documentElement.scrollWidth,
             viewport: innerWidth,
           };
         });
         expect(geometry.sidebar.width).toBe(288);
         expect(geometry.scrollWidth).toBeLessThanOrEqual(width);
+        // The reading width sets the message column; the composer keeps the
+        // standard column at every ratio.
         const available =
           (geometry.conversation.width - 2 * geometry.gutter) * ratio;
-        expect(Math.abs(geometry.composer.width - available)).toBeLessThan(2);
+        expect(Math.abs(geometry.message.width - available)).toBeLessThan(2);
+        expect(
+          Math.abs(
+            geometry.composer.width -
+              Math.min(
+                geometry.conversation.width - 2 * geometry.gutter,
+                geometry.chatWidth,
+              ),
+          ),
+        ).toBeLessThan(2);
         expect(geometry.composer.right).toBeLessThanOrEqual(width);
         expect(geometry.message.right).toBeLessThanOrEqual(width);
         console.log(JSON.stringify({ width, ratio, ...geometry }));

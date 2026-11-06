@@ -42,7 +42,7 @@
 }
 .account-login {
   border: var(--studio-border-width) solid var(--line);
-  border-radius: var(--mantine-spacing-xs);
+  border-radius: var(--studio-radius-card);
   margin-top: var(--mantine-spacing-md);
   padding: var(--mantine-spacing-md);
   font-size: var(--studio-text-body);
@@ -217,7 +217,7 @@
 .claude-profile {
   padding: var(--mantine-spacing-sm);
   background: var(--mantine-color-default-hover);
-  border-radius: var(--mantine-spacing-xs);
+  border-radius: var(--studio-radius-card);
 }
 .claude-profile > .disclosure-control {
   font-weight: 600;
@@ -245,7 +245,7 @@
 .account-replacement {
   padding: var(--mantine-spacing-sm);
   background: var(--mantine-color-default-hover);
-  border-radius: var(--mantine-spacing-xs);
+  border-radius: var(--studio-radius-card);
 }
 .account-confirm-actions {
   justify-content: flex-end;

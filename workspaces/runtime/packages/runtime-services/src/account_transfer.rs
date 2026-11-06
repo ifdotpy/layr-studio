@@ -174,6 +174,22 @@ fn read_result(response: Option<&ProviderResponse>) -> Result<ReadResult, Transf
     Ok((Field::Value(body), spill))
 }
 
+/// The form of native request params kept in the transfer record. A large body,
+/// such as a whole Claude session for `claude/moveImport`, keeps only its digest:
+/// the record compares params and never sends them again, and its size is bounded.
+pub(crate) fn durable_params(
+    params: &studio_json::OwnedRawJson,
+) -> Result<studio_json::OwnedRawJson, TransferError> {
+    if params.as_str().len() <= studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES {
+        return Ok(params.to_owned());
+    }
+    studio_json::to_raw_value(&json!({"durableDigest":{
+        "sha256": studio_runtime_store::sha256_hex(params.as_str().as_bytes()),
+        "size": params.as_str().len(),
+    }}))
+    .map_err(|_| invalid("provider payload", "/"))
+}
+
 /// The reply body that `provider_read_receipt` leaves out of the record.
 pub(crate) fn spilled_reply(receipt: &SessionReceipt) -> Option<(String, Vec<u8>)> {
     read_result(receipt.response()).ok()?.1
@@ -214,6 +230,56 @@ pub enum TransferError {
     Requires(&'static str),
     #[error(transparent)]
     Store(#[from] studio_runtime_store::StoreError),
+}
+
+impl From<crate::account_session_runtime::AccountSessionError> for TransferError {
+    fn from(error: crate::account_session_runtime::AccountSessionError) -> Self {
+        use crate::account_session_runtime::AccountSessionError;
+        match error {
+            AccountSessionError::Expired => Self::Expired,
+            AccountSessionError::Requires(name) => Self::Requires(name),
+            AccountSessionError::Refused(reason) => Self::Refused(reason),
+            AccountSessionError::InvalidResponse(pointer) => Self::Stored {
+                object: "account session response",
+                pointer,
+            },
+            AccountSessionError::Persistence => Self::Refused("Account session persistence failed"),
+            AccountSessionError::Unknown => Self::Refused(
+                "The provider request outcome is unknown; inspect its receipt before retrying",
+            ),
+        }
+    }
+}
+
+/// Maximum length of a user-visible transfer refusal reason, in Unicode scalar values.
+const TRANSFER_PUBLIC_REASON_MAX_CHARS: usize = 1000;
+
+pub(crate) fn public_preparation_reason(error: &TransferError) -> String {
+    // The public reason is short; the log keeps the full cause once.
+    eprintln!("account transfer preparation failed: {error:?}");
+    let reason = match error {
+        TransferError::Refused(reason) => (*reason).to_owned(),
+        TransferError::Stored {
+            object: "account session response",
+            pointer,
+        } => {
+            format!("Invalid account session response at {pointer}")
+        }
+        TransferError::Expired
+        | TransferError::Stored { .. }
+        | TransferError::Requires(_)
+        | TransferError::Store(_) => "Transfer preparation failed".to_owned(),
+    };
+    if reason.chars().count() <= TRANSFER_PUBLIC_REASON_MAX_CHARS {
+        reason
+    } else {
+        let mut shortened: String = reason
+            .chars()
+            .take(TRANSFER_PUBLIC_REASON_MAX_CHARS - 1)
+            .collect();
+        shortened.push('…');
+        shortened
+    }
 }
 
 impl From<studio_runtime_store::transfer_record::TransferRecordError> for TransferError {
@@ -965,6 +1031,7 @@ impl Snapshot {
             .members
             .get(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
+        let params = &durable_params(params)?;
         let params_value: Value =
             studio_json::from_str(params.as_str()).map_err(|_| invalid("provider payload", "/"))?;
         if !self.pending()
@@ -1653,6 +1720,7 @@ impl Snapshot {
                 "The transfer is not ready for a new native request",
             ));
         }
+        let params = &durable_params(params)?;
         let params_value: Value =
             studio_json::from_str(params.as_str()).map_err(|_| invalid("provider payload", "/"))?;
         if !matches!(
@@ -1686,6 +1754,7 @@ impl Snapshot {
     pub fn typed_preparation_failed(
         &self,
         agent: &str,
+        reason: &str,
         source: &studio_runtime_schema::queue_command::Field<
             studio_runtime_store::transfer_record::TransferSource,
         >,
@@ -1710,7 +1779,7 @@ impl Snapshot {
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         member.phase = Phase::Blocked;
-        member.error = Field::Value("Transfer preparation failed before native submission".into());
+        member.error = Field::Value(reason.into());
         Ok(self.decision(operation, self.agents.clone(), vec![]))
     }
 
@@ -1979,7 +2048,7 @@ pub fn typed_enroll(
     ) && source != *target
     {
         return Err(TransferError::Refused(
-            "Archive VM workers before changing the team account",
+            "Archive workers in this environment before changing the team account",
         ));
     }
     let done = source == *target;
@@ -2067,7 +2136,8 @@ pub fn typed_enroll(
             .clone()
             .try_map(|value| match value {
                 studio_runtime_store::NativeFailureHold::Boolean(value) => Ok(value),
-                studio_runtime_store::NativeFailureHold::Unreadable(_) => {
+                studio_runtime_store::NativeFailureHold::Unreadable(_)
+                | studio_runtime_store::NativeFailureHold::Terminal { .. } => {
                     Err(invalid("transfer agent", "/nativeFailureHold"))
                 }
             })?,
@@ -2260,10 +2330,17 @@ fn check_cancel(
             || member.transport_ticket.is_some()
             || submitted
             || result;
+        // An intent with no transport ticket, send time or result was never handed
+        // to a provider, so nothing native can be in flight.
+        let never_sent = matches!(phase, Phase::Unknown | Phase::LazySubmitted)
+            && !member.transport_ticket.is_some()
+            && !submitted
+            && !result;
         if member.lazy.value() == Some(&true)
             && !phase.terminal()
             && phase != Phase::Lazy
             && native_request
+            && !never_sent
             && !(phase == Phase::Blocked
                 && member.archive_invalidated.value() == Some(&true)
                 && (!submitted || result))
@@ -2694,26 +2771,101 @@ mod provider_receipt_tests {
         let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
         assert!(
             snapshot
-                .typed_preparation_failed("agent", &Field::Missing)
+                .typed_preparation_failed("agent", "reason", &Field::Missing)
                 .unwrap()
                 .changed
         );
         let decision = snapshot
-            .typed_preparation_failed("agent", &Field::Null)
+            .typed_preparation_failed(
+                "agent",
+                "Finish the Claude turn and background tasks before a move",
+                &Field::Null,
+            )
             .unwrap();
         assert!(decision.changed);
         assert_eq!(
             decision.operation.members.get("agent").unwrap().phase,
             super::Phase::Blocked
         );
+        assert_eq!(
+            decision.operation.members.get("agent").unwrap().error,
+            Field::Value("Finish the Claude turn and background tasks before a move".into())
+        );
+        let long = "é".repeat(65_537);
+        let reason = super::public_preparation_reason(&super::TransferError::from(
+            crate::account_session_runtime::AccountSessionError::InvalidResponse(long),
+        ));
+        let decision = snapshot
+            .typed_preparation_failed("agent", &reason, &Field::Null)
+            .unwrap();
+        assert!(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .error
+                .value()
+                .unwrap()
+                .chars()
+                .count()
+                <= 1000
+        );
         let absent = raw.replace(",\"source\":null", "");
         let snapshot =
             super::Snapshot::read(&absent, [("agent".into(), agent.to_string())]).unwrap();
         assert!(
             !snapshot
-                .typed_preparation_failed("agent", &Field::Null)
+                .typed_preparation_failed("agent", "reason", &Field::Null)
                 .unwrap()
                 .changed
+        );
+    }
+
+    #[test]
+    fn a_claude_session_import_is_a_valid_persisted_native_method() {
+        // A Claude to Claude move submits claude/moveImport; the record must store it.
+        let schema: studio_json::Value = studio_json::from_str(include_str!(
+            "../../runtime-schema/src/schemas/persisted-account-transfer-record.schema.json"
+        ))
+        .unwrap();
+        let methods = &schema["$defs"]["TransferMemberRecord"]["properties"]["nativeMethod"]["anyOf"]
+            [0]["enum"];
+        for method in [
+            studio_runtime_store::transfer_record::TransferMethod::Start,
+            studio_runtime_store::transfer_record::TransferMethod::Fork,
+            studio_runtime_store::transfer_record::TransferMethod::ClaudeImport,
+        ] {
+            assert!(
+                methods
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m == method.as_str()),
+                "{} is missing from nativeMethod",
+                method.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn transfer_public_reason_limit_fits_persisted_transfer_member_error_schema() {
+        let schema: studio_json::Value = studio_json::from_str(include_str!(
+            "../../runtime-schema/src/schemas/persisted-account-transfer-record.schema.json"
+        ))
+        .unwrap();
+        let storage_limit = schema["$defs"]["TransferMemberRecord"]["properties"]["error"]["anyOf"]
+            [0]["maxLength"]
+            .as_u64()
+            .unwrap();
+        assert!(super::TRANSFER_PUBLIC_REASON_MAX_CHARS as u64 <= storage_limit);
+        let internal = super::TransferError::Stored {
+            object: "private database path",
+            pointer: "secret".into(),
+        };
+        assert_eq!(
+            super::public_preparation_reason(&internal),
+            "Transfer preparation failed"
         );
     }
 
@@ -2941,6 +3093,23 @@ mod provider_receipt_tests {
         );
         let encoded = decision.encoded().unwrap();
         assert!(encoded.find("\"z\":{").unwrap() < encoded.find("\"a\":{").unwrap());
+    }
+
+    #[test]
+    fn a_large_import_request_keeps_only_its_digest_in_the_record() {
+        // A 26 MB Claude session must not exceed the 8 MB transfer record.
+        let big = studio_json::to_raw_value(&studio_json::json!({
+            "session": {"turns": "x".repeat(studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES + 1)}
+        }))
+        .unwrap();
+        let kept = super::durable_params(&big).unwrap();
+        assert!(kept.as_str().len() < 200);
+        assert_eq!(super::durable_params(&big).unwrap().as_str(), kept.as_str());
+        let small = studio_json::to_raw_value(&studio_json::json!({"cwd":"/p"})).unwrap();
+        assert_eq!(
+            super::durable_params(&small).unwrap().as_str(),
+            small.as_str()
+        );
     }
 
     #[test]
@@ -3295,6 +3464,19 @@ mod provider_receipt_tests {
                 "A native history move has started. Resolve its receipt before cancelling."
             ))
         ));
+    }
+
+    #[test]
+    fn cancel_returns_a_member_whose_import_was_never_handed_to_a_provider() {
+        let mut snapshot = refused_during_source_reads(true);
+        // The refused import left an intent but no ticket, send time or result.
+        let mut operation = snapshot.operation.clone();
+        operation.members.get_mut("agent").unwrap().phase = Phase::Unknown;
+        snapshot.operation = operation;
+        let cancelled = snapshot
+            .decide(Command::Action(Action::Cancel))
+            .expect("an import that was never sent may be cancelled");
+        assert_eq!(cancelled.operation.status, TransferStatus::Cancelled);
     }
 
     #[test]

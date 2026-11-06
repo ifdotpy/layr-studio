@@ -14,13 +14,16 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
     drop(db);
     let before = fs::read(&database).expect("fixture database is readable");
 
-    let result = Command::new(env!("CARGO_BIN_EXE_studio-runtime-server"))
-        .env("PATH", root.join("empty-path"))
-        .env("CODEX_AGENTS_PYTHON", root.join("missing-python"))
-        .arg("state-check")
-        .arg(&root)
-        .output()
-        .expect("state-check command starts");
+    let result = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+    )
+    .env("PATH", root.join("empty-path"))
+    .env("CODEX_AGENTS_PYTHON", root.join("missing-python"))
+    .arg("state-check")
+    .arg(&root)
+    .output()
+    .expect("state-check command starts");
     assert!(
         result.status.success(),
         "state-check failed: {}",

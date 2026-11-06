@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { messageRenderKey } from "../../message-delivery/messageDelivery";
+import { reportPromptComposerRender } from "../../prompt-composer/renderProbe";
 import { shouldFollowTranscriptTail } from "../../useConversationScroll";
 import type { HistoryGroup } from "../../turnHistoryModel";
 import {
@@ -36,6 +37,7 @@ const HistoryRow = memo(function HistoryRow({
   render: (row: HistoryGroup, revealedMessage?: string) => ReactNode;
   revealedMessage?: string | undefined;
 }) {
+  reportPromptComposerRender("history-window-row", row.id);
   return render(row, revealedMessage);
 });
 
@@ -725,7 +727,11 @@ export default function HistoryWindow({
             data-history-row={row.id}
             className="history-window-row"
           >
-            {render(row, revealedMessage)}
+            <HistoryRow
+              row={row}
+              render={render}
+              revealedMessage={revealedMessage}
+            />
           </div>
         ))}
       </div>

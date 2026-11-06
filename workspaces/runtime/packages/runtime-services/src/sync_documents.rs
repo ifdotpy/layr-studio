@@ -138,13 +138,10 @@ pub fn with_entity_delta(
     mut result: Value,
 ) -> Result<Value, StoreError> {
     const LIMIT: usize = studio_runtime_schema::shared_values::SYNC_ENTITY_PAGE_LIMIT as usize;
-    let rows = SyncDocumentsRepository::entities_after(connection, after, (LIMIT + 1) as i64)?;
+    let (rows, complete) = crate::entity_scope::delta_after(connection, after, LIMIT as i64)?;
     if !rows.is_empty() {
-        result["_syncEntities"] =
-            Value::Array(rows.iter().take(LIMIT).filter_map(entity_change).collect());
-        if rows.len() <= LIMIT
-            && SyncDocumentsRepository::entity_tombstone_floor(connection)? <= after
-        {
+        result["_syncEntities"] = Value::Array(rows.iter().filter_map(entity_change).collect());
+        if complete {
             result["_syncEntitiesAfter"] = studio_json::json!(after);
         }
     }
@@ -155,6 +152,13 @@ pub fn with_entity_delta(
 /// Pull, stream, and every mutation envelope share this read boundary.
 pub fn entity_payload(row: &studio_runtime_store::EntityRow) -> Option<Value> {
     let mut payload: Value = studio_json::from_str(row.payload.as_deref()?).ok()?;
+    if row.collection == "project"
+        && let Some(value) = payload.get_mut("value").and_then(Value::as_object_mut)
+    {
+        for field in ["layrReadiness", "layrSync", "vault"] {
+            value.remove(field);
+        }
+    }
     if !matches!(
         studio_runtime_schema::normalize_sync_entity_payload(
             &row.collection,
@@ -182,4 +186,23 @@ pub fn entity_change(row: &studio_runtime_store::EntityRow) -> Option<Value> {
     );
     object.insert("seq".to_owned(), Value::from(row.sequence));
     Some(payload)
+}
+
+#[cfg(test)]
+mod legacy_project_tests {
+    #[test]
+    fn stored_project_vm_fields_are_ignored_at_the_shared_read_boundary() {
+        let row = studio_runtime_store::EntityRow {
+            collection: "project".into(),
+            id: "p".into(),
+            sequence: 1,
+            payload: Some(r#"{"collection":"project","id":"p","value":{"id":"p","path":"/p","vault":{"bad":true},"layrSync":{"bad":true},"layrReadiness":{"bad":true}}}"#.into()),
+            deleted: false,
+        };
+        let payload = super::entity_payload(&row).expect("legacy project loads");
+        assert_eq!(payload["value"]["id"], "p");
+        for field in ["vault", "layrSync", "layrReadiness"] {
+            assert!(payload["value"].get(field).is_none());
+        }
+    }
 }

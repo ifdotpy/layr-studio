@@ -25,7 +25,6 @@ const UNIX_SOCKET_PATH_LIMIT: usize = 108;
 const UNIX_SOCKET_PATH_LIMIT: usize = 104;
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const UNIX_SOCKET_PATH_LIMIT: usize = 104;
-const SOURCE: &str = env!("CARGO_MANIFEST_DIR");
 
 pub(crate) struct DisposableState(pub(crate) PathBuf, tempfile::TempDir);
 
@@ -121,7 +120,9 @@ impl SupervisorProcess {
             .arg(&state.0)
             .envs(child_environment(&state.0))
             .env("XDG_CACHE_HOME", state.0.join("cache"))
-            .current_dir(SOURCE)
+            .current_dir(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::from(log))

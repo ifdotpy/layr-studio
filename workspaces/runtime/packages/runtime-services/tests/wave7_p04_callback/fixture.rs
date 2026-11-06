@@ -224,6 +224,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
             ) || name == studio_runtime_store::agent_volatile::AGENT_VOLATILE_TABLE
                 || (name.starts_with("sync_") && name != "sync_entities")
                 || name.starts_with("durable_")
+                || name == "agent_publication_state"
                 // The chat, turn and session tables project the agent record, which the
                 // oracle already compares.
                 || matches!(
@@ -238,7 +239,7 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
         let sql = if logical && name == "runtime_agents" {
             "SELECT id,record FROM runtime_agents".to_owned()
         } else if logical && name == "sync_entities" {
-            "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agentSummary','agentDetail')".to_owned()
+            "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree')".to_owned()
         } else {
             studio_runtime_store::agent_columns::select_declared_sql(&connection, &name).unwrap()
         };
@@ -260,6 +261,16 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
             for row in &mut rows {
                 let id = row[0].as_str().unwrap().to_owned();
                 studio_runtime_store::agent_volatile::merge(&connection, &id, &mut row[1]).unwrap();
+            }
+        }
+        if logical && name == "sync_entities" {
+            // The agent views are built at read time; compare them as the old copies.
+            for row in studio_runtime_services::entity_scope::agent_snapshot(&connection).unwrap() {
+                if row.collection == "agent" {
+                    let payload: Value =
+                        studio_json::from_str(row.payload.as_deref().unwrap()).unwrap();
+                    rows.push(json!([row.collection, row.id, payload, 0]));
+                }
             }
         }
         result.insert(name, json!(rows));
@@ -355,7 +366,8 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
         }
     }
     // fe1e1f249 retires yoloMode from the published agent projection. These
-    // fixtures write the old record after migration, without permissionMode.
+    // fixtures write the old record after migration, without permissionMode. The
+    // views are built at read time, so the view before the change has no yoloMode.
     for kind in ["added", "removed"] {
         let Some(rows) = expected
             .get_mut("sync_entities")
@@ -375,10 +387,9 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
                 continue;
             };
             crate::agent_view_fixtures::normalize_legacy_agent(value);
-            if kind == "added"
-                && let Some(mode) = value
-                    .as_object_mut()
-                    .and_then(|fields| fields.remove("yoloMode"))
+            if let Some(mode) = value
+                .as_object_mut()
+                .and_then(|fields| fields.remove("yoloMode"))
             {
                 assert!(mode.is_boolean(), "frozen yoloMode");
             }

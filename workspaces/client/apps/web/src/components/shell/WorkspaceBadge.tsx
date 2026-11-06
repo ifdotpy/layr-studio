@@ -2,7 +2,7 @@ import { AgentRole as GeneratedApiAgentRole } from "../../generated/api.ts";
 import type { Agent } from "../../types";
 
 export type WorkspaceBadgeInfo = {
-  label: "Layr" | "Layr VM" | "WT" | "SHARED";
+  label: "Layr" | "Unavailable" | "WT" | "SHARED";
   title: string;
 };
 
@@ -11,7 +11,7 @@ export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
   if (agent.remoteWorker && (!agent.cwd || !agent.workspaceMode)) return null;
   // Legacy rows without a mode keep only the inference their flags prove.
   const mode =
-    agent.workspaceMode ??
+    (agent.workspaceMode as string | null | undefined) ??
     (agent.isLead
       ? undefined
       : agent.worktree === true
@@ -21,13 +21,17 @@ export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
           ? "shared"
           : undefined);
   // A chat lead never shows the shared mode of its own folder.
-  if (!mode || mode === "image" || (agent.isLead && mode === "shared"))
+  if (
+    !mode ||
+    !["layr-native", "layr", "worktree", "shared"].includes(mode) ||
+    (agent.isLead && mode === "shared")
+  )
     return null;
   const info: WorkspaceBadgeInfo =
     mode === "layr-native"
       ? { label: "Layr", title: "Native Layr workspace" }
       : mode === "layr"
-        ? { label: "Layr VM", title: "Virtual machine with Layr" }
+        ? { label: "Unavailable", title: "Legacy workspace unavailable" }
         : mode === "worktree"
           ? { label: "WT", title: "Git worktree" }
           : { label: "SHARED", title: "Shared folder" };

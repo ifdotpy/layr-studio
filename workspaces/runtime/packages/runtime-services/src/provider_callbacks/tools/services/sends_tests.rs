@@ -802,6 +802,87 @@ async fn monitor_cancel_release_notifies_only_the_monitor_dispatcher() {
 }
 
 #[tokio::test]
+async fn complaint_read_projects_a_page_with_one_agent_scan() {
+    let (_directory, store, oracle) = frozen::state().await;
+    let lead = oracle["agents"][0].clone();
+    let worker = oracle["agents"][1].clone();
+    let lead_id = lead["id"].as_str().unwrap();
+    let worker_id = worker["id"].as_str().unwrap();
+    let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
+    let tx = db.transaction().unwrap();
+    for index in 0..100 {
+        let complaint = studio_runtime_store::ComplaintRecord {
+            id: format!("complaint-{index}"),
+            lead_id: Some(lead_id.to_owned()),
+            author: Some(worker_id.to_owned()),
+            text: Some(format!("Question {index}")),
+            recipient: studio_runtime_schema::complaint_record::ComplaintRecipient::Lead,
+            status: studio_runtime_schema::complaint_record::ComplaintStatus::Open,
+            created: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(
+                index as f64,
+            ),
+            updated: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(
+                index as f64,
+            ),
+            read_at: None,
+            version: Some(1),
+            responses: Vec::new(),
+            source_type: None,
+            title: None,
+        };
+        studio_runtime_store::Table::<studio_runtime_store::ComplaintRecord>::new(&tx)
+            .put(&complaint)
+            .unwrap();
+    }
+    tx.commit().unwrap();
+    AGENT_SCANS.set(0);
+    db.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+        Some(trace_agent_scans),
+    );
+    let tx = db.transaction().unwrap();
+    let read = crate::notification_dispatch::agent_complaint_action(
+        &tx,
+        &lead,
+        &json!({"action":"read"}),
+        "read-page",
+        200.0,
+    )
+    .unwrap();
+    assert_eq!(read["complaints"].as_array().unwrap().len(), 50);
+    assert_eq!(read["remaining"], 50);
+    assert!(
+        read["complaints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["readAt"] == 200.0)
+    );
+    let complaint = |id: &str| -> Value {
+        let row = crate::entity_scope::direct_document(&tx, "complaint", id)
+            .unwrap()
+            .expect("complaint document");
+        studio_json::from_str(row.payload.as_deref().unwrap()).unwrap()
+    };
+    let projected = read["complaints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| complaint(row["id"].as_str().unwrap())["value"]["readAt"] == 200.0)
+        .count();
+    assert_eq!(projected, 50);
+    let first = &read["complaints"][0];
+    let projected = complaint(first["id"].as_str().unwrap());
+    assert_eq!(projected["value"]["authorName"], worker["name"]);
+    assert_eq!(projected["value"]["leadName"], lead["name"]);
+    assert_eq!(
+        AGENT_SCANS.get(),
+        0,
+        "the page writes scan no agents; views are built at read time"
+    );
+}
+
+#[tokio::test]
 async fn complaint_submit_read_and_respond_share_the_notification_service() {
     let (_directory, store, oracle) = frozen::state().await;
     let worker = oracle["agents"][1].clone();

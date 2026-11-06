@@ -148,26 +148,10 @@ impl ManagedToolRuntime {
         }
     }
 
-    /// Attach the browser bridges that take `orchestration_sign_in` links
-    /// (docs/vm-browser-bridge.md, section 7).
+    /// Attach the browser bridge that takes `orchestration_sign_in` links.
     pub fn attach_sign_in(&self, sources: crate::sign_in::SignInSources) {
         if self.ports.late.sign_in.set(sources).is_err() {
             // The first attached bridges stay the owners of these links.
-        }
-    }
-
-    /// Attach the VM guest channel and Mac service of `host_exec`
-    /// (docs/host-exec.md).
-    pub fn attach_host_exec(&self, runtime: Arc<crate::host_exec::HostExecRuntime>) {
-        if self.ports.late.host_exec.set(runtime).is_err() {
-            // The first attached runtime stays the owner of host commands.
-        }
-    }
-
-    /// Attach the VM guest channel that runs `layr_read` (docs/vm-layr.md).
-    pub fn attach_layr_read(&self, guest: Arc<dyn crate::linux_vm_guest::GuestRpc>) {
-        if self.ports.late.layr_read.set(guest).is_err() {
-            // The first attached channel stays the owner of reviewer reads.
         }
     }
 

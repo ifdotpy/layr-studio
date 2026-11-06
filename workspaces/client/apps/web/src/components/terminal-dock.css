@@ -13,13 +13,13 @@
   background: var(--surface);
   border-top: 1px solid var(--line);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 .terminal-dock.is-open {
-  box-shadow: 0 -10px 36px #0004;
+  box-shadow: 0 calc(-1 * var(--studio-border-width)) 0 var(--line);
 }
 .terminal-dock-bar {
   display: flex;
@@ -42,8 +42,8 @@
   font: inherit;
 }
 .terminal-dock-toggle strong {
-  font-size: 12px;
-  font-weight: 550;
+  font-size: var(--studio-text-meta);
+  font-weight: 500;
 }
 .terminal-dock-count {
   color: var(--muted);
@@ -118,7 +118,7 @@
 }
 .terminal-session.is-selected {
   background: var(--raised);
-  border-left-color: var(--accent);
+  border-left-color: var(--text);
 }
 .terminal-session-dot {
   width: 6px;
@@ -137,7 +137,7 @@
   min-width: 0;
 }
 .terminal-session-description strong {
-  font-size: 12px;
+  font-size: var(--studio-text-meta);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -204,7 +204,7 @@
   min-height: 0;
 }
 .terminal-xterm {
-  background: #141519;
+  background: var(--studio-terminal);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -256,7 +256,7 @@
 }
 .terminal-dock-welcome strong {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--studio-text-body);
   font-weight: 500;
 }
 .terminal-dock-welcome p {
@@ -311,7 +311,7 @@
 }
 
 .terminal-dock .terminal-xterm .xterm-viewport {
-  background-color: #141519;
+  background-color: var(--studio-terminal);
 }
 
 /* A closed dock occupies only the bottom of the conversation sidebar. A server view in the

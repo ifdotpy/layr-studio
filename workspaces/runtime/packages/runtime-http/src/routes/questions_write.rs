@@ -48,58 +48,30 @@ pub(crate) async fn answer_approval(
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let async_store = store.clone();
     let browser_store = store.clone();
-    let browser_id = id.clone();
     let local_window = super::browser::local_window(headers, peer);
-    let vm_state_dir = state.vm_state_dir.clone();
-    let browser_guest = state.browser_answer_guest.clone();
     let browser_host_guest = state.browser_answer_host_guest.clone();
-    let browser_local_forwarder = state.browser_local_forwarder.clone();
-    let browser_host_local_forwarder = state.browser_host_local_forwarder.clone();
     let browser_context = async {
-        let host_source =
-            studio_runtime_services::browser_answer::is_host_source(&browser_store, browser_id)
-                .await?;
-        let (guest, forwarder): (
-            Arc<dyn studio_runtime_services::linux_vm_guest::GuestRpc>,
-            Option<Arc<studio_runtime_services::browser::BrowserForwarder>>,
-        ) = if host_source {
-            (
-                browser_host_guest.unwrap_or_else(|| {
-                    Arc::new(
-                        studio_runtime_services::linux_vm_guest::UnixSocketGuestRpc::new(
-                            browser_store
-                                .root()
-                                .join(crate::router::BROWSER_HOST_FOLDER_NAME)
-                                .join(crate::router::BROWSER_HOST_CONTROL_SOCKET_NAME),
-                        ),
-                    )
-                }),
-                browser_host_local_forwarder,
-            )
-        } else {
-            (
-                browser_guest.unwrap_or_else(|| {
-                    Arc::new(
-                        studio_runtime_services::linux_vm_guest::UnixGuestRpc::for_runtime_state(
-                            &vm_state_dir,
-                        ),
-                    )
-                }),
-                browser_local_forwarder,
-            )
-        };
+        let guest: Arc<dyn studio_runtime_services::browser_rpc::BrowserRpc> = browser_host_guest
+            .unwrap_or_else(|| {
+                Arc::new(
+                    studio_runtime_services::browser_rpc::UnixSocketBrowserRpc::new(
+                        browser_store
+                            .root()
+                            .join(crate::router::BROWSER_HOST_FOLDER_NAME)
+                            .join(crate::router::BROWSER_HOST_CONTROL_SOCKET_NAME),
+                    ),
+                )
+            });
         let now = callback_clock().map_err(|_| {
             studio_runtime_services::browser_answer::BrowserAnswerError::Invalid(
                 "The system clock is unavailable",
             )
         })?;
-        Ok::<_, studio_runtime_services::browser_answer::BrowserAnswerError>((
-            guest, forwarder, now,
-        ))
+        Ok::<_, studio_runtime_services::browser_answer::BrowserAnswerError>((guest, now))
     }
     .await
     .map_err(browser_answer_error)?;
-    let (guest, forwarder, now) = browser_context;
+    let (guest, now) = browser_context;
     let browser_answer = studio_runtime_services::browser_answer::answer(
         &store,
         &id,
@@ -107,7 +79,6 @@ pub(crate) async fn answer_approval(
         studio_runtime_services::browser_answer::BrowserAnswerContext {
             local_window,
             guest,
-            local_forwarder: forwarder,
             now,
             http_providers: Default::default(),
         },

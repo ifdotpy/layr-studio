@@ -150,7 +150,10 @@ fn api_responses_include_schema_and_security_headers() {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn workspace_keeps_studio_json_maps_sorted() {
-    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../");
+    let workspace = std::path::Path::new(
+        &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../../../");
     let output = std::process::Command::new("cargo")
         .args([
             "tree",
@@ -184,21 +187,93 @@ fn a_federation_route_gets_no_principal_from_the_edge() {
     use studio_runtime_services::principal::{CommandClass, Grant, Principal};
     // A forged peer header is not read at the edge: the handler builds `Federated`
     // only after the signature check.
-    assert_eq!(edge_check(None, CommandClass::Federation), Ok(None));
+    assert_eq!(
+        edge_check(
+            None,
+            CommandClass::Federation,
+            "POST",
+            "/api/federation/v1/pair"
+        ),
+        Ok(None)
+    );
     // A signed device or server cannot use a federation route.
     let device = Principal::Device {
         id: "d".into(),
         grant: Grant::Full,
     };
     let peer = Principal::Peer { server: "s".into() };
-    assert_eq!(edge_check(Some(&device), CommandClass::Federation), Err(()));
-    assert_eq!(edge_check(Some(&peer), CommandClass::Federation), Err(()));
+    assert_eq!(
+        edge_check(
+            Some(&device),
+            CommandClass::Federation,
+            "POST",
+            "/api/federation/v1/pair"
+        ),
+        Err(())
+    );
+    assert_eq!(
+        edge_check(
+            Some(&peer),
+            CommandClass::Federation,
+            "POST",
+            "/api/federation/v1/pair"
+        ),
+        Err(())
+    );
     // Other routes: no principal means the owner, which the table checks.
     assert_eq!(
-        edge_check(None, CommandClass::OwnerOnly),
+        edge_check(None, CommandClass::OwnerOnly, "POST", "/api/rules"),
         Ok(Some(Principal::Owner))
     );
-    assert_eq!(edge_check(Some(&peer), CommandClass::OwnerOnly), Err(()));
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::OwnerOnly, "POST", "/api/rules"),
+        Err(())
+    );
+}
+
+#[test]
+fn a_scoped_answer_passes_the_edge_only_on_a_route_that_settles_it() {
+    use crate::middleware::edge_check;
+    use studio_runtime_services::principal::{CommandClass, Principal};
+    let peer = Principal::Peer { server: "s".into() };
+    let ok = Ok(Some(peer.clone()));
+    // `/api/commands` checks the link worker row; `/api/action` has no row check.
+    assert_eq!(
+        edge_check(
+            Some(&peer),
+            CommandClass::ChatControl,
+            "POST",
+            "/api/commands"
+        ),
+        ok
+    );
+    assert_eq!(
+        edge_check(
+            Some(&peer),
+            CommandClass::ChatControl,
+            "POST",
+            "/api/action"
+        ),
+        Err(())
+    );
+    // A spawn passes only where the edge checks the peer's own link.
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/agents"),
+        ok
+    );
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/leads"),
+        Err(())
+    );
+    assert_eq!(
+        edge_check(Some(&peer), CommandClass::Spawn, "POST", "/api/peer-teams"),
+        Err(())
+    );
+    // An unscoped answer does not depend on the route.
+    assert_eq!(
+        edge_check(None, CommandClass::ChatControl, "POST", "/api/action"),
+        Ok(Some(Principal::Owner))
+    );
 }
 
 #[test]
@@ -316,5 +391,94 @@ async fn a_lead_message_from_a_granted_peer_outside_the_tailnet_is_admitted() {
             lead
         )
         .await
+    );
+}
+
+#[tokio::test]
+async fn a_peer_spawns_only_under_the_parent_of_its_own_home_link() {
+    use axum::body::{Body, to_bytes};
+    use axum::extract::ConnectInfo;
+    use studio_runtime_services::principal::Principal;
+    use tower::ServiceExt;
+    let directory = tempfile::tempdir().expect("isolated state");
+    let store = std::sync::Arc::new(
+        studio_runtime_store::RuntimeStore::open(Some(directory.path()))
+            .await
+            .expect("store"),
+    );
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO runtime_server_links(id,record) VALUES('link',?1)",
+                [studio_json::json!({"id":"link","side":"home","server":"peer-a","parent":"lead-1","parentEpoch":0,"workers":[]}).to_string()],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("link");
+    let state = crate::router::HttpState::new(
+        "token".into(),
+        "workspace".into(),
+        directory.path().to_string_lossy().into_owned(),
+        4620,
+        None,
+        Some(store),
+        None,
+    );
+    let app = crate::router(state).expect("router");
+    let spawn = |server: &str, body: studio_json::Value| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/agents")
+            .header("host", "127.0.0.1:4620")
+            .header("content-type", "application/json")
+            .header("x-canvas-token", "token")
+            .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+            .extension(ConnectInfo(
+                "127.0.0.1:12345"
+                    .parse::<std::net::SocketAddr>()
+                    .expect("peer"),
+            ))
+            .extension(Principal::Peer {
+                server: server.into(),
+            })
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    };
+    let refused = |response: axum::response::Response| async move {
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        status == StatusCode::FORBIDDEN
+            && String::from_utf8_lossy(&body).contains("may not run this command")
+    };
+    let body = |parent: Option<&str>| {
+        let mut body = studio_json::json!({"prompt":"work","cwd":directory.path()});
+        if let Some(parent) = parent {
+            body["parent"] = parent.into();
+        }
+        body
+    };
+    for (server, parent) in [
+        ("peer-a", None),
+        ("peer-a", Some("lead-2")),
+        ("peer-b", Some("lead-1")),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(spawn(server, body(parent)))
+            .await
+            .expect("response");
+        assert!(refused(response).await, "{server} {parent:?}");
+    }
+    let response = app
+        .clone()
+        .oneshot(spawn("peer-a", body(Some("lead-1"))))
+        .await
+        .expect("response");
+    assert!(
+        !refused(response).await,
+        "the peer's own link parent passes the edge"
     );
 }

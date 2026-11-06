@@ -10,7 +10,7 @@
   color: inherit;
   background: var(--mantine-color-default);
   border: 1px solid var(--mantine-color-default-border);
-  border-radius: 5px;
+  border-radius: var(--studio-radius-control);
   padding: 5px 10px;
   cursor: pointer;
 }
@@ -53,7 +53,7 @@
   min-height: 160px;
   width: 100%;
   overflow: auto;
-  background: var(--mantine-color-dark-8, #171717);
+  background: var(--inset);
 }
 .image-viewer-viewport img {
   display: block;

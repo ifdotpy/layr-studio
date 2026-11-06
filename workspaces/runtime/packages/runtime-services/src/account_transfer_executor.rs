@@ -676,6 +676,10 @@ async fn session_reply(
             .value()
             .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
         if matches!(result.kind(), ResponseKind::Rejected) {
+            eprintln!(
+                "account transfer read {} replays a provider rejection",
+                call.operation
+            );
             return Err(TransferError::Refused(
                 "The provider rejected a transfer read",
             ));
@@ -717,7 +721,7 @@ async fn session_reply(
             value,
         ));
     }
-    let admission = if call.method == Method::ThreadUnsubscribe {
+    let admission = if driver::source_call_needs_admission(call.method.as_str()) {
         driver::provider_admission(
             context.store,
             context.transfer,
@@ -767,16 +771,7 @@ async fn session_reply(
                 })
                 .await
         })
-        .map_err(|error| match error {
-            AccountSessionError::Expired => TransferError::Expired,
-            AccountSessionError::Requires(name) => TransferError::Requires(name),
-            AccountSessionError::Refused(_)
-            | AccountSessionError::InvalidResponse(_)
-            | AccountSessionError::Persistence
-            | AccountSessionError::Unknown => TransferError::Refused(
-                "The retained provider request failed; inspect its durable intent",
-            ),
-        })?;
+        .map_err(TransferError::from)?;
         let certainty = receipt.certainty();
         let receipt = driver::provider_read_receipt(
             context.store,
@@ -797,13 +792,29 @@ async fn session_reply(
             || receipt.scope != scope
             || receipt.certainty() != RequestCertainty::Written
         {
+            eprintln!(
+                "account transfer read {} not written: certainty {:?}, not-sent reason {:?}, same scope {}",
+                call.operation,
+                receipt.certainty(),
+                receipt.not_sent_reason(),
+                receipt.scope == scope
+            );
             return Err(TransferError::Refused(
                 "The retained read receipt is not Written on the expected connection",
             ));
         }
         let response = match receipt.response().cloned() {
             Some(ProviderResponse::Reply(value)) => value,
-            Some(ProviderResponse::Rejected(_)) | None => {
+            Some(ProviderResponse::Rejected(rejection)) => {
+                eprintln!(
+                    "account transfer read {} rejected by the provider: {rejection:?}",
+                    call.operation
+                );
+                return Err(TransferError::Refused(
+                    "The provider rejected a transfer read",
+                ));
+            }
+            None => {
                 return Err(TransferError::Refused(
                     "The provider rejected a transfer read",
                 ));
@@ -1145,6 +1156,7 @@ impl TransferExecutor for AccountTransferExecutor {
 
             let mut portable = None;
             let mut history_text = None;
+            let mut transcript_source = None;
             let mut copied_history_path = None;
             let mut claude_export = None;
             let source_thread = member.source_thread_id.value().map(String::as_str);
@@ -1152,18 +1164,10 @@ impl TransferExecutor for AccountTransferExecutor {
                 // No other agent may use the source account any more, so its
                 // worker can be stopped. Start it before the source reads.
                 if self.session.current_scope(source_account).is_none() {
-                    self.session.ensure_session(source_account).await.map_err(
-                        |error| match error {
-                            AccountSessionError::Expired => TransferError::Expired,
-                            AccountSessionError::Requires(name) => TransferError::Requires(name),
-                            AccountSessionError::Refused(_)
-                            | AccountSessionError::InvalidResponse(_)
-                            | AccountSessionError::Persistence
-                            | AccountSessionError::Unknown => {
-                                TransferError::Refused("The source account session did not start")
-                            }
-                        },
-                    )?;
+                    self.session
+                        .ensure_session(source_account)
+                        .await
+                        .map_err(TransferError::from)?;
                 }
                 let source_context = ProviderReadContext {
                     store: self.store.as_ref(),
@@ -1225,21 +1229,24 @@ impl TransferExecutor for AccountTransferExecutor {
                         },
                     )
                     .await?;
-                    if !source_page_empty(&background, "Invalid source background command page")? {
-                        return Err(TransferError::Refused(
-                            "Source native thread has background commands; saved input remains queued",
-                        ));
+                    // A running background command stays with the source: the thread
+                    // stays attached so the command finishes there, and the chat moves on.
+                    if source_page_empty(&background, "Invalid source background command page")? {
+                        source_transfer_call(
+                            &source_context,
+                            SourceTransferCall {
+                                thread: thread_id,
+                                suffix: "unsubscribe",
+                                method: Method::ThreadUnsubscribe,
+                                params: json!({"threadId":thread_id}),
+                            },
+                        )
+                        .await?;
+                    } else {
+                        eprintln!(
+                            "account transfer of thread {thread_id} leaves a background command running on the source"
+                        );
                     }
-                    source_transfer_call(
-                        &source_context,
-                        SourceTransferCall {
-                            thread: thread_id,
-                            suffix: "unsubscribe",
-                            method: Method::ThreadUnsubscribe,
-                            params: json!({"threadId":thread_id}),
-                        },
-                    )
-                    .await?;
                 }
                 let queue = source_transfer_call(
                     &source_context,
@@ -1397,6 +1404,7 @@ impl TransferExecutor for AccountTransferExecutor {
                     })
                     .await?;
                     history_text = Some(validated_history);
+                    transcript_source = Some(descriptor.clone());
                     portable = Some(descriptor.to_value().map_err(|_| {
                         TransferError::Refused("Invalid portable archive descriptor")
                     })?);
@@ -1458,7 +1466,28 @@ impl TransferExecutor for AccountTransferExecutor {
                 "default"
             });
             if let Some(text) = history_text {
-                params["developerInstructions"] = json!(text);
+                let mut instructions = text;
+                if let Some(source) = transcript_source {
+                    // The model reads the full history from a file in the destination folder.
+                    let project = PathBuf::from(
+                        params["cwd"]
+                            .as_str()
+                            .ok_or(TransferError::Refused("Destination folder is missing"))?,
+                    );
+                    let root = self.store.root().to_path_buf();
+                    let transcript = run_transfer_blocking(move || {
+                        portable_history::write_readable_transcript(&root, &source, &project)
+                            .map_err(|_| {
+                                TransferError::Refused("Source transcript file write failed")
+                            })
+                    })
+                    .await?;
+                    instructions.push_str(&format!(
+                        "\n\nThe complete earlier conversation is in this read-only file: {}. Read it when earlier context is needed.",
+                        transcript.display()
+                    ));
+                }
+                params["developerInstructions"] = json!(instructions);
             }
             if let Some(path) = copied_history_path {
                 params["path"] = json!(path);
@@ -2196,6 +2225,8 @@ mod retained_executor_tests {
         transfer_id: String,
         requests: Mutex<Vec<String>>,
         queue_has_input: bool,
+        /// The source thread runs a background command during the move.
+        background: bool,
         native_path: Option<String>,
         /// An account with no live session until `ensure_session` starts it.
         dormant: Mutex<Option<String>>,
@@ -2512,7 +2543,9 @@ mod retained_executor_tests {
                     Method::ThreadQueueList => {
                         json!({"data":if self.queue_has_input {json!([{"id":"queued-input"}])} else {json!([])},"nextCursor":null})
                     }
-                    Method::ThreadBackgroundTerminalsList => json!({"data":[],"nextCursor":null}),
+                    Method::ThreadBackgroundTerminalsList => {
+                        json!({"data":if self.background {json!([{"id":"bg-1","status":"running"}])} else {json!([])},"nextCursor":null})
+                    }
                     Method::ThreadUnsubscribe => json!({}),
                     Method::Initialize
                     | Method::Initialized
@@ -2732,8 +2765,6 @@ mod retained_executor_tests {
             claude_account_pin: studio_json::Value::Null,
             account_driver: None,
             account_session: None,
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
 
         let agent = before_start(Arc::clone(&store), None, &catalog, &resources, "lead", 2.0)
@@ -2814,6 +2845,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: true,
+            background: false,
             native_path: None,
             dormant: Mutex::new(Some("source".into())),
         });
@@ -2856,8 +2888,6 @@ mod retained_executor_tests {
             claude_account_pin: studio_json::Value::Null,
             account_driver,
             account_session: Some(session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
 
         let result = before_start(
@@ -2944,6 +2974,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: true,
+            background: false,
             native_path: None,
             dormant: Mutex::new(None),
         });
@@ -2966,8 +2997,6 @@ mod retained_executor_tests {
             claude_account_pin: studio_json::Value::Null,
             account_driver: None,
             account_session: Some(session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
 
         let result = before_start(
@@ -3026,11 +3055,20 @@ mod retained_executor_tests {
     }
 
     #[tokio::test]
+    async fn a_background_command_does_not_block_a_transfer() {
+        Box::pin(assert_history_transfer(false, true)).await;
+    }
+
+    #[tokio::test]
     async fn cold_catalog_transfer_prepares_history_without_http_model_read() {
         Box::pin(assert_history_transfer_without_duplicate_fork(true)).await;
     }
 
     async fn assert_history_transfer_without_duplicate_fork(cold_catalog: bool) {
+        Box::pin(assert_history_transfer(cold_catalog, false)).await;
+    }
+
+    async fn assert_history_transfer(cold_catalog: bool, background: bool) {
         let root = tempfile::tempdir().expect("test fixture operation succeeds");
         let fixture = root.path().join("fixture");
         let state_dir = root.path().join("state");
@@ -3101,6 +3139,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: false,
+            background,
             native_path: Some(native_path.to_string_lossy().into_owned()),
             dormant: Mutex::new(None),
         });
@@ -3123,8 +3162,6 @@ mod retained_executor_tests {
             claude_account_pin: Value::Null,
             account_driver: None,
             account_session: Some(session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
         if !cold_catalog {
             crate::account_transfer_driver::begin_read(&store, transfer_id, "lead", 1.5)
@@ -3255,6 +3292,14 @@ mod retained_executor_tests {
         )
         .await
         .expect("worker before-start prepares the transfer");
+        let detached = session
+            .requests
+            .lock()
+            .expect("the provider request log is available")
+            .iter()
+            .any(|method| method == "thread/unsubscribe");
+        // A background command keeps running on the source: its thread stays attached.
+        assert_eq!(detached, !background);
         if cold_catalog {
             assert_eq!(
                 session
@@ -3351,6 +3396,7 @@ mod retained_executor_tests {
             transfer_id: transfer_id.into(),
             requests: Mutex::new(Vec::new()),
             queue_has_input: false,
+            background: false,
             native_path: Some(native_path.to_string_lossy().into_owned()),
             dormant: Mutex::new(None),
         });
@@ -3372,8 +3418,6 @@ mod retained_executor_tests {
             claude_account_pin: Value::Null,
             account_driver: None,
             account_session: Some(recovered_session.clone()),
-            guest_rpc: None,
-            vm_provider_launch: None,
         };
         assert!(
             before_start(
@@ -3466,6 +3510,15 @@ mod claude_move_import_tests {
         missing.as_object_mut().unwrap().remove("path");
         assert!(claude_import_params(&missing, &json!("/t"), &json!("default")).is_err());
         assert!(claude_import_params(&export(), &json!("/t"), &json!("other-model")).is_err());
+    }
+
+    #[test]
+    fn claude_export_gets_a_durable_request_identity() {
+        // The worker stores a move export, so an empty root identity is refused.
+        use crate::account_transfer_driver::source_call_needs_admission;
+        assert!(source_call_needs_admission("claude/moveExport"));
+        assert!(source_call_needs_admission("thread/unsubscribe"));
+        assert!(!source_call_needs_admission("thread/queue/list"));
     }
 
     #[test]

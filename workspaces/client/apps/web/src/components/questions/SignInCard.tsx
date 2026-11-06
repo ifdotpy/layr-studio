@@ -34,7 +34,7 @@ function useNow() {
   return now;
 }
 
-/** A sign-in request of an agent (docs/vm-browser-bridge.md, section 6.2). The link opens in
+/** A sign-in request of an agent. The link opens in
  * the system browser after the approval; a window that cannot hold the redirect port takes the
  * address of the page that did not load and sends it to the command. */
 export default function SignInCard({

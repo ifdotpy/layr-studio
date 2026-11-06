@@ -2119,46 +2119,11 @@ impl crate::monitor_runtime::WorkspaceAdmission for ChangedProjectWorkspace {
         Ok(())
     }
 }
-struct FakeVmReviewGuest;
-thread_local! {
-    static VM_REVIEW_GUEST_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-impl crate::linux_vm_guest::GuestRpc for FakeVmReviewGuest {
-    fn stream(
-        &self,
-        method: &str,
-        params: &Value,
-        request_id: Option<&str>,
-        timeout: std::time::Duration,
-        _on_frame: &mut dyn FnMut(Value) -> Result<(), crate::linux_vm_guest::GuestError>,
-    ) -> Result<Value, crate::linux_vm_guest::GuestError> {
-        VM_REVIEW_GUEST_CALLS.with(|calls| calls.set(calls.get() + 1));
-        assert_eq!(method, "line.save");
-        assert!(params["agentId"].as_str().is_some_and(|id| !id.is_empty()));
-        let turn = params["turnId"].as_str().unwrap();
-        let key = turn.strip_prefix("review:").unwrap();
-        assert_eq!(
-            request_id,
-            Some(format!("layr-review-state:{key}").as_str())
-        );
-        assert_eq!(timeout, std::time::Duration::from_secs(130));
-        Ok(json!({"stateId":"guest-state-17"}))
-    }
-}
 thread_local! {
     static FAIL_MANAGED_WORKSPACE_PREPARATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CHANGE_PROJECT_DURING_ADMISSION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnvironment {
-    fn guest_rpc(
-        &self,
-        _: &RuntimeStore,
-    ) -> Result<
-        Arc<dyn crate::linux_vm_guest::GuestRpc>,
-        crate::managed_child_create::ManagedCreationEnvironmentError,
-    > {
-        Ok(Arc::new(FakeVmReviewGuest))
-    }
     fn select_worker_account(
         &self,
         request: crate::provider_callbacks::WorkerAccountRequest<'_>,
@@ -3048,7 +3013,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     let run_id = "run:spawn-review-corpus";
     let run = json!({"id":run_id,"agent":actor_value["id"],"accountKey":"default",
         "epoch":context.epoch as i64,"threadId":actor_value.get("threadId").cloned().unwrap_or(Value::Null),
-        "turnId":null,"created":10.0,"status":"pending","firstAttemptId":null,
+        "turnId":actor_value["turnId"],"created":10.0,"status":"pending","firstAttemptId":null,
         "rootAttemptId":null,"latestAttemptId":null});
     let actor_id_for_run = actor_value["id"].as_str().unwrap().to_owned();
     let actor_thread_for_run = actor_value
@@ -3056,11 +3021,12 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         .and_then(Value::as_str)
         .map(str::to_owned);
     let run_record = run.to_string();
+    let actor_turn_for_run = actor_value["turnId"].as_str().unwrap().to_owned();
     let epoch = context.epoch as i64;
     store.transaction_with::<_, StoreError>(move |tx| {
-        tx.execute("INSERT INTO runtime_execution_runs(id,agent,account,epoch,thread,turn,created,record) VALUES(?1,?2,?3,?4,?5,NULL,10,?6)",
+        tx.execute("INSERT INTO runtime_execution_runs(id,agent,account,epoch,thread,turn,created,record) VALUES(?1,?2,?3,?4,?5,?6,10,?7)",
             rusqlite::params![run_id, actor_id_for_run, "default", epoch,
-                actor_thread_for_run, run_record])?;
+                actor_thread_for_run, actor_turn_for_run, run_record])?;
         Ok(())
     }).await.unwrap();
 
@@ -3121,6 +3087,35 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     assert_eq!(spawned_child["nativeEffort"], "low");
     assert_eq!(spawned_child["profileId"], "profile-reviewer");
     assert_eq!(spawned_child["profileInstructions"], "profile instructions");
+    let effect: String = read
+        .query_row(
+            "SELECT record FROM runtime_execution_effects WHERE id=?1",
+            [format!("spawn:{spawned_child_id}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let node: String = read
+        .query_row(
+            "SELECT record FROM runtime_execution_nodes WHERE id=?1",
+            [format!("worker:{spawned_child_id}")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        studio_json::from_str::<Value>(&effect).unwrap(),
+        json!({
+            "id":format!("spawn:{spawned_child_id}"), "runId":run_id, "kind":"spawn",
+            "referenceId":spawned_child_id, "attemptId":null, "requestId":"dispatcher-spawn-api",
+            "status":spawned_child["status"]
+        })
+    );
+    assert_eq!(
+        studio_json::from_str::<Value>(&node).unwrap(),
+        json!({
+            "id":format!("worker:{spawned_child_id}"), "runId":run_id, "kind":"managed_worker",
+            "agentId":spawned_child_id, "status":spawned_child["status"]
+        })
+    );
     assert_eq!(
         spawned.result().test_value()["agents"][0]["baseRef"],
         "HEAD~1"
@@ -3336,6 +3331,15 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         "removed workspace mode must be refused"
     );
 
+    actor_value["excludedAccountKeys"] = json!(["default"]);
+    let updated_actor = actor_value.clone();
+    store
+        .transaction_with::<_, StoreError>(move |tx| {
+            AgentRepository::put(tx, &AgentRecord::from_value(updated_actor).unwrap())
+        })
+        .await
+        .unwrap();
+    let actor = Actor::from_record(&actor_value, &context.agent, context.epoch).unwrap();
     let reviewed = crate::managed_child_create::request_review(
         &store,
         &actor,
@@ -3363,6 +3367,48 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     .value();
     assert_eq!(child["cwd"], review_directory);
     assert_eq!(child["nativeReview"]["status"], "pending");
+    assert_eq!(child["accountKey"], "default");
+    drop(read);
+
+    let root_id = context.agent.clone();
+    store
+        .transaction_with::<_, StoreError>(move |tx| {
+            let mut root = AgentRepository::get(tx, &AgentId::from(root_id.as_str()))?
+                .unwrap()
+                .value();
+            root["reviewDefaults"] = json!({"model":null,"accountKey":"alternate"});
+            AgentRepository::put(tx, &AgentRecord::from_value(root).unwrap())
+        })
+        .await
+        .unwrap();
+    let selected_actor = {
+        let read = store.test_reader().unwrap();
+        let root = AgentRepository::get(&read, &AgentId::from(context.agent.as_str()))
+            .unwrap()
+            .unwrap()
+            .value();
+        Actor::from_record(&root, &context.agent, context.epoch).unwrap()
+    };
+    let reviewed = crate::managed_child_create::request_review(
+        &store,
+        &selected_actor,
+        &json!({"target":{"type":"uncommittedChanges"},"cwd":review_cwd}),
+        "dispatcher-review-selected-account",
+        21.1,
+        &CreationEnvironment,
+    )
+    .await
+    .unwrap();
+    let child_id = reviewed.result().test_value()["agents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let read = store.test_reader().unwrap();
+    let child = AgentRepository::get(&read, &AgentId::from(child_id.as_str()))
+        .unwrap()
+        .unwrap()
+        .value();
+    assert_eq!(child["accountKey"], "alternate");
     drop(read);
 
     actor_value["executionMode"] = json!("vm");
@@ -3384,8 +3430,43 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         })
         .await
         .unwrap();
+    for (execution, workspace) in [("vm", "worktree"), ("native", "layr")] {
+        let mut legacy = actor_value.clone();
+        legacy["executionMode"] = json!(execution);
+        legacy["workspaceMode"] = json!(workspace);
+        let legacy_actor = Actor::from_record(&legacy, &context.agent, context.epoch).unwrap();
+        let error = crate::managed_child_create::spawn_agents(
+            &store,
+            &legacy_actor,
+            &json!({"agents":[{"name":"Worker","prompt":"Work"}]}),
+            "legacy-spawn",
+            22.0,
+            &CreationEnvironment,
+        )
+        .await
+        .expect_err("legacy parents cannot spawn");
+        assert!(
+            error
+                .to_string()
+                .contains("Legacy VM parents cannot create workers or reviews")
+        );
+        let error = crate::managed_child_create::request_review(
+            &store,
+            &legacy_actor,
+            &json!({"target":{"type":"uncommittedChanges"}}),
+            "legacy-review",
+            22.0,
+            &CreationEnvironment,
+        )
+        .await
+        .expect_err("legacy parents cannot review");
+        assert!(
+            error
+                .to_string()
+                .contains("Legacy VM parents cannot create workers or reviews")
+        );
+    }
     let vm_actor = Actor::from_record(&actor_value, &context.agent, context.epoch).unwrap();
-    VM_REVIEW_GUEST_CALLS.set(0);
     let before_vm_review: i64 = store
         .test_reader()
         .unwrap()
@@ -3400,11 +3481,11 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         &CreationEnvironment,
     )
     .await
-    .expect_err("VM review creation is unavailable until VM workspace preparation exists");
+    .expect_err("legacy VM review creation is refused");
     assert!(matches!(
         vm_review_error,
-        crate::managed_child_create::Error::Managed(crate::managed_host_tools::Error::Unavailable(
-            "workspace-state/vm-workspace"
+        crate::managed_child_create::Error::Managed(crate::managed_host_tools::Error::Invalid(
+            "Legacy VM parents cannot create workers or reviews"
         ))
     ));
     let after_vm_review: i64 = store
@@ -3416,7 +3497,6 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         before_vm_review, after_vm_review,
         "no VM reviewer was enqueued"
     );
-    assert_eq!(VM_REVIEW_GUEST_CALLS.get(), 0, "refusal precedes line.save");
     let after_uncertain_review: i64 = store
         .test_reader()
         .unwrap()
@@ -4441,4 +4521,41 @@ async fn null_and_absent_model_select_the_same_provider_default() {
         crate::provider_adapter::adapter(studio_runtime_providers::ProviderKind::Claude)
             .default_model()
     );
+}
+
+#[tokio::test]
+async fn reviewer_account_selection_respects_precedence() {
+    let (_dir, store, _) = fixture().await;
+    let load = std::collections::HashMap::new();
+    let spec = studio_runtime_schema::creation_intent::CreationIntent::default();
+    for (review, explicit, expected) in [
+        (Some("alternate"), None, "alternate"),
+        (None, None, "default"),
+        (Some("alternate"), Some("default"), "default"),
+    ] {
+        let review_json = if review.is_some() {
+            "\"alternate\""
+        } else {
+            "null"
+        };
+        let root: AgentRecord = studio_json::from_str(&format!(
+            r#"{{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","workerDefaults":{{"accountKey":"default"}},"reviewDefaults":{{"model":"gpt-6-astra","accountKey":{review_json}}}}}"#
+        )).expect("typed reviewer fixture");
+        let settings = crate::managed_child_create::resolve_worker_settings(
+            &store,
+            &CreationEnvironment,
+            crate::managed_child_create::WorkerSettingsRequest {
+                parent: &root,
+                root: &root,
+                spec: &spec,
+                profile: None,
+                role: "reviewer",
+                requested_account_key: explicit,
+                account_load: &load,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(settings.account_key, expected);
+    }
 }

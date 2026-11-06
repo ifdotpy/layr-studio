@@ -1,7 +1,7 @@
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "../api";
 import type { Agent, JsonInput, Message } from "../types";
 import { failureMessage } from "./turnFailureReason";
@@ -220,12 +220,8 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       ];
     });
   }, [items, errors, existing, agent?.id, agent?.threadId]);
-  const loading = new Set(current.loading);
-  return {
-    items: enriched,
-    loading,
-    failed: new Set(current.failed),
-    retry: (turn: string) => {
+  const retry = useCallback(
+    (turn: string) => {
       setResult((old) => ({
         scope,
         errors: old.scope === scope ? old.errors : {},
@@ -237,5 +233,14 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       }));
       setLookupAttempt((value) => value + 1);
     },
+    [scope],
+  );
+  const loading = useMemo(() => new Set(current.loading), [current.loading]);
+  const failed = useMemo(() => new Set(current.failed), [current.failed]);
+  return {
+    items: enriched,
+    loading,
+    failed,
+    retry,
   };
 }

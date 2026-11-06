@@ -38,7 +38,6 @@ pub use stream::NotificationStreamBuffer;
 use stream::{EnqueueResult, StreamKey};
 use submission::record_submission;
 
-const ITEM_PREVIEW_CHARS: usize = 20_000;
 const SAVEPOINT: &str = "notification_dispatch_scope";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -70,16 +69,6 @@ pub struct NativeProcessSource {
 #[derive(Clone, Default)]
 pub struct PublicationContext {
     pub(crate) native_source: Option<NativeProcessSource>,
-    vm_journal: Option<VmJournalScope>,
-}
-
-/// Trusted actor binding, separate from the account used for authorization.
-#[derive(Clone)]
-struct VmJournalScope {
-    account: String,
-    actor: String,
-    epoch: i64,
-    provider_handle: String,
 }
 
 impl PublicationContext {
@@ -88,76 +77,11 @@ impl PublicationContext {
         self
     }
 
-    /// Only the account journal owner supplies this exact VM namespace.
-    pub(crate) fn with_vm_journal(
-        mut self,
-        account: &str,
-        actor: &str,
-        epoch: i64,
-        journal_scope: &str,
-    ) -> Result<Self, NotificationDispatchError> {
-        if account.is_empty()
-            || actor.is_empty()
-            || epoch < 0
-            || journal_scope != crate::account_worker::vm_journal_scope(account, actor)
-        {
-            return Err(NotificationDispatchError::invalid());
-        }
-        self.vm_journal = Some(VmJournalScope {
-            account: account.into(),
-            actor: actor.into(),
-            epoch,
-            provider_handle: studio_runtime_process::ProviderHandle::for_account(journal_scope)
-                .as_str()
-                .into(),
-        });
-        Ok(self)
-    }
-
-    fn validate_actor(&self, agent: &Value, actor: &str) -> Result<(), NotificationDispatchError> {
-        let valid = match &self.vm_journal {
-            Some(scope) => {
-                agent["id"] == scope.actor
-                    && actor == scope.actor
-                    && agent["epoch"] == scope.epoch
-                    && agent["executionMode"] == "vm"
-                    && agent
-                        .get("accountKey")
-                        .and_then(Value::as_str)
-                        .unwrap_or("default")
-                        == scope.account
-            }
-            None => agent["executionMode"] != "vm",
-        };
-        if !valid {
+    fn validate_actor(&self, agent: &Value, _actor: &str) -> Result<(), NotificationDispatchError> {
+        if agent["executionMode"] == "vm" {
             return Err(NotificationDispatchError::invalid());
         }
         Ok(())
-    }
-
-    /// Keep cursor/observation identities scoped without granting another account.
-    fn scoped_delivery(
-        &self,
-        tx: &Transaction<'_>,
-        actor: &str,
-        authority: &ProviderDeliveryIdentity,
-    ) -> Result<Option<ProviderDeliveryIdentity>, NotificationDispatchError> {
-        let Some(scope) = &self.vm_journal else {
-            return Ok(None);
-        };
-        if authority.provider_handle
-            != studio_runtime_process::ProviderHandle::for_account(&scope.account).as_str()
-        {
-            return Err(NotificationDispatchError::invalid());
-        }
-        let agent = NotificationDispatchRepository::agent_record(tx, actor)?
-            .ok_or(NotificationDispatchError::invalid())?;
-        self.validate_actor(&agent, actor)?;
-        Ok(Some(ProviderDeliveryIdentity {
-            provider_handle: scope.provider_handle.clone(),
-            generation: authority.generation,
-            cursor: authority.cursor,
-        }))
     }
 }
 
@@ -449,8 +373,7 @@ pub fn dispatch_notification_with_effects(
     let mut post_commit = NotificationPublicationBatch::default();
     let mut command_output_monitor_present = None;
     let result = in_savepoint(transaction, || {
-        let scoped = publication.scoped_delivery(transaction, agent_id, identity)?;
-        let delivery = scoped.as_ref().unwrap_or(identity);
+        let delivery = identity;
         let outcome = (|| {
             if !observed_at.is_finite()
                 || observed_at < 0.0
@@ -943,6 +866,26 @@ pub(crate) fn put_task_record(
     task: &Value,
 ) -> Result<(), NotificationDispatchError> {
     kinds::put_task(tx, task)
+}
+
+/// Test entry to the canonical task writer and its window, for other crates' tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_put_task(
+    tx: &Transaction<'_>,
+    task: &studio_runtime_store::TaskRecord,
+) -> Result<(), NotificationDispatchError> {
+    kinds::put_checked_task(tx, task)?;
+    crate::sync_policy::maintain_task_window(tx, &|_, _, _, _| true)?;
+    Ok(())
+}
+
+/// Test entry: delete a task row and keep its window.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_delete_task(tx: &Transaction<'_>, id: &str) -> Result<(), NotificationDispatchError> {
+    tx.execute("DELETE FROM runtime_tasks WHERE id=?1", [id])
+        .map_err(studio_runtime_store::StoreError::from)?;
+    crate::sync_policy::maintain_task_window(tx, &|_, _, _, _| true)?;
+    Ok(())
 }
 
 pub(crate) fn put_checked_task_record(
@@ -1515,8 +1458,7 @@ fn write_text_notification(
         index_search,
     )?;
     if completed {
-        // Sign-in links in the message become sign-in cards once it commits
-        // (docs/vm-browser-bridge.md, section 7). The text stays as it is.
+        // Sign-in links become cards once the message commits; its text stays unchanged.
         crate::sign_in::note_message(agent_id, &id, &text);
         agent["activity"] = json!({"phase":"thinking", "at":observed_at});
         agent["lastAnswer"] = Value::String(suffix(&text, 16_000));
@@ -1968,12 +1910,13 @@ fn assistant_item_record(
     turn_id: Option<&str>,
     phase: Value,
 ) -> Value {
+    let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(text);
     json!({
         "id": id,
         "role": "assistant",
         "title": "Assistant",
-        "text": text.chars().take(ITEM_PREVIEW_CHARS).collect::<String>(),
-        "truncated": text.chars().count() > ITEM_PREVIEW_CHARS,
+        "text": preview,
+        "truncated": truncated,
         "at": at,
         "streaming": streaming,
         "turnId": turn_id,
@@ -2615,7 +2558,7 @@ mod tests {
                  CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT NOT NULL,record TEXT NOT NULL);
                  CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
                  CREATE VIRTUAL TABLE runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');

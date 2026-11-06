@@ -185,7 +185,7 @@ const meta = {
             <div className="message-content">
               <ConversationStart
                 projectName="codex-studio"
-                location="VM /projects/codex-studio"
+                location="/projects/codex-studio"
                 recentChats={recentChats}
                 onSelect={args.onSelect}
               />
@@ -250,7 +250,7 @@ export const ProjectStart: Story = {
     await expect(
       canvas.getByRole("heading", { name: "codex-studio" }),
     ).toBeVisible();
-    await expect(canvas.getByText("VM /projects/codex-studio")).toBeVisible();
+    await expect(canvas.getByText("/projects/codex-studio")).toBeVisible();
     await expect(
       canvas.getByRole("button", { name: "Chat context" }),
     ).toHaveTextContent("Context 32%");

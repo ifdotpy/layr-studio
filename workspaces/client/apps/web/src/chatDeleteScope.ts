@@ -1,19 +1,16 @@
 import { ApiError } from "./api";
 import { serverMutationResponseIsUncertain } from "./servers/mutationIdentity";
-import type { components } from "./generated/api";
+import type { CommandResponse } from "./commands";
 
+/** Delete a chat through the command path. `finish` gets every id that the server deleted. */
 export async function deleteConversation(
-  post: (
-    path: "/api/conversation/delete",
-    body: { id: string },
-    options: { signal: AbortSignal },
-  ) => Promise<components["schemas"]["DeletedResponse"]>,
+  remove: (id: string, signal: AbortSignal) => Promise<CommandResponse>,
   id: string,
   finish: (deleted: string[]) => void,
   signal: AbortSignal,
 ): Promise<void> {
-  const result = await post("/api/conversation/delete", { id }, { signal });
-  finish(result.deleted);
+  const result = await remove(id, signal);
+  finish(result.kind === "delete" ? result.result.deleted : [id]);
 }
 
 export function definiteDeleteRejection(error: unknown): boolean {

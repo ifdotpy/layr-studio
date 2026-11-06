@@ -43,6 +43,19 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_tool_request_actor
                 ON runtime_tool_requests(json_extract(record,'$.agent'), json_extract(record,'$.updated') DESC);
             CREATE TABLE IF NOT EXISTS runtime_rules (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+            -- What the last publication of each agent's views saw: the publisher compares
+            -- it with the new row to find team, room and liveness changes, and keeps a
+            -- lead's team counts so a member change marks the lead only when they
+            -- change. The views themselves are built at read time.
+            -- Owner, created time and running state of each task in the client task
+            -- window, so a task write can place it without its document.
+            CREATE TABLE IF NOT EXISTS task_window_state (id TEXT PRIMARY KEY,
+                agent TEXT NOT NULL, created REAL, running INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS task_window_state_history
+                ON task_window_state(created DESC) WHERE NOT running;
+            CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
+                root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
+                team_counts TEXT);
             CREATE INDEX IF NOT EXISTS runtime_rule_ready_tick
                 ON runtime_rules(json_extract(record,'$.status'))
                 WHERE NOT COALESCE(json_extract(record,'$.inFlight'),0);
@@ -201,17 +214,12 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     for schema in feature_statements() {
         transaction.execute_batch(schema)?;
     }
-    crate::entity_publication::prepare_work_change_journal(transaction)?;
     transaction.execute_batch("CREATE INDEX IF NOT EXISTS runtime_receipt_transcript_item ON runtime_event_meta(json_extract(record,'$.transcriptItemId'))")?;
     // A deleted row is no longer readable by the writer journal. Its source
     // trigger owns the corresponding summary tombstone in the same transaction.
     for (table, collection) in [
-        ("runtime_plans", "plan"),
-        ("runtime_annotations", "annotation"),
         ("runtime_events", "messageReceipt"),
         ("runtime_tasks", "task"),
-        ("runtime_requests", "questionHistory"),
-        ("runtime_agents", "retainedWorktree"),
     ] {
         let tombstone =
             format!("json_object('collection','{collection}','id',OLD.id,'value',json('{{}}'))");

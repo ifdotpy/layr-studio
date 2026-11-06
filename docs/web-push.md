@@ -1,6 +1,6 @@
 # Sign-in alerts on the phone (Web Push)
 
-A sign-in card waits for the person (docs/vm-browser-bridge.md, section 6.2). Studio windows
+A sign-in card waits for the person. Studio windows
 show a desktop alert for it. A phone that is locked or closed has no Studio window, so the
 server also sends a standard Web Push alert to the devices that turned it on.
 

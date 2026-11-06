@@ -1,52 +1,119 @@
+@import "./design/fonts.css";
 @import "./design/layout.css";
+@import "./design/components.css";
 
-/* Owner of the application type scale and legacy surface aliases. */
+/* Owner of the application type scale, surfaces, elevation, and font stacks.
+   The visual language follows the Vercel Geist system: ink on neutral gray,
+   hairline borders, stacked soft shadows, Geist and Geist Mono.
+   See docs/design/redesign-brief.md. */
 :root {
   --studio-touch-input-min-font-size: 16px;
   --studio-text-meta: 0.75rem;
   --studio-text-body: 0.875rem;
   --studio-text-title: 1rem;
   --studio-text-section: 1.25rem;
+  --studio-text-display: 1.5rem;
   --studio-text-code: 0.8125rem;
   --studio-weight-normal: 400;
   --studio-weight-medium: 500;
   --studio-weight-strong: 600;
+  /* Letter spacing, in em: body text and headings track slightly negative. */
+  --studio-tracking-body: -0.01em;
+  --studio-tracking-title: -0.02em;
+  --studio-tracking-section: -0.03em;
+  --studio-font-sans:
+    "Geist", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --studio-font-mono:
+    "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --studio-action-size: var(--studio-control-size);
+  /* Corner radii, from the Mantine scale: controls, cards, dialogs, pills. */
+  --studio-radius-control: var(--mantine-radius-sm);
+  --studio-radius-card: var(--mantine-radius-md);
+  --studio-radius-dialog: var(--mantine-radius-lg);
+  --studio-radius-pill: 624.9375rem;
+  /* The terminal is an ink panel in both schemes; black keeps OLED pixels off.
+     TerminalDock.tsx reads these for xterm. */
+  --studio-terminal: #000000;
+  --studio-terminal-text: #ededed;
+  --studio-terminal-selection: #3d3d3d;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
+/* Dark is OLED black: the page, panels, and fields are #000 so unlit pixels
+   draw no power. Hairlines and small raised fills carry the structure. */
 :root,
 [data-mantine-color-scheme="dark"] {
   color-scheme: dark;
   --studio-page: var(--mantine-color-dark-7);
-  --surface: var(--mantine-color-dark-6);
+  --surface: var(--mantine-color-dark-7);
   --sidebar: var(--studio-page);
   --raised: var(--mantine-color-dark-5);
-  --inset: var(--studio-page);
-  --hover: color-mix(in srgb, var(--text) 5%, transparent);
+  --inset: var(--mantine-color-dark-6);
+  /* Menus, popovers, dialogs, and toasts: black too; the ring separates them. */
+  --overlay: var(--mantine-color-dark-7);
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --selected: color-mix(in srgb, var(--text) 9%, transparent);
   --line: var(--mantine-color-dark-4);
+  /* Field and control borders, and a hovered hairline. */
+  --line-strong: #3d3d3d;
   --muted: var(--mantine-color-dark-2);
   --text: var(--mantine-color-dark-0);
-  --accent: var(--mantine-color-signal-4);
-  --studio-warning: #f0b43c;
-  --studio-warning-hover: #ffd078;
+  --accent: var(--mantine-color-blue-4);
+  --studio-warning: var(--mantine-color-yellow-4);
+  --studio-warning-hover: var(--mantine-color-yellow-3);
+  --studio-backdrop: rgb(0 0 0 / 80%);
+  --studio-switch-thumb: var(--muted);
+  /* Diff lines: added and removed text, and their row tint over the panel. */
+  --studio-diff-add: var(--mantine-color-green-4);
+  --studio-diff-delete: var(--mantine-color-red-4);
+  --studio-diff-tint: 16%;
+  --studio-shadow-xs: 0 0 0 var(--studio-border-width) var(--line);
+  --studio-shadow-sm: var(--studio-shadow-xs);
+  --studio-shadow-md:
+    var(--studio-shadow-xs), 0 0.5rem 1rem -0.25rem rgb(0 0 0 / 60%);
+  --studio-shadow-lg:
+    var(--studio-shadow-xs), 0 1.5rem 2rem -0.5rem rgb(0 0 0 / 80%);
 }
 
 [data-mantine-color-scheme="light"] {
   color-scheme: light;
-  --studio-page: #f3f5f7;
+  --studio-page: var(--mantine-color-gray-0);
   --surface: #ffffff;
   --sidebar: var(--studio-page);
-  --raised: #e5eaf0;
-  --inset: var(--studio-page);
-  --hover: color-mix(in srgb, var(--text) 5%, transparent);
-  --line: #b7c1cd;
-  --muted: #526173;
-  --text: #18202a;
-  --accent: var(--mantine-color-signal-7);
-  --studio-warning: #875800;
-  --studio-warning-hover: #6c4600;
+  /* Structure is stronger than the gray ramp: on #fafafa the ramp's hairline
+     and fill fall to 1.07 to 1.14:1, against 1.2 to 1.4:1 in dark. */
+  --raised: #e8e8e8;
+  --inset: var(--mantine-color-gray-0);
+  --overlay: #ffffff;
+  --hover: color-mix(in srgb, var(--text) 4%, transparent);
+  --selected: color-mix(in srgb, var(--text) 7%, transparent);
+  --line: #e0e0e0;
+  --line-strong: #c4c4c4;
+  --muted: var(--mantine-color-gray-7);
+  --text: var(--mantine-color-gray-9);
+  --accent: var(--mantine-color-blue-7);
+  --studio-warning: var(--mantine-color-yellow-7);
+  --studio-warning-hover: var(--mantine-color-yellow-8);
+  --studio-backdrop: rgb(0 0 0 / 30%);
+  --studio-switch-thumb: #ffffff;
+  --studio-diff-add: var(--mantine-color-green-7);
+  --studio-diff-delete: var(--mantine-color-red-7);
+  --studio-diff-tint: 9%;
+  --studio-shadow-xs: 0 0 0 var(--studio-border-width) rgb(0 0 0 / 12%);
+  --studio-shadow-sm:
+    var(--studio-shadow-xs), 0 0.0625rem 0.0625rem rgb(0 0 0 / 2%),
+    0 0.125rem 0.125rem rgb(0 0 0 / 4%);
+  --studio-shadow-md:
+    var(--studio-shadow-xs), 0 0.125rem 0.125rem rgb(0 0 0 / 4%),
+    0 0.5rem 1rem -0.25rem rgb(0 0 0 / 4%);
+  --studio-shadow-lg:
+    var(--studio-shadow-xs), 0 0.0625rem 0.0625rem rgb(0 0 0 / 2%),
+    0 0.5rem 1rem -0.25rem rgb(0 0 0 / 4%),
+    0 1.5rem 2rem -0.5rem rgb(0 0 0 / 6%);
 }
 
 :root[data-mantine-color-scheme],
@@ -56,9 +123,25 @@
   --mantine-color-body: var(--studio-page);
   --mantine-color-text: var(--text);
   --mantine-color-dimmed: var(--muted);
+  --mantine-color-placeholder: var(--muted);
   --mantine-color-default: var(--surface);
-  --mantine-color-default-hover: var(--raised);
-  --mantine-color-default-border: var(--line);
+  --mantine-color-default-hover: var(--hover);
+  --mantine-color-default-border: var(--line-strong);
+  --mantine-color-anchor: var(--accent);
+  --studio-diff-add-bg: color-mix(
+    in srgb,
+    var(--studio-diff-add) var(--studio-diff-tint),
+    transparent
+  );
+  --studio-diff-delete-bg: color-mix(
+    in srgb,
+    var(--studio-diff-delete) var(--studio-diff-tint),
+    transparent
+  );
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .studio-tabular {

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Studio's `open` for agent commands on a macOS host (docs/vm-browser-bridge.md, section 6.4).
+# Studio's `open` for agent commands on a macOS host.
 # One http or https URL goes to the person's browser through the Studio launcher next to this
 # folder. Every other use runs the system `open` with the same arguments.
 if [ "$#" -eq 1 ]; then

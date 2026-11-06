@@ -24,8 +24,6 @@ const agent = {
 const signInCard = signInCards({
   clientId: "kube",
   scope: "openid",
-  linuxUser: "studio-a-0123",
-  source: "vm",
 });
 const requests = [
   signInCard("approve", browserSignInUrl, "accounts.example.com", {

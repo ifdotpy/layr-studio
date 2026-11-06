@@ -382,8 +382,7 @@ export default function ServerAccountsPanel({
                           <Badge
                             key={server.id}
                             size="xs"
-                            color="blue"
-                            variant="light"
+                            variant="default"
                             title={`Default ${server.label}`}
                           >
                             <Check size={12} aria-hidden="true" />

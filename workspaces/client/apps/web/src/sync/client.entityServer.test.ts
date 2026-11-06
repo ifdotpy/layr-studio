@@ -1,3 +1,5 @@
+// Captured from the Rust entity transfer writer; see just regenerate-entity-server-frames.
+import coldFrames from "./entityServerFrames.fixture.json";
 import { EventHistory } from "./eventHistory.testHelper";
 import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
@@ -59,6 +61,9 @@ let headers: Record<string, string>;
 let server: ReturnType<typeof spawn>;
 let directory: string;
 let stopProjection: (() => void) | undefined;
+let coldResponse: Response | undefined;
+const coldController = new AbortController();
+const liveColdTransfer = process.env.STUDIO_ENTITY_SERVER_HEAVY === "1";
 beforeAll(async () => {
   const binary =
     process.env.STUDIO_DRAFT_SERVER_BINARY ??
@@ -96,9 +101,27 @@ beforeAll(async () => {
   } finally {
     lines.close();
   }
+  await Promise.all([
+    import("./client"),
+    import("./entitySequence"),
+    import("./transcriptCache"),
+    import("./entityTransfer"),
+  ]);
+  if (liveColdTransfer) {
+    const query = new URLSearchParams({
+      protocol: String(SYNC_PROTOCOL_VERSION),
+      resources: JSON.stringify([{ kind: "state" }]),
+      tokenRates: "false",
+    });
+    coldResponse = await fetch(`${origin}/api/sync/stream?${query}`, {
+      headers,
+      signal: coldController.signal,
+    });
+  }
 }, DRAFT_SERVER_READY_TIMEOUT_MS);
 afterAll(async () => {
   stopProjection?.();
+  coldController.abort();
   try {
     if (server?.pid && server.exitCode === null && server.signalCode === null) {
       const exited = once(server, "exit", {
@@ -229,7 +252,13 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
       request: (_key: string, write: () => Promise<unknown>) => write(),
     },
   });
-  mocks.syncGet.mockImplementation((path: string) => request(path));
+  const firstFrame = coldFrames[0];
+  assert.ok(firstFrame);
+  mocks.syncGet.mockImplementation((path: string) =>
+    liveColdTransfer
+      ? request(path)
+      : Promise.resolve({ workspaceId: firstFrame.workspaceId }),
+  );
   const module = await import("./client");
   const { createEntitySequenceScope } = await import("./entitySequence");
   const { createTranscriptCache } = await import("./transcriptCache");
@@ -267,23 +296,20 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
     },
   });
   const assembler = new EntityTransferAssembler(new FixtureTransferStorage());
-  const controller = new AbortController();
-  const query = new URLSearchParams({
-    protocol: String(SYNC_PROTOCOL_VERSION),
-    resources: JSON.stringify([{ kind: "state" }]),
-    tokenRates: "false",
-  });
-  const response = await fetch(`${origin}/api/sync/stream?${query}`, {
-    headers,
-    signal: controller.signal,
-  });
+  async function* frames() {
+    if (coldResponse) {
+      for await (const frame of wireFrames(coldResponse))
+        if (frame.name === "entity-transfer") yield frame.value;
+    } else {
+      yield* coldFrames;
+    }
+  }
   let complete: import("./entityTransfer").StagedEntityInterval | undefined;
   let stagedFrames = 0;
   try {
-    for await (const frame of wireFrames(response)) {
-      if (frame.name !== "entity-transfer") continue;
+    for await (const frame of frames()) {
       stagedFrames++;
-      complete = await assembler.receive(frame.value);
+      complete = await assembler.receive(frame);
       if (!complete) {
         expect(
           await client.readSubscriptionCursor({ kind: "state" }),
@@ -365,7 +391,6 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
     ).toBe(true);
     await interval.dispose();
   } finally {
-    controller.abort();
     await assembler.invalidate();
   }
 });

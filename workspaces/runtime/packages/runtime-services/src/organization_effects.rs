@@ -110,7 +110,7 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
             }
             Some(folder_id.to_owned())
         };
-        let current = stored_revision(agent.extra.get("projectFolderRevision"), id)?;
+        let current = stored_folder_revision(&agent.project_folder_revision, id)?;
         let revision = body
             .expected_revision
             .value()
@@ -136,9 +136,10 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
                 .ok_or(EventWriteError::InvalidRequest(
                     "The chat folder revision is invalid",
                 ))?;
-            agent
-                .extra
-                .insert("projectFolderRevision".into(), json!(revision));
+            agent.project_folder_revision = Field::Value(studio_runtime_schema::raw_json::RawJson(
+                studio_json::to_raw_value(&revision)
+                    .map_err(studio_runtime_store::StoreError::from)?,
+            ));
         }
         match desired {
             Some(folder) => {
@@ -247,6 +248,26 @@ fn apply_read_state(
     publish(tx, agent)
 }
 
+fn stored_folder_revision(
+    value: &Field<studio_runtime_schema::raw_json::RawJson>,
+    id: &str,
+) -> Result<i64, EventWriteError> {
+    match value {
+        Field::Missing => Ok(0),
+        Field::Value(raw) => studio_json::from_str::<i64>(raw.0.as_str())
+            .ok()
+            .filter(|revision| *revision >= 0)
+            .ok_or_else(|| EventWriteError::InvalidStoredObject {
+                object: "runtime_agents",
+                id: id.to_owned(),
+            }),
+        Field::Null => Err(EventWriteError::InvalidStoredObject {
+            object: "runtime_agents",
+            id: id.to_owned(),
+        }),
+    }
+}
+
 fn stored_revision(value: Option<&Value>, id: &str) -> Result<i64, EventWriteError> {
     match value {
         None => Ok(0),
@@ -276,6 +297,38 @@ mod tests {
     const CHAT: &str = "organized-chat";
 
     #[test]
+    fn folder_revision_preserves_missing_valid_and_malformed_behavior() {
+        use studio_runtime_schema::{queue_command::Field, raw_json::RawJson};
+        let decode = |raw: &str| {
+            Field::Value(RawJson(
+                studio_json::OwnedRawJson::from_string(raw.into()).unwrap(),
+            ))
+        };
+        assert_eq!(
+            super::stored_folder_revision(&Field::Missing, CHAT).unwrap(),
+            0
+        );
+        assert_eq!(
+            super::stored_folder_revision(&decode("1"), CHAT).unwrap(),
+            1
+        );
+        for field in [
+            Field::Null,
+            decode("-1"),
+            decode("1.0"),
+            decode(r#""invalid""#),
+        ] {
+            assert!(matches!(
+                super::stored_folder_revision(&field, CHAT),
+                Err(super::EventWriteError::InvalidStoredObject {
+                    object: "runtime_agents",
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
     fn organization_request_is_strict_and_bounds_revision() {
         use super::OrganizationRequest;
         use studio_runtime_schema::http_ingress::Object;
@@ -296,15 +349,11 @@ mod tests {
 
     /// The client view of the chat, as the renderer pulls it.
     fn client_view(store: &RuntimeStore) -> Value {
-        let payload: String = store
-            .test_read_transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0",
-                    [CHAT],
-                    |row| row.get(0),
-                )?)
-            })
-            .expect("the chat entity reads");
+        let payload = store
+            .test_read_transaction(|tx| crate::entity_scope::direct_document(tx, "agent", CHAT))
+            .expect("the chat entity reads")
+            .and_then(|row| row.payload)
+            .expect("the chat entity is live");
         studio_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
     }
 
@@ -368,52 +417,5 @@ mod tests {
             true,
             "a read state reaches the client"
         );
-    }
-
-    /// A read state stored by a build that did not publish it leaves the client one
-    /// revision behind. The client then repeats the read with its old revision, which
-    /// the server accepts as a replay; the replay must repair the client view.
-    #[tokio::test]
-    async fn a_read_replay_repairs_a_stale_client_view() {
-        let dir = tempfile::tempdir().expect("isolated state");
-        let store = RuntimeStore::open(Some(dir.path()))
-            .await
-            .expect("runtime store opens");
-        let stale = json!({"compactions":0,
-            "id":CHAT,"rootId":CHAT,"epoch":1,"status":"completed","name":"Organized chat",
-            "provider":"codex","model":"gpt-6","prompt":"Start","cwd":"/fixture",
-            "accountKey":"default","isLead":true,"autoWake":true,"threadId":"thread-1",
-            "lastCompletedTurn":"turn-1","lastCompletedTurnStatus":"completed",
-            "readState":{"read":true,"revision":2,"threadId":"thread-1","turnId":"turn-1"}
-        });
-        let mut stored = stale.clone();
-        stored["lastCompletedTurn"] = json!("turn-2");
-        stored["readState"] =
-            json!({"read":true,"revision":3,"threadId":"thread-1","turnId":"turn-2"});
-        store
-            .transaction_with(move |tx| {
-                let published = AgentRecord::from_value(stale)?;
-                AgentRepository::put(tx, &published)?;
-                crate::agents_create::publish_agent(tx, &published.value())?;
-                // The read of turn-2 was stored without a publication.
-                AgentRepository::put(tx, &AgentRecord::from_value(stored)?)?;
-                Ok::<_, StoreError>(())
-            })
-            .await
-            .expect("the chat is seeded with a stale client view");
-        assert_eq!(client_view(&store)["readState"]["turnId"], "turn-1");
-
-        // The client sees turn-2 unread and marks it read with the revision it knows.
-        organize(
-            &store,
-            r#"{"id":"organized-chat","read_state":{"thread_id":"thread-1","turn_id":"turn-2","read":true,"expected_revision":2}}"#,
-        )
-        .await;
-        let read = &client_view(&store)["readState"];
-        assert_eq!(
-            read["turnId"], "turn-2",
-            "the replay repairs the client view"
-        );
-        assert_eq!(read["revision"], 3);
     }
 }

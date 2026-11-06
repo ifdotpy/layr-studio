@@ -309,8 +309,15 @@ inventory::submit! {
 inventory::submit! {
     ConnectionFunctionRegistration("sync_entity_payload")
 }
-inventory::submit! { ConnectionFunctionRegistration(crate::entity_publication::WORK_HISTORY_FUNCTION) }
-inventory::submit! { ConnectionFunctionRegistration(crate::entity_publication::WORK_IDENTITY_FUNCTION) }
+
+/// Functions of the retired work journal triggers. Migration `2026-11-04-work-read-time`
+/// drops the triggers; until it runs on an old database, they call these no-ops.
+const RETIRED_WORK_JOURNAL_FUNCTIONS: [(&str, i32); 2] = [
+    ("sync_work_history_change", 3),
+    ("sync_work_identity_change", 2),
+];
+inventory::submit! { ConnectionFunctionRegistration(RETIRED_WORK_JOURNAL_FUNCTIONS[0].0) }
+inventory::submit! { ConnectionFunctionRegistration(RETIRED_WORK_JOURNAL_FUNCTIONS[1].0) }
 
 fn has_registered_connection_function(name: &str) -> bool {
     inventory::iter::<ConnectionFunctionRegistration>
@@ -319,7 +326,9 @@ fn has_registered_connection_function(name: &str) -> bool {
 }
 
 pub(crate) fn register_python_trigger_functions(connection: &Connection) -> StoreResult<()> {
-    crate::entity_publication::register_work_change_functions(connection)?;
+    for (name, arguments) in RETIRED_WORK_JOURNAL_FUNCTIONS {
+        connection.create_scalar_function(name, arguments, FunctionFlags::empty(), |_| Ok(0))?;
+    }
     connection.create_scalar_function(
         "sync_entity_payload",
         4,
@@ -366,6 +375,19 @@ pub fn truthy(value: Option<&Value>) -> bool {
         Some(Value::Array(values)) => !values.is_empty(),
         Some(Value::Object(values)) => !values.is_empty(),
         Some(Value::Bool(true)) => true,
+    }
+}
+
+/// Apply the stored-record truthiness rule to an already validated opaque JSON value.
+pub fn raw_truthy(value: Option<&studio_json::OwnedRawJson>) -> bool {
+    let Some(value) = value else { return false };
+    let raw = value.as_str().trim();
+    match raw.as_bytes()[0] {
+        b'n' | b'f' => false,
+        b't' => true,
+        b'"' => raw.len() > 2,
+        b'[' | b'{' => !raw[1..raw.len() - 1].trim().is_empty(),
+        _ => raw.parse::<f64>().is_ok_and(|number| number != 0.0),
     }
 }
 
@@ -651,6 +673,34 @@ fn connection_pragmas(connection: &Connection) -> StoreResult<(String, i64)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raw_truthiness_matches_the_stored_value_owner() {
+        for raw in [
+            "null",
+            "false",
+            "true",
+            "0",
+            "-0.0",
+            "1e-300",
+            r#""""#,
+            r#""x""#,
+            r#""\u0000""#,
+            "[]",
+            "[ null ]",
+            "{}",
+            r#"{ "a": 0 }"#,
+        ] {
+            let parsed: studio_json::Value = studio_json::from_str(raw).unwrap();
+            let opaque = studio_json::OwnedRawJson::from_string(raw.into()).unwrap();
+            assert_eq!(
+                super::raw_truthy(Some(&opaque)),
+                super::truthy(Some(&parsed)),
+                "{raw}"
+            );
+        }
+        assert!(!super::raw_truthy(None));
+    }
+
     use super::{
         PayloadMigrationState, event_payload, python_float_json, python_json, python_json_compact,
         verify_payload_migration,

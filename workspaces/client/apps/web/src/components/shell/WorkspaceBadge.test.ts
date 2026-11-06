@@ -59,7 +59,6 @@ test.each([
 );
 
 test.each([
-  ["layr", "Layr VM"],
   ["layr-native", "Layr"],
   ["worktree", "WT"],
 ] as const)("shows the chat workspace %s as %s", (workspaceMode, label) => {
@@ -74,11 +73,11 @@ test.each([
 test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
   const current = agent({
     ...(remote ? { remoteWorker: { server: "remote", link: "link" } } : {}),
-    workspaceMode: GeneratedApiWorkspaceMode.layr,
+    workspaceMode: "layr" as Agent["workspaceMode"],
   });
   expect(workspaceBadgeInfo(current)).toEqual({
-    label: "Layr VM",
-    title: "Virtual machine with Layr · /projects/example",
+    label: "Unavailable",
+    title: "Legacy workspace unavailable · /projects/example",
   });
 });
 

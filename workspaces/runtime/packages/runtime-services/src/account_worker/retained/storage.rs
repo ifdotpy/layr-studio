@@ -85,35 +85,8 @@ fn monitor_account_sql(agent_param: usize) -> String {
     )
 }
 
-/// Whether `agent` runs its provider in a VM. Only such an actor has its own
-/// session and journal lane. Every other authorized actor's request is sent
-/// and answered on the host session.
-pub fn vm_actor(connection: &rusqlite::Connection, agent: &str) -> Result<bool, WorkerError> {
-    let record = AgentRepository::get(connection, &AgentId::from(agent))?;
-    Ok(record.is_some_and(|record| {
-        record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-    }))
-}
-
 pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<bool, WorkerError> {
     let Some(actor) = call.actor.as_ref() else {
-        if call.transfer.is_none()
-            && call.deleted_actor_session.is_none()
-            && super::account_refresh_shape(
-                &call.scope,
-                &call.root_request_id,
-                &call.operation,
-                call.method,
-                &call.params,
-            )
-        {
-            let Some(token) = &call.admitted_request else {
-                return Ok(false);
-            };
-            let saved = recorded_operation(tx, &call.key(), Some(token.id()))?;
-            return Ok(saved.is_some_and(|record| same_replay_identity(record.call(), call)));
-        }
-
         if let Some(transfer) = call.transfer.as_ref() {
             let Some(operation) =
                 studio_runtime_store::AccountTransferRepository::get(tx, &transfer.transfer_id)?
@@ -134,16 +107,11 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
                     &transfer.thread_id,
                     &call.params,
                 )
+                // `valid_source_preflight_params` above owns the allowed source methods.
                 && call.operation.starts_with(&format!(
                     "transfer:{}:{}:",
                     transfer.transfer_id, transfer.member
-                ))
-                && matches!(
-                    call.method,
-                    Method::ThreadQueueList
-                        | Method::ThreadBackgroundTerminalsList
-                        | Method::ThreadUnsubscribe
-                ));
+                )));
         }
         return Ok(super::valid_actorless_request_shape(
             call.method,
@@ -154,6 +122,9 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
     let Some(agent_record) = AgentRepository::get(tx, &AgentId::from(actor.agent.as_str()))? else {
         return Ok(false);
     };
+    if crate::workspace_ready::legacy_vm_record(&agent_record) {
+        return Ok(false);
+    }
     if call.method == Method::ThreadUnsubscribe {
         return crate::agent_management_recovery::authorize_release(
             tx,
@@ -411,7 +382,6 @@ fn authorize_retained_monitor_control(
         || operation.agent.as_str() != actor.agent
         || operation.epoch.get() != actor.epoch
         || operation.account_key.as_str() != call.scope.account
-        || vm_actor(tx, &actor.agent)?
     {
         return Ok(false);
     }
@@ -755,14 +725,7 @@ pub(super) fn reserve(
     {
         return Ok(());
     }
-    let actor_id = match &call.actor {
-        Some(actor) if vm_actor(tx, &actor.agent)? => Some(actor.agent.as_str()),
-        _ => None,
-    };
-    let stream = actor_id.map_or_else(
-        || call.scope.account.clone(),
-        |actor| super::super::vm_journal_scope(&call.scope.account, actor),
-    );
+    let stream = call.scope.account.clone();
     let row = OutboxRow {
         id: call.key(),
         kind: OutboxKind::ProviderCall,
@@ -1154,6 +1117,9 @@ pub(in crate::account_worker) async fn recover(
             )
             .map_err(outbox_error)?
             {
+                if row.stream_id.as_deref() != Some(account.as_str()) {
+                    continue;
+                }
                 let store::ProviderCall::Retained(payload) = row.payload else {
                     continue;
                 };
@@ -1172,15 +1138,11 @@ pub(in crate::account_worker) async fn recover(
                         payload.call.method.as_str(),
                         &payload.call.params,
                     );
-                let actor_id = match &payload.call.actor {
-                    Some(actor) if vm_actor(tx, &actor.agent)? => Some(actor.agent.clone()),
-                    _ => None,
-                };
                 recovered.push((
                     PendingRequest {
                         call: payload.call,
                         ticket: request.ticket.clone(),
-                        actor_id,
+                        actor_id: None,
                         reply: None,
                         result: payload
                             .outcome
@@ -1573,6 +1535,50 @@ mod replay_identity_tests {
         let mut other = call;
         other.scope.generation += 1;
         assert!(!thread_started_for_actor(&tx, &other, "thread-1").expect("different generation"));
+    }
+
+    #[tokio::test]
+    async fn transfer_source_authorizes_a_claude_session_export() {
+        let root = tempfile::tempdir().expect("root");
+        let store = database(root.path()).await;
+        let cwd = store.root().to_path_buf();
+        store
+            .transaction(move |tx| {
+                let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
+                    "id":"m","rootId":"m","epoch":1,"status":"idle","isLead":true,
+                    "accountKey":"default","provider":"claude","model":"default",
+                    "threadId":"thread-1","cwd":cwd}))?;
+                AgentRepository::put(tx, &agent)?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .expect("agent");
+        let transfer = "5a300f72-4ea6-4d30-8a0e-9b2c13c42281";
+        crate::account_transfer_driver::request(
+            &store, transfer, "m", "target", "team", "claude", 10.0,
+        )
+        .await
+        .expect("transfer");
+        store
+            .transaction(move |tx| {
+                let mut request = call();
+                request.actor = None;
+                request.transfer = Some(super::super::TransferAuthorization {
+                    transfer_id: transfer.into(),
+                    member: "m".into(),
+                    source_account: "default".into(),
+                    thread_id: "thread-1".into(),
+                });
+                request.method = Method::ClaudeMoveExport;
+                request.operation = format!("transfer:{transfer}:m:move-export");
+                request.params = json!({"threadId":"thread-1"});
+                assert!(authorize(tx, &request).expect("export"));
+                request.method = Method::ThreadFork;
+                assert!(!authorize(tx, &request).expect("fork"));
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .expect("transfer source authorization");
     }
 
     #[tokio::test]
@@ -1977,8 +1983,11 @@ mod replay_identity_tests {
                 assert!(!authorize(tx,&invalid)?,"{field}");
             }
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.executionMode','vm') WHERE id='agent-1'",[])?;
-            assert!(!authorize(tx,&exact)?,"a host generation does not prove a guest process identity");
-            tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.executionMode') WHERE id='agent-1'",[])?;
+
+            assert!(!authorize(tx,&exact)?,"a legacy VM process cannot use host identity");
+            tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.executionMode'),'$.workspaceMode','layr') WHERE id='agent-1'",[])?;
+            assert!(!authorize(tx,&exact)?,"legacy workspace mode cannot use host identity");
+            tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.workspaceMode') WHERE id='agent-1'",[])?;
             tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.epoch',8) WHERE id='watch'",[])?;
             assert!(!crate::account_worker::retained::monitor_survives_account_transfer(tx,"watch","agent-1")?,"the monitor row epoch must match its actor and submitted operation");
             Ok::<_,WorkerError>(())

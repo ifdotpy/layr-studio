@@ -5,7 +5,6 @@ import type { TestAgent } from "../playwright.ts";
 import type { ProjectEntityDto } from "../../src/generated/api.ts";
 
 import type { MultiServerFixtureOptions } from "../servers/multi-server-fixture.ts";
-import type { PostBody } from "../../src/apiTypes.ts";
 import type { Owner } from "./sidebar-parity-fixture.ts";
 import { fixturePostBody } from "../servers/browser-fixture.ts";
 import { remoteNetwork } from "../servers/browser-fixture.ts";
@@ -343,12 +342,6 @@ for (const [theme, viewport] of [
         >;
       }[]
     > = { local: [], remote: [] };
-    const syncCalls: PostBody<"/api/mac-sync/resolve">[] = [];
-    const secretCalls: {
-      path: string;
-      body: PostBody<"/api/project-secrets/set">;
-    }[] = [];
-    const secretNames = new Set(["EXISTING_KEY"]);
     const handler =
       (owner: Owner): NonNullable<MultiServerFixtureOptions["handle"]> =>
       ({ url, body: rawBody, json, snapshot }) => {
@@ -369,28 +362,6 @@ for (const [theme, viewport] of [
             pinned: !!row!.pinned,
             archived: !!row!.archived,
           });
-          return true;
-        }
-        if (url.pathname === "/api/mac-sync/resolve") {
-          const body = fixturePostBody<"/api/mac-sync/resolve">(rawBody);
-          expect(owner).toBe("remote");
-          syncCalls.push(body);
-          json({
-            path: body.path,
-            choice: body.choice,
-            mainStateId: "m1",
-            status: null,
-          });
-          return true;
-        }
-        if (url.pathname.startsWith("/api/project-secrets/")) {
-          const body = fixturePostBody<"/api/project-secrets/set">(rawBody);
-          expect(owner).toBe("remote");
-          secretCalls.push({ path: url.pathname, body });
-          if (url.pathname.endsWith("/set")) secretNames.add(body.name);
-          if (url.pathname.endsWith("/remove")) secretNames.delete(body.name);
-          // The server answers with names only.
-          json({ projectId: body.projectId, names: [...secretNames].sort() });
           return true;
         }
         if (url.pathname === "/api/rename") {
@@ -448,7 +419,6 @@ for (const [theme, viewport] of [
                 },
               ],
               // Only the remote server reports layr support for its folder.
-              layrReadiness: { state: "ready" },
             }
           : {}),
       } satisfies Partial<ProjectEntityDto>);
@@ -487,31 +457,8 @@ for (const [theme, viewport] of [
         hasText: "Home project",
       });
       await expect(projectName).toBeVisible();
-      const heading = sidebar.locator(".project-tree-heading", {
-        hasText: "Home project",
-      });
-      // Only the remote server reports readiness; the button keeps its name, and the LAYR
-      // chip under it is a button of its own.
-      const readiness = heading.locator(".project-layr-readiness");
-      await expect(projectName.locator(".project-layr-readiness")).toHaveCount(
-        0,
-      );
-      await expect(
-        heading.getByRole("button", {
-          name: "layr: REM: Ready for layr chats",
-          exact: true,
-        }),
-      ).toBeVisible();
-      await expect(readiness).toHaveText("LAYR");
-      await expect(readiness).toHaveAttribute("data-state", "ready");
-      await expect(readiness).toHaveAttribute(
-        "title",
-        "REM: Ready for layr chats",
-      );
-      await expect(
-        sidebar.getByRole("button", { name: "Home project", exact: true }),
-      ).toHaveAccessibleDescription(
-        "REM: Ready for layr chats. Drag to reorder. Alt + Up or Down also works.",
+      await expect(projectName).toHaveAccessibleDescription(
+        "Drag to reorder. Alt + Up or Down also works.",
       );
       await expect(projectName).toHaveAttribute("aria-expanded", "true");
       expect(await projectName.evaluate((element) => element.tagName)).toBe(
@@ -690,261 +637,6 @@ for (const [theme, viewport] of [
       await expect(row).toBeVisible();
       expect(calls.local).toEqual([]);
 
-      // layr shows only where it is active: an import in progress shows nothing.
-      remote.offline(false);
-      remote.snapshot.runtime.projects[0]!.layrReadiness = {
-        state: "importing",
-      };
-      await page.reload();
-      if (viewport.width < 760)
-        await page
-          .getByRole("button", { name: "Servers and chats", exact: true })
-          .click();
-      await expect(projectName).toBeVisible();
-      await expect(heading.locator(".project-layr-readiness")).toHaveCount(0);
-      await expect(
-        sidebar.getByRole("button", { name: "Home project", exact: true }),
-      ).toHaveAccessibleDescription(
-        "Drag to reorder. Alt + Up or Down also works.",
-      );
-
-      // The remote server now syncs its Mac folder: one chip tells that the project is
-      // ready and that one file waits for a choice, and the remote server takes it.
-      Object.assign(remote.snapshot.runtime.projects[0]!, {
-        layrReadiness: { state: "ready", projectId: "remote-layr" },
-        layrSync: {
-          projectId: "remote-layr",
-          state: "conflict",
-          enabled: true,
-          conflicts: ["src/app.txt"],
-          choices: [],
-          withAgent: [],
-          deletes: 0,
-          reason: null,
-        },
-      } satisfies Partial<ProjectEntityDto>);
-      await page.reload();
-      if (viewport.width < 760)
-        await page
-          .getByRole("button", { name: "Servers and chats", exact: true })
-          .click();
-      // One LAYR chip on its own line: the conflict marks it and its tooltip says why.
-      const layrChip = heading.locator(".project-layr-readiness");
-      await expect(layrChip).toHaveText("LAYR");
-      await expect(layrChip).toHaveAttribute("data-attention", "true");
-      await expect(layrChip).toHaveAttribute(
-        "title",
-        "REM: Ready for layr chats\nREM: Folder sync: 1 file changed on both sides",
-      );
-      await expect(heading.locator(".project-layr-sync")).toHaveCount(0);
-      // The chip starts where the project name starts.
-      {
-        const name = (await projectName.locator("span").first().boundingBox())!;
-        const chip = (await layrChip.boundingBox())!;
-        expect(Math.abs((chip?.x ?? 0) - (name?.x ?? 0))).toBeLessThanOrEqual(
-          1,
-        );
-      }
-      // Its menu closes with Escape and with a click outside it.
-      const chipMenu = page.getByRole("menu").filter({
-        has: page.getByRole("menuitem", { name: "Pause sync (REM)" }),
-      });
-      await layrChip.click();
-      await expect(chipMenu).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(chipMenu).toHaveCount(0);
-      await layrChip.click();
-      await expect(chipMenu).toBeVisible();
-      await sidebar.locator(".projects-heading-label").click();
-      await expect(chipMenu).toHaveCount(0);
-      if (viewport.width >= 760) {
-        // A click in the frame of the main view also closes it.
-        await layrChip.click();
-        await expect(chipMenu).toBeVisible();
-        await page.mouse.click(viewport.width - 20, viewport.height / 2);
-        await expect(chipMenu).toHaveCount(0);
-      }
-      const nameBox = (await projectName
-        .locator("span")
-        .first()
-        .boundingBox())!;
-      const chipBox = (await layrChip.boundingBox())!;
-      expect(
-        chipBox && nameBox && chipBox.y >= nameBox.y + nameBox.height - 1,
-      ).toBe(true);
-      await expect(
-        sidebar.getByRole("button", { name: "Home project", exact: true }),
-      ).toHaveAccessibleDescription(
-        "REM: Ready for layr chats; REM: Folder sync: 1 file changed on both sides. " +
-          "Drag to reorder. Alt + Up or Down also works.",
-      );
-      await page.screenshot({
-        path: testInfo.outputPath(`sync-row-${theme}.png`),
-      });
-      // The LAYR chip opens the layr menu; the remote server takes the choice for its Mac
-      // folder.
-      await layrChip.click();
-      await page
-        .getByRole("menuitem", {
-          name: "Choose versions (1) (REM)",
-          exact: true,
-        })
-        .click();
-      const syncDialog = page.getByRole("dialog", {
-        name: "Folder sync: Home project (REM)",
-      });
-      await expect(syncDialog.getByText("src/app.txt")).toBeVisible();
-      await page.screenshot({
-        path: testInfo.outputPath(`mac-sync-${theme}.png`),
-      });
-      await syncDialog
-        .getByRole("button", { name: "Keep VM", exact: true })
-        .click();
-      await expect.poll(() => syncCalls.length).toBe(1);
-      expect(syncCalls[0]).toEqual({
-        projectId: "remote-layr",
-        path: "src/app.txt",
-        choice: "vm",
-      });
-      await expect(
-        syncDialog.getByText("No files wait for a choice."),
-      ).toBeVisible();
-      // Escape would also close the mobile sidebar drawer.
-      await syncDialog.getByRole("button", { name: "Close" }).click();
-      await expect(syncDialog).toHaveCount(0);
-
-      // The project's vault: the menu tells when it last saved a change and opens its Desk
-      // page; the folder belongs to the remote server, so this Mac does not pull it.
-      remote.snapshot.runtime.projects[0]!.vault = {
-        projectId: "remote-layr",
-        state: "ok",
-        prefix: "home project",
-        site: "https://desk.example.com/",
-        lastPush: Math.floor(Date.now() / 1000) - 600,
-      };
-      await page.reload();
-      if (viewport.width < 760)
-        await page
-          .getByRole("button", { name: "Servers and chats", exact: true })
-          .click();
-      // The project menu has no layr items: they are only in the LAYR chip's menu.
-      await heading.hover();
-      const options = heading.getByRole("button", {
-        name: "Options for project Home project",
-        exact: true,
-      });
-      await options.click();
-      await expect(
-        page.getByRole("menuitem", { name: "Rename project", exact: true }),
-      ).toBeVisible();
-      for (const name of [
-        "Choose versions (1) (REM)",
-        "Pause sync (REM)",
-        "Open in Desk (REM)",
-      ] as const)
-        await expect(
-          page.getByRole("menuitem", { name, exact: true }),
-        ).toHaveCount(0);
-      await options.click();
-      await expect(
-        page.getByRole("menuitem", { name: "Rename project", exact: true }),
-      ).toHaveCount(0);
-      // A project with a vault has a cloud on its chip and the vault report in the tooltip.
-      await expect(layrChip).toHaveAttribute("data-vault", "ok");
-      await expect(layrChip.locator("svg")).toHaveCount(1);
-      await expect(layrChip).toHaveAttribute(
-        "title",
-        /REM: Vault: saved 10 min ago$/,
-      );
-      await layrChip.click();
-      await expect(
-        page.getByText("Vault: saved 10 min ago (REM)"),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("menuitem", { name: "Pause sync (REM)", exact: true }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("menuitem", { name: "Open in Desk (REM)", exact: true }),
-      ).toHaveAttribute("href", "https://desk.example.com/home%20project/");
-      await expect(
-        page.getByRole("menuitem", { name: "Pull… (REM)", exact: true }),
-      ).toHaveCount(0);
-      // The screenshot waits for the end of the menu's opening transition.
-      await expect(
-        page.getByRole("menu").filter({
-          has: page.getByRole("menuitem", { name: "Open in Desk (REM)" }),
-        }),
-      ).toHaveCSS("opacity", "1");
-      await page.screenshot({
-        path: testInfo.outputPath(`vault-menu-${theme}.png`),
-      });
-      await page.keyboard.press("Escape");
-
-      // The project's secrets: the dialog lists names, adds one with a hidden value, and
-      // removes one; the remote server that holds the layr project takes each change.
-      await layrChip.click();
-      await page
-        .getByRole("menuitem", { name: "Secrets… (REM)", exact: true })
-        .click();
-      const secretsDialog = page.getByRole("dialog", {
-        name: "Secrets: Home project (REM)",
-      });
-      await expect(
-        secretsDialog.getByText("EXISTING_KEY", { exact: true }),
-      ).toBeVisible();
-      const nameField = secretsDialog.getByLabel("Name", { exact: true });
-      const valueField = secretsDialog.getByLabel("Value", { exact: true });
-      const add = secretsDialog.getByRole("button", {
-        name: "Add",
-        exact: true,
-      });
-      await expect(valueField).toHaveAttribute("type", "password");
-      await nameField.fill("lower-case");
-      await expect(
-        secretsDialog.getByText("Use only A to Z, 0 to 9 and _"),
-      ).toBeVisible();
-      await expect(add).toBeDisabled();
-      const secretValue = "zulip-value-from-the-browser";
-      await nameField.fill("ZULIP_APEIRO_SHOWROOM_API_KEY");
-      await valueField.fill(secretValue);
-      await add.click();
-      await expect(
-        secretsDialog.getByText("ZULIP_APEIRO_SHOWROOM_API_KEY"),
-      ).toBeVisible();
-      await expect(nameField).toHaveValue("");
-      await expect(valueField).toHaveValue("");
-      await expect(secretsDialog).not.toContainText(secretValue);
-      await page.screenshot({
-        path: testInfo.outputPath(`project-secrets-${theme}.png`),
-      });
-      await secretsDialog
-        .getByRole("button", { name: "Remove EXISTING_KEY", exact: true })
-        .click();
-      await expect(
-        secretsDialog.getByText("EXISTING_KEY", { exact: true }),
-      ).toHaveCount(0);
-      expect(secretCalls.map((call) => call.path)).toEqual([
-        "/api/project-secrets/list",
-        "/api/project-secrets/set",
-        "/api/project-secrets/remove",
-      ]);
-      expect(secretCalls[1]!.body).toEqual({
-        projectId: "remote-layr",
-        name: "ZULIP_APEIRO_SHOWROOM_API_KEY",
-        value: secretValue,
-        requestId: expect.any(String),
-      });
-      expect(secretCalls[2]!.body).toEqual({
-        projectId: "remote-layr",
-        name: "EXISTING_KEY",
-        requestId: expect.any(String),
-      });
-      expect(secretCalls[2]!.body.requestId).not.toBe(
-        secretCalls[1]!.body.requestId,
-      );
-      // Escape would also close the mobile sidebar drawer.
-      await secretsDialog.getByRole("button", { name: "Close" }).click();
-      await expect(secretsDialog).toHaveCount(0);
       expect(calls.local).toEqual([]);
       expect(errors).toEqual([]);
       await testInfo.attach("owner-requests", {
@@ -958,7 +650,7 @@ for (const [theme, viewport] of [
   });
 }
 
-test("offline folder expansion does not change the saved source state after reconnect", async ({
+test("offline folder expansion preserves the saved source state after reconnect", async ({
   page,
   context,
 }, testInfo) => {

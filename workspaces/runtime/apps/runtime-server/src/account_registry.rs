@@ -552,51 +552,12 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
         Box::pin(async move { port?.worker_diagnostics().await })
     }
 
-    fn deliver_vm_notification(
-        &self,
-        account: String,
-        agent_id: String,
-        epoch: u64,
-        sequence: u64,
-        frame: studio_runtime_providers::Frame,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        (),
-                        studio_runtime_services::account_session_runtime::AccountSessionError,
-                    >,
-                > + Send,
-        >,
-    > {
-        use studio_runtime_services::account_session_runtime::AccountSessionError;
-
-        let session = self
-            .sessions
-            .read()
-            .ok()
-            .and_then(|sessions| sessions.get(&account).cloned())
-            .filter(|session| session.is_live());
-        Box::pin(async move {
-            let Some(session) = session else {
-                return Err(AccountSessionError::Requires(
-                    "account-worker/vm-notification",
-                ));
-            };
-            let epoch = i64::try_from(epoch).map_err(|_| AccountSessionError::Unknown)?;
-            session
-                .deliver_vm_notification(&account, &agent_id, epoch, sequence, frame)
-                .await
-                .map_err(|_| AccountSessionError::Unknown)
-        })
-    }
-
     fn claude_control_session(
         &self,
         account: &str,
     ) -> Result<
         Arc<dyn studio_runtime_services::claude_controls::service::ControlSession>,
-        studio_runtime_services::account_session_runtime::AccountSessionError,
+        studio_runtime_services::account_session_runtime::ClaudeControlSessionError,
     > {
         let session = self
             .sessions
@@ -605,17 +566,14 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
             .and_then(|sessions| sessions.get(account).cloned())
             .filter(|session| session.is_live())
             .ok_or(
-                studio_runtime_services::account_session_runtime::AccountSessionError::Requires(
-                    "provider-session/claude-controls",
-                ),
+                studio_runtime_services::account_session_runtime::ClaudeControlSessionError::Unavailable,
             )?;
-        let port =
-            studio_runtime_services::account_worker::retained::consumers::ClaudePort::new(session)
-                .map_err(|_| {
-                    studio_runtime_services::account_session_runtime::AccountSessionError::Refused(
-                        "Claude account session is unavailable",
-                    )
-                })?;
+        let port = studio_runtime_services::account_worker::retained::consumers::ClaudePort::new(
+            session,
+        )
+        .map_err(|_| {
+            studio_runtime_services::account_session_runtime::ClaudeControlSessionError::Unavailable
+        })?;
         Ok(Arc::new(
             studio_runtime_services::claude_runtime::RetainedClaudeSession::new(Arc::new(port)),
         ))
@@ -676,11 +634,8 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                     &request.thread_id,
                     &request.params,
                 );
+            // `valid_source_preflight_params` owns the allowed source methods.
             if !allowed_params
-                || !matches!(
-                    request.method.as_str(),
-                    "thread/queue/list" | "thread/backgroundTerminals/list" | "thread/unsubscribe"
-                )
                 || !request.operation.starts_with(&format!(
                     "transfer:{}:{}:",
                     request.transfer_id, request.member
@@ -734,9 +689,12 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
                 Err(studio_runtime_services::account_worker::retained::PortError::Expired) => {
                     Err(AccountSessionError::Expired)
                 }
-                Err(_) => Err(AccountSessionError::Refused(
-                    "Account transfer source request was rejected",
-                )),
+                Err(error) => {
+                    eprintln!("account transfer source request {operation} rejected: {error}");
+                    Err(AccountSessionError::Refused(
+                        "Account transfer source request was rejected",
+                    ))
+                }
             }
         })
     }
@@ -891,6 +849,13 @@ async fn dispatch_request(
             return Ok(not_sent_receipt(
                 fallback_request,
                 ReceiptOutcome::NotHandedOff(cause),
+            ));
+        }
+        // The worker refuses an invalid or over-capacity request before any send.
+        Err(studio_runtime_services::account_worker::retained::PortError::Invalid) => {
+            return Ok(not_sent_receipt(
+                fallback_request,
+                ReceiptOutcome::NotHandedOff("invalid-request".into()),
             ));
         }
         Err(studio_runtime_services::account_worker::retained::PortError::Deadline) => {

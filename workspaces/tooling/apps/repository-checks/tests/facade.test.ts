@@ -61,40 +61,6 @@ test("provider shutdown tails and status reader boundaries stay in both fast fil
   }
 });
 
-test("host_exec process scenarios have a named manual owner and fast boundary coverage", () => {
-  const profiles = readFileSync(".config/nextest.toml", "utf8");
-  assert.doesNotMatch(profiles, /test\(\/\^host_exec_service::\//);
-  assert.equal(profiles.split("host_exec(_service)?|layr_read").length - 1, 2);
-  const recipe = readFileSync("justfile", "utf8");
-  assert.match(
-    recipe,
-    /test-host-exec-processes:\n[^\n]*--run-ignored only[^\n]*--test-threads 1[^\n]*host_exec_service::/,
-  );
-  const processes = readFileSync(
-    "workspaces/runtime/apps/runtime-server/tests/host_exec_service.rs",
-    "utf8",
-  );
-  assert.equal(
-    (
-      processes.match(
-        /#\[ignore = "manual process tier: just test-host-exec-processes"\]/g,
-      ) ?? []
-    ).length,
-    5,
-  );
-  const lifecycle = readFileSync(
-    "workspaces/runtime/packages/runtime-services/src/host_exec_service/lifecycle.rs",
-    "utf8",
-  );
-  for (const name of [
-    "a_fresh_token_is_private_durable_and_never_overwrites_an_existing_token",
-    "startup_wait_requires_ready_proof_and_preserves_the_poll_order",
-    "startup_wait_retains_unknown_deadline_and_process_probe_errors",
-  ]) {
-    assert.match(lifecycle, new RegExp(`fn ${name}\\(`));
-  }
-});
-
 // Suppress facade text, but preserve Node's binary test result frames.
 function silenceFacadeOutput() {
   const originalWrite = process.stdout.write;
@@ -158,7 +124,6 @@ test("short and comprehensive recipes preserve their owned test boundaries", () 
     assert.match(recipe.command, /studio-contracts/);
     assert.match(recipe.command, /boundaries-check/);
     assert.match(recipe.command, /javascript-check/);
-    assert.match(recipe.command, /vm-guest\/run-guest-suite\.mts/);
     assert.doesNotMatch(
       recipe.command,
       /--release|test-server-load|runtime_load|mutations/,
@@ -218,7 +183,7 @@ test("unsafe Rust is limited to the purpose-listed modules", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "codex-unsafe-rust-policy-"));
   const exception = path.join(
     root,
-    "workspaces/runtime/packages/runtime-services/src/host_exec_service/clone_ffi.rs",
+    "workspaces/runtime/packages/runtime-priority-sys/src/lib.rs",
   );
   const violation = path.join(root, "workspaces/runtime/src/unsafe_probe.rs");
   const quotedViolation = path.join(

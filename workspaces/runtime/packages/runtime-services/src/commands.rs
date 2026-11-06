@@ -132,10 +132,16 @@ pub fn authorize(
                 Command::Send { target, .. }
                 | Command::Withdraw { target, .. }
                 | Command::Stop { target, .. }
+<<<<<<< head
                 | Command::Pause { target, .. } => target.as_str().to_owned(),
                 Command::Answer { .. }
                 | Command::LeadMessage { .. }
                 | Command::RestoreDeletedRoot { .. } => {
+=======
+                | Command::Pause { target, .. }
+                | Command::Delete { target, .. } => target.as_str().to_owned(),
+                Command::Answer { .. } | Command::LeadMessage { .. } => {
+>>>>>>> main
                     return Err(CommandError::Forbidden);
                 }
             };
@@ -446,6 +452,19 @@ pub fn apply_withdraw(
 
 /// Step 4. Read the referenced rows now. `ids` are the entities that the command changed:
 /// the reference and its chat. A row above `COMMAND_ROW_MAX_BYTES` is left to the stream.
+/// The chat `chat` and all its descendants, by the parent of each agent record.
+pub fn chat_tree(conn: &Connection, chat: &str) -> Result<Vec<String>, CommandError> {
+    let mut statement = conn.prepare_cached(
+        "WITH RECURSIVE tree(id) AS (SELECT ?1 UNION \
+         SELECT a.id FROM runtime_agents a JOIN tree t ON json_extract(a.record,'$.parentId')=t.id) \
+         SELECT id FROM tree ORDER BY id",
+    )?;
+    let ids = statement
+        .query_map([chat], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
 pub fn response(
     conn: &Connection,
     reference: &RequestReference,
@@ -638,6 +657,7 @@ pub fn execute_sync(
             )?;
             agent_reference(tx, target.as_str())?
         }
+<<<<<<< head
         Command::RestoreDeletedRoot { target, .. } => {
             reply = crate::agent_management_store::execute_in_transaction(
                 tx,
@@ -645,6 +665,16 @@ pub fn execute_sync(
                     target: target.as_str().to_owned(),
                 },
                 now,
+=======
+        Command::Delete { target, .. } => {
+            reply = run_stop(
+                tx,
+                &Action::Delete {
+                    target: target.as_str().to_owned(),
+                },
+                now,
+                ports,
+>>>>>>> main
             )?;
             agent_reference(tx, target.as_str())?
         }

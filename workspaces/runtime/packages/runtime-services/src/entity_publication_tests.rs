@@ -350,6 +350,59 @@ async fn worker_rowid_reuse_refreshes_both_teams() {
 }
 
 #[tokio::test]
+async fn team_counts_follow_agent_status_and_publish_changes() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    seed_chat(&store, chat(json!({"id":"worker", "rootId":CHAT, "parentId":CHAT, "isLead":false, "status":"completed"}))).await;
+    let sequence = || {
+        store
+            .test_read_transaction(|tx| {
+                Ok(
+                    crate::entity_scope::direct_document(tx, "agentSummary", CHAT)?
+                        .expect("lead")
+                        .sequence,
+                )
+            })
+            .unwrap()
+    };
+    for (status, working) in [
+        ("running", 1),
+        ("completed", 0),
+        ("starting", 1),
+        ("failed", 0),
+        ("waiting_on_monitor", 1),
+        ("paused", 0),
+        ("queued", 0),
+    ] {
+        let before = sequence();
+        write(
+            &store,
+            "UPDATE runtime_agents SET record=json_set(record,'$.status',?1) WHERE id='worker'",
+            vec![status.into()],
+        )
+        .await;
+        assert_eq!(
+            client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+            json!({"working":working,"total":1}),
+            "{status}"
+        );
+        if status != "queued" {
+            assert!(sequence() > before, "lead revision for {status}");
+        }
+    }
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='worker'",
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":0})
+    );
+}
+
+#[tokio::test]
 async fn worker_status_changes_publish_lead_team_counts() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
@@ -358,7 +411,7 @@ async fn worker_status_changes_publish_lead_team_counts() {
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":1,"total":1})
     );
-    // The status lives on the chat row. The record write after it publishes the change.
+    // The agent record write publishes the change.
     write(
         &store,
         "UPDATE chats SET status='completed' WHERE id=?1",
@@ -405,18 +458,17 @@ async fn worker_status_changes_publish_lead_team_counts() {
     seed_chat(&store, chat(json!({"id":"nested", "rootId":CHAT, "parentId":"worker", "isLead":false, "status":"paused", "autoWake":true}))).await;
     assert_eq!(
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
-        json!({"working":1,"total":2})
+        json!({"working":0,"total":2})
     );
     let before = client_entity(&store, "agentSummary", CHAT).expect("lead").1;
     let sequence = || {
         store
             .test_read_transaction(|tx| {
-                tx.query_row(
-                    "SELECT seq FROM sync_entities WHERE collection='agentSummary' AND id=?1",
-                    [CHAT],
-                    |row| row.get::<_, i64>(0),
+                Ok(
+                    crate::entity_scope::direct_document(tx, "agentSummary", CHAT)?
+                        .expect("lead summary")
+                        .sequence,
                 )
-                .map_err(StoreError::from)
             })
             .expect("lead sequence")
     };
@@ -582,108 +634,34 @@ async fn reserved_user_input_has_same_status_in_queue_and_receipt() {
 }
 
 #[tokio::test]
-async fn work_metadata_skips_history_and_explicit_publication_is_not_repeated() {
-    use crate::sync_policy::{self, work_publication_probe};
+async fn owned_work_is_decoded_once_per_agent_publication() {
+    use crate::sync_policy::work_publication_probe;
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
-    let id = "metadata-history-cost";
-    let result = |id| json!({"id":id,"agent":CHAT,"text":"Evidence","checks":"Checked","revision":"abc","files":[],"created":1});
-    let work = json!({"id":id,"rootId":CHAT,"title":"Inspect","status":"ready","owner":null,"dependencies":[],"created":1,"updated":1,"version":1,"results":[result("first"),result("second")],"decisions":[]});
-    write(
-        &store,
-        "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
-        vec![id.into(), work.to_string()],
-    )
-    .await;
-    work_publication_probe::take(id);
-    for statement in [
-        "UPDATE runtime_work SET record=json_set(record,'$.title','New title') WHERE id=?1",
-        "UPDATE runtime_work SET record=json_set(record,'$.owner','published-chat','$.status','running') WHERE id=?1",
-        "UPDATE runtime_work SET record=json_set(record,'$.gate',json('{\"command\":\"check\",\"timeout_ms\":1234}'),'$.version',2) WHERE id=?1",
-    ] {
-        write(&store, statement, vec![id.into()]).await;
-        let counts = work_publication_probe::take(id);
+    let work = |id: &str| json!({"id":id,"rootId":CHAT,"title":"Inspect","status":"ready","owner":CHAT,"dependencies":[],"created":1,"updated":1,"version":1,"results":[],"decisions":[]});
+    for id in ["owned-first", "owned-second"] {
+        write(
+            &store,
+            "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+            vec![id.into(), work(id).to_string()],
+        )
+        .await;
+    }
+    for id in ["owned-first", "owned-second"] {
+        work_publication_probe::take(id);
+    }
+    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.name','Renamed owner','$.status','running') WHERE id=?1", vec![CHAT.into()]).await;
+    for id in ["owned-first", "owned-second"] {
         assert_eq!(
-            counts.history_entries, 0,
-            "metadata must not visit serialized history: {statement}"
-        );
-        assert_eq!(
-            counts.history_bytes, 0,
-            "metadata must not hash history payloads"
+            work_publication_probe::take(id).owned_decodes,
+            1,
+            "owned work must be decoded once per agent publication"
         );
     }
-    store
-        .transaction(move |_| {
-            studio_runtime_store::entity_publication::mark_stale("work", id);
-            Ok(())
-        })
-        .await
-        .expect("refusal-only publication");
-    assert_eq!(work_publication_probe::take(id).history_entries, 0);
-    let second_id = "metadata-history-cost-second";
-    let mut second_work = work.clone();
-    second_work["id"] = json!(second_id);
-    second_work["owner"] = json!(CHAT);
-    write(
-        &store,
-        "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
-        vec![second_id.into(), second_work.to_string()],
-    )
-    .await;
-    work_publication_probe::take(id);
-    work_publication_probe::take(second_id);
-    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.name','Renamed owner','$.status','running') WHERE id=?1", vec![CHAT.into()]).await;
-    let owner_update = work_publication_probe::take(id);
-    assert_eq!(
-        owner_update.owned_decodes, 1,
-        "owned work must be decoded once per agent publication"
-    );
-    assert_eq!(work_publication_probe::take(second_id).owned_decodes, 1);
-    assert_eq!(
-        owner_update.metadata, 0,
-        "unrelated owner updates must not reread owned task metadata"
-    );
-    assert_eq!(owner_update.history_entries, 0);
-    store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.epoch',json_extract(record,'$.epoch')+1) WHERE id=?1", [CHAT])?;
-        tx.execute("UPDATE runtime_work SET record=json_set(record,'$.title','Compound owner change') WHERE id=?1", [id])?;
-        Ok(())
-    }).await.expect("owner identity and task metadata change together");
-    let compound = work_publication_probe::take(id);
-    assert_eq!(
-        compound.metadata, 1,
-        "compound changes publish task metadata once"
-    );
-    assert_eq!(compound.history_entries, 0);
-    assert_eq!(compound.history_bytes, 0);
-    store
-        .transaction(move |tx| {
-            tx.execute(
-                "UPDATE runtime_work SET record=json_set(record,'$.title','Explicit') WHERE id=?1",
-                [id],
-            )?;
-            sync_policy::publish_entity_changes(
-                tx,
-                &sync_policy::EntityChanges {
-                    work: [id.to_owned()].into(),
-                    ..Default::default()
-                },
-                None,
-                &|_, _, _, _| true,
-            )
-        })
-        .await
-        .expect("explicit source publication");
-    assert_eq!(
-        work_publication_probe::take(id).metadata,
-        1,
-        "last publication suppresses the commit publisher"
-    );
 }
 
 #[tokio::test]
-async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollback() {
-    use crate::sync_policy::work_publication_probe;
+async fn work_history_documents_follow_edits_reorder_root_move_and_rollback() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
     let id = "history-delta-cost";
@@ -698,18 +676,12 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
         vec![id.into(), work.to_string()],
     )
     .await;
-    work_publication_probe::take(id);
     write(
         &store,
         "UPDATE runtime_work SET record=json_insert(record,'$.results[#]',json(?2)) WHERE id=?1",
         vec![id.into(), third.to_string()],
     )
     .await;
-    assert_eq!(
-        work_publication_probe::take(id).history_entries,
-        1,
-        "append publishes only the new result"
-    );
     first["gate"] = json!({"status":"failed","config":{"command":"check","timeout_ms":1234},"output":"Changed gate output"});
     write(
         &store,
@@ -717,7 +689,6 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
         vec![id.into(), first["gate"].to_string()],
     )
     .await;
-    assert_eq!(work_publication_probe::take(id).history_entries, 1);
     let edited = client_entity(&store, "workResult", &format!("{id}:0"))
         .expect("edited result")
         .1;
@@ -730,11 +701,6 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
     )
     .await;
     assert_eq!(
-        work_publication_probe::take(id).history_entries,
-        1,
-        "JSON boolean and number values are distinct"
-    );
-    assert_eq!(
         client_entity(&store, "workRelease", &format!("{id}:0"))
             .expect("typed release")
             .1["value"],
@@ -746,7 +712,6 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
         vec![id.into()],
     )
     .await;
-    assert_eq!(work_publication_probe::take(id).history_entries, 4);
     assert_eq!(
         client_entity(&store, "workResult", &format!("{id}:0"))
             .expect("moved result")
@@ -759,11 +724,6 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
         vec![id.into(), json!([second, first, third]).to_string()],
     )
     .await;
-    assert_eq!(
-        work_publication_probe::take(id).history_entries,
-        2,
-        "same-length reorder remains observable"
-    );
     assert_eq!(
         client_entity(&store, "workResult", &format!("{id}:0"))
             .expect("reordered result")
@@ -783,7 +743,6 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
                 .0
         );
     }
-    work_publication_probe::take(id);
     let rollback: Result<(), StoreError> = store.transaction(move |tx| { tx.execute("UPDATE runtime_work SET record=json_set(record,'$.results[0].text','Rolled back') WHERE id=?1", [id])?; Err(StoreError::RecordContract("test rollback")) }).await;
     assert!(rollback.is_err());
     assert_eq!(
@@ -798,16 +757,10 @@ async fn work_source_deltas_preserve_history_edits_reorder_root_move_and_rollbac
         vec![id.into()],
     )
     .await;
-    assert_eq!(
-        work_publication_probe::take(id).history_entries,
-        0,
-        "rolled-back journal entries cannot leak into a later commit"
-    );
 }
 
 #[tokio::test]
-async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
-    use crate::sync_policy::work_publication_probe;
+async fn work_written_without_a_publisher_is_read_before_any_pull() {
     let directory = tempfile::tempdir().expect("isolated state");
     let store = studio_runtime_store::RuntimeStore::open(Some(directory.path()))
         .await
@@ -820,7 +773,6 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
         tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
         Ok(())
     }).await.expect("pre-upgrade sources without a publisher");
-    assert!(client_entity(&store, "workDetail", id).is_none());
     super::install(&store)
         .await
         .expect("production startup publication");
@@ -841,15 +793,6 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
             .expect("root default")
             .1["taskDefaultGate"]["command"],
         "upgrade-check"
-    );
-    assert_eq!(work_publication_probe::take(id).history_entries, 1);
-    super::install(&store)
-        .await
-        .expect("idempotent startup readiness");
-    assert_eq!(
-        work_publication_probe::take(id).history_entries,
-        0,
-        "the durable marker skips later seed reads"
     );
 }
 
@@ -961,7 +904,7 @@ async fn work_detail_publishes_full_review_state_at_commit_and_retires_on_delete
     let history_seq = store
         .test_read_transaction(|tx| {
             tx.query_row(
-                "SELECT seq FROM sync_entities WHERE collection='workResult' AND id='assignment:0'",
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_work_results' AND id='assignment:0'",
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -988,7 +931,7 @@ async fn work_detail_publishes_full_review_state_at_commit_and_retires_on_delete
             .1["status"],
         "review"
     );
-    assert_eq!(store.test_read_transaction(|tx| tx.query_row("SELECT seq FROM sync_entities WHERE collection='workResult' AND id='assignment:0'", [], |row| row.get::<_, i64>(0)).map_err(StoreError::from)).expect("unchanged result sequence"), history_seq, "status changes do not replay full histories");
+    assert_eq!(store.test_read_transaction(|tx| tx.query_row("SELECT seq FROM durable_rows WHERE tbl='runtime_work_results' AND id='assignment:0'", [], |row| row.get::<_, i64>(0)).map_err(StoreError::from)).expect("unchanged result sequence"), history_seq, "status changes do not replay full histories");
     write(
         &store,
         "DELETE FROM runtime_work WHERE id=?1",
@@ -1034,8 +977,7 @@ async fn create_user_question(
             };
             new.request = Request::Question { questions };
             new.epoch = epoch;
-            let row = studio_runtime_store::approvals::create(tx, new, Timestamp(1.0))?;
-            crate::approval_sync::publish(tx, &row)?;
+            studio_runtime_store::approvals::create(tx, new, Timestamp(1.0))?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1054,7 +996,6 @@ async fn set_question_epoch(
             let mut row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
             row.epoch = Some(epoch);
             studio_runtime_store::approvals::put(tx, &row)?;
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1136,13 +1077,7 @@ async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
     store
         .transaction(|tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            crate::sync_policy::maintain_entity_projections(
-                tx,
-                "",
-                &Default::default(),
-                &rooms,
-                |_, _, _, _| true,
-            )
+            crate::sync_policy::maintain_entity_projections(tx, "", &rooms, |_, _, _, _| true)
         })
         .await
         .expect("upgrade seeds projections and marker");
@@ -1190,13 +1125,7 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
     store
         .transaction(|tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            crate::sync_policy::maintain_entity_projections(
-                tx,
-                "",
-                &Default::default(),
-                &rooms,
-                |_, _, _, _| true,
-            )
+            crate::sync_policy::maintain_entity_projections(tx, "", &rooms, |_, _, _, _| true)
         })
         .await
         .expect("rebuild projections");
@@ -1293,13 +1222,7 @@ async fn message_send_projection_upgrade_on_reflink_copy() {
     reopened
         .transaction(|tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            crate::sync_policy::maintain_entity_projections(
-                tx,
-                "",
-                &Default::default(),
-                &rooms,
-                |_, _, _, _| true,
-            )
+            crate::sync_policy::maintain_entity_projections(tx, "", &rooms, |_, _, _, _| true)
         })
         .await
         .expect("rebuild copied projections");
@@ -1325,40 +1248,6 @@ async fn message_send_projection_upgrade_on_reflink_copy() {
         tx.query_row("SELECT COUNT(*) FROM sync_entities e WHERE e.deleted=0 AND ((e.collection='messageReceipt' AND json_extract(e.payload,'$.value.status') IN ('pending','reserved','dispatching','accepted','sent')) OR (e.collection='queue' AND EXISTS(SELECT 1 FROM json_each(e.payload,'$.value.items') item WHERE json_extract(item.value,'$.status')='pending')))", [], |row| row.get::<_, i64>(0)).map_err(Into::into)
     }).expect("scan copied projections");
     assert_eq!(legacy, 0);
-}
-
-#[tokio::test]
-async fn agent_projections_roll_back_with_the_source_if_detail_validation_fails() {
-    let (_dir, store) = store().await;
-    seed_chat(&store, chat(json!({"name":"Before"}))).await;
-    let before = client_entity(&store, "agentSummary", CHAT).expect("summary");
-    let failure = store
-        .transaction(|tx| {
-            tx.execute(
-                "UPDATE runtime_agents SET record=json_set(record,'$.name','After') WHERE id=?1",
-                [CHAT],
-            )?;
-            crate::sync_policy::publish_agent_projection(
-                tx,
-                CHAT,
-                json!({"id":CHAT,"name":"After"}),
-                false,
-                &|collection, _, _, _| collection != "agentDetail",
-            )
-        })
-        .await;
-    assert!(failure.is_err());
-    assert_eq!(
-        client_entity(&store, "agentSummary", CHAT).expect("summary"),
-        before
-    );
-    let source = store
-        .test_read_transaction(|tx| {
-            AgentRepository::get(tx, &studio_runtime_store::AgentId::from(CHAT))
-        })
-        .expect("source")
-        .expect("agent");
-    assert_eq!(source.value()["name"], "Before");
 }
 
 #[tokio::test]
@@ -1724,12 +1613,11 @@ fn new_question(id: &str) -> studio_runtime_store::approvals::NewApproval {
 async fn create_question(store: &studio_runtime_store::RuntimeStore, id: &'static str) {
     store
         .transaction_with(move |tx| {
-            let row = studio_runtime_store::approvals::create(
+            studio_runtime_store::approvals::create(
                 tx,
                 new_question(id),
                 studio_runtime_schema::approvals::Timestamp(1.0),
             )?;
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1753,8 +1641,6 @@ async fn answer_question(store: &studio_runtime_store::RuntimeStore, id: &'stati
                 },
                 CommandId("command".into()),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -1812,14 +1698,14 @@ async fn synced_agent_values_recompute_the_view_and_create_a_missing_entity() {
     });
     store
         .transaction_with(move |tx| {
-            // The row exists, but its writer never published it.
+            // The writer does not publish; the view is built from the row at read time.
             AgentRepository::put(tx, &AgentRecord::from_value(worker)?)?;
             Ok::<_, StoreError>(())
         })
         .await
         .expect("the worker row is stored");
     super::install(&store).await.expect("publisher installed");
-    assert!(client_entity(&store, "agent", "sync-worker").is_none());
+    assert!(client_entity(&store, "agent", "sync-worker").is_some());
     store
         .transaction_with(|tx| {
             let mut agent = AgentRepository::get(tx, &"sync-worker".into())?.expect("worker");
@@ -1908,10 +1794,13 @@ async fn a_claude_sign_in_repair_reaches_the_client() {
     )
     .await;
     let store = Arc::new(store);
-    crate::claude_login::chats::StoredChats(Arc::clone(&store))
-        .refresh("claude-account")
-        .await
-        .expect("the repair commits");
+    crate::claude_login::chats::StoredChats::new(
+        Arc::clone(&store),
+        Arc::new(tokio::sync::Notify::new()),
+    )
+    .refresh("claude-account")
+    .await
+    .expect("the repair commits");
     let view = chat_view(&store, CHAT);
     assert_eq!(
         view["status"], "idle",
@@ -2026,8 +1915,6 @@ async fn question_history_entities_retain_answers_after_the_request_is_closed() 
                 Principal::Owner,
                 Timestamp(2.0),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -2052,8 +1939,6 @@ async fn question_history_entities_retain_answers_after_the_request_is_closed() 
                     by: Principal::Owner,
                 }),
             )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("row");
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<_, StoreError>(())
         })
         .await
@@ -2328,90 +2213,6 @@ async fn every_studio_error_change_still_publishes_with_its_source_write() {
             .0
     );
     assert_published_list(&store);
-}
-
-/// The view log lists exactly the view ids that the publisher wrote, at the same numbers.
-/// A reader that learns changed view ids from the log after a cursor therefore sees what a
-/// reader of `sync_entities` sees.
-#[tokio::test]
-async fn the_view_log_matches_the_published_views_of_agents_requests_and_work() {
-    use std::collections::BTreeSet;
-    use studio_runtime_store::durable_seq::{VIEW_COLLECTIONS, view_changes_since};
-    type View = (String, String, i64, bool);
-
-    fn published(store: &studio_runtime_store::RuntimeStore) -> BTreeSet<View> {
-        store
-            .test_read_transaction(|tx| {
-                let mut views = BTreeSet::new();
-                let mut statement =
-                    tx.prepare("SELECT collection,id,seq,deleted FROM sync_entities")?;
-                for row in statement.query_map([], |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get::<_, i64>(3)? != 0,
-                    ))
-                })? {
-                    let view: View = row?;
-                    if VIEW_COLLECTIONS.contains(&view.0.as_str()) {
-                        views.insert(view);
-                    }
-                }
-                Ok(views)
-            })
-            .expect("published views")
-    }
-    fn logged(store: &studio_runtime_store::RuntimeStore) -> BTreeSet<View> {
-        store
-            .test_read_transaction(|tx| {
-                Ok(view_changes_since(tx, 0)?
-                    .into_iter()
-                    .map(|c| (c.collection, c.id, c.seq, c.deleted))
-                    .collect())
-            })
-            .expect("logged views")
-    }
-
-    let (_dir, store) = store().await;
-    seed_chat(&store, chat(json!({}))).await;
-    create_question(&store, "parity-card").await;
-    assert!(!client_entity(&store, "request", "parity-card").unwrap().0);
-    assert_eq!(logged(&store), published(&store), "after inserts");
-    answer_question(&store, "parity-card").await;
-    assert!(!client_entity(&store, "request", "parity-card").unwrap().0);
-    assert_eq!(logged(&store), published(&store), "after answering");
-    store
-        .transaction_with(|tx| {
-            use studio_runtime_schema::approvals::{ApprovalId, Principal, Timestamp};
-            let id = ApprovalId("parity-card".into());
-            studio_runtime_store::approvals::confirm_delivery(
-                tx,
-                &id,
-                Principal::Owner,
-                Timestamp(2.0),
-            )?;
-            let row = studio_runtime_store::approvals::get(tx, &id)?.expect("approval exists");
-            crate::approval_sync::publish(tx, &row)?;
-            Ok::<_, StoreError>(())
-        })
-        .await
-        .expect("delivery confirmed");
-    assert!(client_entity(&store, "request", "parity-card").unwrap().0);
-    assert!(
-        !client_entity(&store, "questionHistory", "parity-card")
-            .unwrap()
-            .0
-    );
-    write(
-        &store,
-        "UPDATE runtime_agents SET record=json_set(record,'$.name','Renamed') WHERE id=?1",
-        vec![CHAT.to_owned()],
-    )
-    .await;
-    let after = published(&store);
-    assert!(!after.is_empty());
-    assert_eq!(logged(&store), after, "after updates and a retired card");
 }
 
 #[tokio::test]

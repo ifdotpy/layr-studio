@@ -1670,9 +1670,6 @@ function entityValuesFromSnapshot(
       "workerBaseRevision",
       "workerEnvironment",
       "workerEnvironmentRevision",
-      "layrReadiness",
-      "layrSync",
-      "vault",
     ]),
   }));
   append(runtime.requests, (row) => ({

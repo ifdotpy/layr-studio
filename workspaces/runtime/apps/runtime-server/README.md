@@ -50,8 +50,6 @@ bounded retry backoff after failures:
   account auth gate has no deadline: it is released after an account or cached
   auth status change
   ([`account_auth_gate.rs`](../../packages/runtime-services/src/account_auth_gate.rs)).
-  Active VM Claude credential security refresh has a separate cadence owned by
-  [`VM_CREDENTIAL_REFRESH_INTERVAL`](../../packages/runtime-services/src/account_worker.rs).
 - The peer-link owner reacts to targeted `runtime_access_clients` invalidation
   hints and child exit. It rereads authoritative peer rows, keeps a running
   child in sync, restarts it after a failed peer update, and uses bounded

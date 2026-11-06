@@ -1,21 +1,15 @@
 //! Typed identities for resources on the live stream.
 
-use crate::{
-    bounded_integer::BoundedInteger, bounded_text::BoundedText, progress_selector::VaultJob,
-};
+use crate::{bounded_integer::BoundedInteger, bounded_text::BoundedText};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error, ser::SerializeMap};
 
 /// Maximum auth-progress request identity, in Unicode code points.
 pub const AUTH_REQUEST_ID_MAX: usize = 256;
-/// Maximum vault-job request identity, in Unicode code points.
-pub const VAULT_JOB_REQUEST_ID_MAX: usize = 256;
 /// Maximum rename-progress request identity, in Unicode code points.
 pub const RENAME_REQUEST_ID_MAX: usize = 200;
 /// Maximum rename-progress agent identity, in Unicode code points.
 pub const RENAME_AGENT_ID_MAX: usize = 200;
-/// Maximum vault prefix length, in ASCII bytes.
-pub const VAULT_PREFIX_MAX: usize = 44;
 
 /// An identifier whose schema permits any nonempty string.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -86,7 +80,6 @@ resource!(ComplaintResource {
 });
 resource!(RequestResource { request_id: BoundedText<1, AUTH_REQUEST_ID_MAX> });
 resource!(RenameResource { agent_id: BoundedText<1, RENAME_AGENT_ID_MAX>, request_id: BoundedText<1, RENAME_REQUEST_ID_MAX> });
-resource!(VaultJobResource { job: VaultJob, request_id: BoundedText<1, VAULT_JOB_REQUEST_ID_MAX> });
 
 fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
     T::deserialize(d).map(Some)
@@ -114,43 +107,6 @@ pub struct TranscriptResource {
         BoundedInteger<1, { crate::shared_values::SYNC_TRANSCRIPT_STREAM_MAX_ITEMS as u64 }>,
     >,
 }
-
-/// Vault prefix used by resource subscriptions.
-#[derive(Clone, Debug, Serialize)]
-#[serde(transparent)]
-pub struct VaultPrefix(String);
-impl VaultPrefix {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-/// Validate the vault prefix used for directories and subscriptions.
-pub fn valid_vault_prefix(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    value.len() <= VAULT_PREFIX_MAX
-        && bytes.next().is_some_and(|b| b.is_ascii_alphanumeric())
-        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
-impl<'de> Deserialize<'de> for VaultPrefix {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(d)?;
-        if !valid_vault_prefix(&value) {
-            return Err(D::Error::custom("invalid vault prefix"));
-        }
-        Ok(Self(value))
-    }
-}
-impl JsonSchema for VaultPrefix {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "VaultResourcePrefix".into()
-    }
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({"type":"string","minLength":1,"maxLength":VAULT_PREFIX_MAX,"pattern":"^[A-Za-z0-9][A-Za-z0-9_-]*$"})
-    }
-}
-resource!(VaultReadinessResource {
-    prefix: VaultPrefix
-});
 
 /// Closed, tagged wire union. Payload fields deliberately exclude the tag.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -200,10 +156,6 @@ pub enum ResourceRef {
     WorkspaceResource(AgentResource),
     #[serde(rename = "auth-progress")]
     AuthProgressResource(RequestResource),
-    #[serde(rename = "vault-readiness")]
-    VaultReadinessResource(VaultReadinessResource),
-    #[serde(rename = "vault-job-progress")]
-    VaultJobProgressResource(VaultJobResource),
     #[serde(rename = "rename-progress")]
     RenameProgressResource(RenameResource),
     #[serde(rename = "agentDetail")]
@@ -286,15 +238,6 @@ impl Serialize for ResourceRef {
                 kind!("auth-progress");
                 map.serialize_entry("requestId", &v.request_id)?;
             }
-            Self::VaultReadinessResource(v) => {
-                kind!("vault-readiness");
-                map.serialize_entry("prefix", &v.prefix)?;
-            }
-            Self::VaultJobProgressResource(v) => {
-                map.serialize_entry("job", &v.job)?;
-                kind!("vault-job-progress");
-                map.serialize_entry("requestId", &v.request_id)?;
-            }
             Self::RenameProgressResource(v) => {
                 map.serialize_entry("agentId", &v.agent_id)?;
                 kind!("rename-progress");
@@ -350,20 +293,12 @@ mod tests {
                 super::AUTH_REQUEST_ID_MAX,
             ),
             (
-                "/components/schemas/VaultJobProgressResource/properties/requestId/maxLength",
-                super::VAULT_JOB_REQUEST_ID_MAX,
-            ),
-            (
                 "/components/schemas/RenameProgressResource/properties/requestId/maxLength",
                 super::RENAME_REQUEST_ID_MAX,
             ),
             (
                 "/components/schemas/RenameProgressResource/properties/agentId/maxLength",
                 super::RENAME_AGENT_ID_MAX,
-            ),
-            (
-                "/components/schemas/VaultReadinessResource/properties/prefix/maxLength",
-                super::VAULT_PREFIX_MAX,
             ),
         ] {
             assert_eq!(document.pointer(path), Some(&json!(limit)), "{path}");
@@ -389,8 +324,6 @@ mod tests {
             json!({"kind":"voice","agentId":"agent"}),
             json!({"kind":"workspace","agentId":"agent"}),
             json!({"kind":"auth-progress","requestId":"request"}),
-            json!({"kind":"vault-readiness","prefix":"vault-1"}),
-            json!({"kind":"vault-job-progress","requestId":"request","job":"pull"}),
             json!({"kind":"rename-progress","requestId":"request","agentId":"agent"}),
             json!({"kind":"agentDetail","agentId":"agent"}),
             json!({"kind":"monitors","agentId":"agent"}),
@@ -403,7 +336,6 @@ mod tests {
             json!({"kind":"accounts","extra":true}),
             json!({"kind":"transcript","agentId":"","tail":40}),
             json!({"kind":"transcript","agentId":"agent","tail":513}),
-            json!({"kind":"vault-readiness","prefix":"bad/path"}),
         ] {
             let typed = studio_json::from_str::<ResourceRef>(&value.to_string());
             assert_eq!(typed.is_ok(), validator.is_valid(&value), "{value}");

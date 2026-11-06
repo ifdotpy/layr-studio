@@ -7,11 +7,10 @@
 //! - a completed agent message with a sign-in link (`note_message`, `run_messages`). The rule
 //!   is `browser_policy::sign_in_links`; the message text does not change.
 //!
-//! Both send the link to the browser bridge of the chat (`browser.submit` of the host bridge or
-//! the VM guest) and write its card at once with `browser_cards::apply`, the one owner of the
+//! Both send the link to the browser bridge of the chat (`browser.submit` of the host bridge) and write its card at once with `browser_cards::apply`, the one owner of the
 //! card. The bridge gives one request to one link of a chat, so a retry, the tool call, the
 //! message and the command's own `BROWSER` call make one card. The owner of the tool definition
-//! and of its result texts is `vm-guest/sign_in_contract.json`; this module reads the texts,
+//! and of its result texts is `sign_in_contract.json`; this module reads the texts,
 //! and a test checks the bundled catalog against the definition.
 
 use std::sync::{Arc, OnceLock};
@@ -25,7 +24,7 @@ use crate::browser_cards::{self, CardSource};
 
 /// The managed tool name (`SIGN_IN_TOOL`).
 pub const TOOL: &str = "orchestration_sign_in";
-const CONTRACT: &str = include_str!("../../../apps/vm-guest/sign_in_contract.json");
+const CONTRACT: &str = include_str!("sign_in_contract.json");
 /// Completed messages with sign-in links that wait for a card; more are dropped and logged.
 const MESSAGE_QUEUE: usize = 64;
 /// The waits for a noted message to commit, in milliseconds: the note comes from inside the
@@ -56,8 +55,7 @@ fn text(state: &str) -> &'static str {
         .unwrap_or_default()
 }
 
-/// The browser bridges that take an agent's links: the host bridge of native chats and, on a
-/// Mac, the VM guest. They are the card sources of `browser_cards`.
+/// The browser bridge that takes an agent's links and supplies cards to `browser_cards`.
 #[derive(Clone, Default)]
 pub struct SignInSources {
     sources: Vec<CardSource>,
@@ -68,10 +66,8 @@ impl SignInSources {
         Self { sources }
     }
 
-    fn source(&self, vm: bool) -> Option<&CardSource> {
-        self.sources
-            .iter()
-            .find(|source| (source.source == "vm") == vm)
+    fn source(&self) -> Option<&CardSource> {
+        self.sources.iter().find(|source| source.source == "host")
     }
 }
 
@@ -92,14 +88,12 @@ pub async fn submit(
     url: &str,
     request_id: &str,
 ) -> Result<(Value, Option<String>), String> {
-    let vm = agent.get("executionMode").and_then(Value::as_str) == Some("vm");
-    let source = sources.source(vm).ok_or_else(|| {
-        if vm {
-            "Sign-in links of VM chats open only on the computer that runs the VM".to_owned()
-        } else {
-            "The browser bridge of native chats is not running".to_owned()
-        }
-    })?;
+    if agent.get("executionMode").and_then(Value::as_str) == Some("vm") {
+        return Err("This workspace is no longer available".to_owned());
+    }
+    let source = sources
+        .source()
+        .ok_or_else(|| "The browser bridge of native chats is not running".to_owned())?;
     let agent_id = agent
         .get("id")
         .and_then(Value::as_str)

@@ -5,7 +5,7 @@ use studio_json::{Value, json};
 /// Client names Studio reports to a provider peer in `initialize`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientName {
-    /// The retained per-account (or per-VM-agent) provider session.
+    /// The retained per-account provider session.
     AccountSession,
     /// An ephemeral model-catalog read.
     Catalog,

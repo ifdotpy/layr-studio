@@ -22,6 +22,7 @@ import {
   targetExternalCatalog,
   listExternalTools,
   readExternalInstructions,
+  movableExternalCatalog,
 } from "./move-external.ts";
 
 test("SDK boundary preserves local and proxy configurations for both callers", () => {
@@ -449,3 +450,14 @@ test.each([
     }
   },
 );
+
+test("a connector that cannot be proven does not block a move", async () => {
+  const empty = { catalogs: [], configs: {}, transports: {} };
+  // The owner's rule: a chat moves even when a connector is missing on the target.
+  const dropped = await movableExternalCatalog(["claude_ai_Claude_Docs"], async () => {
+    throw externalRefusal(["claude_ai_Claude_Docs"], [], ["claude_ai_Claude_Docs"]);
+  });
+  assert.deepEqual(dropped, { ...empty, droppedExternal: ["claude_ai_Claude_Docs"] });
+  const kept = { catalogs: [{ name: "x" }], configs: {}, transports: {} };
+  assert.equal(await movableExternalCatalog(["x"], async () => kept as never), kept);
+});

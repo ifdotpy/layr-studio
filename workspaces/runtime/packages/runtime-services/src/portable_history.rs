@@ -650,6 +650,94 @@ Full archive path (JSON string): {}\nArchive SHA256: {}\n<historical_conversatio
     Ok(format!("{prefix}{}{suffix}", recent.text()))
 }
 
+/// Project folder subdirectory that holds readable transcripts for the model.
+const TRANSCRIPT_DIRECTORY: &str = ".studio-history";
+
+/// Full text of every Studio item in the chain, oldest first. It is unbounded:
+/// the caller writes it to a file the model reads on demand.
+pub fn transcript_text(
+    state_root: &Path,
+    descriptor: &ArchiveDescriptor,
+) -> Result<String, PortableHistoryError> {
+    let mut paths = Vec::new();
+    let current = validate_history_with_ancestors(state_root, descriptor, |archive| {
+        paths.push(archive.descriptor.path.clone());
+        Ok(())
+    })?;
+    paths.push(current.descriptor.path);
+    let mut text = String::new();
+    for path in &paths {
+        append_studio_transcript(state_root, path, &mut text)?;
+    }
+    Ok(text)
+}
+
+fn append_studio_transcript(
+    state_root: &Path,
+    path: &Path,
+    text: &mut String,
+) -> Result<(), PortableHistoryError> {
+    let file = open_archive_file(state_root, path)?;
+    for line in BufReader::new(file).lines() {
+        let record: ArchiveRecord = studio_json::from_str(&line?)?;
+        if let ArchiveRecord::StudioItem {
+            item,
+            full_text,
+            input_events,
+            ..
+        } = record
+        {
+            if truthy(item.get("afterRestore")) {
+                continue;
+            }
+            let role = item
+                .get("role")
+                .and_then(Value::as_str)
+                .unwrap_or("History");
+            let body = full_text
+                .as_deref()
+                .or_else(|| item.get("text").and_then(Value::as_str))
+                .unwrap_or_default();
+            text.push_str(&format!("{role}: {body}\n\n"));
+            for event in input_events {
+                let kind = event.get("kind").and_then(Value::as_str).unwrap_or("Input");
+                let body = event
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                text.push_str(&format!("{kind}: {body}\n\n"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write the full transcript to a read-only file under `project` and return its path.
+/// The name comes from the immutable archive, so a retry replaces the same bytes.
+pub fn write_readable_transcript(
+    state_root: &Path,
+    descriptor: &ArchiveDescriptor,
+    project: &Path,
+) -> Result<PathBuf, PortableHistoryError> {
+    let text = transcript_text(state_root, descriptor)?;
+    let directory = project.join(TRANSCRIPT_DIRECTORY);
+    fs::create_dir_all(&directory)?;
+    let stem = descriptor
+        .path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or(PortableHistoryError::InvalidIdentity("archive name"))?;
+    let path = directory.join(format!("{stem}.md"));
+    let mut file = tempfile::NamedTempFile::new_in(&directory)?;
+    file.write_all(text.as_bytes())?;
+    file.as_file().sync_all()?;
+    let mut permissions = file.as_file().metadata()?.permissions();
+    permissions.set_readonly(true);
+    file.as_file().set_permissions(permissions)?;
+    file.persist(&path).map_err(|error| error.error)?;
+    Ok(path)
+}
+
 fn publish<F>(
     state_root: &Path,
     source: HistorySource,

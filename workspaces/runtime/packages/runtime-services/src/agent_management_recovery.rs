@@ -1777,8 +1777,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_tool_reset_refuses_vm_and_claude_sessions() {
-        for (provider, mode) in [("codex", "vm"), ("claude", "native")] {
+    async fn manual_tool_reset_refuses_claude_sessions() {
+        {
+            let provider = "claude";
             let (_directory, store, actor, session) = fixture().await;
             store
                 .transaction(move |tx| {
@@ -1787,11 +1788,7 @@ mod tests {
                     worker.provider = studio_runtime_schema::queue_command::Field::Value(
                         provider.parse().unwrap(),
                     );
-                    worker.execution_mode = Some(if mode == "vm" {
-                        studio_runtime_store::AgentExecutionMode::Vm
-                    } else {
-                        studio_runtime_store::AgentExecutionMode::Native
-                    });
+                    worker.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Native);
                     AgentRepository::put(tx, &worker)
                 })
                 .await

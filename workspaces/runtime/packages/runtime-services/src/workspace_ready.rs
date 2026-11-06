@@ -113,8 +113,7 @@ pub enum WorkspaceRefusal {
 /// What defers a workspace decision, and so which change can end the deferral.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeferredBy {
-    /// The actor's own record: deleted, not auto-waking, or VM or image
-    /// readiness not recorded yet.
+    /// The actor's own record is deleted or is not auto-waking.
     Actor,
     /// Another workspace operation, reservation or provisioning lock.
     Workspace,
@@ -128,17 +127,41 @@ pub enum WorkspaceDecision {
     Refuse(WorkspaceRefusal),
 }
 
+pub(crate) fn vm_workspace_unsupported(
+    execution_mode: Option<&str>,
+    workspace_mode: Option<&str>,
+    layr_ready: bool,
+    has_layr_line: bool,
+) -> bool {
+    execution_mode == Some("vm")
+        || (workspace_mode != Some("layr-native")
+            && (workspace_mode == Some("layr") || layr_ready || has_layr_line))
+}
+
+/// Whether a persisted agent belongs to a retired VM workspace.
+pub fn legacy_vm_record(record: &studio_runtime_store::AgentRecord) -> bool {
+    let value = record.value();
+    vm_workspace_unsupported(
+        value["executionMode"].as_str(),
+        value["workspaceMode"].as_str(),
+        record.layr_ready == Some(true),
+        value["layrLine"].as_str().is_some(),
+    )
+}
+
 pub fn unsupported(actor: &WorkspaceActor) -> Option<WorkspaceRefusal> {
+    if vm_workspace_unsupported(
+        actor.execution_mode.as_deref(),
+        actor.workspace_mode.as_deref(),
+        actor.layr_ready,
+        actor.layr_line.is_some(),
+    ) {
+        return Some(WorkspaceRefusal::VmWorkspaceUnsupported);
+    }
     if actor.workspace_mode.as_deref() == Some("layr-native") {
         return None;
     }
-    if actor.execution_mode.as_deref() == Some("vm")
-        || actor.workspace_mode.as_deref() == Some("layr")
-        || actor.layr_ready
-        || actor.layr_line.is_some()
-    {
-        Some(WorkspaceRefusal::VmWorkspaceUnsupported)
-    } else if actor.environment.as_deref() == Some("linux") {
+    if actor.environment.as_deref() == Some("linux") {
         Some(WorkspaceRefusal::LegacyVmWorkspaceUnsupported)
     } else if actor.image_bound() {
         Some(WorkspaceRefusal::ImageWorkspaceUnsupported)

@@ -746,40 +746,6 @@ it("delivers subscribed auth progress without sending its URL to the entity pers
   expect(f.post).toHaveBeenCalledTimes(1);
 });
 
-it("delivers vault job codes only through transient subscribed frames", async () => {
-  const f = await fixture();
-  const resource = {
-    kind: "vault-job-progress",
-    requestId: "vault-one",
-    job: "login",
-  } as const;
-  const listener = vi.fn();
-  f.transport.watchResourceChanges(resource, listener);
-  await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
-  f.persist.mockClear();
-  const value = {
-    requestId: "vault-one",
-    state: "running",
-    page: "https://device.example/transient",
-    code: "TEMP",
-  };
-  f.source.emit("resource-progress", {
-    protocol: SYNC_PROTOCOL_VERSION,
-    workspaceId: "workspace",
-    epoch: "epoch",
-    revision: 2,
-    resource,
-    value,
-  });
-  expect(listener).toHaveBeenCalledWith(
-    expect.objectContaining({ progress: { resource, value } }),
-  );
-  expect(f.persist).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(10_000);
-  expect(f.post).toHaveBeenCalledTimes(1);
-});
-
 it("coalesces chat switches into one POST without reopening the SSE stream", async () => {
   const f = await fixture();
   for (let i = 0; i < 10; i++) {
@@ -1943,7 +1909,7 @@ it("connection: real lifecycle removes every registered listener across disposal
 
 it("connection: foreign, stale and invalid progress cannot heal a replacement stream", async () => {
   const f = await fixture(false, true, true);
-  const resource = { kind: "vault-readiness", prefix: "vault" } as const;
+  const resource = { kind: "auth-progress", requestId: "login-one" } as const;
   f.transport.watchResourceChanges(resource, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
   f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
@@ -1953,7 +1919,7 @@ it("connection: foreign, stale and invalid progress cannot heal a replacement st
     epoch: "epoch",
     revision: 10,
     resource,
-    value: true,
+    value: { requestId: "login-one", accountKey: "account", status: "ready" },
   };
   f.source.emit("resource-progress", progress);
   const status = vi.fn();

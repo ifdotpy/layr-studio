@@ -21,7 +21,7 @@
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--mantine-color-default-hover);
   color: #d97757;
 }

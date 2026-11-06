@@ -69,17 +69,19 @@ test("keeps physical left placement and expanded sidebar state", () => {
   expect(html).toContain("height:523px");
 });
 
-test("plain rail contains only the sidebar toggle and the existing menu", () => {
+test("plain rail keeps Messages reachable without a badge", () => {
   const html = render({
     ...props,
     messages: { count: 0, onClick: action },
     sidebar: { onClick: action, expanded: true },
   });
-  expect(html.match(/<button/g)).toHaveLength(2);
+  expect(html.match(/<button/g)).toHaveLength(3);
   expect(html).toContain('aria-label="Toggle conversations"');
+  expect(html).toContain('aria-label="Messages"');
   expect(html).toContain('aria-label="Chat actions"');
+  expect(html).not.toContain("edge-rail-badge");
 });
-test("attention adds just the messages button with its badge", () => {
+test("attention adds the badge to the messages button", () => {
   const html = render({
     ...props,
     sidebar: { onClick: action },

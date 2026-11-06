@@ -1100,10 +1100,10 @@ pub(super) fn execute(
         ToolKind::SignIn => Err(CallbackError::Dependency(
             super::runtime_dispatch::SIGN_IN_DEPENDENCY,
         )),
-        // The managed-tool dispatcher runs host_exec through its attached runtime.
-        ToolKind::HostExec => Err(CallbackError::Dependency(crate::host_exec::DEPENDENCY)),
+        // Old host_exec requests cannot run after VM removal.
+        ToolKind::HostExec => Err(CallbackError::Dependency("host-exec/removed")),
         // The managed-tool dispatcher runs layr_read through the guest channel.
-        ToolKind::LayrRead => Err(CallbackError::Dependency(crate::layr_read::DEPENDENCY)),
+        ToolKind::LayrRead => Err(CallbackError::Dependency("native-layr/read")),
         ToolKind::Title => {
             if actor["isLead"] != true {
                 return Err(CallbackError::Invalid(

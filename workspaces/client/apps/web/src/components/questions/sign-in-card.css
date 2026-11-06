@@ -1,7 +1,7 @@
-/* The sign-in request card (docs/vm-browser-bridge.md, section 6.2). It follows the
+/* The sign-in request card. It follows the
    question card, and it is one column at phone width. */
 #requests .request-card.request-sign-in {
-  border-color: var(--accent);
+  border-color: var(--studio-state-answer);
 }
 .sign-in-card {
   min-width: 0;
@@ -15,7 +15,7 @@
   gap: 4px 8px;
 }
 .sign-in-card-icon {
-  color: var(--accent);
+  color: var(--studio-state-answer);
   flex: none;
 }
 .sign-in-card-chat {
@@ -23,7 +23,7 @@
   overflow-wrap: anywhere;
 }
 .sign-in-card-state {
-  color: var(--accent);
+  color: var(--studio-state-answer);
   font-size: var(--studio-text-meta);
 }
 .sign-in-card-host {
@@ -59,7 +59,7 @@
   margin: 10px 0;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
 }
 .sign-in-card-device > span {
   display: block;
@@ -69,7 +69,7 @@
 .sign-in-card-code {
   display: block;
   margin: 2px 0 4px;
-  font-family: var(--mantine-font-family-monospace);
+  font-family: var(--studio-font-mono);
   font-size: calc(var(--studio-text-body) + 8px);
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -112,7 +112,7 @@
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--raised);
   color: var(--text);
   font: inherit;

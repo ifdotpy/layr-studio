@@ -2,7 +2,6 @@
 
 The `layr-native` workspace mode runs agents on the host.
 The chat selector calls this mode **Layr**.
-**Layr VM** uses `layr` and runs in the Studio Linux VM.
 **WT** uses Git worktrees.
 
 ## Store and installation
@@ -131,7 +130,6 @@ Use the socket from `native-layr paths` when you start that root's daemon.
 ## First import
 
 The native import omits Git-ignored data, including ignored `.env` files.
-The VM archive rules remain unchanged.
 
 Studio selects all paths and rejects case or Unicode collisions before it writes imported entries.
 It sorts path references and checks sibling names once per directory.
@@ -224,7 +222,7 @@ Known Layr limits, last checked on 0.5.1:
   A directory attribute change alone can be absent from the saved head.
   A successful metadata fixture does not establish support for this case.
 
-Layr 0.11.0 includes Studio's earlier fixes for private directory metadata and warm cache copies.
+Layr includes Studio's earlier fixes for private directory metadata and warm cache copies.
 It keeps private directories writable until metadata updates finish.
 The final state and line retain source directory and file modes, including `0555` and `0444`.
 The source modes stay unchanged.
@@ -375,7 +373,7 @@ It does not permit changes to main or worker lines.
 Reviewer turn completion does not save or repair main.
 
 The host user owns the entire store.
-Native mode does not create separate Unix users as the VM mode does.
+Native mode does not create separate Unix users.
 The native `layr_read` tool also accepts `try <state> -- <command>`.
 Studio runs the command in a temporary Layr copy.
 On macOS, `sandbox-exec` permits writes only in that copy and the private scratch folder.
@@ -408,6 +406,9 @@ The import includes uncommitted files and omits Git-ignored data.
 It excludes the worktree's `.git` pointer. Build output becomes warm caches.
 Prunable worktrees are reported and skipped.
 Completed receipts make a repeated migration idempotent.
+The migration writes typed copy progress as JSON lines on standard error; its
+normal report stays on standard output. Line creation and cache preparation
+are indeterminate because Layr does not expose counts for those operations.
 
 For a project with running WT chats:
 
@@ -475,6 +476,9 @@ An implementer can switch only when its parent is a ready Layr chat.
 Its worktree must have no uncommitted or untracked files, and its HEAD must be on a remote-tracking branch.
 Studio does not fetch. Push the branch first.
 A running turn, monitor, task, queued input, or workspace operation refuses the switch.
+Switching requires an idle chat, so its copy progress is not displayed in the
+client. The existing start progress carrier applies only to queued or starting
+agents.
 New workers of a switched lead use Layr.
 Existing WT workers keep WT until you switch them.
 A switched lead cannot accept Git results from a WT worker. Switch each implementer after the lead.

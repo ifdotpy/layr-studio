@@ -94,7 +94,7 @@ class InstallUpdate(unittest.TestCase):
         self.mac = FakeMac()
         self.stops = []
         self.verified = []
-        environment = patch.dict(os.environ, {"CODEX_LINUX_VM_STATE_DIR": str(self.state / "linux-vm")})
+        environment = patch.dict(os.environ, {})
         environment.start()
         self.addCleanup(environment.stop)
 
@@ -203,15 +203,6 @@ class InstallUpdate(unittest.TestCase):
         self.assertTrue((self.state / updates.PENDING_FILE).exists())
         self.assertEqual(self.mac.commands, [])
         self.assertEqual(self.stops, [])
-
-    def test_waits_while_a_vm_upgrade_holds_the_maintenance_lock(self):
-        lock = self.state / "linux-vm" / "maintenance.lock"
-        lock.parent.mkdir()
-        with lock.open("a") as lease:
-            fcntl.flock(lease, fcntl.LOCK_EX)
-            self.assertEqual(self.install(), (installer.WAITING, "waiting for the VM maintenance lock"))
-        self.assertEqual(self.mac.commands, [])
-        self.assertEqual(self.install()[0], installer.INSTALLED)
 
     def test_other_certificate_leaves_the_installed_app_unchanged(self):
         (self.staged / "Contents/CERTIFICATE").write_text("Another Signing")
@@ -342,7 +333,7 @@ class BackendRestartAfterSwap(unittest.TestCase):
                        "backend": "rust", "runtimeServer": str(binary)}
         self.identity = {"pid": self.backend.pid, "backendKind": "rust",
                          "backendBuild": installer.recovery.file_sha256(binary)}
-        environment = patch.dict(os.environ, {"CODEX_LINUX_VM_STATE_DIR": str(self.state / "linux-vm")})
+        environment = patch.dict(os.environ, {})
         environment.start()
         self.addCleanup(environment.stop)
 

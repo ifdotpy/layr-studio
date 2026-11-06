@@ -139,14 +139,6 @@ pub struct BarrierCommand {
     deadline: Instant,
     reply: oneshot::Sender<Result<(), PortError>>,
 }
-pub struct VmNotificationCommand {
-    pub(super) scope: ConnectionScope,
-    pub(super) agent_id: String,
-    pub(super) epoch: i64,
-    pub(super) sequence: u64,
-    pub(super) frame: studio_runtime_providers::Frame,
-    pub(super) reply: oneshot::Sender<Result<(), PortError>>,
-}
 #[derive(Clone)]
 pub struct RetainedSessionPort {
     pub(super) scope: ConnectionScope,
@@ -264,70 +256,6 @@ impl RetainedSessionPort {
             .map_err(|_| PortError::Deadline)?
             .map_err(|_| PortError::Identity)?
     }
-
-    /// Commit a guest provider notification through the actor's account worker
-    /// before the guest journal cursor is acknowledged.
-    pub async fn deliver_vm_notification(
-        &self,
-        account: &str,
-        agent_id: &str,
-        epoch: i64,
-        sequence: u64,
-        frame: studio_runtime_providers::Frame,
-    ) -> Result<(), PortError> {
-        let notification = match &frame {
-            studio_runtime_providers::Frame::Notification(_) => true,
-            studio_runtime_providers::Frame::UnknownMethod(frame) => {
-                !frame.fields.contains_key("id")
-            }
-            studio_runtime_providers::Frame::Request(_)
-            | studio_runtime_providers::Frame::Response { .. } => false,
-        };
-        if account != self.scope.account
-            || agent_id.is_empty()
-            || epoch < 0
-            || sequence == 0
-            || !notification
-            || !self.is_live()
-        {
-            return Err(PortError::Identity);
-        }
-        let (reply, receipt) = oneshot::channel();
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
-        tokio::time::timeout_at(
-            deadline,
-            self.commands.send(AccountCommand::VmNotification(Box::new(
-                VmNotificationCommand {
-                    scope: self.scope.clone(),
-                    agent_id: agent_id.to_owned(),
-                    epoch,
-                    sequence,
-                    frame,
-                    reply,
-                },
-            ))),
-        )
-        .await
-        .map_err(|_| PortError::NotSent("send-deadline".into()))?
-        .map_err(|_| PortError::NotSent("worker-send".into()))?;
-        tokio::time::timeout_at(deadline, receipt)
-            .await
-            .map_err(|_| PortError::Unknown)?
-            .map_err(|_| PortError::Unknown)?
-    }
-}
-fn account_refresh_shape(
-    scope: &ConnectionScope,
-    root: &str,
-    operation: &str,
-    method: Method,
-    params: &Value,
-) -> bool {
-    method == Method::AccountRead
-        && operation == format!("vm-codex-token-refresh:{}:{root}", scope.account)
-        && params.as_object().is_some_and(|params| {
-            params.len() == 1 && params.get("refreshToken") == Some(&Value::Bool(true))
-        })
 }
 
 pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
@@ -346,15 +274,7 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
     }
     let actorless_request = request.transfer.is_none()
         && request.actor.is_none()
-        && (valid_actorless_request_shape(request.method, &request.params, &request.operation)
-            || (request.deleted_actor_session.is_none()
-                && account_refresh_shape(
-                    &request.scope,
-                    &request.root_request_id,
-                    &request.operation,
-                    request.method,
-                    &request.params,
-                )));
+        && valid_actorless_request_shape(request.method, &request.params, &request.operation);
     let deleted_voice_stop = request
         .deleted_actor_session
         .as_ref()
@@ -602,7 +522,7 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
     if !(actorless_request || actor_method || transfer_method)
         || request.operation.is_empty()
         || request.operation.len() > 1024
-        || request.params.to_string().len() > 2 * 1024 * 1024
+        || request.params.to_string().len() > max_request_params_bytes(request.method)
         || !request.params.is_object()
         || (request.method == Method::McpServerReconnect
             && (request.expected_scope.as_ref() != Some(&request.scope)
@@ -671,6 +591,16 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
         return Err(PortError::Invalid);
     }
     Ok(())
+}
+
+/// A Claude session import carries the exported session, so it may use most of
+/// one provider frame; other requests keep the small bound.
+fn max_request_params_bytes(method: Method) -> usize {
+    if method == Method::ClaudeMoveImport {
+        studio_runtime_providers::MAX_FRAME_BYTES - 64 * 1024
+    } else {
+        2 * 1024 * 1024
+    }
 }
 
 fn valid_background_terminals_list(params: &Value) -> bool {
@@ -1283,7 +1213,7 @@ pub(crate) fn monitor_command_scope(
 }
 
 /// Whether a host monitor can keep its original process through an account move.
-/// Missing command identity and VM process ownership remain explicit blockers.
+/// Missing command identity remains an explicit blocker.
 pub(crate) fn monitor_survives_account_transfer(
     tx: &rusqlite::Transaction<'_>,
     id: &str,
@@ -1303,7 +1233,7 @@ pub(crate) fn monitor_survives_account_transfer(
         || record.epoch.get() != actor.epoch
         || operation.agent.as_str() != agent
         || operation.epoch.get() != actor.epoch
-        || vm_actor(tx, agent)?
+        || actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
     {
         return Ok(false);
     }
@@ -1463,7 +1393,6 @@ pub(super) struct PendingBarrier {
 mod runtime;
 pub(in crate::account_worker) mod storage;
 pub(super) use storage::recover;
-pub use storage::vm_actor;
 #[cfg(feature = "test-support")]
 pub use storage::{checkpoint_covered, record_outcome, submitted};
 #[cfg(test)]
@@ -2181,6 +2110,30 @@ mod validation_tests {
         assert!(validate(&request).is_ok());
         request.method = Method::ThreadFork;
         assert_eq!(validate(&request), Err(PortError::Invalid));
+    }
+
+    #[test]
+    fn a_claude_session_import_may_carry_a_large_session() {
+        let big = "x".repeat(3 * 1024 * 1024);
+        assert!(super::max_request_params_bytes(Method::ClaudeMoveImport) > big.len());
+        assert!(super::max_request_params_bytes(Method::ThreadStart) < big.len());
+    }
+
+    #[test]
+    fn transfer_source_accepts_a_claude_session_export() {
+        let mut request = turns_request("full", 1, false);
+        request.scope.account = "source-account".into();
+        request.expected_scope = Some(request.scope.clone());
+        request.operation = "transfer:transfer-a:agent-a:move-export".into();
+        request.method = Method::ClaudeMoveExport;
+        request.params = json!({"threadId":"source-thread"});
+        request.transfer = Some(TransferAuthorization {
+            transfer_id: "transfer-a".into(),
+            member: "agent-a".into(),
+            source_account: "source-account".into(),
+            thread_id: "source-thread".into(),
+        });
+        assert_eq!(validate(&request), Ok(()));
     }
 
     #[test]

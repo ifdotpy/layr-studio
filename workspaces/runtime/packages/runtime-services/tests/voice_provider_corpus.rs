@@ -448,7 +448,6 @@ async fn seeded_store() -> (tempfile::TempDir, RuntimeStore) {
     studio_runtime_services::account_worker::attach_provider_stream_for_test(
         &store,
         "account",
-        None,
         1,
         "receipt-matrix-connection",
     )
@@ -463,7 +462,7 @@ fn fixture_directory() -> tempfile::TempDir {
 
 async fn attach_delete_scope(store: &RuntimeStore) {
     studio_runtime_services::account_worker::attach_provider_stream_for_test(
-        store, "account", None, 7, "7",
+        store, "account", 7, "7",
     )
     .await
     .expect("attach voice provider");
@@ -2330,7 +2329,6 @@ async fn voice_start_returns_connecting_before_provider_setup_and_replays_once()
     studio_runtime_services::account_worker::attach_provider_stream_for_test(
         &store,
         "account",
-        None,
         1,
         "delayed-prepare-connection",
     )
@@ -2948,7 +2946,6 @@ async fn start_admission_finishes_before_end_dispatches_stop() {
     studio_runtime_services::account_worker::attach_provider_stream_for_test(
         &store,
         "account",
-        None,
         1,
         "voice-corpus-connection",
     )

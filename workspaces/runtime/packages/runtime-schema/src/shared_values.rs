@@ -1,5 +1,5 @@
-//! Cross-language runtime values. This file is the owner: the web, Swift, and
-//! VM guest copies are rendered from it by `studio-contracts`
+//! Cross-language runtime values. This file is the owner: client copies are
+//! rendered from it by `studio-contracts`
 //! (`pnpm run contracts:generate`), and `pnpm run contracts:check` rejects drift.
 
 /// Native MCP foreground wait before automatic background transfer, in milliseconds.
@@ -56,12 +56,6 @@ pub const MAX_MANAGED_MESSAGE_CODEPOINTS: usize = 32000;
 pub use studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS;
 /// Display label of `MAX_USER_ATTACHMENT_BYTES`.
 pub const USER_ATTACHMENT_LIMIT_LABEL: &str = "20 MiB";
-/// Largest project secret value, in UTF-8 bytes.
-pub const MAX_PROJECT_SECRET_VALUE_BYTES: usize = 16384;
-/// Display label of `MAX_PROJECT_SECRET_VALUE_BYTES`.
-pub const PROJECT_SECRET_VALUE_LIMIT_LABEL: &str = "16 KiB";
-/// Deadline of one project-secrets guest RPC, in seconds.
-pub const PROJECT_SECRETS_GUEST_TIMEOUT_SECONDS: u64 = 30;
 /// Deadline of one `skills/extraRoots/set` call that registers the Chrome skill, in seconds.
 pub const BROWSER_SKILL_TIMEOUT_SECONDS: u64 = 20;
 /// Text that tells a lead, once, that Studio no longer uses its old
@@ -294,12 +288,6 @@ pub const PROVIDER_SESSION_MISSING_ERROR: &str =
     "The saved Claude session of this chat is missing. Start a new thread to continue.";
 /// Refusal of a monitor whose owner stopped its turn: the owner ended it, not Studio.
 pub const MONITOR_OWNER_STOPPED_ERROR: &str = "The agent turn was stopped";
-/// Seconds that the host retries one idempotent Linux VM provider journal read (next,
-/// replay, eventRead, info, status, ack) after a result that the guest could not prove. A
-/// guest supervisor stall shorter than this does not end the provider connection. Writes
-/// are never retried.
-pub const GUEST_PROVIDER_READ_RETRY_SECONDS: u64 = 30;
-
 // Free space of the volume that holds the state directory, in bytes available to Studio
 // (statvfs f_bavail * f_frsize). The desktop warns below WARNING and CRITICAL. Below
 // DISK_FULL_ENTER the disk is full: Studio starts no new turn, and an agent whose turn
@@ -324,40 +312,21 @@ pub const DISK_FULL_MAX_RESUMES: u64 = 5;
 pub const DISK_FULL_ERROR_PATTERN: &str =
     "ENOSPC|No space left on device|database or disk is full|SQLITE_FULL";
 
-// In-place VM guest updates (docs/linux-vm-workspaces.md, "Guest updates"). Provisioning
-// writes the Mac's update key (root only) and the record of the parts that only
-// provisioning installs; the root broker reads both. Paths in the guest.
-/// Guest path of the Mac's update key.
-pub const GUEST_UPDATE_KEY_PATH: &str = "/etc/codex-studio/update-key";
-/// Guest path of the provisioning payload record.
-pub const GUEST_PAYLOAD_RECORD_PATH: &str = "/var/lib/codex-studio/guest-payload.json";
-/// Largest raw file part in one `update.stage` request, in bytes (base64 must fit the
-/// 2 MiB guest frame).
-pub const GUEST_UPDATE_PART_BYTES: usize = 1048576;
-/// The virtiofs tag of the Rosetta for Linux directory share (docs/linux-vm-workspaces.md,
-/// "x86_64 binaries"). The VM helper attaches the share with this tag; the guest mounts it.
-pub const LINUX_VM_ROSETTA_TAG: &str = "rosetta";
-/// Prefix of the guest native provider handle of one agent: the handle is this prefix, then
-/// the agent ID (docs/linux-vm-workspaces.md). The host builds the handle; the guest checks
-/// that a handle names its own agent.
-pub const LINUX_VM_PROVIDER_HANDLE_PREFIX: &str = "linux-worker:";
 /// The longest time that a sign-in request stays open while its command still listens for
-/// the sign-in redirect, in seconds from the request's creation (docs/vm-browser-bridge.md,
-/// "Card lifetime"). The host bridge (`runtime-services/src/browser_host.rs`) and the VM
-/// guest bridge (`vm-guest/browser_bridge.py`) move the deadline of such a request forward
+/// the sign-in redirect, in seconds from the request's creation. The host bridge
+/// (`runtime-services/src/browser_host.rs`) moves the deadline of such a request forward
 /// up to this bound, so the person can still answer the card after the 600 s request time.
-/// It must stay below the 3600 s for which both bridges keep a closed request
+/// It must stay below the 3600 s for which the bridge keeps a closed request
 /// (`KEEP_SECONDS`), so the server still reads the final state of a request at this bound.
 pub const SIGN_IN_OPEN_LIMIT_SECONDS: u64 = 1800;
 /// The error code of a sign-in bridge step that sent nothing to the sign-in command because
 /// the listening ports were unknown (a failed or slow probe). The request stays open and a
-/// retry is safe. The host bridge (`browser_host::NOT_SENT_CODE`), the VM guest bridge and
-/// the server's answers (`browser_answer`) use it.
+/// retry is safe. The host bridge (`browser_host::NOT_SENT_CODE`) and the server's
+/// answers (`browser_answer`) use it.
 pub const SIGN_IN_NOT_SENT_CODE: &str = "not_sent";
 /// The state of a sign-in request that waits on the open request of another chat with the
-/// same Linux user, sign-in host and client ID (its `joinedTo`), instead of a card of its own
-/// (docs/vm-browser-bridge.md, "One card for the same sign-in"). The host bridge
-/// (`browser_host::JOINED`), the VM guest bridge and the card poll (`browser_cards`) use it.
+/// same user, sign-in host and client ID (its `joinedTo`), instead of a card of its own
+/// The host bridge (`browser_host::JOINED`) and the card poll (`browser_cards`) use it.
 pub const SIGN_IN_JOINED_STATE: &str = "joined";
 /// The `closeReason` of a joined sign-in request whose sign-in finished on the card that it
 /// waited on. The card poll tells the joined chat to run its command again.
@@ -428,10 +397,6 @@ mod tests {
             (
                 MAX_USER_ATTACHMENT_BYTES as u64,
                 USER_ATTACHMENT_LIMIT_LABEL,
-            ),
-            (
-                MAX_PROJECT_SECRET_VALUE_BYTES as u64,
-                PROJECT_SECRET_VALUE_LIMIT_LABEL,
             ),
             (MAX_WORKSPACE_PREVIEW_BYTES, WORKSPACE_PREVIEW_LIMIT_LABEL),
         ] {

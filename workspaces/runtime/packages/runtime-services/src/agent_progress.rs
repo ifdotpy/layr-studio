@@ -61,12 +61,7 @@ pub(crate) fn publish_monitor_owner_change(
     before: &studio_runtime_store::MonitorRecord,
     after: &studio_runtime_store::MonitorRecord,
 ) -> StoreResult<()> {
-    if command_progress(before) != command_progress(after)
-        || !transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0)",
-            [&after.agent], |row| row.get::<_, bool>(0),
-        )?
-    {
+    if command_progress(before) != command_progress(after) {
         publish_owner(transaction, &after.agent)?;
     }
     Ok(())
@@ -186,23 +181,10 @@ pub(crate) fn assignments(connection: &Connection, agent_id: &str) -> StoreResul
 /// Publish the owner after a managed-command write, including output-only updates.
 pub(crate) fn publish_owner(transaction: &Transaction<'_>, agent_id: &str) -> StoreResult<()> {
     use studio_runtime_store::{AgentId, AgentRepository};
-    let Some(agent) = AgentRepository::get(transaction, &AgentId::from(agent_id))? else {
+    if AgentRepository::get(transaction, &AgentId::from(agent_id))?.is_none() {
         return Ok(());
-    };
-    let record = agent.value();
-    let server_id = studio_runtime_store::RuntimeStore::transaction_local_server_id(transaction)?;
-    let context =
-        crate::sync_entity_context::agent_view_context(transaction, &record, server_id.as_deref())?;
-    if let Some(view) = crate::sync_views::agent_entity_view(&record, &context) {
-        crate::sync_policy::publish_agent_projection(
-            transaction,
-            agent_id,
-            view,
-            false,
-            &|_, _, _, _| true,
-        )?;
     }
-    Ok(())
+    crate::sync_policy::publish_agent_projection(transaction, agent_id, false)
 }
 
 #[cfg(test)]
@@ -484,7 +466,7 @@ mod tests {
             let mut decision = snapshot.decision();
             decision.record.tail = "first\nlast gate passed".to_owned().try_into().expect("tail");
             crate::monitor_runtime::apply(tx,&snapshot,&actor,&decision,20.0)?;
-            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='agent' AND id='worker'",[],|r|r.get(0)).expect("test fixture value");
+            let raw = crate::entity_scope::direct_document(tx,"agent","worker")?.and_then(|row| row.payload).expect("test fixture value");
             let view: studio_json::Value = studio_json::from_str(&raw).expect("test fixture value");
             assert_eq!(view["value"]["commandProgress"][0]["lastOutputLine"],"last gate passed");
             assert_eq!(AgentRepository::get(tx,&AgentId::from("worker"))?.expect("test fixture value").status,AgentStatus::Running);
@@ -496,13 +478,6 @@ mod tests {
             crate::monitor_runtime::apply(tx, &before, &actor, &repeated, 21.0)?;
             tx.trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, None);
             assert_eq!(AGENT_PUBLICATIONS.with(Cell::get), 0, "unchanged progress should not republish the owner");
-            tx.execute("DELETE FROM sync_entities WHERE collection='agent' AND id='worker'", []).map_err(studio_runtime_store::StoreError::from)?;
-            let (before, actor) = crate::monitor_runtime::snapshot(tx, "m")?;
-            let mut repair = before.decision();
-            repair.record.tail = "last gate passed\nlast gate passed".to_owned().try_into().expect("tail");
-            crate::monitor_runtime::apply(tx, &before, &actor, &repair, 22.0)?;
-            let restored: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id='worker' AND deleted=0)", [], |row| row.get(0)).map_err(studio_runtime_store::StoreError::from)?;
-            assert!(restored, "missing owner projection must be repaired");
             Ok::<(),crate::monitor_policy::MonitorError>(())
         }).await.expect("test fixture value");
     }

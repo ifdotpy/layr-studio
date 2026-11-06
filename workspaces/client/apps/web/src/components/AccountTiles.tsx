@@ -1,7 +1,7 @@
 import { LimitColor } from "../generated/api.ts";
 import type { components } from "../generated/api";
 import { useServerSync } from "../servers/ServerServicesContext";
-import { Badge, Radio, SegmentedControl, Tooltip } from "@mantine/core";
+import { Radio, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check, Sparkles } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { ActionButton } from "./ui/primitives";
@@ -71,21 +71,24 @@ export function AccountTilesLayout({
 }) {
   return (
     <div className="account-tiles" role="group" aria-label={label}>
-      <SegmentedControl
-        fullWidth
-        aria-label={`${label} provider`}
-        value={provider}
-        onChange={onProvider}
-        data={providers.map((value) => ({
-          value,
-          label: (
-            <span className="setup-provider">
-              <ProviderMark provider={value} />
-              {providerLabel(value)}
-            </span>
-          ),
-        }))}
-      />
+      {/* A choice of one provider is no choice; the tiles name it. */}
+      {providers.length > 1 && (
+        <SegmentedControl
+          fullWidth
+          aria-label={`${label} provider`}
+          value={provider}
+          onChange={onProvider}
+          data={providers.map((value) => ({
+            value,
+            label: (
+              <span className="setup-provider">
+                <ProviderMark provider={value} />
+                {providerLabel(value)}
+              </span>
+            ),
+          }))}
+        />
+      )}
       {children}
     </div>
   );
@@ -288,6 +291,7 @@ function AccountTile({
 }
 
 type AccountTilesProps = {
+  automaticDescription?: string | undefined;
   label: string;
   showLabel?: boolean;
   visibleLabel?: string;
@@ -373,12 +377,8 @@ export function AccountTiles(p: AccountTilesProps) {
               <span className="setup-automatic-label">
                 <Sparkles aria-hidden="true" />
                 <span>Automatic</span>
-                <Badge size="xs" variant="light">
-                  Recommended
-                </Badge>
               </span>
             }
-            description="Prefers a free slot, project order, then fewer active agents."
             checked={!selected}
             data-selected={!selected || undefined}
             disabled={p.disabled}
@@ -417,6 +417,12 @@ export function AccountTiles(p: AccountTilesProps) {
             </div>
           ))}
       </div>
+      {p.automatic && !selected && (
+        <p className="account-tiles-help">
+          {p.automaticDescription ||
+            "Picks a free account: project order first, then the least busy."}
+        </p>
+      )}
     </div>
   );
 }

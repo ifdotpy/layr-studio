@@ -66,7 +66,7 @@ This crate owns the shared runtime contracts: `src/shared_values.rs`,
 `src/sync_protocol.rs`, `src/delivery.rs`, `src/provider_kind.rs`,
 `src/provider_method_policy.rs`, `src/token_rate_limits.rs`, `src/records.rs`,
 and `src/studio_errors.rs`. The `studio-contracts`
-binary (`src/contracts.rs`) renders their TypeScript, Swift, and VM guest copies
+binary (`src/contracts.rs`) renders their TypeScript copies
 and the web API types of `runtime-http/openapi.json`, and holds the committed
 OpenAPI and persisted-state schemas to these owners. Refresh the copies with
 `pnpm run contracts:generate`; `pnpm run contracts:check` rejects drift. The

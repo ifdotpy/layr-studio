@@ -149,7 +149,7 @@ pub(super) fn data_fault(error: &WorkerError) -> Option<(String, String)> {
         | WorkerError::Notification(_)
         | WorkerError::Expired
         | WorkerError::PreparationRefused(_)
-        | WorkerError::StaleVmActor
+        | WorkerError::UnavailableActor
         | WorkerError::PreparationPending(_)
         | WorkerError::PreparationAwaitsAgent(_)
         | WorkerError::CleanupUnconfirmed(_)
@@ -220,7 +220,6 @@ pub(super) fn in_savepoint<T>(
 /// error, and one that names no agent, is returned unchanged.
 pub(super) fn isolate<T>(
     tx: &studio_runtime_store::Transaction<'_>,
-    server_id: Option<&str>,
     stage: FaultStage,
     subject: &mut Option<String>,
     apply: impl FnOnce(&mut Option<String>) -> Result<T, WorkerError>,
@@ -239,7 +238,7 @@ pub(super) fn isolate<T>(
     };
     settle_failed()?;
     let detail = error.to_string();
-    let hold = hold_agent(tx, server_id, &agent_id, stage, &detail)?;
+    let hold = hold_agent(tx, &agent_id, stage, &detail)?;
     Ok(Err(AgentFault {
         agent_id,
         stage,
@@ -344,7 +343,6 @@ pub(super) fn hold_message(stage: FaultStage, detail: &str) -> String {
 /// reached the provider, and a reserved event would block every later claim.
 pub(super) fn hold_agent(
     tx: &studio_runtime_store::Transaction<'_>,
-    server_id: Option<&str>,
     agent_id: &str,
     stage: FaultStage,
     detail: &str,
@@ -354,26 +352,48 @@ pub(super) fn hold_agent(
         match AgentRepository::get(tx, &AgentId::from(agent_id)) {
             Ok(None) => Ok(HoldResult::Missing),
             Ok(Some(agent)) => {
-                if agent.status == AgentStatus::Paused
-                    || agent.native_failure_held()
-                    || agent.start_outcome_hold.is_some()
-                {
+                if agent.status == AgentStatus::Paused || agent.native_failure_held() {
                     return Ok(HoldResult::AlreadyHeld);
                 }
                 // A thread request still in flight releases the input itself,
                 // with its reply or its unknown outcome.
+                let pending = if agent.start_outcome_hold.is_some() {
+                    true
+                } else {
+                    match store::has_pending_thread_start(tx, agent_id) {
+                        Ok(pending) => pending,
+                        Err(error) if data_fault(&error).is_some() => true,
+                        Err(error) => return Err(error),
+                    }
+                };
+                let mut terminal =
+                    pending.then_some(studio_runtime_store::TerminalFault::PendingReceipt);
+                if terminal.is_none() && unsubmitted_attempt(&agent).is_none() {
+                    let reserved: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status='reserved')",
+                        [agent_id], |row| row.get(0),
+                    )?;
+                    if reserved {
+                        terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt);
+                    }
+                }
                 if let Some(identity) = unsubmitted_attempt(&agent)
-                    && !store::has_pending_thread_start(tx, agent_id)?
+                    && !pending
                 {
                     match in_savepoint(tx, AGENT_REQUEUE_SAVEPOINT, || {
                         Ok(SchedulerRepository::requeue_unsubmitted_attempt(
                             tx, &identity,
                         )?)
                     })? {
-                        Ok(_) => {}
+                        Ok(true) => {}
+                        Ok(false) => {
+                            terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt)
+                        }
                         // The attempt itself is the invalid data: its input
                         // stays reserved with the held agent.
-                        Err(error) if data_fault(&error).is_some() => {}
+                        Err(error) if data_fault(&error).is_some() => {
+                            terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt)
+                        }
                         Err(error) => return Err(error),
                     }
                 }
@@ -381,12 +401,34 @@ pub(super) fn hold_agent(
                     return Ok(HoldResult::Missing);
                 };
                 agent.status = AgentStatus::Failed;
-                agent.set_native_failure_hold(true);
+                if let Some(fault) = terminal {
+                    agent.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::NativeFailureHold::Terminal {
+                            terminal_fault: fault,
+                        },
+                    );
+                } else {
+                    agent.set_native_failure_hold(true);
+                }
                 agent.auto_wake = Some(false);
                 agent.in_flight = Some(false);
                 agent.error = studio_runtime_schema::queue_command::Field::Value(
                     studio_runtime_schema::provider_errors::AgentError::Message(
-                        (message).to_string(),
+                        if let Some(fault) = terminal {
+                            let cause = match fault {
+                                studio_runtime_store::TerminalFault::InvalidAttempt => {
+                                    "Attempt identity invalid"
+                                }
+                                studio_runtime_store::TerminalFault::PendingReceipt => {
+                                    "Start receipt unresolved"
+                                }
+                            };
+                            format!(
+                                "{cause}: {detail}. Copy the input into a new agent or message."
+                            )
+                        } else {
+                            message.clone()
+                        },
                     ),
                 );
                 AgentRepository::put(tx, &agent)?;
@@ -415,14 +457,7 @@ pub(super) fn hold_agent(
                     reason: reason.clone(),
                 }
                 .to_string();
-                store::hold_invalid_agent_record_in(
-                    tx,
-                    server_id,
-                    agent_id,
-                    &pointer,
-                    &reason,
-                    &diagnostic,
-                )?;
+                store::hold_invalid_agent_record_in(tx, agent_id, &pointer, &reason, &diagnostic)?;
                 Ok(HoldResult::Placed)
             }
             Err(error) => Err(error.into()),
@@ -457,14 +492,13 @@ pub(super) async fn hold_after(
     record: (String, String),
     detail: String,
 ) -> Result<Option<AgentFault>, WorkerError> {
-    let server_id = store.local_server_id()?;
     let hold_detail = detail.clone();
     let held = scheduler::lifecycle_transaction_with(store, move |tx| {
         let (scope, id) = record;
         let Some(agent_id) = fault_agent(tx, &scope, &id, Some(&subject))? else {
             return Ok(None);
         };
-        let hold = hold_agent(tx, server_id.as_deref(), &agent_id, stage, &hold_detail)?;
+        let hold = hold_agent(tx, &agent_id, stage, &hold_detail)?;
         Ok::<_, WorkerError>(Some((agent_id, hold)))
     })
     .await?;

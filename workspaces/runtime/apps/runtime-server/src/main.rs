@@ -38,7 +38,7 @@ use studio_runtime_store::path_identity::CanonicalPath;
 
 use axum::Extension;
 use rusqlite::OptionalExtension;
-use studio_runtime_http::{HttpState, VaultJobOwner, router};
+use studio_runtime_http::{HttpState, router};
 use studio_runtime_server::handover;
 use studio_runtime_services::account_driver::{
     AccountDriver, create_default_registry, resolve_codex_home,
@@ -69,7 +69,7 @@ const STARTUP_TRACE_ENV: &str = "CODEX_STUDIO_STARTUP_TRACE";
 
 /// Durable inputs that can enqueue or unblock a server-to-server delivery.
 const ORCHESTRATION_WAKE_TABLES: [ObservedTable; 3] = [
-    // The shared outbox holds server requests and federation messages. A write wakes both schedulers.
+    // Both remote delivery families share this outbox.
     ObservedTable::RuntimeOutbox,
     ObservedTable::AccessClients,
     ObservedTable::ServerLinks,
@@ -87,7 +87,15 @@ const FEDERATION_WAKE_TABLES: [ObservedTable; 6] = [
 fn observe_table_wakes(store: &RuntimeStore, tables: &[ObservedTable], wake: Arc<Notify>) {
     for table in tables {
         let wake = Arc::clone(&wake);
-        store.add_table_change_observer(*table, move || wake.notify_one());
+        if *table == ObservedTable::RuntimeOutbox {
+            store.add_outbox_change_observer(move |local_only| {
+                if !local_only {
+                    wake.notify_one();
+                }
+            });
+        } else {
+            store.add_table_change_observer(*table, move || wake.notify_one());
+        }
     }
 }
 
@@ -122,16 +130,6 @@ fn main() -> std::process::ExitCode {
     // The launcher of agent sign-in links runs this binary (`browser_host::write_launcher`).
     #[cfg(unix)]
     if let Some(code) = studio_runtime_services::browser_host::shim_main(env::args_os()) {
-        std::process::exit(code);
-    }
-    // The Linux VM helper in its own session (`linux_vm_runtime::TrampolineLauncher`).
-    #[cfg(unix)]
-    if let Some(code) = studio_runtime_services::linux_vm_runtime::helper_main(env::args_os()) {
-        std::process::exit(code);
-    }
-    // The Mac host_exec service of a VM state folder (`host_exec_service::lifecycle`).
-    #[cfg(unix)]
-    if let Some(code) = studio_runtime_services::host_exec_service::main(env::args_os()) {
         std::process::exit(code);
     }
     // The standby copy of a live handover holds the socket and no state (src/handover.rs).
@@ -354,20 +352,6 @@ fn panic_observed_log(location: Option<&std::panic::Location<'_>>) -> String {
     format!("runtime server observed panic{location} (payload redacted)")
 }
 
-/// The vault writer layr-desk runs: configure the VM writer from the configuration on standard input.
-#[cfg(unix)]
-fn vault_configure(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let [vm_state_dir, source] = args else {
-        return Err("vault-configure requires a VM state directory and a project folder".into());
-    };
-    let given: studio_json::Value = studio_json::from_reader(std::io::stdin())?;
-    let guest = studio_runtime_services::linux_vm_guest::UnixGuestRpc::new(vm_state_dir);
-    let result =
-        studio_runtime_services::vault::configure(&guest, Path::new(vm_state_dir), source, &given)?;
-    println!("{}", studio_json::to_string_pretty(&result)?);
-    Ok(())
-}
-
 async fn run(
     shutdown_requested: Sender<()>,
 ) -> Result<Option<handover::Handed>, Box<dyn std::error::Error>> {
@@ -382,10 +366,6 @@ async fn run(
         .any(|argument| argument == handover::TAKEOVER_ARG);
     let resume = args.iter().any(|argument| argument == handover::RESUME_ARG);
     args.retain(|argument| argument != handover::TAKEOVER_ARG && argument != handover::RESUME_ARG);
-    #[cfg(unix)]
-    if args.first().map(String::as_str) == Some(studio_runtime_services::vault::WRITER_SUBCOMMAND) {
-        return vault_configure(&args[1..]).map(|()| None);
-    }
     if args.first().map(String::as_str) == Some("state-check") {
         let state_dir = args
             .get(1)
@@ -742,13 +722,6 @@ async fn run(
             .with_peer_link_advert(Arc::clone(&peer_link_advert))
             .with_peer_link_token(&peer_link_token);
     }
-    #[cfg(unix)]
-    {
-        let guest = studio_runtime_services::linux_vm_guest::UnixGuestRpc::for_runtime_state(
-            &PathBuf::from(&state_dir),
-        );
-        state = state.with_project_secrets_guest_rpc(Arc::new(guest));
-    }
     account_driver.recover_codex_logins()?;
     state = state.with_native_runtime(Arc::clone(&native_runtime));
     state.account_session = Some(Arc::clone(&account_session));
@@ -923,11 +896,6 @@ async fn run(
     }
     let sync_changes = state.sync_changes_handle();
     let cost_scan_cancelled = state.cost_scan_cancellation_handle();
-    let vault_job_owner = VaultJobOwner::start(
-        Arc::clone(&sync_changes),
-        state.resource_notifications_handle(),
-    );
-    state = state.with_vault_job_client(vault_job_owner.client());
     state.initialize_bounded_entities().await?;
     let app = match router(state.clone()) {
         Ok(app) => {
@@ -949,17 +917,13 @@ async fn run(
             {
                 let terminal_cleanup = shutdown_io_runtime(Arc::clone(&io_runtime)).await;
                 let runtime_cleanup = runtime_shutdown::close(runtime, &state).await;
-                let vault_jobs_cleanup = vault_job_owner.shutdown().await;
                 terminal_cleanup?;
                 runtime_cleanup?;
-                vault_jobs_cleanup?;
             }
             #[cfg(not(unix))]
             {
                 let services_cleanup = state.shutdown_services().await;
-                let vault_jobs_cleanup = vault_job_owner.shutdown().await;
                 services_cleanup?;
-                vault_jobs_cleanup?;
             }
             return Err(error);
         }
@@ -1028,7 +992,7 @@ async fn run(
         monitor_runtime,
         monitor_shutdown.subscribe(),
     );
-    // Sign-in links of agents (docs/vm-browser-bridge.md): the host bridge of native chats
+    // Sign-in links of agents: the host bridge of native chats
     // serves the launcher and control sockets; one poll for each source writes the cards.
     #[cfg(unix)]
     let browser_host = match studio_runtime_services::browser_host::HostBridgeService::start(
@@ -1062,7 +1026,7 @@ async fn run(
     let approval_expiry_task = state
         .callback_runtime()
         .map(|runtime| tokio::spawn(runtime.run_expiry(monitor_shutdown.subscribe())));
-    // Links that agents give for a sign-in (docs/vm-browser-bridge.md, section 7): the
+    // Links that agents give for a sign-in: the
     // `orchestration_sign_in` tool and sign-in links in completed messages reach the same
     // bridges and cards.
     let sign_in_sources =
@@ -1453,9 +1417,6 @@ async fn run(
             peer_link.shutdown().await;
         }
         federation_cancelled.store(true, std::sync::atomic::Ordering::Release);
-        let vault_jobs_cleanup =
-            shutdown_join("vault job owner", vault_job_owner.shutdown()).await?;
-        vault_jobs_cleanup?;
         #[cfg(unix)]
         let history_cleanup = shutdown_join("history runtime task", history_task).await?;
         #[cfg(unix)]
@@ -2117,6 +2078,278 @@ mod targeted_scheduler_wake_tests {
     use std::time::Duration;
     use studio_runtime_store::RuntimeStore;
     use tokio::sync::Notify;
+
+    #[tokio::test]
+    #[ignore]
+    async fn outbox_wake_measurement() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_services::multi_server_orchestration::{
+            HttpsPairedTransport, OrchestrationDriver, RuntimeOrchestrationEffects,
+        };
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        let driver = OrchestrationDriver::new(
+            store.clone(),
+            Arc::new(HttpsPairedTransport::new(store.clone())),
+            Arc::new(RuntimeOrchestrationEffects::new(store.clone())),
+        );
+        let mut counts = (0, 0);
+        for n in 0..20 {
+            store
+                .transaction(move |tx| {
+                    Outbox::put(
+                        tx,
+                        &OutboxRow {
+                            id: n.to_string(),
+                            kind: if n % 2 == 0 {
+                                OutboxKind::JournalEntry
+                            } else {
+                                OutboxKind::Publication
+                            },
+                            owner_kind: OwnerKind::Account,
+                            owner_id: "account".into(),
+                            request_id: None,
+                            signature: "sig".into(),
+                            status: OutboxStatus::Pending,
+                            account: None,
+                            stream_id: None,
+                            generation: None,
+                            ordinal: None,
+                            next_at: None,
+                            payload: studio_test_deps::EmptyObject {},
+                            created: 1,
+                        },
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            if tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_ok()
+            {
+                counts.0 += 1;
+                driver.pump_due(1).await.unwrap();
+                driver.next_due_at().await.unwrap();
+            }
+            if tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_ok()
+            {
+                counts.1 += 1;
+                studio_runtime_services::federation::snapshot(&store)
+                    .await
+                    .unwrap();
+            }
+        }
+        println!(
+            "wake counts: orchestration={}, federation={}",
+            counts.0, counts.1
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn typed_local_outbox_writes_leave_remote_schedulers_quiet() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        for kind in [OutboxKind::JournalEntry, OutboxKind::Publication] {
+            store
+                .transaction(move |tx| {
+                    Outbox::put(
+                        tx,
+                        &OutboxRow {
+                            id: format!("{kind:?}"),
+                            kind,
+                            owner_kind: OwnerKind::Account,
+                            owner_id: "account".into(),
+                            request_id: None,
+                            signature: "sig".into(),
+                            status: OutboxStatus::Pending,
+                            account: None,
+                            stream_id: None,
+                            generation: None,
+                            ordinal: None,
+                            next_at: None,
+                            payload: studio_test_deps::EmptyObject {},
+                            created: 1,
+                        },
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                tokio::time::timeout(Duration::ZERO, federation.notified())
+                    .await
+                    .is_err()
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unclassified_mixed_overflow_and_remote_outbox_wake_both() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        use studio_runtime_store::remote_outbox::{RemoteEffect, RemoteOutbox};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        for scenario in 0..8 {
+            store.transaction(move |tx| {
+                if scenario == 0 || scenario == 1 {
+                    tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES(?1,'journal_entry','account','account','sig','pending','{}',1)", [format!("raw-{scenario}")])?;
+                }
+                if scenario == 1 || scenario == 2 || scenario == 7 {
+                    for n in 0..if scenario == 2 { studio_runtime_store::CHANGED_ROW_HINT_LIMIT + 1 } else { 1 } {
+                        Outbox::put(tx, &OutboxRow {
+                            id: format!("typed-{scenario}-{n}"), kind: OutboxKind::JournalEntry,
+                            owner_kind: OwnerKind::Account, owner_id: "account".into(), request_id: None,
+                            signature: "sig".into(), status: OutboxStatus::Pending, account: None,
+                            stream_id: None, generation: None, ordinal: None, next_at: None,
+                            payload: studio_test_deps::EmptyObject {}, created: 1,
+                        })?;
+                    }
+                }
+                if scenario == 5 {
+                    tx.execute("UPDATE runtime_outbox SET status='committed' WHERE id='raw-0'", [])?;
+                }
+                if scenario == 6 {
+                    tx.execute("DELETE FROM runtime_outbox WHERE id='raw-0'", [])?;
+                }
+                if scenario == 3 || scenario == 4 || scenario == 7 {
+                    RemoteOutbox::put(tx, if scenario == 3 { RemoteEffect::ServerRequest } else { RemoteEffect::FederationMessage }, "peer", &format!("remote-{scenario}"), "sig", OutboxStatus::Pending, Some(1), studio_test_deps::EmptyObject {}, 1)?;
+                }
+                Ok(())
+            }).await.unwrap();
+            assert!(
+                tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                    .await
+                    .is_ok(),
+                "scenario {scenario}"
+            );
+            assert!(
+                tokio::time::timeout(Duration::ZERO, federation.notified())
+                    .await
+                    .is_ok(),
+                "scenario {scenario}"
+            );
+        }
+        let result = store
+            .transaction(|tx| {
+                Outbox::put(
+                    tx,
+                    &OutboxRow {
+                        id: "rolled-back".into(),
+                        kind: OutboxKind::JournalEntry,
+                        owner_kind: OwnerKind::Account,
+                        owner_id: "account".into(),
+                        request_id: None,
+                        signature: "sig".into(),
+                        status: OutboxStatus::Pending,
+                        account: None,
+                        stream_id: None,
+                        generation: None,
+                        ordinal: None,
+                        next_at: None,
+                        payload: studio_test_deps::EmptyObject {},
+                        created: 1,
+                    },
+                )?;
+                Err::<(), _>(studio_runtime_store::StoreError::WriterPoisoned)
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rollback_hints_do_not_suppress_next_raw_outbox_write() {
+        use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        use studio_runtime_store::outbox::{Outbox, OutboxRow};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let orchestration = Arc::new(Notify::new());
+        let federation = Arc::new(Notify::new());
+        observe_table_wakes(&store, &ORCHESTRATION_WAKE_TABLES, orchestration.clone());
+        observe_table_wakes(&store, &FEDERATION_WAKE_TABLES, federation.clone());
+        let result = store
+            .transaction(|tx| {
+                Outbox::put(
+                    tx,
+                    &OutboxRow {
+                        id: "rollback-before-raw".into(),
+                        kind: OutboxKind::JournalEntry,
+                        owner_kind: OwnerKind::Account,
+                        owner_id: "account".into(),
+                        request_id: None,
+                        signature: "sig".into(),
+                        status: OutboxStatus::Pending,
+                        account: None,
+                        stream_id: None,
+                        generation: None,
+                        ordinal: None,
+                        next_at: None,
+                        payload: studio_test_deps::EmptyObject {},
+                        created: 1,
+                    },
+                )?;
+                Err::<(), _>(studio_runtime_store::StoreError::WriterPoisoned)
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_err()
+        );
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES('raw-after-rollback','remote_delivery','account','account','sig','pending','{}',1)", [])?;
+            Ok(())
+        }).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::ZERO, orchestration.notified())
+                .await
+                .is_ok()
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, federation.notified())
+                .await
+                .is_ok()
+        );
+    }
 
     #[tokio::test]
     async fn unrelated_event_commit_does_not_wake_orchestration_but_outbox_commit_does() {

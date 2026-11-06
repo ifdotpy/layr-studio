@@ -859,6 +859,7 @@ function Checkpoints(c: Context) {
               </p>
             )}
             <Button
+              variant="filled"
               color="orange"
               disabled={!preview.canRestore}
               loading={busy}
@@ -1288,6 +1289,7 @@ function Profiles(c: Context) {
           instructions.
         </p>
         <Button
+          variant="filled"
           color="red"
           loading={busy}
           onClick={async () => {
@@ -1673,6 +1675,7 @@ function Rules(c: Context) {
       >
         <p>Delete “{remove?.name}”?</p>
         <Button
+          variant="filled"
           color="red"
           loading={busy}
           onClick={() => remove && void act(remove, "delete")}

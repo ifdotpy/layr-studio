@@ -43,6 +43,7 @@ fn worker_defaults(value: &generated::WorkerDefaults) -> WorkerDefaults {
 
 fn review_defaults(value: &generated::ReviewDefaults) -> ReviewDefaults {
     ReviewDefaults {
+        account_key: nullable_field!(value.account_key.clone()),
         model: value.model.clone().map_or(Field::Null, Field::Value),
         effort: value.effort.clone().map_or(Field::Null, Field::Value),
         fast_mode: value.fast_mode,
@@ -80,7 +81,6 @@ fn lead_intent(body: &generated::CreateLeadRequest) -> CreationIntent {
         ),
         workspace_mode: body.workspace_mode.as_ref().map(|mode| match mode {
             generated::CreateLeadRequestWorkspaceMode::LayrNative => WorkspaceMode::LayrNative,
-            generated::CreateLeadRequestWorkspaceMode::Layr => WorkspaceMode::Layr,
             generated::CreateLeadRequestWorkspaceMode::Worktree => WorkspaceMode::Worktree,
         }),
         yolo_mode: body.yolo_mode,
@@ -128,7 +128,6 @@ fn agent_intent(body: &generated::CreateAgentRequest) -> CreationIntent {
         ),
         workspace_mode: body.workspace_mode.as_ref().map(|mode| match mode {
             generated::CreateAgentRequestWorkspaceMode::LayrNative => WorkspaceMode::LayrNative,
-            generated::CreateAgentRequestWorkspaceMode::Layr => WorkspaceMode::Layr,
             generated::CreateAgentRequestWorkspaceMode::Worktree => WorkspaceMode::Worktree,
             generated::CreateAgentRequestWorkspaceMode::Shared => WorkspaceMode::Shared,
         }),
@@ -300,34 +299,11 @@ pub(super) fn prepare_parent_workspace(
     // child mode is independently validated and provisioned by creation.
     let mode = actor.workspace_mode;
     if mode == Some(studio_runtime_schema::records::WorkspaceMode::Layr) {
-        let project_id = actor
-                .extra
-                .get("layrProjectId")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
-                    "The parent layr line is not ready",
-                ))?;
-        let line = actor
-                .extra
-                .get("layrLine")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
-                    "The parent layr line is not ready",
-                ))?;
-        if actor.layr_ready != Some(true) {
-            return Err(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
-                    "The parent layr line is not ready",
-                ));
-        }
-        return Ok(Box::new(VmManagedWorkspace {
-            id,
-            epoch,
-            cwd: cwd.to_owned(),
-            project_id: project_id.to_owned(),
-            line: line.to_owned(),
-        }));
+        return Err(
+            studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
+                "The parent workspace mode is unavailable",
+            ),
+        );
     }
     if mode == Some(studio_runtime_schema::records::WorkspaceMode::Image) {
         return Err(
@@ -349,6 +325,17 @@ pub(super) fn prepare_parent_workspace(
 #[cfg(test)]
 mod workspace_admission_tests {
     use super::*;
+
+    #[test]
+    fn legacy_layr_parent_is_refused() {
+        let parent = studio_runtime_store::AgentRecord::from_value(studio_json::json!({
+            "compactions":0,"accountKey":"default","id":"parent","rootId":"parent",
+            "epoch":1,"status":"queued","workspaceMode":"layr","cwd":"/guest/line",
+            "layrReady":true,"layrProjectId":"project","layrLine":"main"
+        }))
+        .unwrap();
+        assert!(prepare_parent_workspace(&parent).is_err());
+    }
 
     #[test]
     fn lead_intent_preserves_native_store_override_for_replay() {
@@ -549,39 +536,6 @@ struct HostManagedWorkspace {
     cwd: String,
 }
 
-struct VmManagedWorkspace {
-    id: String,
-    epoch: i64,
-    cwd: String,
-    project_id: String,
-    line: String,
-}
-
-impl studio_runtime_services::monitor_runtime::WorkspaceAdmission for VmManagedWorkspace {
-    fn check(
-        &self,
-        _tx: &studio_runtime_store::Transaction<'_>,
-        actor: &studio_runtime_store::AgentRecord,
-    ) -> Result<(), studio_runtime_services::monitor_policy::MonitorError> {
-        let extra = &actor.extra;
-        if actor.id.0 != self.id
-            || actor.epoch != self.epoch
-            || actor.cwd.as_deref() != Some(self.cwd.as_str())
-            || actor.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
-            || actor.layr_ready != Some(true)
-            || actor.layr_project_id.as_deref() != Some(self.project_id.as_str())
-            || extra.get("layrLine").and_then(Value::as_str) != Some(self.line.as_str())
-        {
-            return Err(
-                studio_runtime_services::monitor_policy::MonitorError::Refused(
-                    "VM workspace changed during preparation",
-                ),
-            );
-        }
-        Ok(())
-    }
-}
-
 impl studio_runtime_services::monitor_runtime::WorkspaceAdmission for HostManagedWorkspace {
     fn check(
         &self,
@@ -766,11 +720,6 @@ pub(crate) fn routes() -> RouteGroup {
             "/api/agents/workspace-mode",
             OperationStatus::Implemented,
             switch_workspace_mode,
-        ),
-        post(
-            "/api/agents/move-to-host",
-            OperationStatus::Implemented,
-            move_to_host,
         ),
         post("/api/configure", OperationStatus::Implemented, configure),
         post(
@@ -1009,11 +958,18 @@ async fn create_lead_with_model(
     }
     if let Some(Some(review)) = body.review_defaults.as_ref() {
         let review_account = body
-            .worker_defaults
+            .review_defaults
             .as_ref()
             .and_then(Option::as_ref)
             .and_then(|defaults| defaults.account_key.as_ref())
-            .and_then(Option::as_deref);
+            .and_then(Option::as_deref)
+            .or_else(|| {
+                body.worker_defaults
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .and_then(|defaults| defaults.account_key.as_ref())
+                    .and_then(Option::as_deref)
+            });
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
@@ -1458,55 +1414,6 @@ async fn switch_workspace_mode(
     super::generated_json(result).map(Json)
 }
 
-/// Move an idle VM chat tree to this device (`vm_to_host`).
-async fn move_to_host(
-    State(state): State<HttpState>,
-    ApiJson(body): ApiJson<generated::AgentMoveToHostRequest>,
-) -> Result<Json<generated::AgentMoveToHostResponse>, ApiError> {
-    use studio_runtime_services::linux_vm_guest::UnixGuestRpc;
-    use studio_runtime_services::vm_to_host::{Host, MacFiles, MoveError, move_to_host};
-    let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let driver = state
-        .account_driver
-        .clone()
-        .ok_or_else(ApiError::internal)?;
-    let accounts = studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-http/routes/move-to-host",
-        move || driver.snapshot(),
-    )
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| ApiError::internal())?
-    .accounts;
-    let guest = std::sync::Arc::new(UnixGuestRpc::new(state.vm_state_dir.clone()));
-    let host = std::sync::Arc::new(Host {
-        guest: guest.clone(),
-        files: std::sync::Arc::new(MacFiles {
-            guest,
-            vm_state_dir: state.vm_state_dir.clone(),
-        }),
-        state_dir: std::path::PathBuf::from(&state.state_dir),
-        accounts,
-        free_bytes: studio_runtime_services::disk_space::free_bytes,
-    });
-    let result = move_to_host(&store, &host, &body.id, &body.request_id)
-        .await
-        .map_err(|error| match error {
-            MoveError::Refused(_) => ApiError::new(StatusCode::CONFLICT, error.to_string()),
-            MoveError::Failed(_) | MoveError::Store(_) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
-            }
-        })?;
-    state.event_wake.notify_one();
-    Ok(Json(generated::AgentMoveToHostResponse {
-        id: result.id,
-        cwd: result.cwd,
-        moved_agents: result.moved_agents,
-        execution_mode: generated::AgentMoveToHostResponseExecutionMode::Native,
-        workspace_mode: generated::AgentMoveToHostResponseWorkspaceMode::Shared,
-    }))
-}
-
 async fn conversation(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<generated::ConversationRequest>,
@@ -1635,10 +1542,17 @@ async fn conversation(
         } else {
             None
         };
-        let review_account = review_settings_catalog_account(
-            request.worker_defaults.as_ref(),
-            stored_worker_account.as_deref(),
-        );
+        let review_account = request
+            .review_defaults
+            .as_ref()
+            .and_then(|defaults| defaults.account_key.value())
+            .cloned()
+            .or_else(|| {
+                review_settings_catalog_account(
+                    request.worker_defaults.as_ref(),
+                    stored_worker_account.as_deref(),
+                )
+            });
         let review_model = request
             .review_defaults
             .as_ref()

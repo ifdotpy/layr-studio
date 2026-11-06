@@ -19,12 +19,8 @@ pub use desktop::{backend_build_identity, initialize_backend_identity};
 mod entity_transfer;
 pub(crate) mod extractors;
 mod federation;
-mod host_secrets;
-pub use host_secrets::{VaultJobClient, VaultJobOwner};
 pub(crate) mod incoming_multi_server;
 mod insights;
-mod linux_vm_settings;
-mod mac_sync;
 pub(crate) mod manifest;
 mod mcp_reconnect;
 mod messages;
@@ -55,13 +51,15 @@ mod sync_stream;
 pub(crate) use sync_stream::SyncSessions;
 #[cfg(test)]
 pub(crate) use sync_stream::SyncStreamQuery;
+#[cfg(feature = "bench-support")]
+#[doc(hidden)]
+pub use sync_stream::sse_event;
 mod system_reads;
 mod terminals;
 mod tool_requests;
 mod transcript;
 mod usage;
 mod usage_reconciliation;
-pub(crate) mod vm_native_provider;
 pub(crate) mod voice;
 mod web_push;
 mod work_items;
@@ -193,7 +191,8 @@ mod registration_tests {
     }
 
     fn route_directory() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/routes")
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("src/routes")
     }
 
     #[test]
@@ -259,6 +258,28 @@ mod registration_tests {
                 .flat_map(|registration| registration.dependencies.iter())
                 .all(|dependency| dependencies.contains(dependency))
         );
+    }
+
+    #[test]
+    fn removed_vm_routes_are_not_registered() {
+        let operations = super::manifest::operation_manifest().expect("valid route manifest");
+        for operation in operations {
+            assert!(!matches!(
+                operation.path(),
+                "/api/linux-vm/settings"
+                    | "/api/mac-sync/config"
+                    | "/api/mac-sync/resolve"
+                    | "/api/agents/move-to-host"
+                    | "/api/project-secrets/list"
+                    | "/api/project-secrets/remove"
+                    | "/api/project-secrets/set"
+                    | "/api/vault/aws-login"
+                    | "/api/vault/pull"
+                    | "/api/vault/setup"
+                    | "/api/vault/setup/facts"
+                    | "/api/vault/unlock"
+            ));
+        }
     }
 
     #[test]

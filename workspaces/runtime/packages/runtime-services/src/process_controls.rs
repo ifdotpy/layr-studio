@@ -254,10 +254,14 @@ fn retained_monitor_scope(
     {
         return Ok(None);
     }
-    match crate::account_worker::retained::vm_actor(tx, operation.agent.as_str()) {
-        Ok(false) => {}
-        Err(crate::account_worker::WorkerError::Store(error)) => return Err(Error::Store(error)),
-        _ => return Ok(None),
+    let actor = studio_runtime_store::AgentRepository::get(
+        tx,
+        &studio_runtime_store::AgentId::from(operation.agent.as_str()),
+    )?;
+    if actor.is_some_and(|actor| {
+        actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+    }) {
+        return Ok(None);
     }
     match crate::account_worker::retained::monitor_command_scope(tx, &monitor.id, operation) {
         Ok(scope) => Ok(scope),
@@ -506,6 +510,8 @@ pub enum ProcessSource {
     Task(Box<studio_runtime_store::TaskRecord>),
 }
 
+const TASK_PROCESS_QUERY: &str = "SELECT id,record FROM runtime_tasks INDEXED BY runtime_task_status WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') = ?2";
+
 /// Scoped active commands paired with their already-loaded owners.
 pub fn process_rows<'a>(
     connection: &Connection,
@@ -513,15 +519,12 @@ pub fn process_rows<'a>(
 ) -> Result<Vec<(&'a Value, ProcessSource)>, Error> {
     let mut result = Vec::new();
     for table in ["runtime_monitors", "runtime_tasks"] {
-        let (index, status) = if table == "runtime_monitors" {
-            ("runtime_monitor_agent_status", "IN (?2,?3,?4)")
+        let sql = if table == "runtime_monitors" {
+            "SELECT id,record FROM runtime_monitors INDEXED BY runtime_monitor_agent_status WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN (?2,?3,?4)"
         } else {
-            ("runtime_task_agent_created_id", "= ?2")
+            TASK_PROCESS_QUERY
         };
-        let sql = format!(
-            "SELECT id,record FROM {table} INDEXED BY {index} WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') {status}"
-        );
-        let mut statement = connection.prepare_cached(&sql).map_err(StoreError::from)?;
+        let mut statement = connection.prepare_cached(sql).map_err(StoreError::from)?;
         for owner in owners {
             let id = text(owner, "id", "");
             let statuses = studio_runtime_store::startup_recovery::ACTIVE_MONITOR_STATUSES;
@@ -1267,6 +1270,19 @@ mod claim_identity_tests {
     use studio_runtime_store::request_results::RequestResults;
 
     #[test]
+    fn task_process_query_uses_status_index() {
+        let db = studio_runtime_store::test_canvas();
+        let plan: String = db
+            .query_row(
+                &format!("EXPLAIN QUERY PLAN {TASK_PROCESS_QUERY}"),
+                rusqlite::params!["owner", "running"],
+                |row| row.get(3),
+            )
+            .unwrap();
+        assert!(plan.contains("runtime_task_status"), "{plan}");
+    }
+
+    #[test]
     fn activity_snapshot_prefers_process_then_restores_task_after_exit() {
         let raw = r#"{"id":"command","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":"pid"}"#;
         let task: studio_runtime_store::TaskRecord = studio_json::from_str(raw).unwrap();
@@ -1438,12 +1454,14 @@ mod claim_identity_tests {
             CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
             CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(id);
             CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT);
-            CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(id);
             CREATE TABLE runtime_process_actions(id TEXT PRIMARY KEY,signature TEXT,record TEXT);
             CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT);
             CREATE TABLE effects(count INTEGER);
             INSERT INTO effects VALUES(0);")
             .expect("claim tables");
+        for index in studio_runtime_store::TaskRepository::index_definitions() {
+            db.execute_batch(&index.create_sql).expect("task index");
+        }
         studio_runtime_store::receipt_schema::create(&db).expect("receipt schema");
         let owner = json!({"id":"owner","epoch":3,"accountKey":"account","inFlight":true,
             "threadId":"thread","turnId":"turn"});

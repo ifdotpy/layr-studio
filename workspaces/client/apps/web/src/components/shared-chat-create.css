@@ -22,7 +22,7 @@
   height: auto;
   min-height: 36px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--studio-radius-card);
   background: var(--hover);
   color: var(--text);
 }

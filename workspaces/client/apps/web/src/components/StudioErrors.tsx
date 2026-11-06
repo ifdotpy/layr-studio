@@ -8,7 +8,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Badge, Button, Checkbox, Group, Stack, Text } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  SegmentedControl,
+  Stack,
+  Text,
+} from "@mantine/core";
 import { errorText, type GetResult } from "../api";
 import { clearAppLog, useAppLog } from "../appLog";
 import type { components } from "../generated/api";
@@ -18,11 +26,14 @@ export type StudioErrorItem = GetResult<"/api/studio-errors">["items"][number];
 type Level = components["schemas"]["StudioErrorLevel"];
 export const LEVELS: Level[] = ["critical", "error", "warning", "log"];
 export const LEVEL_COLORS: Record<Level, string> = {
-  critical: "grape",
+  critical: "violet",
   error: "red",
   warning: "orange",
   log: "blue",
 };
+/** Sentence-case level name; labels are never all caps. */
+const levelLabel = (level: Level) =>
+  level.charAt(0).toUpperCase() + level.slice(1);
 const EMPTY_ERRORS: StudioErrorItem[] = [];
 
 export function actionLabel(item: StudioErrorItem) {
@@ -96,28 +107,33 @@ export function StudioErrorList({
     .map((row) => row.item.id);
   return (
     <Stack gap="sm">
-      <Group gap="xs" aria-label="Filter by level">
-        <Button
-          size="xs"
-          variant={filter === null ? "filled" : "light"}
-          onClick={() => setFilter(null)}
-        >
-          All ({rows.length})
-        </Button>
-        {LEVELS.map((level) => (
-          <Button
-            key={level}
-            size="xs"
-            color={LEVEL_COLORS[level]}
-            variant={filter === level ? "filled" : "light"}
-            onClick={() => setFilter(level)}
-          >
-            {level.toUpperCase()} (
-            {rows.filter((row) => row.level === level).length})
-          </Button>
-        ))}
+      <Group gap="xs">
+        <SegmentedControl
+          aria-label="Filter by level"
+          value={filter ?? "all"}
+          onChange={(value) =>
+            setFilter(value === "all" ? null : (value as Level))
+          }
+          data={[
+            { value: "all", label: `All (${rows.length})` },
+            ...LEVELS.map((level) => ({
+              value: level,
+              label: (
+                <span className="studio-error-level">
+                  <span
+                    className="studio-error-dot"
+                    style={{
+                      background: `var(--mantine-color-${LEVEL_COLORS[level]}-filled)`,
+                    }}
+                  />
+                  {`${levelLabel(level)} (${rows.filter((row) => row.level === level).length})`}
+                </span>
+              ),
+            })),
+          ]}
+        />
         {logs.length > 0 && (
-          <Button size="xs" variant="default" onClick={clearAppLog}>
+          <Button size="xs" variant="subtle" onClick={clearAppLog}>
             Clear local logs
           </Button>
         )}
@@ -133,8 +149,8 @@ export function StudioErrorList({
         </Button>
         <Button
           size="xs"
-          color="red"
-          variant="light"
+          variant="default"
+          className="studio-error-delete"
           disabled={busy !== null || selected.size === 0}
           onClick={onDelete}
         >
@@ -159,8 +175,8 @@ export function StudioErrorList({
           {visible.map((row) =>
             row.type === "local" ? (
               <article className="studio-error-row" key={row.item.id}>
-                <Badge color={LEVEL_COLORS[row.level]}>
-                  {row.level.toUpperCase()}
+                <Badge variant="dot" color={LEVEL_COLORS[row.level]}>
+                  {levelLabel(row.level)}
                 </Badge>
                 <Text size="sm">{row.item.title}</Text>
                 <Text size="sm">{row.item.reason}</Text>
@@ -179,8 +195,8 @@ export function StudioErrorList({
                 key={row.item.id}
                 data-kind={row.item.kind}
               >
-                <Badge color={LEVEL_COLORS[row.level]}>
-                  {row.level.toUpperCase()}
+                <Badge variant="dot" color={LEVEL_COLORS[row.level]}>
+                  {levelLabel(row.level)}
                 </Badge>
                 <Checkbox
                   label={ownerLabel(row.item)}

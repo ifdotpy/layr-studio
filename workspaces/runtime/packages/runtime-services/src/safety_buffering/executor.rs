@@ -93,7 +93,7 @@ struct Dispatch {
     state: DispatchState,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "dispatch", rename_all = "snake_case", deny_unknown_fields)]
 enum DispatchState {
     Ready,
@@ -426,14 +426,26 @@ async fn drive(
         let body = if let Some(response) = recorded {
             response
         } else {
-            let (method, params) = request_for_stage(
+            let prepared = request_for_stage(
                 Arc::clone(&store),
                 resources,
                 &operation,
                 stage,
                 scope.generation,
             )
-            .await?;
+            .await;
+            let (method, params) = match prepared {
+                Err(error @ Error::Preparation(_)) => {
+                    let (current, settled) =
+                        persist_preparation_failure(&store, &operation, &error.to_string()).await?;
+                    return if settled {
+                        Err(error)
+                    } else {
+                        operation_public(&current)
+                    };
+                }
+                result => result?,
+            };
             if !persist_intent(
                 &store,
                 &mut operation,
@@ -1302,6 +1314,34 @@ async fn persist_unknown_receipt(
     Ok(still_active)
 }
 
+async fn persist_preparation_failure(
+    store: &RuntimeStore,
+    expected: &SafetyOperation,
+    message: &str,
+) -> Result<(SafetyOperation, bool), Error> {
+    let expected = expected.clone();
+    let message = message.to_owned();
+    store
+        .transaction_with::<_, Error>(move |tx| {
+            let mut current = read_retry(tx, &expected.initial.id)?.ok_or(Error::StaleRetry)?;
+            if current.initial.attempt_id != expected.initial.attempt_id
+                || current.initial.stage != expected.initial.stage
+                || current.dispatch.state != expected.dispatch.state
+                || !matches!(current.dispatch.state, DispatchState::Ready)
+            {
+                return Ok((current, false));
+            }
+            current.initial.stage = Stage::Failed;
+            current.initial.updated = unix_seconds();
+            current.dispatch.state = DispatchState::Rejected;
+            current.error = Some(message);
+            let mut agent = read_agent(tx, &current.initial.agent)?;
+            save_operation(tx, &mut agent, &current)?;
+            Ok((current, true))
+        })
+        .await
+}
+
 async fn persist_operation(
     store: &RuntimeStore,
     operation: &mut SafetyOperation,
@@ -1473,9 +1513,10 @@ mod publication_tests;
 mod initial_receipt_test {
     use super::*;
 
+    const STORED: &str = r#"{"accountKey":"acct","admission":{"created":1793154122023,"id":"[\"safety-retry\",[\"agent\"],\"01a18050-8127-776d-af7a-bd891ba05919\",[\"agent:turn\"]]","signature":"{\"accountKey\":\"acct\",\"agent\":\"agent\",\"attemptId\":\"01a18050-8127-776d-af7a-bd891ba05919\",\"connectionId\":\"connection\",\"created\":1793154122.023043,\"epoch\":7,\"id\":\"agent:turn\",\"model\":\"model-fast\",\"rootRequestId\":\"01a18050-8127-776d-af7a-bd891ba05919\",\"sourceThreadId\":\"thread\",\"stage\":\"turns\",\"threadId\":\"thread\",\"turnId\":\"turn\",\"updated\":1793154122.023043}"},"agent":"agent","attemptId":"01a18050-8127-776d-af7a-bd891ba05919","connectionId":"connection","created":1793154122.023043,"dispatch":"ready","epoch":7,"id":"agent:turn","model":"model-fast","receipts":{},"responses":{},"rootRequestId":"01a18050-8127-776d-af7a-bd891ba05919","scope":{"account":"acct","connection":"connection","generation":1},"sourceThreadId":"thread","stage":"turns","threadId":"thread","turnId":"turn","updated":1793154122.023043}"#;
+
     #[test]
     fn signature_matches_the_stored_corpus_retry() {
-        const STORED: &str = r#"{"accountKey":"acct","admission":{"created":1793154122023,"id":"[\"safety-retry\",[\"agent\"],\"01a18050-8127-776d-af7a-bd891ba05919\",[\"agent:turn\"]]","signature":"{\"accountKey\":\"acct\",\"agent\":\"agent\",\"attemptId\":\"01a18050-8127-776d-af7a-bd891ba05919\",\"connectionId\":\"connection\",\"created\":1793154122.023043,\"epoch\":7,\"id\":\"agent:turn\",\"model\":\"model-fast\",\"rootRequestId\":\"01a18050-8127-776d-af7a-bd891ba05919\",\"sourceThreadId\":\"thread\",\"stage\":\"turns\",\"threadId\":\"thread\",\"turnId\":\"turn\",\"updated\":1793154122.023043}"},"agent":"agent","attemptId":"01a18050-8127-776d-af7a-bd891ba05919","connectionId":"connection","created":1793154122.023043,"dispatch":"ready","epoch":7,"id":"agent:turn","model":"model-fast","receipts":{},"responses":{},"rootRequestId":"01a18050-8127-776d-af7a-bd891ba05919","scope":{"account":"acct","connection":"connection","generation":1},"sourceThreadId":"thread","stage":"turns","threadId":"thread","turnId":"turn","updated":1793154122.023043}"#;
         #[derive(serde::Deserialize)]
         struct Stored {
             admission: AdmittedRequest,
@@ -1498,5 +1539,113 @@ mod initial_receipt_test {
             studio_json::to_string(&initial).unwrap(),
             stored.admission.signature()
         );
+    }
+    #[tokio::test]
+    async fn stale_preparation_failure_preserves_newer_retry_at_fork_and_start() {
+        for stage in [Stage::Fork, Stage::Start] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = Arc::new(RuntimeStore::open(Some(dir.path())).await.unwrap());
+            let mut stale: SafetyOperation = studio_json::from_str(STORED).unwrap();
+            stale.initial.stage = stage;
+            let initial = stale.clone();
+            store.transaction_with(move |tx| {
+                let mut agent = json!({"id":"agent", "rootId":"agent", "epoch":7, "status":"running", "accountKey":"acct", "provider":"codex", "compactions":0});
+                save_operation(tx, &mut agent, &initial)
+            }).await.unwrap();
+            let mut newer = stale.clone();
+            newer.initial.stage = if stage == Stage::Fork {
+                Stage::Start
+            } else {
+                Stage::Running
+            };
+            newer.dispatch.state = DispatchState::Received;
+            newer.accepted_turn_id = Some("accepted-turn".into());
+            let expected = studio_runtime_store::projection_value(&newer);
+            let (release, wait) = tokio::sync::oneshot::channel();
+            let stale_store = Arc::clone(&store);
+            let stale_retry = tokio::spawn(async move {
+                wait.await.unwrap();
+                let (current, settled) =
+                    persist_preparation_failure(&stale_store, &stale, "preparation refused")
+                        .await
+                        .unwrap();
+                assert!(!settled);
+                current
+            });
+            let saved = newer.clone();
+            store.transaction_with(move |tx| {
+                let mut agent = json!({"id":"agent", "rootId":"agent", "epoch":7, "status":"running", "accountKey":"acct", "provider":"codex", "compactions":0});
+                save_operation(tx, &mut agent, &saved)
+            }).await.unwrap();
+            release.send(()).unwrap();
+            let observed = stale_retry.await.unwrap();
+            assert_eq!(studio_runtime_store::projection_value(&observed), expected);
+            let actual = store
+                .transaction_with(|tx| read_retry(tx, "agent:turn"))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(studio_runtime_store::projection_value(&actual), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn current_start_preparation_failure_is_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
+        let mut operation: SafetyOperation = studio_json::from_str(STORED).unwrap();
+        operation.initial.stage = Stage::Start;
+        let saved = operation.clone();
+        store.transaction_with(move |tx| {
+            let mut agent = json!({"id":"agent", "rootId":"agent", "epoch":7, "status":"running", "accountKey":"acct", "provider":"codex", "compactions":0});
+            save_operation(tx, &mut agent, &saved)
+        }).await.unwrap();
+        let (current, settled) =
+            persist_preparation_failure(&store, &operation, "preparation refused")
+                .await
+                .unwrap();
+        assert!(settled);
+        assert_eq!(current.initial.stage, Stage::Failed);
+        assert_eq!(current.error.as_deref(), Some("preparation refused"));
+    }
+
+    #[tokio::test]
+    async fn dispatched_start_ignores_preparation_failure_and_accepts_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
+        let mut operation: SafetyOperation = studio_json::from_str(STORED).unwrap();
+        operation.initial.stage = Stage::Start;
+        operation.dispatch.state = DispatchState::Intent;
+        let saved = operation.clone();
+        store.transaction_with(move |tx| {
+            let mut agent = json!({"id":"agent", "rootId":"agent", "epoch":7, "status":"starting", "accountKey":"acct", "provider":"codex", "compactions":0, "startAttempt":{"id":saved.initial.attempt_id,"epoch":7,"submitted":true,"events":[]}});
+            save_operation(tx, &mut agent, &saved)
+        }).await.unwrap();
+        let (current, settled) =
+            persist_preparation_failure(&store, &operation, "preparation refused")
+                .await
+                .unwrap();
+        assert!(!settled);
+        assert!(matches!(current.dispatch.state, DispatchState::Intent));
+        let receipt = SessionReceipt {
+            scope: operation.scope.clone(),
+            operation: "agent:turn:start".into(),
+            outcome: ReceiptOutcome::Written {
+                ticket: studio_runtime_providers::RequestTicket {
+                    generation: 1,
+                    id: RequestId::String("ticket".into()),
+                    method: Method::TurnStart,
+                },
+                response: ProviderResponse::Reply(json!({"turn":{"id":"accepted-turn"}})),
+            },
+            replayed: false,
+        };
+        assert!(
+            persist_stage_receipt(&store, &mut operation, Stage::Start, &receipt)
+                .await
+                .unwrap()
+        );
+        assert!(matches!(operation.dispatch.state, DispatchState::Received));
+        assert_eq!(operation.receipts["start"].len(), 1);
     }
 }

@@ -96,7 +96,9 @@ fn recover_requests(tx: &Transaction<'_>, now: f64) -> Result<usize, MonitorErro
                 }
             }
             ApprovalState::Pending
-                if !retained_question(tx, &row)? && !retained_monitor_approval(tx, &row)? =>
+                if !retained_question(tx, &row)?
+                    && !retained_monitor_approval(tx, &row)?
+                    && !supervised_provider_request(&row) =>
             {
                 // A sign-in request lives in its bridge across the restart; the card poll gives
                 // the card back while that request is open (`browser_cards::apply`).
@@ -121,7 +123,6 @@ fn recover_requests(tx: &Transaction<'_>, now: f64) -> Result<usize, MonitorErro
         let apply = (|| {
             studio_runtime_store::approvals::put(tx, &row)
                 .map_err(studio_runtime_store::StoreError::from)?;
-            crate::approval_sync::publish(tx, &row)?;
             Ok::<(), MonitorError>(())
         })();
         if let Err(error) = apply {
@@ -146,6 +147,15 @@ fn recover_requests(tx: &Transaction<'_>, now: f64) -> Result<usize, MonitorErro
 }
 
 /// Monitor approvals are local durable intents, independent of a native turn.
+/// A provider request of a process under the supervisor. The process may still run
+/// and wait for the answer, so the card stays. The account worker closes it at its
+/// start when the provider generation changed (`expire_ended_generations`).
+fn supervised_provider_request(row: &studio_runtime_schema::approvals::Approval) -> bool {
+    row.delivery
+        .as_ref()
+        .is_some_and(|delivery| delivery.supervisor.is_some())
+}
+
 fn retained_monitor_approval(
     tx: &Transaction<'_>,
     row: &studio_runtime_schema::approvals::Approval,
@@ -487,14 +497,13 @@ pub async fn answer_approval(
                 typed::CommandId(request_id.clone()),
             )
             .map_err(studio_runtime_store::StoreError::from)?;
-            let answered = studio_runtime_store::approvals::confirm_delivery(
+            studio_runtime_store::approvals::confirm_delivery(
                 tx,
                 &id,
                 typed::Principal::Owner,
                 typed::Timestamp(now),
             )
             .map_err(studio_runtime_store::StoreError::from)?;
-            crate::approval_sync::publish(tx, &answered)?;
             Ok(Some(MonitorApprovalAnswer {
                 response: json!({"status":"answered"}),
                 accepted,
@@ -898,7 +907,6 @@ pub fn apply_with_rule(
                     };
                     studio_runtime_store::approvals::put(tx, &request)
                         .map_err(studio_runtime_store::StoreError::from)?;
-                    crate::approval_sync::publish(tx, &request)?;
                 }
             }
             Effect::Probe { .. } | Effect::Terminate | Effect::Native { .. } => (),
@@ -1545,7 +1553,7 @@ pub fn create_in_transaction(
     repository::put(tx, &record)?;
     crate::agent_progress::publish_owner(tx, &actor.id.0)?;
     if record.status == studio_runtime_schema::studio_errors::MonitorStatus::Approval {
-        let approval = studio_runtime_store::approvals::create(
+        studio_runtime_store::approvals::create(
             tx,
             studio_runtime_store::approvals::NewApproval {
                 id: studio_runtime_schema::approvals::ApprovalId(format!("monitor-approval:{id}")),
@@ -1572,7 +1580,6 @@ pub fn create_in_transaction(
             studio_runtime_schema::approvals::Timestamp(now),
         )
         .map_err(studio_runtime_store::StoreError::from)?;
-        crate::approval_sync::publish(tx, &approval)?;
     }
     let after = MonitorSnapshot::checked_stored(&record, actor_value)?;
     crate::sync_policy::publish_monitor_change(tx, None, &after)?;
@@ -1932,6 +1939,83 @@ mod recovery_selection_tests {
                 "duplicate-unknown-last",
                 "z-running"
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use studio_runtime_schema::approvals::{
+        AgentId, ApprovalId, ApprovalState, CloseReason, Delivery, Detail, ProviderObject, Request,
+        RpcId, Supervisor, Timestamp, TurnId,
+    };
+    use studio_runtime_store::approvals;
+
+    fn provider_request(id: &str, supervisor: Option<Supervisor>) -> approvals::NewApproval {
+        approvals::NewApproval {
+            id: ApprovalId(id.into()),
+            agent: AgentId("agent".into()),
+            turn: Some(TurnId("turn".into())),
+            epoch: None,
+            request: Request::Exec {
+                command: "ls".into(),
+                cwd: "/".into(),
+                reason: None,
+            },
+            delivery: Some(Delivery {
+                rpc_id: RpcId::Number { value: 7 },
+                account: "default".into(),
+                connection: "connection".into(),
+                supervisor,
+            }),
+            detail: Detail {
+                params: ProviderObject(Default::default()),
+                preview: None,
+                answer_error: None,
+                host_close_reason: None,
+            },
+            fire_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restart_keeps_the_pending_requests_of_supervised_providers() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("store");
+        let states = store
+            .transaction_with::<_, super::MonitorError>(|tx| {
+                let supervised = Supervisor {
+                    generation: 3,
+                    state_dir: None,
+                    handle: Some("handle".into()),
+                };
+                approvals::create(
+                    tx,
+                    provider_request("kept", Some(supervised)),
+                    Timestamp(1.0),
+                )
+                .map_err(studio_runtime_store::StoreError::from)?;
+                approvals::create(tx, provider_request("closed", None), Timestamp(1.0))
+                    .map_err(studio_runtime_store::StoreError::from)?;
+                super::recover_requests(tx, 10.0)?;
+                let state = |id: &str| {
+                    approvals::get(tx, &ApprovalId(id.into()))
+                        .map(|row| row.expect("row").state)
+                        .map_err(studio_runtime_store::StoreError::from)
+                };
+                Ok((state("kept")?, state("closed")?))
+            })
+            .await
+            .expect("recovery");
+        assert_eq!(states.0, ApprovalState::Pending);
+        assert_eq!(
+            states.1,
+            ApprovalState::Closed {
+                reason: CloseReason::SessionLost,
+                at: Timestamp(10.0)
+            }
         );
     }
 }

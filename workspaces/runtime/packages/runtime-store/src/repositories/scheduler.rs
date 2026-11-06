@@ -247,7 +247,6 @@ mod tests {
                 &crate::agent_columns::fixture_sql("CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,account TEXT,epoch INTEGER,thread TEXT,turn TEXT,created REAL,record TEXT);
                  CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT,record TEXT);
                  CREATE TABLE runtime_execution_inputs(run TEXT,event TEXT,PRIMARY KEY(run,event));
-                 CREATE TABLE runtime_completed_turns(id TEXT PRIMARY KEY);
                  CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_events(
                    id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,
@@ -256,7 +255,7 @@ mod tests {
                  CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,
                    PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER);
-                 CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);"),
+                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);"),
             )
             .expect("scheduler tables create");
         connection
@@ -455,6 +454,8 @@ mod tests {
             .unwrap();
         agent.in_flight = Some(true);
         agent.auto_wake = Some(true);
+        agent.start_wait =
+            Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: 4 });
         AgentRepository::put(&connection, &agent).unwrap();
         let transaction = connection.transaction().expect("recovery transaction");
         SchedulerRepository::hold_unclean_starts(&transaction).expect("hold uncertain start");
@@ -465,6 +466,10 @@ mod tests {
             .expect("agent remains");
         assert_eq!(agent.in_flight, Some(false));
         assert_eq!(agent.auto_wake, Some(false));
+        assert!(
+            agent.start_wait.is_none(),
+            "an uncertain start is not still waiting"
+        );
         let statuses: Vec<String> = connection
             .prepare("SELECT status FROM runtime_events WHERE id IN ('first','tie') ORDER BY id")
             .expect("statuses")
@@ -473,6 +478,31 @@ mod tests {
             .collect::<Result<_, _>>()
             .expect("decode");
         assert_eq!(statuses, ["uncertain", "uncertain"]);
+    }
+
+    #[test]
+    fn unclean_startup_skips_terminal_invalid_attempt() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        SchedulerRepository::claim(&tx, "agent", 4, "attempt", 10.0, 2).unwrap();
+        tx.commit().unwrap();
+        let mut agent = AgentRepository::get(&connection, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        agent.start_attempt.as_mut().unwrap().id = None;
+        agent.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+            crate::NativeFailureHold::Terminal {
+                terminal_fault: crate::TerminalFault::InvalidAttempt,
+            },
+        );
+        AgentRepository::put(&connection, &agent).unwrap();
+        let tx = connection.transaction().unwrap();
+        assert_eq!(SchedulerRepository::hold_unclean_starts(&tx).unwrap(), 0);
+        assert_eq!(SchedulerRepository::recover_unsubmitted(&tx).unwrap(), 0);
+        let saved = AgentRepository::get(&tx, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.native_failure_hold, agent.native_failure_hold);
     }
 
     #[test]
@@ -503,6 +533,41 @@ mod tests {
             )
             .expect("reserved count reads");
         assert_eq!(reserved, 0);
+    }
+
+    #[test]
+    fn restart_requeue_clears_persisted_workspace_copy_wait() {
+        let mut connection = database();
+        let transaction = connection.transaction().unwrap();
+        SchedulerRepository::claim(&transaction, "agent", 4, "attempt", 10.0, 2).unwrap();
+        transaction.commit().unwrap();
+        let mut agent = AgentRepository::get(&connection, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        agent.start_wait = Some(
+            studio_runtime_schema::agent_progress::AgentStartWait::WorkspaceCopy {
+                epoch: 4,
+                progress: studio_runtime_schema::layr_progress::CopyProgress {
+                    phase: studio_runtime_schema::layr_progress::CopyPhase::Staging,
+                    done: 2,
+                    total: Some(4),
+                    unit: studio_runtime_schema::layr_progress::CopyUnit::Files,
+                },
+            },
+        );
+        AgentRepository::put(&connection, &agent).unwrap();
+        let transaction = connection.transaction().unwrap();
+        assert_eq!(
+            SchedulerRepository::recover_unsubmitted(&transaction).unwrap(),
+            2
+        );
+        transaction.commit().unwrap();
+        let recovered = AgentRepository::get(&connection, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.epoch, 4);
+        assert_eq!(recovered.status, AgentStatus::Queued);
+        assert!(recovered.start_wait.is_none());
     }
 
     #[test]

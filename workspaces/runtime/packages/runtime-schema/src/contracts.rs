@@ -1,4 +1,4 @@
-//! The render target of the Rust-owned contracts: the web, Swift, and VM guest
+//! The render target of the Rust-owned contracts: the web
 //! copies of the constants in this crate, and the web API types of the
 //! committed `openapi.json`. `studio-contracts --check` (`pnpm run
 //! contracts:check`) rejects drift; `--write` (`pnpm run contracts:generate`)
@@ -204,14 +204,6 @@ fn shared_values_ts() -> String {
                 json_string(values::USER_ATTACHMENT_LIMIT_LABEL),
             ),
             (
-                "MAX_PROJECT_SECRET_VALUE_BYTES",
-                values::MAX_PROJECT_SECRET_VALUE_BYTES.to_string(),
-            ),
-            (
-                "PROJECT_SECRET_VALUE_LIMIT_LABEL",
-                json_string(values::PROJECT_SECRET_VALUE_LIMIT_LABEL),
-            ),
-            (
                 "ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS",
                 values::ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS.to_string(),
             ),
@@ -328,14 +320,6 @@ fn shared_values_ts() -> String {
             (
                 "BACKEND_RESTARTED_TURN_ERROR",
                 values::BACKEND_RESTARTED_TURN_ERROR,
-            ),
-            (
-                "VM_PROVIDER_DISCONNECTED_TURN_ERROR",
-                values::VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-            ),
-            (
-                "LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR",
-                values::LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
             ),
             ("DISK_FULL_ERROR_PATTERN", values::DISK_FULL_ERROR_PATTERN),
         ],
@@ -541,30 +525,6 @@ fn api_types_tail() -> String {
         json_string(crate::SYNC_ENTITY_SCOPE),
         crate::TOKEN_RATE_MAX_ENTRIES,
         crate::TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS,
-    )
-}
-
-fn vm_guest_py() -> String {
-    format!(
-        "# {HEADER}\nMAX_PROJECT_SECRET_VALUE_BYTES = {}\nPROJECT_SECRET_VALUE_LIMIT_LABEL = {}\nGUEST_UPDATE_KEY_PATH = {}\nGUEST_PAYLOAD_RECORD_PATH = {}\nGUEST_UPDATE_PART_BYTES = {}\nLINUX_VM_ROSETTA_TAG = {}\nLINUX_VM_PROVIDER_HANDLE_PREFIX = {}\nSIGN_IN_OPEN_LIMIT_SECONDS = {}\nSIGN_IN_NOT_SENT_CODE = {}\nSIGN_IN_JOINED_STATE = {}\nSIGN_IN_JOINED_SIGNED_IN_REASON = {}\n",
-        values::MAX_PROJECT_SECRET_VALUE_BYTES,
-        json_string(values::PROJECT_SECRET_VALUE_LIMIT_LABEL),
-        json_string(values::GUEST_UPDATE_KEY_PATH),
-        json_string(values::GUEST_PAYLOAD_RECORD_PATH),
-        values::GUEST_UPDATE_PART_BYTES,
-        json_string(values::LINUX_VM_ROSETTA_TAG),
-        json_string(values::LINUX_VM_PROVIDER_HANDLE_PREFIX),
-        values::SIGN_IN_OPEN_LIMIT_SECONDS,
-        json_string(values::SIGN_IN_NOT_SENT_CODE),
-        json_string(values::SIGN_IN_JOINED_STATE),
-        json_string(values::SIGN_IN_JOINED_SIGNED_IN_REASON),
-    )
-}
-
-fn linux_vm_swift() -> String {
-    format!(
-        "// {HEADER}\nlet LINUX_VM_ROSETTA_TAG = {}\n",
-        json_string(values::LINUX_VM_ROSETTA_TAG)
     )
 }
 
@@ -866,8 +826,6 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
         "ResourceTokenRatesEvent",
         "AuthProgressEvent",
         "RenameProgressEvent",
-        "VaultReadinessEvent",
-        "VaultJobProgressEvent",
     ] {
         for bound in ["const", "minimum", "maximum"] {
             expect_number(
@@ -1312,6 +1270,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name]["properties"]["status"] =
             studio_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
     }
+    openapi["components"]["schemas"]["AgentSummaryEntityDto"]["properties"]["startWait"] = studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/AgentEntityStartWaitDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["QueueItem"]["properties"]["status"] =
         studio_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
     openapi["components"]["schemas"]["MessageRecord"]["properties"]["status"] = studio_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
@@ -1694,15 +1653,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 &api_schema::schema_hash(&openapi),
             ),
         },
-        Rendered {
-            path: "workspaces/runtime/apps/vm-guest/shared_values_generated.py".into(),
-            text: vm_guest_py(),
-        },
-        Rendered {
-            path: "workspaces/client/apps/desktop/native/linux-vm/shared_values_generated.swift"
-                .into(),
-            text: linux_vm_swift(),
-        },
     ];
     // The workspace envelope remains a legacy input; its eligibility leaf is
     // generated from the same Rust owner as the HTTP and SSE contracts.
@@ -2039,9 +1989,16 @@ pub fn stale(root: &Path, rendered: &[Rendered]) -> Vec<String> {
         .collect()
 }
 
-/// The repository root of this source tree.
+/// The repository root of this source tree. Cargo sets `CARGO_MANIFEST_DIR`
+/// for `cargo run` and `cargo test`. It is read at run time: a path baked in at
+/// compile time names one checkout, so a copied build cache must rebuild this
+/// crate and every crate that depends on it. Without cargo, the current
+/// directory is the root.
 pub fn repository_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
+    std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(
+        || PathBuf::from("."),
+        |dir| Path::new(&dir).join("../../../.."),
+    )
 }
 
 #[cfg(test)]
@@ -2345,12 +2302,6 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             rendered
                 .iter()
                 .all(|file| !file.path.starts_with("workspaces/runtime/apps/server/"))
-        );
-        assert!(
-            rendered
-                .iter()
-                .any(|file| file.path
-                    == "workspaces/runtime/apps/vm-guest/shared_values_generated.py")
         );
         assert_eq!(
             stale(&root, &rendered),

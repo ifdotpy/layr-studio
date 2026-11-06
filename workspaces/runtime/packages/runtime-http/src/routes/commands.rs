@@ -14,7 +14,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json, extract::State};
 use studio_json::Value;
 use studio_runtime_schema::command::{
-    Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow, LeadMessageResult,
+    Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow, DeleteResult,
+    LeadMessageResult,
 };
 use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
 use studio_runtime_services::commands::{self, CommandError, Start};
@@ -83,7 +84,11 @@ async fn command(
         | Command::Stop { .. }
         | Command::Resolve { .. }
         | Command::Pause { .. }
+<<<<<<< head
         | Command::RestoreDeletedRoot { .. }
+=======
+        | Command::Delete { .. }
+>>>>>>> main
         | Command::LeadMessage { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, request) = (ports.clone(), request.clone());
@@ -229,6 +234,19 @@ async fn command(
     };
     let outcome = match (answer, &request.command) {
         (Some(result), _) => CommandOutcome::Answer { result },
+        (None, Command::Delete { target, .. }) => {
+            let chat = target.as_str().to_owned();
+            CommandOutcome::Delete {
+                result: DeleteResult {
+                    deleted: store
+                        .read_async("runtime-http/routes/commands/delete", move |connection| {
+                            commands::chat_tree(connection, &chat)
+                        })
+                        .await
+                        .map_err(command_error)?,
+                },
+            }
+        }
         (None, Command::LeadMessage { .. }) => CommandOutcome::LeadMessage {
             result: LeadMessageResult {
                 id: reference.id.clone(),
@@ -948,6 +966,46 @@ mod tests {
             before + 1,
             "the replay changes nothing"
         );
+    }
+
+    #[tokio::test]
+    async fn delete_removes_the_chat_tree_once_and_replays_the_same_list() {
+        let (app, store, directory) = app_with_queue().await;
+        let cwd = directory.path().to_string_lossy().into_owned();
+        store.transaction(move |tx| {
+            AgentRepository::put(tx, &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"worker","rootId":"other","parentId":"other","epoch":0,"status":"idle","cwd":cwd,"provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
+            Ok(())
+        }).await.expect("seed worker");
+        let id = RequestIdentity::issue_root();
+        let body = json!({"id":id.as_str(),"client":"web-1","number":1,"kind":"delete","target":"other","body":{}});
+        let (status, first) = post(&app, None, body.clone()).await;
+        assert_eq!(status, 200, "{first}");
+        assert_eq!(first["kind"], "delete");
+        assert_eq!(first["result"]["deleted"], json!(["other", "worker"]));
+        let deleted = |id: &'static str| {
+            let store = store.clone();
+            async move {
+                store
+                    .read_async("test/deleted", move |connection| {
+                        Ok::<_, studio_runtime_store::StoreError>(connection.query_row(
+                            "SELECT json_extract(record,'$.deletedAt') IS NOT NULL FROM runtime_agents WHERE id=?1",
+                            [id],
+                            |row| row.get::<_, bool>(0),
+                        )?)
+                    })
+                    .await
+                    .expect("read")
+            }
+        };
+        assert!(deleted("other").await && deleted("worker").await);
+        assert!(
+            !deleted("workspace").await,
+            "only the target tree is deleted"
+        );
+        let (status, again) = post(&app, None, body).await;
+        assert_eq!(status, 200, "{again}");
+        assert_eq!(again["result"], first["result"]);
+        assert_eq!(again["rev"], first["rev"]);
     }
 
     #[tokio::test]

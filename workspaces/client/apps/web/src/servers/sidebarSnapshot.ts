@@ -67,6 +67,8 @@ export function sidebarAgent(agent: Agent): Agent {
     "movedFrom",
     "moveImportPending",
     "status",
+    "epoch",
+    "startWait",
     "inFlight",
     "autoWake",
     "empty",
@@ -129,9 +131,6 @@ export function sidebarSnapshot(
         "accountGroupsRevision",
         "created",
         "updated",
-        "layrReadiness",
-        "layrSync",
-        "vault",
       ]),
     ),
     rooms: (runtime?.rooms || []).map((room) =>

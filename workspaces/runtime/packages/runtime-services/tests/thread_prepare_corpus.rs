@@ -29,7 +29,7 @@ fn snapshot(value: &Value) -> Snapshot {
 fn attempt(outcome: Outcome) -> PreparedAttempt {
     match outcome {
         Outcome::Start(value) | Outcome::Resume(value) => *value,
-        other @ Outcome::Ready(_) | other @ Outcome::Hold(_) | other @ Outcome::Refuse(_) => {
+        other @ Outcome::Ready(_) | other @ Outcome::Refuse(_) => {
             panic!("expected preparation, got {other:?}")
         }
     }
@@ -70,7 +70,10 @@ fn every_hold_releases_and_accepts_without_consuming_input() {
             }
         }
         let unchanged = s.clone();
-        assert_eq!(plan(&s, "attempt", "ticket"), Outcome::Hold(reason));
+        assert_eq!(
+            plan(&s, "attempt", "ticket"),
+            Outcome::Refuse(Refusal::Blocked(reason))
+        );
         assert_eq!(s, unchanged);
         // Adapter observation (ready workspace/account, resolved repair/release/
         // transfer, replacement connection, reopened runtime) clears the gate.
@@ -101,7 +104,6 @@ fn every_hold_releases_and_accepts_without_consuming_input() {
 fn named_refusals_have_no_intents_and_preserve_snapshot() {
     for refusal in [
         Refusal::ImageWorkspace,
-        Refusal::VmWorkspace,
         Refusal::NativeCatalogMutation,
         Refusal::PortableHistoryImport,
         Refusal::FrozenImport,
@@ -111,7 +113,6 @@ fn named_refusals_have_no_intents_and_preserve_snapshot() {
         let mut s = snapshot(&baseline());
         match refusal {
             Refusal::ImageWorkspace => s.workspace = WorkspaceReadiness::Image,
-            Refusal::VmWorkspace => s.workspace = WorkspaceReadiness::Vm,
             Refusal::NativeCatalogMutation
             | Refusal::PortableHistoryImport
             | Refusal::FrozenImport
@@ -121,7 +122,8 @@ fn named_refusals_have_no_intents_and_preserve_snapshot() {
             | Refusal::MissingGuidance
             | Refusal::EmptyThreadIdentity
             | Refusal::PreparationIdentity
-            | Refusal::MalformedCatalog => s.unsupported = Some(refusal),
+            | Refusal::MalformedCatalog
+            | Refusal::Blocked(_) => s.unsupported = Some(refusal),
         }
         let before = s.clone();
         assert_eq!(plan(&s, "attempt", "ticket"), Outcome::Refuse(refusal));
@@ -150,7 +152,7 @@ fn unknown_then_late_receipt_and_replaced_connection_are_safe() {
     );
     assert_eq!(
         plan(&s, "new", "ticket"),
-        Outcome::Hold(HoldReason::PreparationPending)
+        Outcome::Refuse(Refusal::Blocked(HoldReason::PreparationPending))
     );
     assert!(matches!(
         reduce_receipt(&old, &s, Some(&receipt(&old)), None, json!(0)),

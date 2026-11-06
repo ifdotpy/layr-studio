@@ -355,13 +355,6 @@
         "type": "index"
       },
       {
-        "create_order": 261,
-        "name": "durable_view_log_seq",
-        "sql": "CREATE INDEX durable_view_log_seq ON durable_view_log(seq)",
-        "table": "durable_view_log",
-        "type": "index"
-      },
-      {
         "create_order": 15,
         "name": "messages_room",
         "sql": "CREATE INDEX messages_room ON messages(room, at)",
@@ -636,8 +629,8 @@
       },
       {
         "create_order": 46,
-        "name": "runtime_event_repair_candidates_v2",
-        "sql": "CREATE INDEX runtime_event_repair_candidates_v2 ON runtime_events(agent,created)\n                  WHERE status='delivered' AND kind IN ('monitor_exit','agent_message','work_review','work_decision')",
+        "name": "runtime_event_repair_candidates_v3",
+        "sql": "CREATE INDEX runtime_event_repair_candidates_v3 ON runtime_events(agent,created,id)\n                  WHERE status='delivered' AND kind IN ('monitor_exit','agent_message','work_review','work_decision')",
         "table": "runtime_events",
         "type": "index"
       },
@@ -1167,13 +1160,6 @@
         "type": "table"
       },
       {
-        "create_order": 260,
-        "name": "durable_view_log",
-        "sql": "CREATE TABLE durable_view_log(\n             collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,\n             deleted INTEGER NOT NULL, PRIMARY KEY(collection,id))",
-        "table": "durable_view_log",
-        "type": "table"
-      },
-      {
         "create_order": 16,
         "name": "graph_edges",
         "sql": "CREATE TABLE graph_edges (\n                  id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL,\n                  kind TEXT NOT NULL, UNIQUE(source, target, kind))",
@@ -1388,13 +1374,6 @@
         "name": "runtime_complaints",
         "sql": "CREATE TABLE runtime_complaints (id TEXT PRIMARY KEY, record TEXT NOT NULL)",
         "table": "runtime_complaints",
-        "type": "table"
-      },
-      {
-        "create_order": 63,
-        "name": "runtime_completed_turns",
-        "sql": "CREATE TABLE runtime_completed_turns (id TEXT PRIMARY KEY)",
-        "table": "runtime_completed_turns",
         "type": "table"
       },
       {
@@ -1930,27 +1909,6 @@
         "type": "trigger"
       },
       {
-        "create_order": 267,
-        "name": "durable_runtime_agents_delete",
-        "sql": "CREATE TRIGGER durable_runtime_agents_delete AFTER DELETE ON runtime_agents BEGIN\n  UPDATE durable_floor SET floor=MAX(floor,\n    (SELECT MAX(seq) FROM durable_rows WHERE deleted=1 AND at<CAST(strftime('%s','now') AS INTEGER)-7776000))\n  WHERE id=1 AND EXISTS(SELECT 1 FROM durable_rows WHERE deleted=1 AND at<CAST(strftime('%s','now') AS INTEGER)-7776000);\n  DELETE FROM durable_rows WHERE deleted=1 AND at<CAST(strftime('%s','now') AS INTEGER)-7776000;\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES('runtime_agents',OLD.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),1,CAST(strftime('%s','now') AS INTEGER))\n             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at;\nEND",
-        "table": "runtime_agents",
-        "type": "trigger"
-      },
-      {
-        "create_order": 265,
-        "name": "durable_runtime_agents_insert",
-        "sql": "CREATE TRIGGER durable_runtime_agents_insert AFTER INSERT ON runtime_agents BEGIN\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES('runtime_agents',NEW.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),0,0)\n             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at;\nEND",
-        "table": "runtime_agents",
-        "type": "trigger"
-      },
-      {
-        "create_order": 266,
-        "name": "durable_runtime_agents_update",
-        "sql": "CREATE TRIGGER durable_runtime_agents_update AFTER UPDATE ON runtime_agents BEGIN\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES('runtime_agents',NEW.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),0,0)\n             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at;\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at)\n    SELECT 'runtime_agents',OLD.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),1,CAST(strftime('%s','now') AS INTEGER) WHERE OLD.id IS NOT NEW.id\n    ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=1,at=excluded.at;\nEND",
-        "table": "runtime_agents",
-        "type": "trigger"
-      },
-      {
         "create_order": 276,
         "name": "durable_runtime_items_delete",
         "sql": "CREATE TRIGGER durable_runtime_items_delete AFTER DELETE ON runtime_items BEGIN\n  UPDATE durable_floor SET floor=MAX(floor,\n    (SELECT MAX(seq) FROM durable_rows WHERE deleted=1 AND at<CAST(strftime('%s','now') AS INTEGER)-7776000))\n  WHERE id=1 AND EXISTS(SELECT 1 FROM durable_rows WHERE deleted=1 AND at<CAST(strftime('%s','now') AS INTEGER)-7776000);\n  DELETE FROM durable_rows WHERE deleted=1 AND at<CAST(strftime('%s','now') AS INTEGER)-7776000;\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES('runtime_items',OLD.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),1,CAST(strftime('%s','now') AS INTEGER))\n             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at;\nEND",
@@ -2011,27 +1969,6 @@
         "name": "durable_runtime_work_update",
         "sql": "CREATE TRIGGER durable_runtime_work_update AFTER UPDATE ON runtime_work BEGIN\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES('runtime_work',NEW.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),0,0)\n             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at;\n  INSERT INTO durable_rows(tbl,id,seq,deleted,at)\n    SELECT 'runtime_work',OLD.id,(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+1 FROM (\n    SELECT COALESCE(MAX(seq),0) AS entity_seq FROM sync_entities),\n    (SELECT COALESCE(MAX(seq),0) AS document_seq FROM sync_documents),\n    (SELECT COALESCE(MAX(value),0) AS generation FROM sync_generation WHERE id=1),\n    (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows)),1,CAST(strftime('%s','now') AS INTEGER) WHERE OLD.id IS NOT NEW.id\n    ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=1,at=excluded.at;\nEND",
         "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 264,
-        "name": "durable_view_log_delete",
-        "sql": "CREATE TRIGGER durable_view_log_delete AFTER DELETE ON sync_entities\n         WHEN OLD.collection IN ('agent','agentSummary','agentDetail','retainedWorktree','questionHistory','request','work','workDetail','workResult','workDecision','workRelease') BEGIN\n             DELETE FROM durable_view_log WHERE collection=OLD.collection AND id=OLD.id; END",
-        "table": "sync_entities",
-        "type": "trigger"
-      },
-      {
-        "create_order": 262,
-        "name": "durable_view_log_insert",
-        "sql": "CREATE TRIGGER durable_view_log_insert AFTER INSERT ON sync_entities\n         WHEN NEW.collection IN ('agent','agentSummary','agentDetail','retainedWorktree','questionHistory','request','work','workDetail','workResult','workDecision','workRelease') BEGIN INSERT INTO durable_view_log(collection,id,seq,deleted)\n         VALUES(NEW.collection,NEW.id,NEW.seq,NEW.deleted)\n         ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted; END",
-        "table": "sync_entities",
-        "type": "trigger"
-      },
-      {
-        "create_order": 263,
-        "name": "durable_view_log_update",
-        "sql": "CREATE TRIGGER durable_view_log_update AFTER UPDATE ON sync_entities\n         WHEN NEW.collection IN ('agent','agentSummary','agentDetail','retainedWorktree','questionHistory','request','work','workDetail','workResult','workDecision','workRelease') BEGIN INSERT INTO durable_view_log(collection,id,seq,deleted)\n         VALUES(NEW.collection,NEW.id,NEW.seq,NEW.deleted)\n         ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted; END",
-        "table": "sync_entities",
         "type": "trigger"
       },
       {
@@ -2105,27 +2042,6 @@
         "type": "trigger"
       },
       {
-        "create_order": 295,
-        "name": "runtime_completed_turns_read_only_delete",
-        "sql": "CREATE TRIGGER runtime_completed_turns_read_only_delete BEFORE DELETE ON runtime_completed_turns\n             BEGIN SELECT RAISE(ABORT,'runtime_completed_turns is read only; use turns'); END",
-        "table": "runtime_completed_turns",
-        "type": "trigger"
-      },
-      {
-        "create_order": 293,
-        "name": "runtime_completed_turns_read_only_insert",
-        "sql": "CREATE TRIGGER runtime_completed_turns_read_only_insert BEFORE INSERT ON runtime_completed_turns\n             BEGIN SELECT RAISE(ABORT,'runtime_completed_turns is read only; use turns'); END",
-        "table": "runtime_completed_turns",
-        "type": "trigger"
-      },
-      {
-        "create_order": 294,
-        "name": "runtime_completed_turns_read_only_update",
-        "sql": "CREATE TRIGGER runtime_completed_turns_read_only_update BEFORE UPDATE ON runtime_completed_turns\n             BEGIN SELECT RAISE(ABORT,'runtime_completed_turns is read only; use turns'); END",
-        "table": "runtime_completed_turns",
-        "type": "trigger"
-      },
-      {
         "create_order": 258,
         "name": "runtime_event_revision",
         "sql": "CREATE TRIGGER runtime_event_revision AFTER UPDATE OF status,text ON runtime_events\n         WHEN OLD.status IS NOT NEW.status OR OLD.text IS NOT NEW.text\n         BEGIN INSERT INTO runtime_event_revisions(id,rev) VALUES(NEW.id,2)\n               ON CONFLICT(id) DO UPDATE SET rev=rev+1; END",
@@ -2196,13 +2112,6 @@
         "type": "trigger"
       },
       {
-        "create_order": 226,
-        "name": "summary_retainedWorktree_delete",
-        "sql": "CREATE TRIGGER summary_retainedWorktree_delete AFTER DELETE ON runtime_agents BEGIN\n             INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)\n             SELECT 'retainedWorktree',OLD.id,(SELECT max(seq)+1 FROM (\n                 SELECT COALESCE(MAX(seq),0) seq FROM sync_entities UNION ALL\n                 SELECT MAX(COALESCE(MAX(seq),0),COALESCE((SELECT value FROM sync_generation WHERE id=1),0)) FROM sync_documents UNION ALL\n                 SELECT COALESCE(MAX(seq),0) FROM durable_rows)),\n                 sync_entity_hash(json_object('collection','retainedWorktree','id',OLD.id,'value',json('{}'))),json_object('collection','retainedWorktree','id',OLD.id,'value',json('{}')),1\n             WHERE EXISTS(SELECT 1 FROM sync_entities WHERE collection='retainedWorktree' AND id=OLD.id AND deleted=0)\n             ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,hash=excluded.hash,payload=excluded.payload,deleted=1;\n             END",
-        "table": "runtime_agents",
-        "type": "trigger"
-      },
-      {
         "create_order": 224,
         "name": "summary_task_delete",
         "sql": "CREATE TRIGGER summary_task_delete AFTER DELETE ON runtime_tasks BEGIN\n             INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)\n             SELECT 'task',OLD.id,(SELECT max(seq)+1 FROM (\n                 SELECT COALESCE(MAX(seq),0) seq FROM sync_entities UNION ALL\n                 SELECT MAX(COALESCE(MAX(seq),0),COALESCE((SELECT value FROM sync_generation WHERE id=1),0)) FROM sync_documents UNION ALL\n                 SELECT COALESCE(MAX(seq),0) FROM durable_rows)),\n                 sync_entity_hash(json_object('collection','task','id',OLD.id,'value',json('{}'))),json_object('collection','task','id',OLD.id,'value',json('{}')),1\n             WHERE EXISTS(SELECT 1 FROM sync_entities WHERE collection='task' AND id=OLD.id AND deleted=0)\n             ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,hash=excluded.hash,payload=excluded.payload,deleted=1;\n             END",
@@ -2241,27 +2150,6 @@
         "create_order": 140,
         "name": "sync_entity_scope_tombstone_delete",
         "sql": "CREATE TRIGGER sync_entity_scope_tombstone_delete\nAFTER DELETE ON sync_entities BEGIN\n  DELETE FROM sync_entity_meta WHERE key='entity_scope_tombstone:' || json_array(OLD.collection,OLD.id);\nEND",
-        "table": "sync_entities",
-        "type": "trigger"
-      },
-      {
-        "create_order": 139,
-        "name": "sync_entity_scope_tombstone_update",
-        "sql": "CREATE TRIGGER sync_entity_scope_tombstone_update\nAFTER UPDATE OF deleted ON sync_entities\nWHEN OLD.deleted IS NOT NEW.deleted AND NEW.collection!='agentSummary' BEGIN\n  INSERT INTO sync_entity_meta(key,value)\n  SELECT 'entity_scope_tombstone:' || json_array(OLD.collection,OLD.id), json_group_array(identity)\n  FROM (\n    SELECT json_array(OLD.collection,json_extract(OLD.payload,'$.value.rootId')) AS identity\n      WHERE json_extract(OLD.payload,'$.value.rootId') IS NOT NULL\n    UNION SELECT json_array(OLD.collection,selector,'team') FROM (\n      SELECT json_extract(OLD.payload,'$.value.agent') AS selector\n      UNION SELECT json_extract(payload,'$.value.rootId') FROM sync_entities\n        WHERE collection='agentSummary' AND deleted=0 AND id=json_extract(OLD.payload,'$.value.agent')\n    ) WHERE selector IS NOT NULL\n  ) WHERE OLD.deleted=0 AND NEW.deleted=1\n  HAVING COUNT(*)>0\n  ON CONFLICT(key) DO UPDATE SET value=excluded.value;\n  INSERT INTO sync_entity_meta(key,value)\n  SELECT 'entity_scope_visibility:' || old.value,CAST(NEW.seq AS TEXT)\n  FROM sync_entity_meta AS provenance,json_each(provenance.value) AS old\n  WHERE provenance.key='entity_scope_tombstone:' || json_array(NEW.collection,NEW.id)\n    AND OLD.deleted=1 AND NEW.deleted=0\n    AND EXISTS (\n      SELECT value FROM json_each(provenance.value)\n      EXCEPT SELECT identity FROM (\n        SELECT json_array(NEW.collection,json_extract(NEW.payload,'$.value.rootId')) AS identity\n          WHERE json_extract(NEW.payload,'$.value.rootId') IS NOT NULL\n        UNION SELECT json_array(NEW.collection,selector,'team') FROM (\n          SELECT json_extract(NEW.payload,'$.value.agent') AS selector\n          UNION SELECT json_extract(payload,'$.value.rootId') FROM sync_entities\n            WHERE collection='agentSummary' AND deleted=0 AND id=json_extract(NEW.payload,'$.value.agent')\n        ) WHERE selector IS NOT NULL\n      )\n    )\n  ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT);\n  DELETE FROM sync_entity_meta\n  WHERE key='entity_scope_tombstone:' || json_array(NEW.collection,NEW.id) AND NEW.deleted=0;\nEND",
-        "table": "sync_entities",
-        "type": "trigger"
-      },
-      {
-        "create_order": 137,
-        "name": "sync_entity_scope_visibility_insert",
-        "sql": "CREATE TRIGGER sync_entity_scope_visibility_insert\nAFTER INSERT ON sync_entities\nWHEN NEW.collection='agentSummary' AND NEW.deleted=0\n     AND json_extract(NEW.payload,'$.value.rootId') IS NOT NULL BEGIN\n  INSERT INTO sync_entity_meta(key,value)\n  VALUES('entity_scope_visibility:' || json_array('*',json_extract(NEW.payload,'$.value.rootId')),CAST(NEW.seq AS TEXT))\n  ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT);\nEND",
-        "table": "sync_entities",
-        "type": "trigger"
-      },
-      {
-        "create_order": 138,
-        "name": "sync_entity_scope_visibility_update",
-        "sql": "CREATE TRIGGER sync_entity_scope_visibility_update\nAFTER UPDATE OF payload,deleted ON sync_entities\nWHEN (OLD.deleted=0 AND NEW.deleted=0 AND (\n        json_extract(OLD.payload,'$.value.agent') IS NOT json_extract(NEW.payload,'$.value.agent') OR\n        json_extract(OLD.payload,'$.value.rootId') IS NOT json_extract(NEW.payload,'$.value.rootId')))\n     OR (NEW.collection='agentSummary' AND OLD.deleted IS NOT NEW.deleted) BEGIN\n  INSERT INTO sync_entity_meta(key,value)\n  SELECT 'entity_scope_visibility:' || identity,CAST(NEW.seq AS TEXT)\n  FROM (\n    SELECT json_array(NEW.collection,json_extract(OLD.payload,'$.value.rootId')) AS identity\n      WHERE json_extract(OLD.payload,'$.value.rootId') IS NOT NULL AND json_extract(OLD.payload,'$.value.rootId') IS NOT json_extract(NEW.payload,'$.value.rootId')\n    UNION SELECT json_array(NEW.collection,json_extract(NEW.payload,'$.value.rootId'))\n      WHERE json_extract(NEW.payload,'$.value.rootId') IS NOT NULL AND json_extract(OLD.payload,'$.value.rootId') IS NOT json_extract(NEW.payload,'$.value.rootId')\n    UNION SELECT json_array(NEW.collection,selector,'team') FROM (\n      SELECT json_extract(OLD.payload,'$.value.agent') AS selector\n      UNION SELECT json_extract(NEW.payload,'$.value.agent')\n      UNION SELECT json_extract(payload,'$.value.rootId') FROM sync_entities\n        WHERE collection='agentSummary' AND deleted=0 AND id IN\n        (json_extract(OLD.payload,'$.value.agent'),json_extract(NEW.payload,'$.value.agent'))\n    ) WHERE selector IS NOT NULL AND json_extract(OLD.payload,'$.value.agent') IS NOT json_extract(NEW.payload,'$.value.agent')\n  ) WHERE OLD.deleted=0 AND NEW.deleted=0\n  ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT);\n  INSERT INTO sync_entity_meta(key,value)\n  SELECT 'entity_scope_visibility:' || json_array('*',root),CAST(NEW.seq AS TEXT)\n  FROM (\n    SELECT json_extract(OLD.payload,'$.value.rootId') AS root WHERE OLD.deleted=0\n    UNION SELECT json_extract(NEW.payload,'$.value.rootId') WHERE NEW.deleted=0\n  ) WHERE NEW.collection='agentSummary' AND root IS NOT NULL\n  ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT);\nEND",
         "table": "sync_entities",
         "type": "trigger"
       },
@@ -2340,90 +2228,6 @@
         "name": "turns_check_update",
         "sql": "CREATE TRIGGER turns_check_update BEFORE UPDATE ON turns WHEN NOT (NEW.state IN ('starting','running','completed','failed','interrupted') AND (NEW.state='running')=(NEW.session IS NOT NULL) AND (NEW.interrupt_ticket IS NULL OR NEW.attempt IS NOT NULL))\n             BEGIN SELECT RAISE(ABORT,'invalid turns state'); END",
         "table": "turns",
-        "type": "trigger"
-      },
-      {
-        "create_order": 218,
-        "name": "work_attempt_identity_delete",
-        "sql": "CREATE TRIGGER work_attempt_identity_delete AFTER DELETE ON runtime_execution_runs BEGIN SELECT sync_work_identity_change(OLD.agent,NULL); END",
-        "table": "runtime_execution_runs",
-        "type": "trigger"
-      },
-      {
-        "create_order": 217,
-        "name": "work_attempt_identity_insert",
-        "sql": "CREATE TRIGGER work_attempt_identity_insert AFTER INSERT ON runtime_execution_runs BEGIN SELECT sync_work_identity_change(NEW.agent,NULL); END",
-        "table": "runtime_execution_runs",
-        "type": "trigger"
-      },
-      {
-        "create_order": 219,
-        "name": "work_attempt_identity_update",
-        "sql": "CREATE TRIGGER work_attempt_identity_update AFTER UPDATE ON runtime_execution_runs\n         WHEN OLD.agent IS NOT NEW.agent OR OLD.account IS NOT NEW.account OR OLD.epoch IS NOT NEW.epoch OR OLD.thread IS NOT NEW.thread OR OLD.turn IS NOT NEW.turn OR OLD.created IS NOT NEW.created\n           OR json_extract(OLD.record,'$.latestAttemptId') IS NOT json_extract(NEW.record,'$.latestAttemptId')\n           OR json_extract(OLD.record,'$.status') IS NOT json_extract(NEW.record,'$.status')\n         BEGIN SELECT sync_work_identity_change(OLD.agent,NULL); SELECT sync_work_identity_change(NEW.agent,NULL); END",
-        "table": "runtime_execution_runs",
-        "type": "trigger"
-      },
-      {
-        "create_order": 210,
-        "name": "work_history_decisions_insert",
-        "sql": "CREATE TRIGGER work_history_decisions_insert AFTER INSERT ON runtime_work BEGIN\n             SELECT sync_work_history_change(NEW.id,'decisions',j.key) FROM json_each(NEW.record,'$.decisions') j; END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 211,
-        "name": "work_history_decisions_update",
-        "sql": "CREATE TRIGGER work_history_decisions_update AFTER UPDATE OF record ON runtime_work\n             WHEN json_extract(OLD.record,'$.decisions') IS NOT json_extract(NEW.record,'$.decisions') OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId') BEGIN\n             SELECT sync_work_history_change(NEW.id,'decisions',changed.key) FROM (\n               WITH old_values AS MATERIALIZED (SELECT key,value,type FROM json_each(OLD.record,'$.decisions')),\n                    new_values AS MATERIALIZED (SELECT key,value,type FROM json_each(NEW.record,'$.decisions'))\n               SELECT n.key FROM new_values n LEFT JOIN old_values o USING(key)\n               WHERE o.key IS NULL OR o.type IS NOT n.type OR o.value IS NOT n.value OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId')\n               UNION SELECT o.key FROM old_values o LEFT JOIN new_values n USING(key) WHERE n.key IS NULL\n             ) changed; END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 212,
-        "name": "work_history_releases_insert",
-        "sql": "CREATE TRIGGER work_history_releases_insert AFTER INSERT ON runtime_work BEGIN\n             SELECT sync_work_history_change(NEW.id,'releases',j.key) FROM json_each(NEW.record,'$.releases') j; END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 213,
-        "name": "work_history_releases_update",
-        "sql": "CREATE TRIGGER work_history_releases_update AFTER UPDATE OF record ON runtime_work\n             WHEN json_extract(OLD.record,'$.releases') IS NOT json_extract(NEW.record,'$.releases') OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId') BEGIN\n             SELECT sync_work_history_change(NEW.id,'releases',changed.key) FROM (\n               WITH old_values AS MATERIALIZED (SELECT key,value,type FROM json_each(OLD.record,'$.releases')),\n                    new_values AS MATERIALIZED (SELECT key,value,type FROM json_each(NEW.record,'$.releases'))\n               SELECT n.key FROM new_values n LEFT JOIN old_values o USING(key)\n               WHERE o.key IS NULL OR o.type IS NOT n.type OR o.value IS NOT n.value OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId')\n               UNION SELECT o.key FROM old_values o LEFT JOIN new_values n USING(key) WHERE n.key IS NULL\n             ) changed; END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 208,
-        "name": "work_history_results_insert",
-        "sql": "CREATE TRIGGER work_history_results_insert AFTER INSERT ON runtime_work BEGIN\n             SELECT sync_work_history_change(NEW.id,'results',j.key) FROM json_each(NEW.record,'$.results') j; END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 209,
-        "name": "work_history_results_update",
-        "sql": "CREATE TRIGGER work_history_results_update AFTER UPDATE OF record ON runtime_work\n             WHEN json_extract(OLD.record,'$.results') IS NOT json_extract(NEW.record,'$.results') OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId') BEGIN\n             SELECT sync_work_history_change(NEW.id,'results',changed.key) FROM (\n               WITH old_values AS MATERIALIZED (SELECT key,value,type FROM json_each(OLD.record,'$.results')),\n                    new_values AS MATERIALIZED (SELECT key,value,type FROM json_each(NEW.record,'$.results'))\n               SELECT n.key FROM new_values n LEFT JOIN old_values o USING(key)\n               WHERE o.key IS NULL OR o.type IS NOT n.type OR o.value IS NOT n.value OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId')\n               UNION SELECT o.key FROM old_values o LEFT JOIN new_values n USING(key) WHERE n.key IS NULL\n             ) changed; END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 214,
-        "name": "work_identity_insert",
-        "sql": "CREATE TRIGGER work_identity_insert AFTER INSERT ON runtime_work BEGIN SELECT sync_work_identity_change(NULL,NEW.id); END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 215,
-        "name": "work_identity_update",
-        "sql": "CREATE TRIGGER work_identity_update AFTER UPDATE OF record ON runtime_work\n         WHEN json_extract(OLD.record,'$.owner') IS NOT json_extract(NEW.record,'$.owner') OR json_extract(OLD.record,'$.version') IS NOT json_extract(NEW.record,'$.version') BEGIN SELECT sync_work_identity_change(NULL,NEW.id); END",
-        "table": "runtime_work",
-        "type": "trigger"
-      },
-      {
-        "create_order": 216,
-        "name": "work_owner_identity_update",
-        "sql": "CREATE TRIGGER work_owner_identity_update AFTER UPDATE OF record ON runtime_agents\n         WHEN json_extract(OLD.record,'$.epoch') IS NOT json_extract(NEW.record,'$.epoch')\n           OR json_extract(OLD.record,'$.accountKey') IS NOT json_extract(NEW.record,'$.accountKey')\n           OR json_extract(OLD.record,'$.threadId') IS NOT json_extract(NEW.record,'$.threadId')\n           OR json_extract(OLD.record,'$.turnId') IS NOT json_extract(NEW.record,'$.turnId')\n         BEGIN SELECT sync_work_identity_change(NEW.id,NULL); END",
-        "table": "runtime_agents",
         "type": "trigger"
       },
       {

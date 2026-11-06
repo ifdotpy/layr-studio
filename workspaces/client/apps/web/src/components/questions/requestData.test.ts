@@ -234,7 +234,6 @@ describe("browserOpenDetails", () => {
         redirect: { host: "localhost", port: 8000, path: "/" },
         clientId: "kube",
         scope: "openid",
-        linuxUser: "studio-a-1",
       },
     );
     expect(browserOpenDetails(request)).toEqual({
@@ -244,8 +243,6 @@ describe("browserOpenDetails", () => {
       redirectPath: "/",
       clientId: "kube",
       scope: "openid",
-      linuxUser: "studio-a-1",
-      source: "host",
     });
   });
 
@@ -289,7 +286,6 @@ describe("browserOpenDetails", () => {
       host: "device.example.com",
       url: "https://device.example.com/?user_code=ABCD",
       userCode: "ABCD",
-      source: "host",
     });
     expect(
       browserOpenDetails(

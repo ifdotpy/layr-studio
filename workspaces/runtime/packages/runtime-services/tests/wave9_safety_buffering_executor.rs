@@ -1965,3 +1965,103 @@ fn successful_response(stage: &str) -> Value {
         _ => panic!("unknown stage {stage}"),
     }
 }
+
+#[tokio::test]
+async fn refused_safety_retry_preparation_is_terminal_without_forking() {
+    let (template, _) = python_corpus();
+    let root = tempfile::tempdir().expect("state copy");
+    for (file, bytes) in ["canvas.sqlite3", "analytics.sqlite3"]
+        .into_iter()
+        .zip(&template)
+    {
+        std::fs::write(root.path().join(file), bytes).expect("state");
+    }
+    let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+    store
+        .transaction_with(|tx| {
+            let mut agent = studio_runtime_store::AgentRepository::get(
+                tx,
+                &studio_runtime_store::AgentId::from("agent"),
+            )?
+            .expect("agent")
+            .value();
+            agent["contextRepairWait"] = json!("repair");
+            studio_runtime_store::AgentRepository::put(
+                tx,
+                &studio_runtime_store::AgentRecord::from_value(agent)?,
+            )?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        })
+        .await
+        .expect("repair wait");
+    let session = Session {
+        store: &store,
+        scope: ConnectionScope {
+            account: "acct".into(),
+            connection: "connection".into(),
+            generation: 1,
+        },
+        calls: Mutex::default(),
+        unknown_at: None,
+        unknown_receipt_at: None,
+        requires_at: None,
+        not_sent_at: None,
+        not_sent_used: Mutex::new(false),
+        reject_start: false,
+    };
+    let result = safety_buffering::execute_action(
+        Arc::clone(&store),
+        &session,
+        &test_resources(),
+        None,
+        safety_buffering::SafetyAction {
+            agent_id: "agent",
+            actor: RequestActor {
+                agent: "agent".into(),
+                epoch: 7,
+            },
+            turn_id: "turn",
+            choice: "retry",
+        },
+    )
+    .await;
+    assert!(result.is_err(), "preparation must be refused");
+    let db = store.test_reader().expect("reader");
+    let (stage, error): (String, Option<String>) = db.query_row(
+        "SELECT json_extract(record,'$.stage'), json_extract(record,'$.error') FROM runtime_safety_retries WHERE id='agent:turn'", [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).expect("retry operation");
+    assert_eq!(stage, "failed");
+    assert!(
+        error
+            .as_deref()
+            .is_some_and(|value| value.contains("ContextRepair"))
+    );
+    assert!(
+        !session
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call["method"] == "thread/fork")
+    );
+    let calls = session.calls.lock().unwrap().len();
+    let replay = safety_buffering::execute_action(
+        Arc::clone(&store),
+        &session,
+        &test_resources(),
+        None,
+        safety_buffering::SafetyAction {
+            agent_id: "agent",
+            actor: RequestActor {
+                agent: "agent".into(),
+                epoch: 7,
+            },
+            turn_id: "turn",
+            choice: "retry",
+        },
+    )
+    .await
+    .expect("replay terminal result");
+    assert_eq!(replay["stage"], "failed");
+    assert_eq!(session.calls.lock().unwrap().len(), calls);
+}

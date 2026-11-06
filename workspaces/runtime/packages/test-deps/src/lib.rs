@@ -33,3 +33,7 @@ extern crate tower;
 extern crate tower_http;
 extern crate url;
 extern crate uuid;
+
+/// Empty object payload shared by typed outbox test fixtures.
+#[derive(serde::Serialize)]
+pub struct EmptyObject {}

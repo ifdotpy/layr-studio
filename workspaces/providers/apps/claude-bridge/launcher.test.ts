@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const launcher = fileURLToPath(new URL("./bridge.mjs", import.meta.url));
 
-test("both entrypoints refuse before importing TypeScript when support is absent", () => {
-  for (const args of [[], ["--refresh-auth"]]) {
+test("the entrypoint refuses before importing TypeScript when support is absent", () => {
+  for (const args of [[]]) {
     const result = spawnSync(
       process.execPath,
       [
@@ -36,7 +36,7 @@ test("both entrypoints refuse before importing TypeScript when support is absent
   }
 });
 
-test("the stable launcher selects the bridge and refresh TypeScript entrypoints", async () => {
+test("the stable launcher selects the bridge TypeScript entrypoint", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-launcher-"));
   try {
     await fs.copyFile(launcher, path.join(root, "bridge.mjs"));
@@ -44,7 +44,7 @@ test("the stable launcher selects the bridge and refresh TypeScript entrypoints"
       path.join(root, "package.json"),
       JSON.stringify({ type: "module" }),
     );
-    for (const name of ["bridge", "refresh-auth"]) {
+    for (const name of ["bridge"]) {
       await fs.writeFile(
         path.join(root, `${name}.ts`),
         `const value: string = ${JSON.stringify(name)}; console.log(value);`,
@@ -52,7 +52,6 @@ test("the stable launcher selects the bridge and refresh TypeScript entrypoints"
     }
     for (const [args, expected] of [
       [[], "bridge"],
-      [["--refresh-auth"], "refresh-auth"],
     ] satisfies [string[], string][]) {
       assert.equal(
         execFileSync(

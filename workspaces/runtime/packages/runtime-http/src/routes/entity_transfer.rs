@@ -125,7 +125,7 @@ async fn prepare(
         // Ordinary writes and tombstones retain indexed sequence deltas.
         let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose()?.unwrap_or(0);
         let after = after.filter(|after| *after >= visibility);
-        let mut page = studio_runtime_services::work_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+        let mut page = studio_runtime_services::entity_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         let through = page.max_sequence;
         let snapshot = page.reset;
         let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
@@ -161,7 +161,7 @@ async fn prepare(
             }
             if final_sql_page { break; }
             after = checkpoint;
-            page = studio_runtime_services::work_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+            page = studio_runtime_services::entity_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         }
         let mut file = spool.ok_or_else(data_error)?;
         file.rewind().map_err(|_| io_error())?;
@@ -187,7 +187,16 @@ fn byte_pages(
         let size = studio_json::to_vec(&document)
             .map_err(ApiError::json)?
             .len();
-        if !batch.documents.is_empty() && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2 {
+        // Documents built from one main-table change share its number. A batch ends
+        // only between numbers, so the next batch never repeats its `after`.
+        let same_change = batch
+            .documents
+            .last()
+            .is_some_and(|last| last.seq == document.seq);
+        if !batch.documents.is_empty()
+            && !same_change
+            && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2
+        {
             batch.through = batch.documents.last().ok_or_else(data_error)?.seq;
             let next = EntityChangeBatch {
                 after: batch.through,
@@ -275,6 +284,43 @@ mod tests {
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
 
+    #[test]
+    fn a_batch_never_splits_documents_of_one_change() {
+        let text = "x".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 3);
+        let document = |id: &str, seq: i64| {
+            super::super::sync_documents::entity_document(&studio_runtime_store::EntityRow {
+                collection: "workspace".into(),
+                id: id.into(),
+                sequence: seq,
+                payload: Some(
+                    json!({"collection":"workspace","id":id,"value":{"stateDir":text}}).to_string(),
+                ),
+                deleted: false,
+            })
+            .expect("document")
+        };
+        let batches = byte_pages(
+            0,
+            3,
+            vec![
+                document("a", 2),
+                document("b", 2),
+                document("c", 2),
+                document("d", 3),
+            ],
+        )
+        .expect("batches");
+        assert_eq!(
+            batches.len(),
+            2,
+            "the byte limit cuts once, between numbers"
+        );
+        assert_eq!(batches[0].documents.len(), 3);
+        assert_eq!(batches[0].through, 2);
+        assert_eq!(batches[1].after, 2);
+        assert_eq!(batches[1].documents[0].seq, 3);
+    }
+
     async fn fixture() -> (tempfile::TempDir, HttpState) {
         let directory = tempfile::tempdir().expect("isolated source");
         let store = Arc::new(
@@ -297,30 +343,38 @@ mod tests {
         state.validators = crate::validation::Registry::compile(&[]).expect("canonical validators");
         (directory, state)
     }
-    fn task(
+    /// Write a task through the canonical task writer, which keeps its window.
+    fn put_task(
+        tx: &rusqlite::Transaction<'_>,
         id: &str,
         agent: &str,
         status: &str,
-    ) -> studio_runtime_schema::process_controls::TaskProjection {
-        use studio_runtime_schema::task_record::{TaskStatus, TaskType};
-        let mut record = studio_runtime_store::TaskRecord::new(
-            agent.into(),
-            id.into(),
-            "turn".into(),
-            studio_json::from_str("1").expect("valid timestamp"),
-            TaskType::CommandExecution,
-            "commandExecution".into(),
-        );
-        record.set_status(match status {
-            "running" => TaskStatus::Running,
-            "completed" => TaskStatus::Completed,
-            _ => panic!("unsupported fixture status"),
-        });
-        let mut projection = studio_runtime_services::sync_views::project_task_record(&record)
-            .expect("task projection");
-        projection.id = id.into();
-        projection
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        studio_runtime_services::notification_dispatch::test_put_task(
+            tx,
+            &task_record(id, agent, status),
+        )
+        .map_err(|_| studio_runtime_store::StoreError::RecordContract("task write"))
     }
+
+    fn delete_task(
+        tx: &rusqlite::Transaction<'_>,
+        id: &str,
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        studio_runtime_services::notification_dispatch::test_delete_task(tx, id)
+            .map_err(|_| studio_runtime_store::StoreError::RecordContract("task delete"))
+    }
+
+    /// A task row with the given id, owner and status.
+    fn task_record(id: &str, agent: &str, status: &str) -> studio_runtime_store::TaskRecord {
+        studio_json::from_str(
+            &json!({"id":id,"agent":agent,"itemId":id,"turnId":"turn","created":1,
+                "type":"commandExecution","name":"commandExecution","kind":"command","status":status})
+            .to_string(),
+        )
+        .expect("task fixture")
+    }
+
     fn event(state: &HttpState) -> ResourceChangeEvent {
         studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"fixture","revision":1,"reason":"initial","resources":[],"resourceVersions":[]})).expect("event")
     }
@@ -486,6 +540,16 @@ mod tests {
             format!("event: entity-transfer\ndata: {saved}\n\n").as_bytes()
         );
     }
+    fn put_member(
+        tx: &rusqlite::Transaction<'_>,
+        id: &str,
+        root: &str,
+    ) -> Result<(), studio_runtime_store::StoreError> {
+        let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":id,
+            "rootId":root,"epoch":1,"status":"idle","accountKey":"default","provider":"codex"}))?;
+        studio_runtime_store::AgentRepository::put(tx, &agent)
+    }
+
     #[tokio::test]
     async fn scoped_membership_swaps_and_reassignment_reset_but_unrelated_moves_and_appends_stay_delta()
      {
@@ -493,23 +557,16 @@ mod tests {
         let store = state.store.as_ref().expect("store");
         store
             .transaction(|tx| {
-                for (id, agent) in [("a-task", "a"), ("b-task", "b"), ("latest", "lead")] {
-                    SyncDocumentsRepository::put_entity(
-                        tx,
-                        "task",
-                        id,
-                        task(id, agent, "running"),
-                        false,
-                    )?;
+                for (id, root) in [
+                    ("lead", "lead"),
+                    ("other", "other"),
+                    ("a", "lead"),
+                    ("b", "other"),
+                ] {
+                    put_member(tx, id, root)?;
                 }
-                for (id, root) in [("a", "lead"), ("b", "other")] {
-                    SyncDocumentsRepository::put_entity(
-                        tx,
-                        "agentSummary",
-                        id,
-                        json!({"id":id,"rootId":root,"status":"idle","source":"managed"}),
-                        false,
-                    )?;
+                for (id, agent) in [("a-task", "a"), ("b-task", "b"), ("latest", "lead")] {
+                    put_task(tx, id, agent, "running")?;
                 }
                 Ok(())
             })
@@ -522,7 +579,9 @@ mod tests {
             .expect("baseline");
         store
             .transaction(|tx| {
-                tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.rootId',CASE id WHEN 'a' THEN 'other' ELSE 'lead' END),seq=seq+100 WHERE collection='agentSummary'", [])?;
+                for (id, root) in [("a", "other"), ("b", "lead")] {
+                    put_member(tx, id, root)?;
+                }
                 Ok(())
             })
             .await
@@ -550,13 +609,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "b-task",
-                    task("b-task", "a", "running"),
-                    false,
-                )?;
+                put_task(tx, "b-task", "a", "running")?;
                 Ok(())
             })
             .await
@@ -588,13 +641,7 @@ mod tests {
                     json!({"id":"unrelated","rootId":"other","status":"idle","source":"managed"}),
                     false,
                 )?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "latest",
-                    task("latest", "lead", "completed"),
-                    false,
-                )?;
+                put_task(tx, "latest", "lead", "completed")?;
                 Ok(())
             })
             .await
@@ -619,13 +666,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "new",
-                    task("new", "lead", "running"),
-                    false,
-                )?;
+                put_task(tx, "new", "lead", "running")?;
                 Ok(())
             })
             .await
@@ -656,13 +697,10 @@ mod tests {
         let store = state.store.as_ref().expect("fixture store");
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "restored",
-                    task("restored", "alpha", "running"),
-                    false,
-                )?;
+                for owner in ["alpha", "beta"] {
+                    put_member(tx, owner, owner)?;
+                }
+                put_task(tx, "restored", "alpha", "running")?;
                 Ok(())
             })
             .await
@@ -676,14 +714,8 @@ mod tests {
             .expect("initial owner baseline");
         store
             .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(tx, "task", "restored", json!({}), true)?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "task",
-                    "restored",
-                    task("restored", "beta", "running"),
-                    false,
-                )?;
+                delete_task(tx, "restored")?;
+                put_task(tx, "restored", "beta", "running")?;
                 Ok(())
             })
             .await
@@ -820,6 +852,99 @@ mod tests {
                 Ok(())
             })
             .expect("bounded snapshot continuation");
+    }
+
+    #[tokio::test]
+    async fn cold_entity_client_fixture_matches_server_frames() {
+        use studio_runtime_store::{AgentRecord, AgentRepository};
+        let (_directory, state) = fixture().await;
+        // The store names its folder by the canonical path: on macOS the temporary
+        // folder /var/folders is /private/var/folders.
+        let state_dir =
+            studio_runtime_store::path_identity::CanonicalPath::existing(_directory.path())
+                .expect("canonical state folder")
+                .to_path_buf()
+                .display()
+                .to_string();
+        let store = state.store.as_ref().expect("store");
+        studio_runtime_services::entity_publication::install(store)
+            .await
+            .expect("entity publisher");
+        store
+            .transaction_with(|tx| {
+                for index in 0..=SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+                    let id = format!("older-{index}");
+                    AgentRepository::put(
+                        tx,
+                        &AgentRecord::from_value(json!({
+                            "provider":"codex", "id":id, "rootId":id, "epoch":1,
+                            "status":"idle", "accountKey":"default", "name":id, "compactions":0
+                        }))?,
+                    )?;
+                }
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .expect("entity baseline");
+        let resource = studio_json::from_str(r#"{"kind":"state"}"#).expect("resource");
+        let (_, reader, _) = prepare(&state, &event(&state), resource, None)
+            .await
+            .expect("snapshot");
+        let mut reader = reader.expect("large snapshot");
+        let mut frames = Vec::new();
+        let mut transfer_id = None;
+        let mut workspace_rows = 0;
+        while let Some(frame) = reader.next().await.expect("frame") {
+            let bytes = wire(frame).await;
+            let text = std::str::from_utf8(&bytes).expect("utf8");
+            let mut value: Value = studio_json::from_str(
+                text.lines()
+                    .find_map(|line| line.strip_prefix("data: "))
+                    .expect("data"),
+            )
+            .expect("frame json");
+            assert_eq!(value["workspaceId"], state.workspace_id);
+            assert_eq!(value["cursor"]["workspaceId"], state.workspace_id);
+            let id = value["transferId"].as_str().expect("transfer ID");
+            uuid::Uuid::parse_str(id).expect("valid transfer ID");
+            assert_eq!(
+                transfer_id.get_or_insert_with(|| id.to_owned()).as_str(),
+                id
+            );
+            assert_eq!(value["partCount"], 1);
+            let data = value["data"].as_str().expect("frame data");
+            let batch: Value = studio_json::from_str(data).expect("batch");
+            for row in batch["documents"].as_array().expect("documents") {
+                if row["collection"] == "workspace" && row["id"] == "current" {
+                    assert_eq!(row["value"]["stateDir"], state_dir);
+                    workspace_rows += 1;
+                }
+            }
+            let data = data.replace(&state_dir, "/fixture-state");
+            value["data"] = json!(data);
+            value["workspaceId"] = json!("00000000000000000000000000000000");
+            value["cursor"]["workspaceId"] = json!("00000000000000000000000000000000");
+            value["transferId"] = json!("00000000-0000-0000-0000-000000000000");
+            frames.push(value);
+        }
+        assert_eq!(workspace_rows, 1);
+        let actual = format!(
+            "{}\n",
+            studio_json::to_string_pretty(&frames).expect("json")
+        );
+        let path = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../../client/apps/web/src/sync/entityServerFrames.fixture.json");
+        if std::env::var_os("STUDIO_REGENERATE_ENTITY_FRAMES").is_some() {
+            tokio::fs::write(&path, &actual)
+                .await
+                .expect("write fixture");
+        }
+        assert!(
+            actual == tokio::fs::read_to_string(&path).await.expect("fixture"),
+            "regenerate with: just regenerate-entity-server-frames"
+        );
     }
 
     #[tokio::test]

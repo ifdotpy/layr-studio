@@ -671,13 +671,25 @@ impl NotificationStreamBuffer {
 
     pub(crate) fn restore_pending(
         &mut self,
-        pending: NotificationPendingStreams,
+        pending: &NotificationPendingStreams,
     ) -> Result<(), NotificationDispatchError> {
-        for entry in pending.0 {
+        // Index pending keys against metadata once. Walking metadata backwards
+        // preserves the old first-match behavior for duplicate stored keys.
+        let mut targets: HashMap<&StreamKey, usize> = pending
+            .0
+            .iter()
+            .map(|entry| (&entry.key, usize::MAX))
+            .collect();
+        for (index, entry) in self.entries.iter().enumerate().rev() {
+            if let Some(target) = targets.get_mut(&entry.key) {
+                *target = index;
+            }
+        }
+        for entry in &pending.0 {
+            let index = targets[&entry.key];
             let target = self
                 .entries
-                .iter_mut()
-                .find(|target| target.key == entry.key)
+                .get_mut(index)
                 .ok_or(NotificationDispatchError::invalid_account())?;
             target.pending.clone_from(&entry.pending);
             target.count = entry.count;
@@ -1251,7 +1263,7 @@ mod tests {
     /// value with each entry's pending text, count and params blanked, plus a
     /// copy of every entry with pending deltas.
     #[test]
-    fn host_and_vm_lanes_keep_same_native_tuple_separate() {
+    fn agent_lanes_keep_same_native_tuple_separate() {
         let host_key = StreamKey {
             agent_id: "host".into(),
             account: "default".into(),
@@ -1261,8 +1273,8 @@ mod tests {
             item: "same-item".into(),
             method: "item/agentMessage/delta".into(),
         };
-        let mut vm_key = host_key.clone();
-        vm_key.agent_id = "vm".into();
+        let mut other_key = host_key.clone();
+        other_key.agent_id = "other".into();
         let mut streams = NotificationStreamBuffer {
             publication_sequence: 17,
             ..NotificationStreamBuffer::default()
@@ -1272,32 +1284,32 @@ mod tests {
             EnqueueResult::Buffered
         ));
         assert!(matches!(
-            streams.enqueue_delta(vm_key.clone(), "vm", &Value::Null, 0),
+            streams.enqueue_delta(other_key.clone(), "other", &Value::Null, 0),
             EnqueueResult::Buffered
         ));
         assert_eq!(streams.selected(None).len(), 2);
-        assert_eq!(streams.selected(Some(&vm_key)), vec![vm_key.clone()]);
-        streams.flush(&vm_key, "").expect("VM flush");
-        assert!(streams.preserve_base(&vm_key, "VM base".into()));
+        assert_eq!(streams.selected(Some(&other_key)), vec![other_key.clone()]);
+        streams.flush(&other_key, "").expect("other flush");
+        assert!(streams.preserve_base(&other_key, "other base".into()));
         assert!(matches!(
-            streams.enqueue_delta(vm_key.clone(), "pending", &Value::Null, 0),
+            streams.enqueue_delta(other_key.clone(), "pending", &Value::Null, 0),
             EnqueueResult::Buffered
         ));
         let before = streams.clone();
-        let vm = streams.take_owner("vm");
+        let other = streams.take_owner("other");
         assert_eq!(streams.selected(None), vec![host_key.clone()]);
-        assert_eq!(vm.selected(None), vec![vm_key.clone()]);
+        assert_eq!(other.selected(None), vec![other_key.clone()]);
         assert_eq!(streams.publication_sequence, 17);
-        assert_eq!(vm.publication_sequence, 0);
-        let (metadata, pending) = vm.persisted_parts();
+        assert_eq!(other.publication_sequence, 0);
+        let (metadata, pending) = other.persisted_parts();
         let mut restored = metadata;
         restored.rebuild_runtime_state();
         restored
-            .restore_pending(pending.expect("VM flush obligation"))
-            .expect("VM pending restored");
+            .restore_pending(&pending.expect("other flush obligation"))
+            .expect("other pending restored");
         streams
             .merge_owner(restored.clone())
-            .expect("host and VM restored together");
+            .expect("both agents restored together");
         assert_eq!(streams, before);
         assert!(
             streams.merge_owner(restored).is_err(),
@@ -1305,10 +1317,35 @@ mod tests {
         );
         assert_eq!(streams, before);
         streams.close(&host_key);
-        streams.close(&vm_key);
-        streams.settle_turn("vm", "default", "same-thread", "same-turn");
+        streams.close(&other_key);
+        streams.settle_turn("other", "default", "same-thread", "same-turn");
         assert_eq!(streams.closed.len(), 1);
         assert_eq!(streams.closed[0].agent_id, "host");
+    }
+
+    #[test]
+    fn pending_restore_matches_first_saved_key_and_rejects_missing_keys() {
+        let key = StreamKey {
+            agent_id: "agent".into(),
+            account: "default".into(),
+            generation: 1,
+            thread: "thread".into(),
+            turn: None,
+            item: "item".into(),
+            method: "delta".into(),
+        };
+        let mut streams = NotificationStreamBuffer::default();
+        streams.enqueue_delta(key, "pending", &Value::Null, 0);
+        let (mut metadata, pending) = streams.persisted_parts();
+        metadata.entries.push(metadata.entries[0].clone());
+        metadata.rebuild_runtime_state();
+        let pending = pending.expect("pending entry");
+        metadata.restore_pending(&pending).expect("restore");
+        assert_eq!(metadata.entries[0].pending, "pending");
+        assert_eq!(metadata.entries[1].pending, "");
+        let mut missing = pending;
+        missing.0[0].key.item = "missing".into();
+        assert!(metadata.restore_pending(&missing).is_err());
     }
 
     #[test]
@@ -1341,7 +1378,7 @@ mod tests {
         restored.rebuild_runtime_state();
         assert!(!restored.has_pending(&key));
         restored
-            .restore_pending(pending)
+            .restore_pending(&pending)
             .expect("restore flush obligation");
         assert!(restored.pending_bytes() > 0);
         assert_eq!(restored.base(&key), Some("authoritative"));

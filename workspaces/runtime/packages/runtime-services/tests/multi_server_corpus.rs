@@ -1517,7 +1517,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         url: "https://login.example.test/".into(),
         bridge_id: bridge_id.into(),
         host: "login.example.test".into(),
-        source: typed::BrowserSource::Vm,
+        source: typed::BrowserSource::Host,
         redirect: Some(typed::BrowserRedirect {
             host: "127.0.0.1".into(),
             port,

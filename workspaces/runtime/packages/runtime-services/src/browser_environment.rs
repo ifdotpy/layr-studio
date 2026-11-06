@@ -1,6 +1,4 @@
-//! The environment that sends browser links of host Codex threads to Studio
-//! (docs/vm-browser-bridge.md, section 6.4). Python `codex_browser_host.thread_environment`
-//! owns the same rule; `tests/browser_environment_differential.rs` checks both.
+//! Browser bridge environment for host Codex threads.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -16,8 +14,7 @@ pub const BROWSER_OPEN_SOCKET: &str = "open.sock";
 /// `shell_environment_policy.set` to the thread's commands, so the app-server
 /// launch does not change. PATH is not set: a Codex `set.PATH` replaces the
 /// whole PATH of the command, also the entries that the person's shell startup
-/// files add (measured with codex-cli 0.160.1, docs/vm-browser-bridge.md
-/// section 6.4). Nothing is set before the launcher exists, so a server without
+/// files add. Nothing is set before the launcher exists, so a server without
 /// the host bridge keeps the tool's own browser behaviour.
 pub fn thread_environment(state_root: &Path, agent_id: &str) -> BTreeMap<String, String> {
     let folder = state_root.join(BROWSER_HOST_FOLDER);

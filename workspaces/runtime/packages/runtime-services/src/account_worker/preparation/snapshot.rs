@@ -5,109 +5,10 @@ use crate::{model_catalog::ModelCatalogService, thread_prepare as thread, turn_p
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, de::DeserializeOwned};
 use std::path::{Path, PathBuf};
-use std::{future::Future, pin::Pin};
 use studio_json::Map;
-use studio_runtime_process::ProviderLaunchSpec;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentRecord, Transaction};
-
-/// Skill files appended to the role guidance of a new layr (VM) session, in this order,
-/// relative to `.agents/skills`. The Python runtime (`codex_runtime.VM_ROLE_GUIDANCE`) lists
-/// the same files.
-const VM_ROLE_GUIDANCE: [&str; 2] = ["codex-workspace/references/layr.md", "layr/SKILL.md"];
-/// Where the guest keeps the Studio skills; a VM session's guidance names these paths. The
-/// Python runtime (`codex_runtime.VM_GUEST_SKILLS_ROOT`) uses the same folder.
-const VM_GUEST_SKILLS_ROOT: &str = "/opt/codex-studio/.agents/skills";
-
-/// Actor-specific inputs needed to launch a provider inside a Linux VM.
-/// Credentials are deliberately absent: the resolver reads and copies them
-/// through its private guest boundary and never returns or logs their values.
-#[derive(Clone, Debug, Eq)]
-pub struct VmProviderLaunchRequest {
-    pub root_request_id: String,
-    pub source: studio_runtime_store::request_results::AdmittedRequest,
-    pub final_effect: Option<studio_runtime_store::request_results::AdmittedRequest>,
-    pub attempt_id: String,
-    pub agent_id: String,
-    pub epoch: i64,
-    pub generation: u64,
-    pub account_key: String,
-    pub provider: String,
-    pub cwd: String,
-    pub guest_home: String,
-}
-
-impl PartialEq for VmProviderLaunchRequest {
-    fn eq(&self, other: &Self) -> bool {
-        // Execution admission belongs to the caller; reuse names the same guest process.
-        self.agent_id == other.agent_id
-            && self.epoch == other.epoch
-            && self.generation == other.generation
-            && self.account_key == other.account_key
-            && self.provider == other.provider
-            && self.cwd == other.cwd
-            && self.guest_home == other.guest_home
-    }
-}
-
-/// Provider launch resolved for one actor. `launch.environment` is the guest
-/// environment only; callers must not merge in the host process environment.
-pub struct VmProviderLaunch {
-    pub provider: String,
-    pub profile: String,
-    pub launch: ProviderLaunchSpec,
-    /// Host-refreshed login payload sent only through the retained guest session.
-    /// It is transient and must never be persisted or logged.
-    pub bootstrap: Option<Value>,
-}
-
-pub type VmProviderLaunchFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<VmProviderLaunch, WorkerError>> + Send + 'a>>;
-
-/// Host-owned VM launch resolver. It selects the provider/profile and durably
-/// copies the minimal provider credential material into the guest before the
-/// caller starts the provider process.
-pub trait VmProviderLaunchResolver: Send + Sync {
-    fn resolve(&self, request: VmProviderLaunchRequest) -> VmProviderLaunchFuture<'_>;
-
-    /// Host-owned Codex refresh for a token callback emitted by a guest actor.
-    #[allow(clippy::too_many_arguments)]
-    fn refresh_codex(
-        &self,
-        _account_key: String,
-        _previous_account_id: String,
-        _actor_id: String,
-        _actor_epoch: i64,
-        _generation: u64,
-        _root_request_id: String,
-        _admitted_request: studio_runtime_store::request_results::AdmittedRequest,
-    ) -> VmProviderAuthFuture<'_> {
-        Box::pin(async {
-            Err(WorkerError::PreparationPending(
-                crate::account_worker::PreparationBlock::new(
-                    crate::account_worker::PreparationWaitReason::ProviderSession,
-                    "provider-session/vm-token-refresh",
-                ),
-            ))
-        })
-    }
-
-    /// Refresh the shared host Claude profile once, then copy it to every
-    /// currently attached actor in the account worker's fenced sweep.
-    fn refresh_claude_credentials(
-        &self,
-        _actors: Vec<VmProviderLaunchRequest>,
-    ) -> VmProviderRefreshFuture<'_> {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-pub type VmProviderAuthFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Value, WorkerError>> + Send + 'a>>;
-
-pub type VmProviderRefreshFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send + 'a>>;
 
 #[derive(Clone)]
 pub struct PreparationResources {
@@ -129,10 +30,6 @@ pub struct PreparationResources {
     /// The host's registry-backed session surface for preparation calls that
     /// need to coordinate another live account.
     pub account_session: Option<Arc<dyn crate::account_session_runtime::AccountSessionPort>>,
-    /// Fakeable guest RPC for VM workspace preparation in the turn-start path.
-    pub guest_rpc: Option<Arc<dyn crate::linux_vm_guest::GuestRpc>>,
-    /// Host-owned per-actor VM provider launch and credential-copy boundary.
-    pub vm_provider_launch: Option<Arc<dyn VmProviderLaunchResolver>>,
 }
 /// Account guidance and receipt path evidence captured outside SQLite callbacks.
 #[derive(Clone, Default)]
@@ -160,9 +57,8 @@ impl PreparationResources {
         account_home: String,
         model_catalog: ModelCatalogService,
     ) -> Result<Self, WorkerError> {
-        let root =
-            CanonicalPath::existing(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
-                .map_err(|_| invalid("repository root"))?;
+        let root = CanonicalPath::existing(studio_runtime_schema::contracts::repository_root())
+            .map_err(|_| invalid("repository root"))?;
         Self::bundled_at(account_home, model_catalog, root.to_path_buf())
     }
 
@@ -233,16 +129,6 @@ impl PreparationResources {
                     .map_err(|_| refusal("thread-preparation/missing-guidance".into()))?,
             );
         }
-        // Only VM sessions use these; preparing one without them is refused below.
-        for relative in VM_ROLE_GUIDANCE {
-            match std::fs::read_to_string(skills_root.join(relative)) {
-                Ok(content) => {
-                    role_guidance.insert(PathBuf::from(relative), content);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err(refusal("thread-preparation/missing-guidance".into())),
-            }
-        }
         Ok(Self {
             role_guidance,
             instructions: data.instructions,
@@ -257,8 +143,6 @@ impl PreparationResources {
             claude_account_pin: Value::Null,
             account_driver: None,
             account_session: None,
-            guest_rpc: None,
-            vm_provider_launch: None,
         })
     }
 
@@ -668,8 +552,7 @@ pub(super) async fn authorization_rows(
 }
 
 /// The resolved paths that one authorization decision over `rows` reads:
-/// every agent cwd and project path. Run it before SQL; a VM cwd gets a
-/// stable guest identity instead of a host resolution.
+/// every agent cwd and project path. Run it before SQL.
 pub(in crate::account_worker) fn authorization_paths(
     rows: &crate::submit_gates::AuthorizationRecords,
 ) -> Result<BTreeMap<String, String>, WorkerError> {
@@ -677,18 +560,10 @@ pub(in crate::account_worker) fn authorization_paths(
     for row in rows.agents.values() {
         let row = row.as_ref().map_err(|_| invalid("cwd"))?;
         if let Some(path) = row.cwd.as_deref().filter(|path| !path.is_empty()) {
-            let resolved = if row.execution_mode.as_deref() == Some("vm") {
-                // Guest paths keep a stable identity without host filesystem resolution.
-                vm_guest_identity(
-                    row.id.as_deref().ok_or_else(|| invalid("vm-agent-id"))?,
-                    path,
-                )
-            } else {
-                CanonicalPath::ancestor_nonstrict(Path::new(path))
-                    .map_err(|_| invalid("cwd"))?
-                    .to_string_lossy()
-                    .into_owned()
-            };
+            let resolved = CanonicalPath::ancestor_nonstrict(Path::new(path))
+                .map_err(|_| invalid("cwd"))?
+                .to_string_lossy()
+                .into_owned();
             resolved_paths.insert(path.to_owned(), resolved);
         }
     }
@@ -725,38 +600,6 @@ impl FilesystemSnapshot {
     }
 }
 
-fn vm_guest_identity(agent_id: &str, guest_cwd: &str) -> String {
-    format!(
-        "/__codex_vm__/{agent_id}/{}",
-        studio_runtime_store::sha256_hex(guest_cwd.as_bytes())
-    )
-}
-
-#[cfg(test)]
-mod vm_identity_tests {
-    use super::vm_guest_identity;
-
-    #[test]
-    fn guest_cwd_gets_a_normalized_host_independent_identity() {
-        let identity = vm_guest_identity("agent-1", "/guest/project/lines/main");
-        assert!(identity.starts_with("/__codex_vm__/agent-1/"));
-        let path = std::path::Path::new(&identity);
-        assert!(path.is_absolute());
-        assert!(
-            !path
-                .components()
-                .any(|part| part == std::path::Component::ParentDir)
-        );
-        assert_eq!(
-            identity,
-            vm_guest_identity("agent-1", "/guest/project/lines/main")
-        );
-        assert_ne!(
-            identity,
-            vm_guest_identity("agent-1", "/guest/project/lines/other")
-        );
-    }
-}
 pub(super) fn authorize(
     tx: &Transaction<'_>,
     intent: &TurnIntent,
@@ -839,11 +682,8 @@ pub(super) fn guidance(
     let role = role_guidance(resources, record)?;
     let mut thread_config = resources.thread_config.clone();
     // A managed host worker runs without the host account's user MCP servers.
-    // Isolated VM profiles do not inherit those transports.
     // (Claude workers get the same rule from the adapter's `userMcp` param.)
-    if record["parentId"].is_string()
-        && ProviderKind::of_record(record) == Ok(ProviderKind::Codex)
-        && record["executionMode"] != "vm"
+    if record["parentId"].is_string() && ProviderKind::of_record(record) == Ok(ProviderKind::Codex)
     {
         let servers: Map<String, Value> = resources
             .filesystem_inputs
@@ -864,7 +704,6 @@ pub(super) fn guidance(
     // Python `codex_browser_host.thread_environment`, at the same call site as
     // `configure_browser`: host Codex threads send their sign-in links to Studio.
     if ProviderKind::of_record(record) == Ok(ProviderKind::Codex)
-        && record["executionMode"] != "vm"
         && let Some(agent_id) = record["id"].as_str()
     {
         thread_config.extend(
@@ -900,15 +739,13 @@ pub(super) fn guidance(
 }
 
 /// Python `codex_browser.configure_browser`: every host Codex agent (lead,
-/// worker or reviewer) gets the account's native Chrome setup; Claude and VM
-/// agents get none.
+/// worker or reviewer) gets the account's native Chrome setup; Claude agents get none.
 fn browser_guidance(
     resources: &PreparationResources,
     record: &Value,
     thread_config: &mut Map<String, Value>,
 ) -> Option<thread::BrowserGuidance> {
     if ProviderKind::of_record(record) != Ok(ProviderKind::Codex)
-        || record["executionMode"] == "vm"
         || resources.account_home.is_empty()
         || resources.shared_home.is_empty()
     {
@@ -982,24 +819,8 @@ fn role_guidance(resources: &PreparationResources, record: &Value) -> Result<Str
         if content.trim().is_empty() {
             return Err(refusal("thread-preparation/missing-guidance".into()));
         }
-        let vm = record["executionMode"] == "vm";
-        let mut content = content.trim().to_owned();
-        if vm {
-            for relative in VM_ROLE_GUIDANCE {
-                let guide = resources
-                    .role_guidance
-                    .get(Path::new(relative))
-                    .ok_or_else(|| refusal("thread-preparation/missing-guidance".into()))?;
-                content.push('\n');
-                content.push_str(guide);
-            }
-        }
-        // A VM session reads the skills inside the guest, not on this machine.
-        let shown_root = if vm {
-            Path::new(VM_GUEST_SKILLS_ROOT)
-        } else {
-            resources.skills_root.as_path()
-        };
+        let content = content.trim().to_owned();
+        let shown_root = resources.skills_root.as_path();
         format!(
             "[Studio role skill: {name}]\nSource: {}\nShared tool guidance: {}\n{}\n[End Studio role skill]",
             shown_root.join(name).join("SKILL.md").display(),
@@ -1022,7 +843,7 @@ fn catalog_source(record: &Value) -> Result<thread::CatalogSource, WorkerError> 
     )
 }
 
-/// VM agents and providers that resend tools each turn use current definitions.
+/// Providers that resend tools each turn use current definitions.
 /// Other agents retain their saved catalog source. Callers apply frozen overrides.
 fn catalog_definitions<'a>(
     resources: &'a PreparationResources,
@@ -1030,7 +851,6 @@ fn catalog_definitions<'a>(
 ) -> Result<&'a Vec<thread::ToolDefinition>, WorkerError> {
     Ok(
         if catalog_source(record)? == thread::CatalogSource::Legacy
-            && record["executionMode"] != "vm"
             && !crate::provider_adapter::adapter(
                 ProviderKind::of_record(record).map_err(|_| invalid("agent/provider"))?,
             )
@@ -1101,7 +921,6 @@ pub(crate) fn actor_tool_definitions(
                 optional(record, "nativeTeleportTool")?,
                 text(record, "threadId")?.is_some(),
             ),
-            vm: thread::VmRole::of(record["executionMode"] == "vm", role(record)?),
         },
     )
     .map_err(|_| invalid("tool catalog"))?;
@@ -1217,7 +1036,6 @@ fn host_worktree(
         || lead
         || role != thread::Role::Implementer
         || record["parentId"].as_str().is_none()
-        || record["executionMode"] == "vm"
         || !((record["worktree"] == true && record["worktreeReady"] == true)
             || (crate::layr_native::is_native(record) && record["layrReady"] == true))
     {
@@ -1313,6 +1131,16 @@ pub(super) fn thread_snapshot(
     state_root: &Path,
     account_transfer_owner: Option<&str>,
 ) -> Result<thread::Snapshot, WorkerError> {
+    if crate::workspace_ready::vm_workspace_unsupported(
+        record["executionMode"].as_str(),
+        record["workspaceMode"].as_str(),
+        record["layrReady"] == true,
+        record["layrLine"].as_str().is_some(),
+    ) {
+        return Err(refusal(
+            crate::workspace_ready::WorkspaceRefusal::VmWorkspaceUnsupported.to_string(),
+        ));
+    }
     let id = record["id"].as_str().ok_or_else(|| invalid("agent/id"))?;
     let root_id = record["rootId"]
         .as_str()
@@ -1368,7 +1196,6 @@ pub(super) fn thread_snapshot(
             native_effort_present: record.get("nativeEffort").is_some(),
             deleted: record.get("deletedAt").is_some_and(|v| !v.is_null()),
             native_review: studio_runtime_store::truthy(record.get("nativeReview")),
-            vm: record["executionMode"] == "vm",
         },
         account: thread::Account {
             key: text(record, "accountKey")?.unwrap_or_else(|| "default".into()),
@@ -1658,7 +1485,6 @@ pub(super) fn submission_snapshot(
             team_state,
             delivered_reminders,
             assets,
-            asset_paths: BTreeMap::new(),
             guidance: turn::GuidanceBundle { role },
             artifact_paths: BTreeMap::new(),
             prepared_at: now(),
@@ -1922,7 +1748,7 @@ mod resource_tests {
                 let plan = thread::plan(&snapshot, "next-attempt", "next-ticket");
                 assert_eq!(native_thread_blocked(&record), error["codexErrorInfo"] == "misalignmentPolicyViolation");
                 if !context_wait.is_null() {
-                    assert_eq!(plan, thread::Outcome::Hold(thread::HoldReason::ContextRepair));
+                    assert_eq!(plan, thread::Outcome::Refuse(thread::Refusal::Blocked(thread::HoldReason::ContextRepair)));
                 } else {
                     assert!(matches!(plan, thread::Outcome::Resume(_)), "{plan:?}");
                 }
@@ -2136,6 +1962,125 @@ mod resource_tests {
             .expect("a review object is read as a review child");
     }
 
+    async fn legacy_vm_restore_refused(kind: &str) {
+        let directory = tempfile::tempdir().expect("state");
+        let store = Arc::new(
+            RuntimeStore::open(Some(directory.path()))
+                .await
+                .expect("store"),
+        );
+        let mut record = json!({"compactions":0,"id":"worker","rootId":"worker","epoch":1,
+            "status":"paused","isLead":true,"role":"implementer","provider":"codex",
+            "model":"fake-model","accountKey":"default","cwd":directory.path(),
+            "executionMode":"vm","workspaceMode":"layr","layrReady":true,
+            "layrProjectId":"legacy","layrLine":"legacy","nativeEffort":null,
+            "effort":null,"autoWake":false});
+        if matches!(kind, "monitor" | "safety") {
+            record
+                .as_object_mut()
+                .expect("object")
+                .remove("executionMode");
+            record["autoWake"] = json!(true);
+            record["threadId"] = json!("old-thread");
+        }
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &AgentRecord::from_value(record).expect("agent"))
+            })
+            .await
+            .expect("saved agent");
+        let resources = PreparationResources::bundled(String::new(), ModelCatalogService::new())
+            .expect("resources");
+        let result = match kind {
+            "native" => super::super::pipeline::prepare_native_thread(
+                Arc::clone(&store),
+                &resources,
+                "worker",
+                "restore",
+                1,
+            )
+            .await
+            .map(|_| ()),
+            "transfer" => super::super::pipeline::prepare_account_transfer_native_thread(
+                Arc::clone(&store),
+                &resources,
+                "worker",
+                "transfer",
+                "restore",
+                1,
+            )
+            .await
+            .map(|_| ()),
+            "review" => super::super::pipeline::prepare_review_thread(
+                Arc::clone(&store),
+                &resources,
+                "worker",
+                "restore",
+                1,
+            )
+            .await
+            .map(|_| ()),
+            "monitor" => super::super::pipeline::prepare_monitor_command(
+                Arc::clone(&store),
+                &resources,
+                "worker",
+                1,
+            )
+            .await
+            .map(|_| ()),
+            "safety" => super::super::pipeline::prepare_safety_retry(
+                Arc::clone(&store),
+                &resources,
+                &super::super::SafetyRetryPreparation {
+                    agent_id: "worker".into(),
+                    attempt_id: "retry".into(),
+                    generation: 1,
+                    source_thread_id: "old-thread".into(),
+                    turn_id: "turn".into(),
+                    model: "fake-model".into(),
+                    input: json!([]),
+                },
+            )
+            .await
+            .map(|_| ()),
+            _ => unreachable!(),
+        };
+        let expected = if matches!(kind, "native" | "review") {
+            "workspace-readiness/unsupported-execution-mode"
+        } else {
+            "VmWorkspaceUnsupported"
+        };
+        assert!(
+            matches!(result, Err(crate::account_worker::WorkerError::PreparationRefused(ref reason)) if reason == expected),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_native_restore_is_refused() {
+        legacy_vm_restore_refused("native").await;
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_transfer_restore_is_refused() {
+        legacy_vm_restore_refused("transfer").await;
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_review_thread_is_refused() {
+        legacy_vm_restore_refused("review").await;
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_monitor_command_is_refused() {
+        legacy_vm_restore_refused("monitor").await;
+    }
+
+    #[tokio::test]
+    async fn legacy_vm_safety_retry_is_refused() {
+        legacy_vm_restore_refused("safety").await;
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn native_layr_paused_legacy_thread_uses_the_canonical_cwd_of_its_saved_alias() {
@@ -2323,122 +2268,6 @@ mod resource_tests {
         }
     }
 
-    /// VM agents use current definitions even when their saved source is legacy.
-    /// Host Codex agents keep that saved source. Both catalogs include sign-in.
-    /// A fixture description distinguishes their selection without removing tools.
-    #[tokio::test]
-    async fn a_vm_agent_on_an_old_thread_gets_the_current_catalog() {
-        let directory = tempfile::tempdir().expect("temporary state directory");
-        let store = studio_runtime_store::RuntimeStore::open(Some(directory.path()))
-            .await
-            .expect("runtime store opens");
-        let mut resources =
-            PreparationResources::bundled(String::new(), ModelCatalogService::new())
-                .expect("runtime resources")
-                .capture_filesystem(None)
-                .capture_native_layr(
-                    Path::new("/state"),
-                    &json!({"workspaceMode":"layr-native"}),
-                    None,
-                )
-                .expect("native Layr inputs");
-        resources
-            .legacy_tools
-            .iter_mut()
-            .find(|tool| tool.name == "orchestration_context")
-            .expect("legacy context tool")
-            .description
-            .push_str(" Legacy catalog fixture.");
-        assert_ne!(resources.tools, resources.legacy_tools);
-        store
-            .transaction_with(move |tx| {
-                let failed = |error: WorkerError| StoreError::SchemaMismatch(error.to_string());
-                let names = |tools: Vec<thread::ToolDefinition>| {
-                    tools.into_iter().map(|tool| tool.name).collect::<Vec<_>>()
-                };
-                for (mode, expected_tools, vm) in [
-                    ("vm", &resources.tools, true),
-                    ("native", &resources.legacy_tools, false),
-                ] {
-                    // An old thread without a saved source, and a new thread
-                    // of an agent whose saved source is legacy.
-                    for (thread_id, source) in [(Some("thread-old"), None), (None, Some("legacy"))]
-                    {
-                        let mut record = json!({"compactions":0,"id":mode, "rootId":mode, "epoch":1,
-                            "status":"running", "isLead":true, "name":"Lead", "provider":"codex",
-                            "accountKey":"default", "executionMode":mode, "cwd":"/line",
-                            "workspaceMode":if vm { "layr" } else { "layr-native" }});
-                        if let Some(thread_id) = thread_id {
-                            record["threadId"] = json!(thread_id);
-                        }
-                        if let Some(source) = source {
-                            record["nativeToolSource"] = json!(source);
-                        }
-                        AgentRepository::put(
-                            tx,
-                            &AgentRecord::from_value(record.clone()).expect("agent"),
-                        )?;
-                        let snapshot = thread_snapshot(
-                            tx,
-                            &resources,
-                            &record,
-                            "connection",
-                            Path::new("/state"),
-                            None,
-                        )
-                        .map_err(failed)?;
-                        let case = format!("{mode} {thread_id:?} {source:?}");
-                        assert_eq!(
-                            snapshot.catalog.source,
-                            thread::CatalogSource::Legacy,
-                            "{case}"
-                        );
-                        assert_eq!(&snapshot.catalog.definitions, expected_tools, "{case}");
-                        let definitions = thread::tool_definitions(&snapshot).expect("tools");
-                        assert_eq!(
-                            actor_tool_definitions(tx, &resources, &record).map_err(failed)?,
-                            json!(definitions),
-                            "{case}: the context tool reports the same catalog"
-                        );
-                        let tools = names(definitions);
-                        assert!(
-                            tools.iter().any(|name| name == crate::sign_in::TOOL),
-                            "{case}: both maintained catalogs include sign-in"
-                        );
-                        assert_eq!(tools.iter().any(|name| name == "host_exec"), vm, "{case}");
-                        assert!(!tools.iter().any(|name| name == "layr_read"), "{case}");
-                        let attempt = match thread::plan(&snapshot, "attempt", "ticket") {
-                            thread::Outcome::Start(attempt) | thread::Outcome::Resume(attempt) => {
-                                attempt
-                            }
-                            other @ thread::Outcome::Ready(_)
-                            | other @ thread::Outcome::Hold(_)
-                            | other @ thread::Outcome::Refuse(_) => panic!("{case}: {other:?}"),
-                        };
-                        assert_eq!(
-                            attempt.before_submit.set["nativeToolSource"],
-                            json!("legacy"),
-                            "{case}"
-                        );
-                        // A Codex resume sends no catalog; a start sends the
-                        // catalog above.
-                        let sent = attempt.params.get("dynamicTools").map(|tools| {
-                            tools
-                                .as_array()
-                                .expect("tools")
-                                .iter()
-                                .map(|tool| tool["name"].as_str().expect("name").to_owned())
-                                .collect::<Vec<_>>()
-                        });
-                        assert_eq!(sent, thread_id.is_none().then_some(tools), "{case}");
-                    }
-                }
-                Ok::<_, StoreError>(())
-            })
-            .await
-            .expect("a VM agent keeps its tools");
-    }
-
     /// Claude resends its tools on each turn. Old host threads need the current
     /// catalog without changing their saved source or exact moved tool list.
     #[tokio::test]
@@ -2453,7 +2282,7 @@ mod resource_tests {
         store
             .transaction_with(move |tx| {
                 let failed = |error: WorkerError| StoreError::SchemaMismatch(error.to_string());
-                for mode in ["native", "vm"] {
+                for mode in ["native"] {
                     for (thread_id, source) in [
                         (Some("thread-old"), None),
                         (Some("thread-old"), Some("legacy")),
@@ -2504,7 +2333,6 @@ mod resource_tests {
                                 attempt
                             }
                             other @ (thread::Outcome::Ready(_)
-                            | thread::Outcome::Hold(_)
                             | thread::Outcome::Refuse(_)) => panic!("{case}: {other:?}"),
                         };
                         assert_eq!(
@@ -2570,10 +2398,8 @@ mod resource_tests {
         );
         assert!(host.contains_key("shell_environment_policy.set.BROWSER"));
         assert!(host.contains_key("shell_environment_policy.set.STUDIO_BROWSER_SOCKET"));
-        for record in [
-            json!({"id":"claude", "isLead":true, "provider":"claude"}),
-            json!({"id":"vm", "isLead":true, "provider":"codex", "executionMode":"vm"}),
-        ] {
+        {
+            let record = json!({"id":"claude", "isLead":true, "provider":"claude"});
             let config = config(record);
             assert!(
                 !config
@@ -2635,11 +2461,9 @@ mod resource_tests {
             assert_eq!(servers["node_repl"], *server, "{role}");
         }
 
-        // Python's call site excludes Claude and VM agents.
-        for record in [
-            json!({"id":"c", "provider":"claude"}),
-            json!({"id":"v", "provider":"codex", "executionMode":"vm"}),
-        ] {
+        // Claude agents do not use this browser setup.
+        {
+            let record = json!({"id":"c", "provider":"claude"});
             let other = bundle(&resources, record);
             assert_eq!(other.browser, None);
             assert!(other.thread_config.get("mcp_servers.node_repl").is_none());
@@ -2700,86 +2524,6 @@ mod resource_tests {
             servers(json!({"id":"c", "parentId":"lead", "provider":"claude"})),
             None
         );
-    }
-
-    #[test]
-    fn vm_codex_children_do_not_inherit_host_mcp_server_overrides() {
-        let crate::browser::BrowserHomes {
-            root,
-            shared,
-            account,
-            ..
-        } = crate::browser::browser_homes();
-        let mut resources = PreparationResources::bundled(
-            account.to_string_lossy().into_owned(),
-            ModelCatalogService::new(),
-        )
-        .expect("resources");
-        resources.shared_home = shared.to_string_lossy().into_owned();
-        for role in ["implementer", "reviewer"] {
-            let record = json!({"id":"vm-child", "parentId":"lead", "isLead":false,
-                "role":role, "provider":"codex", "executionMode":"vm"});
-            let bundle = guidance(&resources, &record, root.path()).expect("VM guidance");
-            assert_eq!(bundle.browser, None);
-            assert!(
-                !bundle
-                    .thread_config
-                    .keys()
-                    .any(|key| key == "mcp_servers" || key.starts_with("mcp_servers.")),
-                "VM {role} must not fabricate host MCP transports: {:?}",
-                bundle.thread_config
-            );
-        }
-    }
-
-    #[test]
-    fn layr_sessions_get_the_layr_guidance_and_skill() {
-        let mut resources =
-            PreparationResources::bundled(String::new(), ModelCatalogService::new())
-                .expect("runtime resources");
-        let skill = resources.role_guidance[Path::new("layr/SKILL.md")].clone();
-        let reference =
-            resources.role_guidance[Path::new("codex-workspace/references/layr.md")].clone();
-        for lead in [true, false] {
-            let vm = guidance(
-                &resources,
-                &json!({"id":"agent", "isLead":lead, "executionMode":"vm", "provider":"codex"}),
-                Path::new("/state"),
-            )
-            .expect("layr guidance");
-            assert!(
-                vm.role
-                    .contains(&format!("\n{reference}\n{skill}\n[End Studio role skill]"))
-            );
-            let name = if lead {
-                "codex-orchestrator"
-            } else {
-                "codex-subagent"
-            };
-            assert!(vm.role.contains(&format!(
-                "Source: {VM_GUEST_SKILLS_ROOT}/{name}/SKILL.md\nShared tool guidance: \
-                 {VM_GUEST_SKILLS_ROOT}/codex-workspace/SKILL.md\n"
-            )));
-            let native = guidance(
-                &resources,
-                &json!({"id":"agent", "isLead":lead, "provider":"codex"}),
-                Path::new("/state"),
-            )
-            .expect("native guidance");
-            assert!(!native.role.contains("# layr by task"));
-            assert!(!native.role.contains(VM_GUEST_SKILLS_ROOT));
-        }
-        resources.role_guidance.remove(Path::new("layr/SKILL.md"));
-        let refused = guidance(
-            &resources,
-            &json!({"id":"agent", "isLead":true, "executionMode":"vm", "provider":"codex"}),
-            Path::new("/state"),
-        );
-        assert!(matches!(
-            refused,
-            Err(WorkerError::PreparationRefused(reason))
-                if reason == "thread-preparation/missing-guidance"
-        ));
     }
 }
 
@@ -2997,7 +2741,7 @@ mod workspace_fence_tests {
                         None)?;
                     let attempt = match thread::plan(&snapshot, "attempt", "ticket") {
                         thread::Outcome::Start(attempt) | thread::Outcome::Resume(attempt) => attempt,
-                        other @ thread::Outcome::Ready(_) | other @ thread::Outcome::Hold(_) | other @ thread::Outcome::Refuse(_) => panic!("expected thread launch, got {other:?}"),
+                        other @ thread::Outcome::Ready(_) | other @ thread::Outcome::Refuse(_) => panic!("expected thread launch, got {other:?}"),
                     };
                     assert_eq!(attempt.params["claude"]["permissionMode"], *mode);
                 }
@@ -3117,7 +2861,6 @@ mod workspace_fence_tests {
                                 attempt
                             }
                             other @ (thread::Outcome::Ready(_)
-                            | thread::Outcome::Hold(_)
                             | thread::Outcome::Refuse(_)) => panic!("expected thread launch, got {other:?}"),
                         };
                         let options = attempt.params.get("claude").unwrap_or(&Value::Null);

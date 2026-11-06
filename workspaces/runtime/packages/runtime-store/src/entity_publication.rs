@@ -17,7 +17,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, functions::FunctionFlags};
+use rusqlite::{Connection, OptionalExtension, Transaction};
 
 use crate::StoreResult;
 
@@ -31,15 +31,13 @@ pub trait EntityPublisher: Send + Sync {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PendingEntities {
     pub agents: BTreeSet<String>,
-    pub requests: BTreeSet<String>,
+    /// Team leads whose members changed. Their views depend on the members only
+    /// through the team counts, so the publisher marks them only when those change.
+    pub team_roots: BTreeSet<String>,
     pub receipt_events: BTreeSet<String>,
     pub receipt_items: BTreeSet<String>,
-    pub plans: BTreeSet<String>,
-    pub annotations: BTreeSet<String>,
     pub tasks: BTreeSet<String>,
     pub work: BTreeSet<String>,
-    pub work_changes: BTreeMap<String, WorkSourceChanges>,
-    pub work_refusal_owners: BTreeSet<String>,
     /// Source rows of the derived Studio error list that changed.
     pub studio_errors: StudioErrorSources,
     pub queues: BTreeSet<String>,
@@ -49,14 +47,11 @@ pub struct PendingEntities {
 impl PendingEntities {
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
-            && self.requests.is_empty()
+            && self.team_roots.is_empty()
             && self.receipt_events.is_empty()
             && self.receipt_items.is_empty()
-            && self.plans.is_empty()
-            && self.annotations.is_empty()
             && self.tasks.is_empty()
             && self.work.is_empty()
-            && self.work_refusal_owners.is_empty()
             && self.studio_errors.is_empty()
             && self.queues.is_empty()
             && self.terminals.is_empty()
@@ -86,97 +81,6 @@ impl WorkHistoryKind {
             Self::Release => "workRelease",
         }
     }
-}
-
-/// An authoritative OLD/NEW source delta recorded by SQLite, never supplied by callers.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct WorkSourceChanges {
-    histories: BTreeMap<WorkHistoryKind, BTreeSet<usize>>,
-}
-impl WorkSourceChanges {
-    pub fn histories(&self) -> &BTreeMap<WorkHistoryKind, BTreeSet<usize>> {
-        &self.histories
-    }
-}
-
-/// Connection-local function identities used only by the source journal triggers.
-pub(crate) const WORK_HISTORY_FUNCTION: &str = "sync_work_history_change";
-pub(crate) const WORK_IDENTITY_FUNCTION: &str = "sync_work_identity_change";
-
-pub(crate) fn register_work_change_functions(connection: &Connection) -> crate::StoreResult<()> {
-    connection.create_scalar_function(
-        WORK_HISTORY_FUNCTION,
-        3,
-        FunctionFlags::empty(),
-        |context| {
-            let id: String = context.get(0)?;
-            let field: String = context.get(1)?;
-            let index: i64 = context.get(2)?;
-            let kind = WorkHistoryKind::ALL
-                .into_iter()
-                .find(|kind| kind.field() == field)
-                .ok_or(rusqlite::Error::InvalidQuery)?;
-            let index = usize::try_from(index).map_err(|_| rusqlite::Error::InvalidQuery)?;
-            push(Event::WorkHistory(id, kind, index));
-            Ok(0)
-        },
-    )?;
-    connection.create_scalar_function(
-        WORK_IDENTITY_FUNCTION,
-        2,
-        FunctionFlags::empty(),
-        |context| {
-            match (
-                context.get::<Option<String>>(0)?,
-                context.get::<Option<String>>(1)?,
-            ) {
-                (Some(owner), None) => push(Event::WorkRefusalOwner(owner)),
-                (None, Some(_)) => push(Event::WorkRefusalTask),
-                _ => return Err(rusqlite::Error::InvalidQuery),
-            }
-            Ok(0)
-        },
-    )?;
-    Ok(())
-}
-
-/// Classify work changes while OLD and NEW are available to the source journal.
-pub(crate) fn prepare_work_change_journal(transaction: &Transaction<'_>) -> crate::StoreResult<()> {
-    for kind in WorkHistoryKind::ALL {
-        let field = kind.field();
-        transaction.execute_batch(&format!(
-            "CREATE TRIGGER IF NOT EXISTS work_history_{field}_insert AFTER INSERT ON runtime_work BEGIN
-             SELECT {WORK_HISTORY_FUNCTION}(NEW.id,'{field}',j.key) FROM json_each(NEW.record,'$.{field}') j; END;
-             CREATE TRIGGER IF NOT EXISTS work_history_{field}_update AFTER UPDATE OF record ON runtime_work
-             WHEN json_extract(OLD.record,'$.{field}') IS NOT json_extract(NEW.record,'$.{field}') OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId') BEGIN
-             SELECT {WORK_HISTORY_FUNCTION}(NEW.id,'{field}',changed.key) FROM (
-               WITH old_values AS MATERIALIZED (SELECT key,value,type FROM json_each(OLD.record,'$.{field}')),
-                    new_values AS MATERIALIZED (SELECT key,value,type FROM json_each(NEW.record,'$.{field}'))
-               SELECT n.key FROM new_values n LEFT JOIN old_values o USING(key)
-               WHERE o.key IS NULL OR o.type IS NOT n.type OR o.value IS NOT n.value OR json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId')
-               UNION SELECT o.key FROM old_values o LEFT JOIN new_values n USING(key) WHERE n.key IS NULL
-             ) changed; END;"
-        ))?;
-    }
-    transaction.execute_batch(&format!(
-        "CREATE TRIGGER IF NOT EXISTS work_identity_insert AFTER INSERT ON runtime_work BEGIN SELECT {WORK_IDENTITY_FUNCTION}(NULL,NEW.id); END;
-         CREATE TRIGGER IF NOT EXISTS work_identity_update AFTER UPDATE OF record ON runtime_work
-         WHEN json_extract(OLD.record,'$.owner') IS NOT json_extract(NEW.record,'$.owner') OR json_extract(OLD.record,'$.version') IS NOT json_extract(NEW.record,'$.version') BEGIN SELECT {WORK_IDENTITY_FUNCTION}(NULL,NEW.id); END;
-         CREATE TRIGGER IF NOT EXISTS work_owner_identity_update AFTER UPDATE OF record ON runtime_agents
-         WHEN json_extract(OLD.record,'$.epoch') IS NOT json_extract(NEW.record,'$.epoch')
-           OR json_extract(OLD.record,'$.accountKey') IS NOT json_extract(NEW.record,'$.accountKey')
-           OR json_extract(OLD.record,'$.threadId') IS NOT json_extract(NEW.record,'$.threadId')
-           OR json_extract(OLD.record,'$.turnId') IS NOT json_extract(NEW.record,'$.turnId')
-         BEGIN SELECT {WORK_IDENTITY_FUNCTION}(NEW.id,NULL); END;
-         CREATE TRIGGER IF NOT EXISTS work_attempt_identity_insert AFTER INSERT ON runtime_execution_runs BEGIN SELECT {WORK_IDENTITY_FUNCTION}(NEW.agent,NULL); END;
-         CREATE TRIGGER IF NOT EXISTS work_attempt_identity_delete AFTER DELETE ON runtime_execution_runs BEGIN SELECT {WORK_IDENTITY_FUNCTION}(OLD.agent,NULL); END;
-         CREATE TRIGGER IF NOT EXISTS work_attempt_identity_update AFTER UPDATE ON runtime_execution_runs
-         WHEN OLD.agent IS NOT NEW.agent OR OLD.account IS NOT NEW.account OR OLD.epoch IS NOT NEW.epoch OR OLD.thread IS NOT NEW.thread OR OLD.turn IS NOT NEW.turn OR OLD.created IS NOT NEW.created
-           OR json_extract(OLD.record,'$.latestAttemptId') IS NOT json_extract(NEW.record,'$.latestAttemptId')
-           OR json_extract(OLD.record,'$.status') IS NOT json_extract(NEW.record,'$.status')
-         BEGIN SELECT {WORK_IDENTITY_FUNCTION}(OLD.agent,NULL); SELECT {WORK_IDENTITY_FUNCTION}(NEW.agent,NULL); END;"
-    ))?;
-    Ok(())
 }
 
 /// Ids of the changed rows that the Studio error list reads. The list owner
@@ -212,8 +116,6 @@ enum Source {
     Event,
     EventMeta,
     Item,
-    Plan,
-    Annotation,
     Task,
     Work,
     QueueAsset,
@@ -232,8 +134,6 @@ impl Source {
             "runtime_events" => Some(Self::Event),
             "runtime_event_meta" => Some(Self::EventMeta),
             "runtime_items" => Some(Self::Item),
-            "runtime_plans" => Some(Self::Plan),
-            "runtime_annotations" => Some(Self::Annotation),
             "runtime_tasks" => Some(Self::Task),
             "runtime_work" => Some(Self::Work),
             "runtime_assets" => Some(Self::QueueAsset),
@@ -247,11 +147,8 @@ impl Source {
     fn of_collection(collection: &str) -> Option<Self> {
         match collection {
             "agent" => Some(Self::Agent),
-            "request" => Some(Self::Request),
-            "plan" => Some(Self::Plan),
-            "annotation" => Some(Self::Annotation),
             "task" => Some(Self::Task),
-            "work" | "workDetail" => Some(Self::Work),
+            "work" => Some(Self::Work),
             _ => None,
         }
     }
@@ -263,8 +160,6 @@ impl Source {
             Self::Event => "runtime_events",
             Self::EventMeta => "runtime_event_meta",
             Self::Item => "runtime_items",
-            Self::Plan => "runtime_plans",
-            Self::Annotation => "runtime_annotations",
             Self::Task => "runtime_tasks",
             Self::Work => "runtime_work",
             Self::QueueAsset => "runtime_assets",
@@ -283,9 +178,6 @@ enum Event {
     Published(Source, String),
     /// A partial projection write needs a full publication.
     Stale(Source, String),
-    WorkHistory(String, WorkHistoryKind, usize),
-    WorkRefusalOwner(String),
-    WorkRefusalTask,
     TeamRoot(String),
 }
 
@@ -358,9 +250,6 @@ pub(crate) fn mark_published(collection: &str, id: &str) {
 
 /// Journal that `collection/id` needs a full publication before commit.
 pub fn mark_stale(collection: &str, id: &str) {
-    if collection == "work" {
-        push(Event::WorkRefusalTask);
-    }
     if let Some(source) = Source::of_collection(collection) {
         push(Event::Stale(source, id.to_owned()));
     }
@@ -388,8 +277,6 @@ pub(crate) fn pending(
                     | Source::Event
                     | Source::EventMeta
                     | Source::Item
-                    | Source::Plan
-                    | Source::Annotation
                     | Source::Task
                     | Source::Work
                     | Source::Terminal
@@ -405,19 +292,6 @@ pub(crate) fn pending(
     }
     let mut pending = PendingEntities::default();
     for ((source, _), id) in &ids {
-        if *source != Source::Work {
-            continue;
-        }
-        if id.is_none() {
-            let mut statement = transaction.prepare_cached(
-                "SELECT DISTINCT id FROM sync_entities WHERE collection IN ('work','workDetail') AND deleted=0 AND NOT EXISTS(SELECT 1 FROM runtime_work WHERE runtime_work.id=sync_entities.id)",
-            )?;
-            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-                pending.work.insert(row?);
-            }
-        }
-    }
-    for ((source, _), id) in &ids {
         if *source == Source::Agent {
             if let Some(id) = id {
                 let root: Option<String> = transaction
@@ -427,14 +301,14 @@ pub(crate) fn pending(
                     .query_row([id], |row| row.get(0))
                     .optional()?;
                 if let Some(root) = root {
-                    pending.agents.insert(root);
+                    pending.team_roots.insert(root);
                 }
             } else {
                 let mut statement = transaction.prepare_cached(
                     "SELECT id FROM runtime_agents WHERE root_id=id AND deleted_at IS NULL",
                 )?;
                 for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-                    pending.agents.insert(row?);
+                    pending.team_roots.insert(row?);
                 }
             }
         }
@@ -495,8 +369,8 @@ pub(crate) fn pending(
             _ => false,
         };
     }
-    // Request attention belongs in summaries even when an explicit request
-    // publisher has already consumed the card's own pending publication.
+    // A changed approval changes the attention fields of its agent's summary. The
+    // approval documents themselves are built at read time.
     for ((source, _), id) in &ids {
         if *source != Source::Request {
             continue;
@@ -511,9 +385,8 @@ pub(crate) fn pending(
                 pending.agents.insert(agent);
             }
         } else {
-            let mut statement = transaction.prepare_cached(
-                "SELECT id FROM sync_entities WHERE collection='agentSummary' AND deleted=0",
-            )?;
+            let mut statement = transaction
+                .prepare_cached("SELECT id FROM runtime_agents WHERE deleted_at IS NULL")?;
             for row in statement.query_map([], |row| row.get::<_, String>(0))? {
                 pending.agents.insert(row?);
             }
@@ -521,7 +394,6 @@ pub(crate) fn pending(
     }
     let mut changed: BTreeMap<(Source, String), usize> = BTreeMap::new();
     let mut published: HashMap<(Source, String), usize> = HashMap::new();
-    let mut work_changes: BTreeMap<String, WorkSourceChanges> = BTreeMap::new();
     for (index, event) in events.into_iter().enumerate() {
         match event {
             Event::Row(source, row_id) => {
@@ -533,27 +405,10 @@ pub(crate) fn pending(
                 changed.insert((source, id), index);
             }
             Event::Published(source, id) => {
-                if source == Source::Work {
-                    work_changes.remove(&id);
-                }
                 published.insert((source, id), index);
             }
-            Event::WorkHistory(id, kind, entry) => {
-                work_changes
-                    .entry(id)
-                    .or_default()
-                    .histories
-                    .entry(kind)
-                    .or_default()
-                    .insert(entry);
-            }
-            Event::WorkRefusalOwner(id) => {
-                pending.work_refusal_owners.insert(id);
-            }
-            // The submission refusal is derived on every work publication.
-            Event::WorkRefusalTask => {}
             Event::TeamRoot(id) => {
-                pending.agents.insert(id);
+                pending.team_roots.insert(id);
             }
         }
     }
@@ -566,20 +421,17 @@ pub(crate) fn pending(
         }
         match source {
             Source::Agent => pending.agents.insert(id),
-            Source::Request => pending.requests.insert(id),
             Source::Event | Source::EventMeta => pending.receipt_events.insert(id),
             Source::Item => pending.receipt_items.insert(id),
-            Source::Plan => pending.plans.insert(id),
-            Source::Annotation => pending.annotations.insert(id),
             Source::Task => pending.tasks.insert(id),
             Source::Work => pending.work.insert(id),
-            Source::QueueAsset | Source::Terminal | Source::Monitor | Source::Incident => false,
+            Source::Request
+            | Source::QueueAsset
+            | Source::Terminal
+            | Source::Monitor
+            | Source::Incident => false,
         };
     }
-    pending.work_changes = work_changes
-        .into_iter()
-        .filter(|(id, _)| pending.work.contains(id))
-        .collect();
     Ok(pending)
 }
 
@@ -614,7 +466,8 @@ mod tests {
             .collect();
         events.push(Event::Row(Source::Event, 101));
         let result = pending(&tx, Journal(events)).unwrap();
-        assert_eq!(result.agents.len(), 101);
+        assert_eq!(result.agents.len(), 100);
+        assert_eq!(result.team_roots, BTreeSet::from(["root".to_owned()]));
         let expected_queues: BTreeSet<_> = (0..100)
             .map(|i| format!("agent-{i}"))
             .chain(["event-only-owner".to_owned()])

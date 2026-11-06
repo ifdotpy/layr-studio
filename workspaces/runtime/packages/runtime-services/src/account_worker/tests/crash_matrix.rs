@@ -55,7 +55,7 @@ async fn scenario(index: usize) {
         15 => scenario_stream_base_survives_replaced_visible_item().await,
         16 => scenario_new_thread_freezes_settings_and_accepts_context().await,
         17 => scenario_child_result_materializes_before_submission().await,
-        18 => scenario_workspace_refusal_retains_queue().await,
+        18 => scenario_legacy_vm_record_is_refused().await,
         19 => scenario_workspace_pending_reuses_reserved_attempt().await,
         20 => preparation_review::scenario_completed_repair_and_missing_complaint_deliver().await,
         21 => Box::pin(preparation_review::scenario_late_context_change_refuses_submission()).await,

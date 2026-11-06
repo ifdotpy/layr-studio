@@ -63,12 +63,12 @@ mod tests {
 
     #[test]
     fn serde_private_number_key_remains_an_object_in_raw_json() {
-        let value = parse_bounded(br#"{"$serde_json::private::Number":"1"}"#, 1024)
-            .expect("valid JSON object");
-        assert_eq!(
-            value,
-            studio_json::json!({"$serde_json::private::Number":"1"})
-        );
+        let value = parse_bounded(
+            format!(r#"{{"{}":"1"}}"#, studio_json::NUMBER_TOKEN).as_bytes(),
+            1024,
+        )
+        .expect("valid JSON object");
+        assert_eq!(value, studio_json::json!({(studio_json::NUMBER_TOKEN):"1"}));
     }
 
     #[test]

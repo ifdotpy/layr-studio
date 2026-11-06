@@ -8,6 +8,22 @@ fn corpus() -> Value {
     studio_json::from_str(include_str!("fixtures/process-controls.json")).unwrap()
 }
 #[tokio::test]
+async fn task_rows_include_only_running_tasks_for_the_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+    store.transaction_with(|tx| {
+        for (id, agent, status) in [("active", "owner", "running"), ("done", "owner", "completed"), ("other", "other", "running")] {
+            let raw = json!({"id":id,"agent":agent,"created":1,"itemId":"item","turnId":"turn","kind":"command","status":status,"type":"commandExecution","name":"commandExecution"}).to_string();
+            tx.execute("INSERT INTO runtime_tasks(id,record) VALUES(?1,?2)", rusqlite::params![id,raw]).map_err(StoreError::from)?;
+        }
+        let owners = [json!({"id":"owner"})];
+        let rows = process_controls::process_rows(tx, &owners)?;
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0].1, process_controls::ProcessSource::Task(task) if task.id().as_ref() == "active"));
+        Ok::<_, process_controls::Error>(())
+    }).await.unwrap();
+}
+#[tokio::test]
 async fn listing_is_atomic_as_a_command_process_starts_and_ends() {
     use studio_runtime_schema::process_controls::BackgroundTaskView;
     use studio_runtime_store::SyncDocumentsRepository;

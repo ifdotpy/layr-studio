@@ -1,4 +1,3 @@
-import { buildLinuxVM } from "./native/linux-vm/build.ts";
 import { signingIdentity, signCode } from "./signing.ts";
 import { runtimeBinaries, runtimeBinaryName } from "./runtime-binaries.ts";
 import { pythonResources } from "./python-resources.ts";
@@ -77,23 +76,6 @@ try {
     path.join(root, "native/speech-info.plist"),
   ]);
   signCode(speech, identity);
-  // File events for the Mac folder sync of VM projects (docs/vm-mac-sync.md).
-  const fsEvents = path.join(stage, "studio-fs-events");
-  if (!uiOnly) {
-    execFileSync("xcrun", [
-      "swiftc",
-      path.join(root, "native/fs-events.swift"),
-      "-O",
-      "-target",
-      "arm64-apple-macos13.0",
-      "-o",
-      fsEvents,
-    ]);
-    signCode(fsEvents, identity);
-  }
-  const linuxVM = uiOnly
-    ? undefined
-    : buildLinuxVM(path.join(stage, "studio-linux-vm"), identity);
   const resources = path.join(stage, "workspace");
   await mkdir(path.join(resources, "web"), { recursive: true });
   if (!uiOnly) {
@@ -154,24 +136,6 @@ try {
       await mkdir(path.dirname(target), { recursive: true });
       await cp(path.join(repositoryRoot, source), target);
     }
-    await cp(
-      path.join(repositoryRoot, "workspaces/runtime/apps/vm-guest"),
-      path.join(resources, "vm/guest"),
-      {
-        recursive: true,
-        filter: (source) =>
-          !source.includes("__pycache__") && !source.endsWith(".pyc"),
-      },
-    );
-    // The vendored layr and layr-desk sources, built inside the guest (docs/vm-layr.md,
-    // docs/vault.md).
-    for (const name of ["layr", "layr-desk"]) {
-      await cp(
-        path.join(repositoryRoot, "workspaces/runtime/apps", name),
-        path.join(resources, "vm", name),
-        { recursive: true },
-      );
-    }
   }
   await cp(rendererDist, path.join(resources, "web/dist"), {
     recursive: true,
@@ -216,13 +180,7 @@ try {
     resources,
     speech,
     buildStamp,
-    ...(uiOnly
-      ? []
-      : [
-          linuxVM!,
-          fsEvents,
-          ...pythonResources.map((file) => path.join(root, file)),
-        ]),
+    ...(uiOnly ? [] : pythonResources.map((file) => path.join(root, file))),
   ];
   // The native shell (apps/native/package.ts) bundles these resources into its own app.
   await mkdir(packageOutput, { recursive: true });

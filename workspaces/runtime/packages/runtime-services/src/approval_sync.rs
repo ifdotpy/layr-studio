@@ -1,18 +1,26 @@
-//! Publishes an approval row to the renderer in the transaction that changed
-//! the row. Both entities carry the typed `Approval`.
+//! The client views of an approval row. `entity_scope` builds them at read time; both
+//! entities carry the typed `Approval`.
 //!
 //! - `request`: an approval that waits for the person (Pending) or whose answer
-//!   is on its way (Answering). Every other state publishes a deletion.
+//!   is on its way (Answering). Every other state is a deletion.
 //! - `questionHistory`: every state of a question or agent question, so a
 //!   transcript card shows the answer after the request left the list.
 //!
-//! A hidden row is published as deleted in both. An asynchronous question
-//! also carries `detail.params.itemId`, the agent message item named by its id.
-use rusqlite::Transaction;
+//! A hidden row is deleted in both. An asynchronous question also carries
+//! `detail.params.itemId`, the agent message item named by its id.
 use studio_runtime_schema::approvals::{Approval, ApprovalState, Request};
-use studio_runtime_store::{StoreError, SyncDocumentsRepository};
+use studio_runtime_store::StoreError;
 
-pub(crate) fn publish(tx: &Transaction<'_>, row: &Approval) -> Result<(), StoreError> {
+/// The view of one approval and whether each collection shows it.
+pub(crate) struct ApprovalView {
+    pub value: studio_json::Value,
+    /// Shown in `request`.
+    pub open: bool,
+    /// Shown in `questionHistory`.
+    pub asked: bool,
+}
+
+pub(crate) fn view(row: &Approval) -> Result<ApprovalView, StoreError> {
     let visible = row.hidden.is_none();
     let open = visible
         && matches!(
@@ -35,7 +43,5 @@ pub(crate) fn publish(tx: &Transaction<'_>, row: &Approval) -> Result<(), StoreE
             .entry("itemId")
             .or_insert_with(|| studio_json::Value::String(item.to_owned()));
     }
-    SyncDocumentsRepository::put_entity(tx, "request", row.id.as_str(), value.clone(), !open)?;
-    SyncDocumentsRepository::put_entity(tx, "questionHistory", row.id.as_str(), value, !asked)?;
-    Ok(())
+    Ok(ApprovalView { value, open, asked })
 }

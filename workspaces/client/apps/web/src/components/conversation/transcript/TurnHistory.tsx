@@ -2,6 +2,7 @@ import { reportPromptComposerRender } from "../../prompt-composer/renderProbe";
 import {
   Fragment,
   memo,
+  useCallback,
   useMemo,
   useLayoutEffect,
   useRef,
@@ -424,6 +425,83 @@ function Turn({
   );
 }
 
+const HistoryContent = memo(function HistoryContent({
+  group,
+  revealedMessage,
+  enabled,
+  renderMessage,
+  questionCards,
+  requestCards,
+  agentId,
+  cwd,
+  storageKey,
+  onJump,
+  failurePending,
+  failureLookupFailed,
+  failureReason,
+  retry,
+}: {
+  group: HistoryGroup;
+  revealedMessage?: string | undefined;
+  enabled: boolean;
+  renderMessage: (message: Message) => ReactNode;
+  questionCards: QuestionCards;
+  requestCards?: RequestCards | undefined;
+  agentId?: string | undefined;
+  cwd?: string | undefined;
+  storageKey: string;
+  onJump: (id: string) => void;
+  failurePending: boolean;
+  failureLookupFailed: boolean;
+  failureReason: string;
+  retry: (turn: string) => void;
+}) {
+  if (typeof window !== "undefined" && window.__studioPromptComposerRenderProbe)
+    reportPromptComposerRender(
+      "history-row",
+      group.id,
+      group.items.at(-1)?.text,
+    );
+  const turnId = (group.turns?.at(-1) || group).items[0].turnId;
+  if (
+    !enabled ||
+    (group.items[0].role === "user" && group.outcome !== "uncertain") ||
+    typeof group.items[0].turnId !== "string" ||
+    typeof turnId !== "string"
+  )
+    return (
+      <Fragment key={messageRenderKey(group.items[0])}>
+        {messages(
+          group.items,
+          renderMessage,
+          questionCards,
+          agentId,
+          cwd,
+          revealedMessage,
+          requestCards,
+        )}
+      </Fragment>
+    );
+  return (
+    <Turn
+      key={group.id}
+      group={group}
+      revealedMessage={revealedMessage}
+      failurePending={failurePending}
+      failureLookupFailed={failureLookupFailed}
+      retryFailure={() => retry(turnId)}
+      failureReason={failureReason}
+      storageKey={storageKey}
+      render={renderMessage}
+      questions={questionCards}
+      requestCards={requestCards}
+      agentId={agentId}
+      cwd={cwd}
+      onJump={onJump}
+    />
+  );
+});
+
 export default function TurnHistory({
   items: sourceItems,
   currentTurn,
@@ -477,7 +555,7 @@ export default function TurnHistory({
     previousGroups.current = { items, currentTurn, groups: nativeGroups };
     return historyPresentationGroups(nativeGroups);
   }, [items, currentTurn]);
-  const failureReasons = useMemo(() => {
+  const failureReasonEntries = useMemo(() => {
     const failedTurns = new Set(
       groups
         .flatMap((group) => group.turns || [group])
@@ -495,23 +573,27 @@ export default function TurnHistory({
       turn.push(item);
       byTurn.set(item.turnId, turn);
     }
-    return new Map(
-      [...byTurn].map(([turn, messages]) => [
-        turn,
-        turnFailureReason(messages),
-      ]),
-    );
+    return [...byTurn]
+      .map(
+        ([turn, messages]) =>
+          [turn, turnFailureReason(messages)] as [string, string],
+      )
+      .sort(([a], [b]) => a.localeCompare(b));
   }, [items, groups]);
+  // Keep the map identity stable across streamed deltas with unchanged failures.
+  const failureReasonKey = failureReasonEntries
+    .map(([turn, reason]) => `${turn.length}:${turn}${reason.length}:${reason}`)
+    .join("|");
+  const failureReasons = useMemo(
+    () => new Map(failureReasonEntries),
+    [failureReasonKey],
+  );
   const previousRows = useRef<HistoryGroup[]>([]);
   const rows = useMemo(() => {
     const partitioned = scrollContainer
       ? windowHistoryRows(groups, previousRows.current)
       : groups;
-    return partitioned.map((group) =>
-      group.items[0].role === "user"
-        ? { ...group, id: messageRenderKey(group.items[0]) }
-        : group,
-    );
+    return partitioned;
   }, [groups, scrollContainer]);
   useLayoutEffect(() => {
     previousRows.current = rows;
@@ -523,6 +605,45 @@ export default function TurnHistory({
         .map((row) => row.id),
     [rows, requestCards],
   );
+  const renderRow = useCallback(
+    (group: HistoryGroup, revealedMessage?: string) => {
+      const turnId = (group.turns?.at(-1) || group).items[0].turnId;
+      return (
+        <HistoryContent
+          group={group}
+          revealedMessage={revealedMessage}
+          enabled={enabled}
+          renderMessage={renderMessage}
+          questionCards={questionCards}
+          requestCards={requestCards}
+          agentId={agentId}
+          cwd={agent?.cwd ?? undefined}
+          storageKey={storageKey}
+          onJump={onJump}
+          failurePending={typeof turnId === "string" && loading.has(turnId)}
+          failureLookupFailed={typeof turnId === "string" && failed.has(turnId)}
+          failureReason={
+            typeof turnId === "string" ? failureReasons.get(turnId) || "" : ""
+          }
+          retry={retry}
+        />
+      );
+    },
+    [
+      enabled,
+      renderMessage,
+      questionCards,
+      requestCards,
+      agentId,
+      agent?.cwd,
+      storageKey,
+      onJump,
+      loading,
+      failed,
+      failureReasons,
+      retry,
+    ],
+  );
   return (
     <HistoryWindow
       rows={rows}
@@ -533,49 +654,7 @@ export default function TurnHistory({
       followTail={followTail}
       hasRecentScrollInput={hasRecentScrollInput}
       scrollContainer={scrollContainer}
-      render={(group, revealedMessage) => {
-        const outcomeTurn = group.turns?.at(-1) || group;
-        const turnId = outcomeTurn.items[0].turnId;
-        if (
-          !enabled ||
-          (group.items[0].role === "user" && group.outcome !== "uncertain") ||
-          !group.items[0].turnId ||
-          typeof group.items[0].turnId !== "string" ||
-          !turnId ||
-          typeof turnId !== "string"
-        )
-          return (
-            <Fragment key={messageRenderKey(group.items[0])}>
-              {messages(
-                group.items,
-                renderMessage,
-                questionCards,
-                agentId,
-                agent?.cwd ?? undefined,
-                revealedMessage,
-                requestCards,
-              )}
-            </Fragment>
-          );
-        return (
-          <Turn
-            key={group.id}
-            group={group}
-            revealedMessage={revealedMessage}
-            failurePending={loading.has(turnId)}
-            failureLookupFailed={failed.has(turnId)}
-            retryFailure={() => retry(turnId)}
-            failureReason={failureReasons.get(turnId) || ""}
-            storageKey={storageKey}
-            render={renderMessage}
-            questions={questionCards}
-            requestCards={requestCards}
-            agentId={agentId}
-            cwd={agent?.cwd ?? undefined}
-            onJump={onJump}
-          />
-        );
-      }}
+      render={renderRow}
     />
   );
 }

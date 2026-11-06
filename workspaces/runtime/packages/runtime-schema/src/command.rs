@@ -164,6 +164,12 @@ pub enum Command {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
         body: AnswerCommandBody,
     },
+    /// Delete the chat and its descendants in one transaction: stop them and keep them as
+    /// tombstones. `target` is the chat.
+    Delete {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: DeleteBody,
+    },
     /// Send a text to the paired peer lead of a grant. `target` is the grant id. The command
     /// id is the dedupe key of the message.
     LeadMessage {
@@ -184,6 +190,7 @@ impl Command {
             Self::RestoreDeletedRoot { .. } => "restore_deleted_root",
             Self::Answer { .. } => "answer",
             Self::LeadMessage { .. } => "lead_message",
+            Self::Delete { .. } => "delete",
         }
     }
 
@@ -197,7 +204,8 @@ impl Command {
             | Self::Pause { target, .. }
             | Self::RestoreDeletedRoot { target, .. }
             | Self::Answer { target, .. }
-            | Self::LeadMessage { target, .. } => target.as_str(),
+            | Self::LeadMessage { target, .. }
+            | Self::Delete { target, .. } => target.as_str(),
         }
     }
 }
@@ -232,6 +240,11 @@ pub struct SendBody {
 pub struct LeadMessageBody {
     pub text: BoundedText<1, { studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS }>,
 }
+
+/// A delete has no options: it always deletes the descendants of the chat too.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteBody {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -314,7 +327,14 @@ pub enum CommandOutcome {
     Stop,
     Resolve,
     Pause,
+<<<<<<< head
     RestoreDeletedRoot,
+=======
+    /// `deleted` is the chat and every descendant that the delete removed.
+    Delete {
+        result: DeleteResult,
+    },
+>>>>>>> main
     Answer {
         result: AnswerResult,
     },
@@ -322,6 +342,13 @@ pub enum CommandOutcome {
     LeadMessage {
         result: LeadMessageResult,
     },
+}
+
+/// The result of a delete: the ids of the chat and of its descendants, read when the
+/// response is built, so a replay gives the same list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteResult {
+    pub deleted: Vec<String>,
 }
 
 /// The result of a lead message: the outbox id of the queued message.
@@ -340,8 +367,14 @@ impl CommandOutcome {
             Command::Stop { .. } => Self::Stop,
             Command::Resolve { .. } => Self::Resolve,
             Command::Pause { .. } => Self::Pause,
+<<<<<<< head
             Command::RestoreDeletedRoot { .. } => Self::RestoreDeletedRoot,
             Command::Answer { .. } | Command::LeadMessage { .. } => return None,
+=======
+            Command::Answer { .. } | Command::LeadMessage { .. } | Command::Delete { .. } => {
+                return None;
+            }
+>>>>>>> main
         })
     }
 }
@@ -465,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn pause_and_answer_are_tagged_commands_and_delete_is_not() {
+    fn pause_answer_and_delete_are_tagged_commands() {
         let id = "0192f3a0-0000-7000-8000-000000000001";
         let pause: CommandRequest = studio_json::from_str(&format!(
             r#"{{"id":"{id}","client":"c","number":1,"kind":"pause","target":"chat","body":{{}}}}"#
@@ -488,7 +521,13 @@ mod tests {
         let delete = format!(
             r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{}}}}"#
         );
-        assert!(studio_json::from_str::<CommandRequest>(&delete).is_err());
+        let delete: CommandRequest = studio_json::from_str(&delete).expect("delete");
+        assert_eq!(delete.command.name(), "delete");
+        assert_eq!(delete.command.target(), "chat");
+        let with_option = format!(
+            r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{"descendants":false}}}}"#
+        );
+        assert!(studio_json::from_str::<CommandRequest>(&with_option).is_err());
     }
 
     #[test]

@@ -45,6 +45,12 @@ pub enum AccountSessionError {
     Unknown,
 }
 
+#[derive(Debug, Error)]
+pub enum ClaudeControlSessionError {
+    #[error("The Claude account session is not running")]
+    Unavailable,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotSentReason {
     NoLiveAccountWorker,
@@ -140,31 +146,15 @@ pub trait AccountSessionPort: Send + Sync {
             ))
         })
     }
-    /// Durably deliver a VM provider notification through the retained account
-    /// worker before the guest event cursor is acknowledged.
-    fn deliver_vm_notification<'a>(
-        &'a self,
-        _account: &'a str,
-        _agent_id: &'a str,
-        _epoch: u64,
-        _sequence: u64,
-        _frame: studio_runtime_providers::Frame,
-    ) -> AccountSessionFuture<'a, ()> {
-        Box::pin(async {
-            Err(AccountSessionError::Requires(
-                "account-worker/vm-notification",
-            ))
-        })
-    }
+
     /// Return the retained Claude control session for an account. The returned
     /// handle is bound to the live account connection and rejects stale receipts.
     fn claude_control_session(
         &self,
         _account: &str,
-    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, AccountSessionError> {
-        Err(AccountSessionError::Requires(
-            "provider-session/claude-controls",
-        ))
+    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, ClaudeControlSessionError>
+    {
+        Err(ClaudeControlSessionError::Unavailable)
     }
     fn transfer_provider_request<'a>(
         &'a self,
@@ -366,6 +356,29 @@ pub async fn limits(
     }
 }
 
+/// Seconds between checks for limit windows that reset after their last read.
+pub const LIMITS_RESET_CHECK_SECONDS: u64 = 300;
+
+/// Whether a saved limits observation shows a window whose reset time passed
+/// after the observation was read. Such an idle account needs a new read.
+pub fn limits_reset_passed(observation: &Value, now: f64) -> bool {
+    let Some(at) = observation.get("at").and_then(Value::as_f64) else {
+        return false;
+    };
+    let data = &observation["data"];
+    let mut groups = vec![&data["rateLimits"]];
+    if let Some(by_id) = data["rateLimitsByLimitId"].as_object() {
+        groups.extend(by_id.values());
+    }
+    groups.into_iter().any(|group| {
+        ["primary", "secondary"].iter().any(|window| {
+            group[*window]["resetsAt"]
+                .as_f64()
+                .is_some_and(|reset| reset <= now && at < reset)
+        })
+    })
+}
+
 #[cfg(test)]
 mod limits_freshness_tests {
     #![allow(clippy::unwrap_used)]
@@ -380,6 +393,20 @@ mod limits_freshness_tests {
     use studio_json::{Value, json};
 
     const NOW: f64 = 1_000.0;
+
+    #[test]
+    fn a_reset_after_the_last_read_needs_a_new_read() {
+        let observation = json!({"accountKey":"default","at":NOW - 500.0,"data":{
+            "rateLimits":{"secondary":{"resetsAt":NOW - 100.0,"usedPercent":100.0}}}});
+        assert!(super::limits_reset_passed(&observation, NOW));
+        // A reset still ahead, or one read after the reset, needs nothing.
+        assert!(!super::limits_reset_passed(&observation, NOW - 200.0));
+        let read_after =
+            json!({"at":NOW - 50.0,"data":{"rateLimits":{"secondary":{"resetsAt":NOW - 100.0}}}});
+        assert!(!super::limits_reset_passed(&read_after, NOW));
+        let by_id = json!({"at":NOW - 500.0,"data":{"rateLimitsByLimitId":{"x":{"primary":{"resetsAt":NOW - 1.0}}}}});
+        assert!(super::limits_reset_passed(&by_id, NOW));
+    }
 
     #[test]
     fn limits_ingress_normalizes_unread_fields_and_rejects_invalid_consumed_fields() {
@@ -785,27 +812,13 @@ pub trait RetainedAccountSession: Send + Sync {
         })
     }
     fn request(&self, request: ProviderRequest) -> SessionFuture;
-    fn deliver_vm_notification(
-        &self,
-        _account: String,
-        _agent_id: String,
-        _epoch: u64,
-        _sequence: u64,
-        _frame: studio_runtime_providers::Frame,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AccountSessionError>> + Send>> {
-        Box::pin(async {
-            Err(AccountSessionError::Requires(
-                "account-worker/vm-notification",
-            ))
-        })
-    }
+
     fn claude_control_session(
         &self,
         _account: &str,
-    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, AccountSessionError> {
-        Err(AccountSessionError::Requires(
-            "provider-session/claude-controls",
-        ))
+    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, ClaudeControlSessionError>
+    {
+        Err(ClaudeControlSessionError::Unavailable)
     }
     fn transfer_request(&self, _request: TransferProviderRequest) -> SessionFuture {
         Box::pin(async {
@@ -1414,12 +1427,11 @@ impl AccountSessionPort for AccountSessionRuntime {
     fn claude_control_session(
         &self,
         account: &str,
-    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, AccountSessionError> {
+    ) -> Result<Arc<dyn crate::claude_controls::service::ControlSession>, ClaudeControlSessionError>
+    {
         self.session
             .as_ref()
-            .ok_or(AccountSessionError::Requires(
-                "provider-session/claude-controls",
-            ))?
+            .ok_or(ClaudeControlSessionError::Unavailable)?
             .claude_control_session(account)
     }
 
@@ -1519,39 +1531,6 @@ impl AccountSessionPort for AccountSessionRuntime {
         })
     }
 
-    fn deliver_vm_notification<'a>(
-        &'a self,
-        account: &'a str,
-        agent_id: &'a str,
-        epoch: u64,
-        sequence: u64,
-        frame: studio_runtime_providers::Frame,
-    ) -> AccountSessionFuture<'a, ()> {
-        Box::pin(async move {
-            let session = self.session.as_ref().ok_or(AccountSessionError::Requires(
-                "account-worker/vm-notification",
-            ))?;
-            let scope = session
-                .current_scope(account)
-                .ok_or(AccountSessionError::Unknown)?;
-            session
-                .deliver_vm_notification(
-                    account.to_owned(),
-                    agent_id.to_owned(),
-                    epoch,
-                    sequence,
-                    frame,
-                )
-                .await?;
-            {
-                if session.current_scope(account).as_ref() == Some(&scope) {
-                    Ok(())
-                } else {
-                    Err(AccountSessionError::Unknown)
-                }
-            }
-        })
-    }
     fn transfer_provider_request<'a>(
         &'a self,
         request: TransferProviderRequest,

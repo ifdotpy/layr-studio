@@ -17,7 +17,10 @@ import {
 import { serverCredentialAdapter } from "../servers/transport";
 import type { StudioServer } from "../servers/registry";
 
-export type NewChatWorkspaceMode = (typeof CHAT_WORKSPACE_MODES)[number];
+export type NewChatWorkspaceMode = Exclude<
+  (typeof CHAT_WORKSPACE_MODES)[number],
+  "layr"
+>;
 
 export type NewChatSettings = Pick<
   PostBody<"/api/conversation">,
@@ -68,7 +71,9 @@ export function settingsForNewChatAccount(
     fast_mode: false,
     daybreak_enabled: false,
     worker_defaults: pinnedWorkerDefaults,
-    review_defaults: undefined,
+    review_defaults: settings.review_defaults?.account_key
+      ? settings.review_defaults
+      : undefined,
   };
 }
 
@@ -147,6 +152,7 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   ];
   if (Object.keys(value).some((key) => !allowed.includes(key))) return false;
   if (
+    value.workspaceMode === "layr" ||
     typeof value.workspaceMode !== "string" ||
     !(CHAT_WORKSPACE_MODES as readonly string[]).includes(value.workspaceMode)
   )
@@ -200,10 +206,11 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
     review === undefined ||
     (record(review) &&
       Object.keys(review).every((key) =>
-        ["model", "effort", "fast_mode"].includes(key),
+        ["model", "effort", "fast_mode", "account_key"].includes(key),
       ) &&
       (review.fast_mode === undefined ||
         typeof review.fast_mode === "boolean") &&
+      (review.account_key === undefined || nullableName(review.account_key)) &&
       nullableName(review.model) &&
       nullableName(review.effort))
   );

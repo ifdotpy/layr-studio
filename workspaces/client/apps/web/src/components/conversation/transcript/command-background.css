@@ -11,20 +11,20 @@
   align-items: center;
   gap: 4px;
   padding: 1px 7px;
-  border: 1px solid light-dark(#18244726, #ffffff26);
-  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--studio-radius-control);
   background: transparent;
-  color: light-dark(#252b3b, #d9d9e3);
+  color: var(--text);
   font: inherit;
   font-size: var(--studio-text-meta);
   white-space: nowrap;
   cursor: pointer;
 }
 .tool-background-button:hover:not(:disabled) {
-  background: light-dark(#1824470b, #ffffff0b);
+  background: var(--hover);
 }
 .tool-background-button:focus-visible {
-  outline: 2px solid var(--mantine-primary-color-filled);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .tool-background-button:disabled {
@@ -41,7 +41,7 @@
 }
 .tool-background-state {
   font-size: var(--studio-text-meta);
-  color: light-dark(#3e51aa, #aaa4e6);
+  color: var(--studio-state-working);
 }
 .tool-background-note {
   margin: 0 0 10px;

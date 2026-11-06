@@ -186,17 +186,59 @@ async fn transfer(
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
             .as_secs_f64();
-        account_transfer_driver::request(
-            &store,
-            request_id.as_str(),
-            lead,
-            target,
-            scope.as_ref().map_or("team", |value| value.as_str()),
-            &target_provider,
-            now,
-        )
-        .await
-        .map_err(error)?
+        // An idle Claude chat moves between Claude accounts of this server by a
+        // file copy and one transaction; other chats use the transfer flow.
+        let homes: std::collections::BTreeMap<String, String> = accounts
+            .accounts
+            .iter()
+            .filter_map(|row| Some((row.id.as_str()?.to_owned(), row.home.as_str()?.to_owned())))
+            .collect();
+        let home = move |account: &str| homes.get(account).cloned();
+        let scope_name = scope.as_ref().map_or("team", |value| value.as_str());
+        let mut simple = if target_provider == ProviderKind::Claude.key() {
+            studio_runtime_services::simple_move::move_claude_chat(
+                &store,
+                lead,
+                &home,
+                target,
+                request_id.as_str(),
+                scope_name,
+                now,
+            )
+            .await
+            .map_err(error)?
+        } else {
+            None
+        };
+        if simple.is_none()
+            && let Ok(provider) = target_provider.parse::<ProviderKind>()
+        {
+            simple = studio_runtime_services::simple_move::move_across_providers(
+                &store,
+                lead,
+                target,
+                provider,
+                request_id.as_str(),
+                scope_name,
+                now,
+            )
+            .await
+            .map_err(error)?;
+        }
+        match simple {
+            Some(moved) => moved,
+            None => account_transfer_driver::request(
+                &store,
+                request_id.as_str(),
+                lead,
+                target,
+                scope.as_ref().map_or("team", |value| value.as_str()),
+                &target_provider,
+                now,
+            )
+            .await
+            .map_err(error)?,
+        }
     };
     state.event_wake.notify_one();
     state.continuation_wake.notify_one();

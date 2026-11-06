@@ -57,13 +57,13 @@ function Foundation({ scheme }: { scheme: "light" | "dark" }) {
           </div>
         ))}
       </section>
-      <section aria-label="Signal palette" className="foundation-signal-ramp">
+      <section aria-label="Ink palette" className="foundation-signal-ramp">
         {Array.from({ length: 10 }, (_, shade) => (
           <div
             key={shade}
             style={
               {
-                "--swatch": `var(--mantine-color-signal-${shade})`,
+                "--swatch": `var(--mantine-color-ink-${shade})`,
               } as CSSProperties
             }
           >

@@ -8,6 +8,7 @@ deny = [{ name = "serde_json", wrappers = [
   "studio-json",
   "axum",
   "cargo_metadata",
+  "gungraun-macros",
   "iroh-relay",
   "json-patch",
   "jsonptr",

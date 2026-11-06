@@ -4,7 +4,7 @@
 
 This app owns the Node process that connects Studio's provider callers to the
 Claude Agent SDK. Its public boundary is the bridge process protocol used by
-the server, desktop package, and Linux guest. Keep SDK session state and
+the server and desktop package. Keep SDK session state and
 credentials within their owning process; do not let the bridge access Studio's
 SQLite database or renderer state. Protocol behavior and dependency versions
 are owned by this app's source and [`package.json`](package.json). Focused check:
@@ -24,9 +24,8 @@ stay omitted in the saved session and move proof.
 
 The bridge uses the [shared Node requirement](../../../../docs/typescript.md#how-typescript-runs). The stable
 [launcher](bridge.mjs) owns the supported runtime requirement and refusal message;
-it checks support before loading the bridge or the authentication-refresh helper.
-Both entrypoints run TypeScript directly without a build step. Production packages
-and guest installs must retain the TypeScript sources alongside the launcher.
+it checks support before loading the bridge. The entrypoint runs TypeScript directly
+without a build step. Production packages must retain the TypeScript sources alongside the launcher.
 
 ## Image input
 
@@ -53,10 +52,8 @@ The bridge manifest pins sharp and its required native modules for darwin-arm64,
 linux-arm64, and linux-x64. These are regular dependencies because the desktop
 resource step uses `pnpm deploy --no-optional`. The Tauri package uses that same
 resource step, then removes the Linux codec pairs from its Mac bridge directory.
-It keeps the source manifests and lockfile for guest and standalone Linux
-installs. The ARM64 guest launches its own
-`/opt/codex-studio/claude_bridge/bridge.mjs`. Linux x64 modules support standalone
-x64 servers.
+It keeps the source manifests and lockfile for standalone Linux installs.
+Linux x64 modules support standalone x64 servers.
 
 Run `node testing/image-codec-witness.ts` inside a deployed production bridge
 to verify the codecs without a model request. Run

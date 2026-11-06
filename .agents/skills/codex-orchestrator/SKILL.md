@@ -45,14 +45,13 @@ Chat creation selects `workspaceMode`.
 | Mode          | UI label | Agent environment                | Worker workspace         |
 | ------------- | -------- | -------------------------------- | ------------------------ |
 | `layr-native` | Layr     | Native macOS APFS or Linux btrfs | Separate owned host line |
-| `layr`        | Layr VM  | Studio Linux VM                  | Separate owned VM line   |
 | `worktree`    | WT       | Native host                      | Git worktree             |
 
 Workers inherit the chat mode. Use deliberate `shared` edits only within an assigned file boundary.
 Worktrees require Git and use a committed base. Submit their results on a named Git branch.
-Both layr modes use exact state IDs for submission and review.
+Layr uses exact state IDs for submission and review.
 
-Read [native Layr](../codex-workspace/references/layr-native.md) or [Layr VM](../codex-workspace/references/layr.md) for readiness, tools, and acceptance.
+Read [native Layr](../codex-workspace/references/layr-native.md) for readiness, tools, and acceptance.
 Use only workspace choices that the current tool schema exposes.
 Use `server` with an absolute remote `cwd` for native work on a paired machine.
 
@@ -111,7 +110,7 @@ Base reports of continued work on an active worker, command, or automatic contin
 - Give every shared branch and every shared file one owner. State who may merge
   into an integration branch.
 - Give workers the folder that contains their task. Wait for workspace readiness before edits.
-  Give implementers owned lines in both layr modes. Review exact saved states.
+  Give implementers owned lines in Layr mode. Review exact saved states.
   Acceptance merges with expect. The lead owns main.
   In worktree mode, ask workers to commit on a named branch.
   Inspect the branch in the returned workspace before integration.
