@@ -6,8 +6,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   existsSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -15,8 +18,27 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  PROVIDER_CONTRACT_CHECK_ARGS,
+  PROVIDER_CONTRACT_TARGET_DIR,
+} from "../gate-config.ts";
 
 const root = fileURLToPath(new URL("../../../../..", import.meta.url));
+
+// cpSync keeps the times of files, not of folders. A build script that watches a folder
+// (runtime-schema watches src/schemas/codex) would then run again on every copy.
+function keepFolderTimes(source: string, target: string) {
+  if (!statSync(source).isDirectory()) return;
+  for (const entry of readdirSync(source, { withFileTypes: true }))
+    if (entry.isDirectory())
+      keepFolderTimes(
+        path.join(source, entry.name),
+        path.join(target, entry.name),
+      );
+  const { atime, mtime } = statSync(source);
+  utimesSync(target, atime, mtime);
+}
+
 /** Whole witness budget, in milliseconds. */
 const WITNESS_TIMEOUT_MS = 900_000;
 /** Part of the budget kept for the source copy and cleanup, in milliseconds. */
@@ -25,15 +47,18 @@ test(
   "Cargo refuses stale sources and regenerated incompatible vendor types",
   { timeout: WITNESS_TIMEOUT_MS },
   async (context) => {
-    // All commands share one deadline: the first check compiles the copied
-    // crates cold and can take most of it beside a gate build; the later
-    // checks are incremental and take seconds.
+    // All commands share one deadline: without warm units (the `sweep` entry)
+    // the first check compiles the copied crates cold and can take most of it
+    // beside a gate build; the later checks are incremental and take seconds.
     const deadline = Date.now() + WITNESS_TIMEOUT_MS - CLEANUP_MARGIN_MS;
     const copy = mkdtempSync(path.join(tmpdir(), "studio-contract-compile-"));
     try {
       for (const file of [
         "Cargo.toml",
         "Cargo.lock",
+        // The build flags of the checkout: the dependency units then match the ones that
+        // the layr cache keeps warm (the `sweep` entry in Cargo.toml).
+        ".cargo/config.toml",
         "rust-toolchain.toml",
         "package.json",
         "pnpm-lock.yaml",
@@ -52,7 +77,13 @@ test(
       ]) {
         const target = path.join(copy, file);
         mkdirSync(path.dirname(target), { recursive: true });
-        cpSync(path.join(root, file), target, { recursive: true });
+        // Same file times as the checkout: cargo then finds the warm units of the unchanged
+        // crates fresh, and only a mutation below makes it compile.
+        cpSync(path.join(root, file), target, {
+          recursive: true,
+          preserveTimestamps: true,
+        });
+        keepFolderTimes(path.join(root, file), target);
       }
       assert.equal(existsSync(path.join(copy, "node_modules")), false);
       const manifest = readFileSync(
@@ -67,11 +98,12 @@ test(
         ...process.env,
         // Own target folder: the gate's Rust lane holds the lock of the shared one for
         // minutes, and each blocked check here waited out its whole timeout. It stays in
-        // the checkout's target/ so dependency builds stay warm between runs.
+        // the checkout's target/ so dependency builds stay warm between runs, and the
+        // `sweep` entry in Cargo.toml keeps them warm for a new line.
         CARGO_TARGET_DIR: path.join(
           root,
           "target",
-          "provider-contract-compile",
+          PROVIDER_CONTRACT_TARGET_DIR,
         ),
       };
       const run = (command: string, args: string[]) => {
@@ -90,14 +122,7 @@ test(
         return result;
       };
       const check = () =>
-        run("cargo", [
-          "check",
-          "--offline",
-          "-j",
-          "4",
-          "-p",
-          "studio-runtime-schema",
-        ]);
+        run("cargo", [...PROVIDER_CONTRACT_CHECK_ARGS, "-j", "4"]);
       const generate = () => {
         const result = run(process.execPath, [
           "workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts",

@@ -89,3 +89,14 @@ export const RUST_CLIPPY_ARGS = [
 // unit taken into another line would be checked again. The retest env in Cargo.toml sets it too.
 export const CLIPPY_CONF_DIR =
   "workspaces/tooling/apps/repository-checks/clippy-ratchet";
+// The compile witness of the provider contracts (tests/provider-cargo-mutations.test.ts) checks
+// runtime-schema in a copy of the repository, as these cargo arguments, into its own folder below
+// target. The `sweep` list in the root Cargo.toml holds both, so the layr cache keeps the
+// dependency units warm and a new line does not compile them for the first run.
+export const PROVIDER_CONTRACT_TARGET_DIR = "provider-contract-compile";
+export const PROVIDER_CONTRACT_CHECK_ARGS = [
+  "check",
+  "--offline",
+  "-p",
+  "studio-runtime-schema",
+] as const;
