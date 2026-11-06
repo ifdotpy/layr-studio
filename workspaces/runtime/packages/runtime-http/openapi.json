@@ -4307,13 +4307,10 @@
           "error": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NativeProviderError"
+                "$ref": "#/components/schemas/AgentError"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Error"
@@ -4532,10 +4529,7 @@
           "nativeStatus": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentNativeStatus"
-              },
-              {
-                "$ref": "#/components/schemas/AgentNativeStatusValue"
+                "$ref": "#/components/schemas/AgentNativeState"
               },
               {
                 "type": "null"
@@ -4656,14 +4650,7 @@
           "permissionMode": {
             "anyOf": [
               {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "auto",
-                  "plan",
-                  "bypassPermissions"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentPermissionMode"
               },
               {
                 "type": "null"
@@ -4868,13 +4855,10 @@
           "worktree": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/AgentWorktree"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Worktree"
@@ -4882,11 +4866,7 @@
           "worktreePreparation": {
             "anyOf": [
               {
-                "enum": [
-                  "waiting",
-                  "preparing"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentWorktreePreparation"
               },
               {
                 "type": "null"
@@ -5416,13 +5396,10 @@
           "error": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NativeProviderError"
+                "$ref": "#/components/schemas/AgentError"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Error"
@@ -5544,8 +5521,7 @@
           "kind": {
             "anyOf": [
               {
-                "const": "agent",
-                "type": "string"
+                "$ref": "#/components/schemas/AgentKind"
               },
               {
                 "type": "null"
@@ -5674,6 +5650,9 @@
             ],
             "title": "Layrstateid"
           },
+          "legacyVmWorkspace": {
+            "type": "boolean"
+          },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
           },
@@ -5782,10 +5761,7 @@
           "nativeStatus": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentNativeStatus"
-              },
-              {
-                "$ref": "#/components/schemas/AgentNativeStatusValue"
+                "$ref": "#/components/schemas/AgentNativeState"
               },
               {
                 "type": "null"
@@ -5928,14 +5904,7 @@
           "permissionMode": {
             "anyOf": [
               {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "auto",
-                  "plan",
-                  "bypassPermissions"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentPermissionMode"
               },
               {
                 "type": "null"
@@ -5998,6 +5967,17 @@
               }
             ],
             "title": "Projectid"
+          },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
           },
           "projectServerId": {
             "anyOf": [
@@ -6257,6 +6237,19 @@
             ],
             "title": "Threadid"
           },
+          "tokensUsed": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokensused"
+          },
           "turnId": {
             "anyOf": [
               {
@@ -6367,13 +6360,10 @@
           "worktree": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/AgentWorktree"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Worktree"
@@ -6381,11 +6371,7 @@
           "worktreePreparation": {
             "anyOf": [
               {
-                "enum": [
-                  "waiting",
-                  "preparing"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentWorktreePreparation"
               },
               {
                 "type": "null"
@@ -6791,6 +6777,16 @@
         "title": "AgentEntityUsageResumeDto",
         "type": "object"
       },
+      "AgentError": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/NativeProviderError"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
       "AgentId": {
         "description": "Identity of the agent that owns the turn.",
         "type": "string"
@@ -6829,6 +6825,10 @@
         ],
         "title": "AgentInboxEntry",
         "type": "object"
+      },
+      "AgentKind": {
+        "const": "agent",
+        "type": "string"
       },
       "AgentLimitProjection": {
         "additionalProperties": false,
@@ -6898,6 +6898,16 @@
         },
         "title": "AgentNativeRelease",
         "type": "object"
+      },
+      "AgentNativeState": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/AgentNativeStatus"
+          },
+          {
+            "$ref": "#/components/schemas/AgentNativeStatusValue"
+          }
+        ]
       },
       "AgentNativeStatus": {
         "additionalProperties": false,
@@ -7111,6 +7121,16 @@
         },
         "title": "AgentOverview",
         "type": "object"
+      },
+      "AgentPermissionMode": {
+        "enum": [
+          "default",
+          "acceptEdits",
+          "auto",
+          "plan",
+          "bypassPermissions"
+        ],
+        "type": "string"
       },
       "AgentProvider": {
         "$ref": "#/components/schemas/ProviderKind"
@@ -9151,6 +9171,9 @@
             "default": null,
             "title": "Layrstateid"
           },
+          "legacyVmWorkspace": {
+            "type": "boolean"
+          },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
           },
@@ -9503,6 +9526,17 @@
             "default": null,
             "title": "Projectid"
           },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
+          },
           "projectServerId": {
             "anyOf": [
               {
@@ -9784,6 +9818,19 @@
             ],
             "default": null,
             "title": "Threadid"
+          },
+          "tokensUsed": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokensused"
           },
           "turnId": {
             "anyOf": [
@@ -10227,8 +10274,7 @@
           "kind": {
             "anyOf": [
               {
-                "const": "agent",
-                "type": "string"
+                "$ref": "#/components/schemas/AgentKind"
               },
               {
                 "type": "null"
@@ -10268,6 +10314,9 @@
               }
             ],
             "title": "Lastreadat"
+          },
+          "legacyVmWorkspace": {
+            "type": "boolean"
           },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
@@ -10665,6 +10714,23 @@
         ],
         "title": "AgentWorkspaceModeResponse",
         "type": "object"
+      },
+      "AgentWorktree": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "AgentWorktreePreparation": {
+        "enum": [
+          "waiting",
+          "preparing"
+        ],
+        "type": "string"
       },
       "AmbiguousToolRequestResponse": {
         "additionalProperties": {
@@ -19692,6 +19758,18 @@
         "title": "ChangesResponse",
         "type": "object"
       },
+      "ChatAccountExclusions": {
+        "default": [],
+        "items": {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "maxItems": 512,
+        "title": "Excluded Account Keys",
+        "type": "array",
+        "uniqueItems": true
+      },
       "ChatEntityDto": {
         "additionalProperties": false,
         "properties": {
@@ -22362,6 +22440,7 @@
             "lead_message": "#/components/schemas/CommandRequestLeadMessage",
             "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
+            "restore_deleted_root": "#/components/schemas/CommandRequestRestoreDeletedRoot",
             "send": "#/components/schemas/CommandRequestSend",
             "stop": "#/components/schemas/CommandRequestStop",
             "withdraw": "#/components/schemas/CommandRequestWithdraw"
@@ -22392,6 +22471,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestLeadMessage"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestRestoreDeletedRoot"
           }
         ],
         "title": "CommandRequest"
@@ -22597,6 +22679,47 @@
         ],
         "type": "object"
       },
+      "CommandRequestRestoreDeletedRoot": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "restore_deleted_root",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
       "CommandRequestSend": {
         "additionalProperties": false,
         "properties": {
@@ -22743,6 +22866,7 @@
             "lead_message": "#/components/schemas/CommandResponseLeadMessage",
             "pause": "#/components/schemas/CommandResponseApplied",
             "resolve": "#/components/schemas/CommandResponseApplied",
+            "restore_deleted_root": "#/components/schemas/CommandResponseApplied",
             "send": "#/components/schemas/CommandResponseApplied",
             "stop": "#/components/schemas/CommandResponseApplied",
             "withdraw": "#/components/schemas/CommandResponseApplied"
@@ -22820,7 +22944,8 @@
               "withdraw",
               "stop",
               "resolve",
-              "pause"
+              "pause",
+              "restore_deleted_root"
             ],
             "type": "string"
           },
@@ -24655,16 +24780,7 @@
             "title": "Effort"
           },
           "excluded_account_keys": {
-            "default": [],
-            "items": {
-              "minLength": 1,
-              "pattern": "\\S",
-              "type": "string"
-            },
-            "maxItems": 512,
-            "title": "Excluded Account Keys",
-            "type": "array",
-            "uniqueItems": true
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "expected_account_key": {
             "default": "default",
@@ -25296,6 +25412,9 @@
             ],
             "default": null,
             "title": "Effort"
+          },
+          "excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "fast_mode": {
             "anyOf": [
@@ -33656,7 +33775,15 @@
         "additionalProperties": false,
         "properties": {
           "storeRoot": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Root"
           }
         },
         "title": "NativeLayrSettingsRequest",
@@ -33680,6 +33807,10 @@
       "NativeLayrSettingsResponse": {
         "additionalProperties": false,
         "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
           "error": {
             "type": "string"
           },
@@ -33722,7 +33853,8 @@
         },
         "required": [
           "version",
-          "storeRoot"
+          "storeRoot",
+          "configured"
         ],
         "title": "NativeLayrSettingsResponse",
         "type": "object"
@@ -38568,6 +38700,30 @@
             "title": "Id",
             "type": "string"
           },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
+          },
           "locations": {
             "anyOf": [
               {
@@ -39131,6 +39287,30 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
           },
           "locations": {
             "anyOf": [
@@ -39762,6 +39942,30 @@
             "title": "Id",
             "type": "string"
           },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
+          },
           "locations": {
             "anyOf": [
               {
@@ -40133,7 +40337,8 @@
                   "rename_folder",
                   "remove_folder",
                   "set_account_groups",
-                  "set_workspace_policy"
+                  "set_workspace_policy",
+                  "set_layr_store_root"
                 ],
                 "type": "string"
               },
@@ -40197,6 +40402,17 @@
             ],
             "default": null,
             "title": "Folder Id"
+          },
+          "layr_store_root": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
           },
           "name": {
             "anyOf": [
@@ -44605,17 +44821,6 @@
       "ReviewDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -44657,12 +44862,6 @@
       "ReviewDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -54106,6 +54305,10 @@
           "checkpoint": {
             "$ref": "#/components/schemas/SyncCheckpoint"
           },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
           "documents": {
             "items": {
               "oneOf": [
@@ -54189,6 +54392,7 @@
         "required": [
           "workspaceId",
           "generation",
+          "complete",
           "documents",
           "checkpoint"
         ],
@@ -63775,19 +63979,6 @@
       "WorkerDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Account Key"
-          },
           "daybreak_enabled": {
             "anyOf": [
               {
@@ -63850,18 +64041,6 @@
       "WorkerDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Accountkey"
-          },
           "cyberAccessProgram": {
             "anyOf": [
               {

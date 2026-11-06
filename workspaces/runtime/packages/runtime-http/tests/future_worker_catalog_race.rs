@@ -8,7 +8,7 @@ use axum::{
 };
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
@@ -35,6 +35,7 @@ const MODEL: &str = "gpt-6.1-sol";
 
 struct CatalogSession {
     failed: bool,
+    same_model: AtomicBool,
     a_reads: AtomicUsize,
     started: Mutex<Option<oneshot::Sender<()>>>,
     release: Semaphore,
@@ -87,6 +88,7 @@ impl AccountSessionPort for CatalogSession {
             }
             let model = match request.account.as_str() {
                 TARGET => MODEL,
+                OLD if self.same_model.load(Ordering::SeqCst) => MODEL,
                 OLD => "gpt-6-luna",
                 LEAD_ACCOUNT => "default",
                 _ => panic!("foreign account metadata request"),
@@ -133,6 +135,9 @@ impl Fixture {
                 .await
                 .expect("fixture store"),
         );
+        store
+            .set_local_server_id(Some("fixture-server".to_owned()))
+            .expect("fixture server identity");
         let target_home = cwd.join("target");
         let old_home = cwd.join("old");
         let lead_home = cwd.join("lead");
@@ -181,6 +186,7 @@ impl Fixture {
         let (started_tx, started) = oneshot::channel();
         let session = Arc::new(CatalogSession {
             failed,
+            same_model: AtomicBool::new(false),
             a_reads: AtomicUsize::new(0),
             started: Mutex::new(Some(started_tx)),
             release: Semaphore::new(0),
@@ -217,9 +223,8 @@ impl Fixture {
             format!("/api/models?account_key={TARGET}&fresh=1")
         }
     }
-    fn settings(automatic: bool) -> Value {
+    fn settings() -> Value {
         json!({"id":LEAD,"expected_account_key":LEAD_ACCOUNT,"worker_defaults":{
-            "account_key":if automatic { Value::Null } else { json!(TARGET) },
             "model":MODEL,"effort":"medium","fast_mode":false,"daybreak_enabled":false,"delegation_depth":1
         }})
     }
@@ -350,7 +355,7 @@ async fn automatic_catalog_drops_a_retired_result_and_keeps_another_ready_accoun
             &fixture.app,
             "POST",
             "/api/conversation",
-            Some(Fixture::settings(true)),
+            Some(Fixture::settings()),
         )
         .await;
         assert_ne!(
@@ -364,7 +369,7 @@ async fn automatic_catalog_drops_a_retired_result_and_keeps_another_ready_accoun
         None
     };
 
-    let mut valid = Fixture::settings(true);
+    let mut valid = Fixture::settings();
     valid["worker_defaults"]["model"] = json!("gpt-6-luna");
     let (saved_status, saved) = call(&fixture.app, "POST", "/api/conversation", Some(valid)).await;
     assert_eq!(
@@ -391,4 +396,48 @@ async fn automatic_catalog_drops_a_retired_result_and_keeps_another_ready_accoun
         !stale_advertised,
         "fresh Automatic GET retained an invalidated account result; stale model POST: {stale_post:?}"
     );
+}
+
+#[tokio::test]
+async fn new_chat_prepares_catalog_for_allowed_worker_account() {
+    use studio_runtime_services::model_catalog::CatalogRead;
+    let fixture = Fixture::new(false).await;
+    fixture.session.same_model.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        fixture
+            .catalog
+            .read_until_ready(
+                TARGET,
+                &fixture.target_home,
+                studio_runtime_providers::ProviderKind::Codex,
+                false
+            )
+            .await,
+        CatalogRead::Ready(_)
+    ));
+    let app = fixture.app.clone();
+    let cwd = fixture._root.path().to_path_buf();
+    let pending = tokio::spawn(async move {
+        call(
+            &app,
+            "POST",
+            "/api/leads",
+            Some(json!({
+                "cwd":cwd, "reuse_empty":false, "account_key":TARGET,
+                "model":MODEL, "excluded_account_keys":[TARGET],
+                "worker_defaults":{"model":MODEL,"effort":"medium","fast_mode":false}
+            })),
+        )
+        .await
+    });
+    let started = tokio::time::timeout(std::time::Duration::from_secs(3), fixture.started).await;
+    fixture.session.release.add_permits(1);
+    assert!(
+        started.is_ok(),
+        "the allowed worker account must load its cold catalog"
+    );
+    let (status, body) = pending.await.expect("create request");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["excludedAccountKeys"], json!([TARGET]));
+    fixture.catalog.shutdown().await.expect("catalog shutdown");
 }

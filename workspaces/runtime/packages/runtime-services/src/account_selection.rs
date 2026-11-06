@@ -44,17 +44,6 @@ impl SelectionSnapshot {
     ) -> Result<Value, TransferError> {
         let mut agent = self.agent.clone();
         let truthy = crate::event_write::truthy;
-        if agent
-            .get("excludedAccountKeys")
-            .and_then(Value::as_array)
-            .is_some_and(|keys| {
-                keys.iter().all(Value::is_string) && keys.iter().any(|key| key == target)
-            })
-        {
-            return Err(TransferError::Refused(
-                "This account is disabled for this chat",
-            ));
-        }
         let source = agent
             .get("accountKey")
             .and_then(Value::as_str)
@@ -206,8 +195,11 @@ pub async fn select(
                 .ok_or(TransferError::Refused(
                     "Select an existing project directory",
                 ))?;
-            let context =
-                crate::sync_entity_context::agent_view_context(tx, &snapshot.agent, None)?;
+            let context = crate::sync_entity_context::agent_view_context_value_adapter(
+                tx,
+                &snapshot.agent,
+                None,
+            )?;
             let mut value = snapshot.decide_account(
                 &target,
                 account.as_ref(),
@@ -274,9 +266,11 @@ pub async fn select(
             let mut typed =
                 studio_runtime_store::AgentRecord::from_value(value).map_err(StoreError::from)?;
             crate::agents_create::mode_fields(&mut typed);
-            let view = typed.value();
-            crate::sync_views::agent_entity_view(&view, &context)
-                .ok_or(TransferError::Refused("Invalid selection agent"))
+            let view = crate::sync_views::agent_entity_from_record(typed, &context)
+                .ok_or(TransferError::Refused("Invalid selection agent"))?;
+            serde::Serialize::serialize(&view, studio_json::value::Serializer)
+                .map_err(StoreError::from)
+                .map_err(TransferError::from)
         })
         .await
 }

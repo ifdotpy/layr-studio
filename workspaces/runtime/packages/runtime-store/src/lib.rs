@@ -57,6 +57,7 @@ pub mod text_blobs;
 pub mod transfer_record;
 pub mod wal_backup;
 pub mod work_history;
+pub mod workspace_cleanup_intent;
 mod write_alert;
 pub mod writer_lanes;
 pub use schema::{
@@ -110,18 +111,20 @@ use sqlite_actor::{ActorResponseDisposition, SqliteActor};
 
 pub use path::{NATIVE_LAYR_DIRECTORY, resolve_state_dir};
 pub use records::{
-    ActiveExecutionView, AgentCapacity, AgentDraft, AgentExecutionMode, AgentId, AgentNaming,
-    AgentRecord, AgentRepository, AgentSandbox, AgentStatus, AnnotationRecord, ChatMessage,
-    ChatMessageId, CheckpointRecord, ComplaintRecord, CredentialCopy, EventMetadataRecord,
-    ExecutionRunRecord, InterruptOutcome, JsonRecord, LegacyWorkReply, MessageRepository,
+    ActiveExecutionView, AgentActiveTool, AgentActivity, AgentCapacity, AgentContextUsage,
+    AgentDraft, AgentExecutionMode, AgentId, AgentNaming, AgentRecord, AgentRepository,
+    AgentSandbox, AgentStatus, AnnotationRecord, ChatMessage, ChatMessageId, CheckpointRecord,
+    ComplaintRecord, CredentialCopy, EventMetadataRecord, ExecutionRunRecord, IdleCache,
+    IdleCompactionEpisode, InterruptOutcome, JsonRecord, LegacyWorkReply, MessageRepository,
     MonitorRecord, NativeFailureHold, NativeRelease, NativeReleaseScope, NativeReviewThread,
-    PlanRecord, QueueEvent, QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder,
-    RecordPredicate, RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction,
-    StartAttemptView, StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold,
-    StoredTitleJob, StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId,
-    TaskRecord, TaskRepository, TerminalFault, TerminalRecord, TitleJob, ToolResultRecord,
-    TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord,
-    UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
+    NativeSafetyBuffering, NativeStatus, NativeThreadBlock, NativeTurnError, PlanRecord,
+    QueueEvent, QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder, RecordPredicate,
+    RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction, StartAttemptView,
+    StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold, StoredTitleJob,
+    StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId, TaskRecord,
+    TaskRepository, TerminalFault, TerminalRecord, TitleJob, ToolResultRecord, TranscriptAssetId,
+    TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord, UnknownAgentStatus,
+    UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
     WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };
 pub use repositories::agent_indexed_reads::{AgentIndexedReads, reserved_turn_input};

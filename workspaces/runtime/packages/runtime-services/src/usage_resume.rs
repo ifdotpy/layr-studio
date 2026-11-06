@@ -486,13 +486,13 @@ fn cancel(s: &Snapshot, _r: &Value, reason: &str, now: f64) -> Decision {
 }
 fn excluded(s: &Snapshot, key: &str) -> bool {
     let agent = s.agent_view();
-    let root = if agent.id.as_str() == agent.root_id.as_str() {
-        Some(agent)
-    } else {
-        s.ancestors_view()
-            .iter()
-            .find(|a| a.id.as_str() == agent.root_id.as_str())
-    };
+    if agent.id == agent.root_id {
+        return false;
+    }
+    let root = s
+        .ancestors_view()
+        .iter()
+        .find(|a| a.id.as_str() == agent.root_id.as_str());
     root.and_then(|root| root.excluded_account_keys.as_ref())
         .is_some_and(|keys| keys.as_slice().iter().any(|id| id.as_str() == key))
 }

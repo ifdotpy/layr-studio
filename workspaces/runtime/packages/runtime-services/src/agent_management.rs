@@ -84,6 +84,9 @@ pub enum Action {
         target: String,
         request_id: String,
     },
+    RestoreDeletedRoot {
+        target: String,
+    },
     Archive {
         actor: String,
         epoch: i64,
@@ -112,7 +115,7 @@ impl Action {
             Self::Archive { actor, .. }
             | Self::Restore { actor, .. }
             | Self::Inspect { actor, .. } => Some(actor),
-            Self::RemoteStop { .. } | Self::Delete { .. } => None,
+            Self::RemoteStop { .. } | Self::Delete { .. } | Self::RestoreDeletedRoot { .. } => None,
         }
     }
     /// The agent whose descendant tree scopes this action's history reads.
@@ -122,6 +125,7 @@ impl Action {
             | Self::Pause { target, .. }
             | Self::RemoteStop { target, .. }
             | Self::Delete { target, .. }
+            | Self::RestoreDeletedRoot { target }
             | Self::Archive { target, .. }
             | Self::Restore { target, .. }
             | Self::Inspect { target, .. } => target,
@@ -1051,6 +1055,7 @@ fn decide_inner(
                 remote_request: None,
             },
         ),
+        Action::RestoreDeletedRoot { target } => restore_deleted_root(snapshot, target),
         Action::Archive {
             actor,
             epoch,
@@ -1078,6 +1083,90 @@ fn decide_inner(
             inspect(snapshot, agent)
         }
     }
+}
+
+fn workspace_was_cleaned(agent: &Agent) -> bool {
+    agent
+        .record
+        .get("cleanedWorktree")
+        .is_some_and(|value| !value.is_null())
+        || (crate::layr_native::is_native(&agent.record)
+            && agent.record.get("layrReady").and_then(Value::as_bool) == Some(false)
+            && agent
+                .record
+                .get("layrLine")
+                .and_then(Value::as_str)
+                .is_some())
+        || (agent.record.get("executionMode").and_then(Value::as_str) == Some("vm")
+            && agent.record.get("layrReady").and_then(Value::as_bool) == Some(false))
+}
+
+fn restore_deleted_root(
+    snapshot: &ManagementSnapshot,
+    target: &str,
+) -> Result<Decision, ManagementError> {
+    let root = snapshot.agent(target)?;
+    if root.identity.parent_id.is_some() || root.identity.root_id != target {
+        return Err(ManagementError::Invalid("Only a root chat can be restored"));
+    }
+    let deleted_at = root
+        .record
+        .get("deletedAt")
+        .filter(|value| truthy(Some(value)))
+        .ok_or(ManagementError::Invalid("The root chat is not deleted"))?;
+    let agents: Vec<_> = snapshot
+        .descendants(target, true)?
+        .into_iter()
+        .filter(|agent| agent.record.get("deletedAt") == Some(deleted_at))
+        .collect();
+    if agents.iter().any(|agent| {
+        agent
+            .record
+            .get("workspaceCleanupIntent")
+            .is_some_and(|intent| !intent.is_null())
+    }) {
+        return Err(ManagementError::Invalid(
+            "Workspace cleanup has not settled",
+        ));
+    }
+    if agents.iter().any(|agent| {
+        agent.identity.in_flight == Some(true)
+            || agent.flag("turnId")
+            || truthy(agent.record["startAttempt"].get("activeAtReservation"))
+    }) {
+        return Err(ManagementError::Invalid("A deleted turn has not settled"));
+    }
+    if workspace_was_cleaned(root) {
+        return Err(ManagementError::Invalid("The root workspace was cleaned"));
+    }
+    let mut skipped = BTreeSet::new();
+    for agent in agents.iter().filter(|agent| workspace_was_cleaned(agent)) {
+        skipped.extend(
+            snapshot
+                .descendants(agent.id(), true)?
+                .into_iter()
+                .map(Agent::id),
+        );
+    }
+    let agents: Vec<_> = agents
+        .into_iter()
+        .filter(|agent| !skipped.contains(agent.id()))
+        .collect();
+    let mut decision = Decision::result(
+        json!({"restored": agents.iter().map(|agent| agent.id()).collect::<Vec<_>>()}),
+    );
+    for agent in agents {
+        let mut record = agent.record.clone();
+        let object = record
+            .as_object_mut()
+            .ok_or(ManagementError::Invalid("Invalid agent"))?;
+        object.remove("deletedAt");
+        object.insert("epoch".into(), json!(next_epoch(agent)?));
+        object.insert("status".into(), json!("paused"));
+        object.insert("autoWake".into(), json!(false));
+        decision.write("runtime_agents", record);
+    }
+    Ok(decision)
 }
 
 /// Python `manage_agent` action `inspect`. Python also reports in-memory
@@ -1300,12 +1389,13 @@ fn stop(
             object.insert("deletedAt".to_owned(), json!(now));
         }
         if delete && agent.record.get("workspaceCleanupIntent").is_none() {
-            record["workspaceCleanupIntent"] =
-                crate::workspace_cleanup_runtime::queued_cleanup_intent(
+            record["workspaceCleanupIntent"] = studio_runtime_store::projection_value(
+                &crate::workspace_cleanup_runtime::queued_cleanup_intent(
                     agent.id(),
                     epoch,
                     crate::workspace_cleanup_runtime::CleanupAction::Delete,
-                );
+                ),
+            );
         }
         for kind in required.remove(agent.id()).unwrap_or_default() {
             decision.effects.push(LifecycleEffect::new(
@@ -1456,12 +1546,14 @@ fn archive(
     record["status"] = json!("paused");
     record["epoch"] = json!(next_epoch(agent)?);
     record["agentArchive"] = json!({"at":now,"by":actor,"reason":reason,"epoch":record["epoch"],"cleanupPending":true,"unknownToolRequests":snapshot.unknown_tool_requests(agent),"unassignedWork":unassigned});
-    record["workspaceCleanupIntent"] = crate::workspace_cleanup_runtime::queued_cleanup_intent(
-        agent.id(),
-        record["epoch"]
-            .as_i64()
-            .ok_or(ManagementError::Invalid("Invalid archive epoch"))?,
-        crate::workspace_cleanup_runtime::CleanupAction::Archive,
+    record["workspaceCleanupIntent"] = studio_runtime_store::projection_value(
+        &crate::workspace_cleanup_runtime::queued_cleanup_intent(
+            agent.id(),
+            record["epoch"]
+                .as_i64()
+                .ok_or(ManagementError::Invalid("Invalid archive epoch"))?,
+            crate::workspace_cleanup_runtime::CleanupAction::Archive,
+        ),
     );
     decision.result = json!({"status":"archived","agent":brief(&record),"worktree":{"state":"none","bytes":0},"unassignedWork":unassigned});
     if !inputs.is_empty() {
@@ -1597,6 +1689,104 @@ mod lifecycle_scope_parity_tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn owner_restores_only_the_root_deletion_cohort() {
+        let mut root = agent("lead", "lead", None, true);
+        let mut child = agent("child", "lead", Some("lead"), false);
+        let mut older = agent("older", "lead", Some("child"), false);
+        root["deletedAt"] = json!(10.0);
+        child["deletedAt"] = json!(10.0);
+        older["deletedAt"] = json!(5.0);
+        let snapshot = ManagementSnapshot::from_records(Records {
+            tables: BTreeMap::from([("runtime_agents".to_owned(), vec![root, child, older])]),
+        })
+        .expect("snapshot");
+        let action = Action::RestoreDeletedRoot {
+            target: "lead".into(),
+        };
+        let decision = decide_with_effects(&snapshot, &action, 20.0).expect("restore");
+        assert_eq!(decision.writes.len(), 2);
+        assert!(
+            decision
+                .writes
+                .iter()
+                .all(|write| write.record.get("deletedAt").is_none())
+        );
+    }
+
+    #[test]
+    fn owner_restore_keeps_descendants_of_cleaned_worker_deleted() {
+        let mut root = agent("lead", "lead", None, true);
+        let mut child = agent("child", "lead", Some("lead"), false);
+        let mut grandchild = agent("grandchild", "lead", Some("child"), false);
+        for record in [&mut root, &mut child, &mut grandchild] {
+            record["deletedAt"] = json!(10.0);
+        }
+        child["cleanedWorktree"] = json!({"root":"/removed"});
+        let snapshot = ManagementSnapshot::from_records(Records {
+            tables: BTreeMap::from([("runtime_agents".to_owned(), vec![root, child, grandchild])]),
+        })
+        .expect("snapshot");
+        let decision = decide_with_effects(
+            &snapshot,
+            &Action::RestoreDeletedRoot {
+                target: "lead".into(),
+            },
+            20.0,
+        )
+        .expect("restore");
+        assert_eq!(decision.writes.len(), 1);
+        assert_eq!(decision.writes[0].record["id"], "lead");
+    }
+
+    #[test]
+    fn owner_restore_refuses_unsettled_turns() {
+        for fields in [
+            json!({"inFlight":true}),
+            json!({"turnId":"turn"}),
+            json!({"startAttempt":{"activeAtReservation":true}}),
+        ] {
+            let mut root = agent("lead", "lead", None, true);
+            let mut child = agent("child", "lead", Some("lead"), false);
+            root["deletedAt"] = json!(10.0);
+            child["deletedAt"] = json!(10.0);
+            child
+                .as_object_mut()
+                .expect("child")
+                .extend(fields.as_object().expect("fields").clone());
+            let snapshot = ManagementSnapshot::from_records(Records {
+                tables: BTreeMap::from([("runtime_agents".to_owned(), vec![root, child])]),
+            })
+            .expect("snapshot");
+            let action = Action::RestoreDeletedRoot {
+                target: "lead".into(),
+            };
+            assert!(
+                decide_with_effects(&snapshot, &action, 20.0).is_err(),
+                "{fields}"
+            );
+        }
+    }
+
+    #[test]
+    fn owner_restore_refuses_pending_cleanup_and_non_root() {
+        let mut root = agent("lead", "lead", None, true);
+        let mut child = agent("child", "lead", Some("lead"), false);
+        root["deletedAt"] = json!(10.0);
+        child["deletedAt"] = json!(10.0);
+        child["workspaceCleanupIntent"] = json!({"phase":"pending"});
+        let snapshot = ManagementSnapshot::from_records(Records {
+            tables: BTreeMap::from([("runtime_agents".to_owned(), vec![root, child])]),
+        })
+        .expect("snapshot");
+        for target in ["lead", "child"] {
+            let action = Action::RestoreDeletedRoot {
+                target: target.into(),
+            };
+            assert!(decide_with_effects(&snapshot, &action, 20.0).is_err());
+        }
     }
 
     #[test]
@@ -1942,7 +2132,9 @@ mod lifecycle_scope_parity_tests {
             Action::Delete { .. } | Action::Stop { .. } | Action::Pause { .. } => {
                 assert!(!full_decision.writes.is_empty())
             }
-            Action::RemoteStop { .. } => unreachable!("not a scoped lifecycle fixture"),
+            Action::RemoteStop { .. } | Action::RestoreDeletedRoot { .. } => {
+                unreachable!("not a scoped lifecycle fixture")
+            }
         }
         assert_eq!(full_decision.result, scoped_decision.result);
         assert_eq!(json!(&full_decision.writes), json!(&scoped_decision.writes));

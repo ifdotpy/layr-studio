@@ -7,7 +7,8 @@ use studio_json::{Value, json};
 use studio_runtime_providers::Frame;
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
-    MonitorRecord, NotificationDispatchRepository, StoreError, Table, Transaction, sha256_hex,
+    AgentRecord, MonitorRecord, NotificationDispatchRepository, StoreError, Table, Transaction,
+    sha256_hex,
 };
 use thiserror::Error;
 
@@ -24,9 +25,10 @@ mod questions;
 #[path = "notification_dispatch/snapshot.rs"]
 mod snapshot;
 pub use effects::{
-    NotificationDependency, NotificationEffects, NotificationHourMetrics, NotificationObservation,
-    NotificationPostCommit, NotificationPublicationBatch, NotificationStreamMetrics,
-    ObservationTime, RecoveredNotificationObservation, SharedJson, UnavailableNotificationEffects,
+    NotificationAgent, NotificationDependency, NotificationEffects, NotificationHourMetrics,
+    NotificationObservation, NotificationPostCommit, NotificationPublicationBatch,
+    NotificationStreamMetrics, ObservationTime, RecoveredNotificationObservation, SharedJson,
+    UnavailableNotificationEffects,
 };
 
 #[path = "notification_dispatch/stream.rs"]
@@ -114,20 +116,20 @@ impl PublicationContext {
         Ok(self)
     }
 
-    fn validate_actor(&self, agent: &Value, actor: &str) -> Result<(), NotificationDispatchError> {
+    fn validate_actor(
+        &self,
+        agent: &AgentRecord,
+        actor: &str,
+    ) -> Result<(), NotificationDispatchError> {
         let valid = match &self.vm_journal {
             Some(scope) => {
-                agent["id"] == scope.actor
+                agent.id.as_ref() == scope.actor
                     && actor == scope.actor
-                    && agent["epoch"] == scope.epoch
-                    && agent["executionMode"] == "vm"
-                    && agent
-                        .get("accountKey")
-                        .and_then(Value::as_str)
-                        .unwrap_or("default")
-                        == scope.account
+                    && agent.epoch == scope.epoch
+                    && agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+                    && agent.account_key.as_str() == scope.account
             }
-            None => agent["executionMode"] != "vm",
+            None => agent.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm),
         };
         if !valid {
             return Err(NotificationDispatchError::invalid());
@@ -371,7 +373,7 @@ pub(crate) fn record_acknowledged_steer_submission(
 /// Transaction-aware read/respond service for model-authored complaints.
 pub(crate) fn agent_complaint_action(
     tx: &Transaction<'_>,
-    agent: &Value,
+    agent: &AgentRecord,
     args: &Value,
     request_id: &str,
     now: f64,
@@ -508,7 +510,7 @@ pub fn dispatch_notification_with_effects(
                     );
                 };
                 publication.validate_actor(&agent, agent_id)?;
-                if agent.get("deletedAt").is_some_and(|value| !value.is_null()) {
+                if agent.deleted_at.is_some() {
                     return save_outcome(
                         transaction,
                         delivery,
@@ -530,7 +532,7 @@ pub fn dispatch_notification_with_effects(
             let mut agent = NotificationDispatchRepository::agent_record(transaction, agent_id)?
                 .ok_or_else(|| stored("runtime_agents", agent_id))?;
             publication.validate_actor(&agent, agent_id)?;
-            if agent.get("deletedAt").is_some_and(|value| !value.is_null()) {
+            if agent.deleted_at.is_some() {
                 return save_outcome(
                     transaction,
                     delivery,
@@ -569,9 +571,10 @@ pub fn dispatch_notification_with_effects(
                 let key = command_key(agent_id, identity, params)?;
                 let mut key = key;
                 key.method = kind.to_owned();
+                let effect_agent = NotificationAgent::from(&agent);
                 for effect in effects.post_commit(
-                    Some(&agent),
-                    Some(&agent),
+                    Some(&effect_agent),
+                    Some(&effect_agent),
                     &notification_payload(notification),
                     delivery,
                     ObservationTime::new(observed_at)
@@ -609,7 +612,7 @@ pub fn dispatch_notification_with_effects(
                     observed_at,
                 )?;
                 if agent != before {
-                    persist_agent(transaction, agent_id, &agent)?;
+                    persist_agent(transaction, agent_id, &mut agent)?;
                     agent_changed = true;
                 }
             }
@@ -695,8 +698,7 @@ pub fn dispatch_notification_with_effects(
                 .and_then(Value::as_str)
                 .filter(|turn| !turn.is_empty());
             let stale_item = kind.starts_with("item/")
-                && turn_id
-                    .is_some_and(|turn| agent.get("turnId").and_then(Value::as_str) != Some(turn));
+                && turn_id.is_some_and(|turn| agent.turn_id.as_deref() != Some(turn));
 
             // `kinds::apply` changes nothing for the kinds that reach here, so
             // `before` is still the stored agent.
@@ -807,9 +809,11 @@ pub fn dispatch_notification_with_effects(
                     }
                 }
                 "thread/tokenUsage/updated" => {
-                    let provider =
-                        studio_runtime_schema::provider_kind::ProviderKind::of_record(&agent)
-                            .map_err(|_| NotificationDispatchError::invalid())?;
+                    let provider = agent
+                        .provider
+                        .value()
+                        .copied()
+                        .ok_or_else(NotificationDispatchError::invalid)?;
                     let observation =
                         match studio_runtime_schema::usage::parse_token_usage(provider, params) {
                             Ok(usage) => TokenUsageObservation::Typed(usage),
@@ -819,11 +823,12 @@ pub fn dispatch_notification_with_effects(
                             ),
                         };
                     if let TokenUsageObservation::Typed(usage) = &observation
-                        && crate::event_write::truthy(agent.get("movedFrom"))
+                        && agent.moved_from_active()
                     {
+                        let effect_agent = studio_runtime_store::AgentId::from(agent_id);
                         effects.capture_move_cache(
                             transaction,
-                            &agent,
+                            &effect_agent,
                             params,
                             usage,
                             observed_at,
@@ -840,7 +845,10 @@ pub fn dispatch_notification_with_effects(
                 after_known = if before.as_ref() == Some(&agent) {
                     AfterAgent::Unchanged
                 } else {
-                    AfterAgent::Stored(persist_agent(transaction, agent_id, &agent)?)
+                    {
+                        persist_agent(transaction, agent_id, &mut agent)?;
+                        AfterAgent::Stored(Box::new(agent))
+                    }
                 };
                 return save_outcome(transaction, delivery, &content_signature, outcome);
             }
@@ -853,14 +861,15 @@ pub fn dispatch_notification_with_effects(
                 update_common_agent_fields(&mut agent, kind, params, observed_at)?;
             }
             if !matches!(outcome, DispatchOutcome::Ignored { .. }) {
-                after_known = AfterAgent::Stored(persist_agent(transaction, agent_id, &agent)?);
+                persist_agent(transaction, agent_id, &mut agent)?;
+                after_known = AfterAgent::Stored(Box::new(agent));
             }
             save_outcome(transaction, delivery, &content_signature, outcome)
         })()?;
         if fresh {
             let unchanged = matches!(after_known, AfterAgent::Unchanged);
             let stored = match after_known {
-                AfterAgent::Stored(agent) => Some(agent),
+                AfterAgent::Stored(agent) => Some(*agent),
                 AfterAgent::Unknown if before.is_some() => {
                     NotificationDispatchRepository::agent_record(transaction, agent_id)?
                 }
@@ -888,12 +897,23 @@ pub fn dispatch_notification_with_effects(
                 let mut key = command_key(agent_id, identity, params)?;
                 key.method = kind.to_owned();
                 if let Some(agent) = &before {
-                    next_streams.flush_analytics(&key, agent);
+                    next_streams.flush_analytics(&key, agent)?;
                 }
             }
+            // Effects borrow the checked record.
+            let effect_before = before.as_ref().map(NotificationAgent::from);
+            let effect_after = if unchanged {
+                None
+            } else {
+                after.map(NotificationAgent::from)
+            };
             let mut current = effects.post_commit(
-                before.as_ref(),
-                after,
+                effect_before.as_ref(),
+                if unchanged {
+                    effect_before.as_ref()
+                } else {
+                    effect_after.as_ref()
+                },
                 &notification_payload(notification),
                 delivery,
                 ObservationTime::new(observed_at).ok_or_else(NotificationDispatchError::invalid)?,
@@ -976,7 +996,7 @@ pub(crate) fn put_checked_task_record(
 /// No provider cursor is fabricated and no commit/publication happens here.
 pub fn recover_task_in_transaction(
     tx: &Transaction<'_>,
-    agent: &Value,
+    agent: &AgentRecord,
     previous: &studio_runtime_store::TaskRecord,
     item: &Value,
     at: f64,
@@ -984,7 +1004,7 @@ pub fn recover_task_in_transaction(
     in_savepoint(tx, || {
         if !at.is_finite()
             || at < 0.0
-            || Some(previous.agent()) != agent["id"].as_str()
+            || previous.agent() != agent.id.as_ref()
             || Some(previous.item_id()) != item["id"].as_str()
             || Some(previous.task_type().as_str()) != item["type"].as_str()
         {
@@ -993,16 +1013,15 @@ pub fn recover_task_in_transaction(
         use studio_runtime_store::{Table, TaskId, TaskRecord};
         let task_id = previous.id().as_ref();
         let current = Table::<TaskRecord>::new(tx).get(&TaskId::from(task_id))?;
-        let stored_agent = NotificationDispatchRepository::agent_record(
-            tx,
-            agent["id"]
-                .as_str()
-                .ok_or(NotificationDispatchError::invalid())?,
-        )?;
+        let stored_agent = NotificationDispatchRepository::agent_record(tx, agent.id.as_ref())?;
         if current.as_ref() != Some(previous) || stored_agent.as_ref() != Some(agent) {
             return Err(NotificationDispatchError::invalid());
         }
-        let snapshot = snapshot::NotificationSnapshot::from_records(agent.clone(), current, None)?;
+        let snapshot = snapshot::NotificationSnapshot::from_records(
+            stored_agent.ok_or_else(NotificationDispatchError::invalid)?,
+            current,
+            None,
+        )?;
         if snapshot.task().map(TaskRecord::status)
             != Some(studio_runtime_schema::task_record::TaskStatus::Running)
         {
@@ -1018,15 +1037,7 @@ pub fn recover_task_in_transaction(
             at,
         )? {
             kinds::put_checked_task(tx, &task)?;
-            kinds::write_historical_item(
-                tx,
-                agent["id"]
-                    .as_str()
-                    .ok_or(NotificationDispatchError::invalid())?,
-                &params,
-                &task,
-                at,
-            )?;
+            kinds::write_historical_item(tx, agent.id.as_ref(), &params, &task, at)?;
         }
         Ok(())
     })
@@ -1041,7 +1052,7 @@ impl NotificationStreamBuffer {
     pub(crate) fn recover_agent_message_in_transaction(
         &self,
         tx: &Transaction<'_>,
-        agent: &mut Value,
+        agent: &mut AgentRecord,
         account: &str,
         generation: u64,
         turn: &Value,
@@ -1051,9 +1062,7 @@ impl NotificationStreamBuffer {
         let mut next = self.clone();
         let mut staged_agent = agent.clone();
         in_savepoint(tx, || {
-            let agent_id = agent["id"]
-                .as_str()
-                .ok_or(NotificationDispatchError::invalid())?;
+            let agent_id = agent.id.as_ref();
             let item_id = item["id"]
                 .as_str()
                 .filter(|id| !id.is_empty())
@@ -1064,14 +1073,14 @@ impl NotificationStreamBuffer {
                 || account.is_empty()
                 || item["type"] != "agentMessage"
                 || turn["id"].as_str().is_none_or(str::is_empty)
-                || agent["turnId"] != turn["id"]
+                || agent.turn_id.as_deref() != turn["id"].as_str()
             {
                 return Err(NotificationDispatchError::invalid());
             }
             let body = recovered_message_text(item)?;
-            let params = json!({"threadId":agent["threadId"],"turnId":turn["id"],"item":item});
+            let params = json!({"threadId":agent.thread_id,"turnId":turn["id"],"item":item});
             validate_agent(
-                agent,
+                &staged_agent,
                 agent_id,
                 &format!("account:{account}"),
                 "item/completed",
@@ -1319,7 +1328,7 @@ fn notification_content_signature(
 }
 
 fn validate_agent(
-    agent: &Value,
+    agent: &AgentRecord,
     agent_id: &str,
     provider_handle: &str,
     kind: &str,
@@ -1327,8 +1336,8 @@ fn validate_agent(
 ) -> Result<(), NotificationDispatchError> {
     validate_agent_write_fields(agent, agent_id)?;
     let thread = agent
-        .get("threadId")
-        .and_then(Value::as_str)
+        .thread_id
+        .as_deref()
         .filter(|thread| !thread.is_empty())
         .ok_or_else(|| stored("runtime_agents", agent_id))?;
     let notification_thread = params.get("threadId").and_then(Value::as_str).or_else(|| {
@@ -1347,11 +1356,10 @@ fn validate_agent(
     if notification_thread.is_some_and(|actual| actual != thread) {
         return Err(NotificationDispatchError::invalid());
     }
-    let account = match agent.get("accountKey") {
-        None => "default",
-        Some(Value::String(account)) if !account.is_empty() => account,
-        Some(_) => return Err(stored("runtime_agents", agent_id)),
-    };
+    let account = &agent.account_key;
+    if account.is_empty() {
+        return Err(stored("runtime_agents", agent_id));
+    }
     if provider_handle != format!("account:{account}") {
         return Err(NotificationDispatchError::invalid());
     }
@@ -1362,45 +1370,24 @@ fn validate_agent(
 /// each notification starts or raises it. A stored value that is present must
 /// still be a counter.
 fn validate_agent_write_fields(
-    agent: &Value,
+    agent: &AgentRecord,
     agent_id: &str,
 ) -> Result<(), NotificationDispatchError> {
-    if agent.get("id").and_then(Value::as_str) != Some(agent_id)
-        || agent
-            .get("epoch")
-            .and_then(Value::as_i64)
-            .is_none_or(|epoch| epoch < 0)
-        || agent
-            .get("rootId")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        || agent.get("status").and_then(Value::as_str).is_none()
-        || agent
-            .get("events")
-            .is_some_and(|events| !events.is_null() && events.as_u64().is_none())
-    {
+    if agent.id.as_ref() != agent_id || agent.epoch < 0 || agent.root_id.as_ref().is_empty() {
         return Err(stored("runtime_agents", agent_id));
     }
-    if agent
-        .get("unhandledNotifications")
-        .is_some_and(|counts| !counts.is_object())
-    {
-        return Err(stored("runtime_agents", agent_id));
-    }
-    if let Some(counts) = agent
-        .get("unhandledNotifications")
-        .and_then(Value::as_object)
-    {
+    // TODO(agent-record-chain r3): notification counters still live in the remainder.
+    if let Some(counts) = agent.extra.get("unhandledNotifications") {
+        let counts = counts
+            .as_object()
+            .ok_or_else(|| stored("runtime_agents", agent_id))?;
         for value in counts.values() {
             if value.get("count").and_then(Value::as_u64).is_none()
-                || value
-                    .get("reasons")
-                    .is_some_and(|reasons| !reasons.is_object())
-            {
-                return Err(stored("runtime_agents", agent_id));
-            }
-            if let Some(reasons) = value.get("reasons").and_then(Value::as_object)
-                && reasons.values().any(|count| count.as_u64().is_none())
+                || value.get("reasons").is_some_and(|reasons| {
+                    reasons.as_object().is_none_or(|reasons| {
+                        reasons.values().any(|count| count.as_u64().is_none())
+                    })
+                })
             {
                 return Err(stored("runtime_agents", agent_id));
             }
@@ -1411,7 +1398,7 @@ fn validate_agent_write_fields(
 
 fn write_text_notification(
     transaction: &Transaction<'_>,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     input: TextWriteInput<'_>,
 ) -> Result<bool, NotificationDispatchError> {
@@ -1519,8 +1506,8 @@ fn write_text_notification(
     };
     let turn = turn.or_else(|| {
         agent
-            .get("turnId")
-            .and_then(Value::as_str)
+            .turn_id
+            .as_deref()
             .filter(|turn| !turn.is_empty())
             .map(str::to_owned)
     });
@@ -1537,11 +1524,19 @@ fn write_text_notification(
     if completed {
         // Sign-in links become cards once the message commits; its text stays unchanged.
         crate::sign_in::note_message(agent_id, &id, &text);
-        agent["activity"] = json!({"phase":"thinking", "at":observed_at});
-        agent["lastAnswer"] = Value::String(suffix(&text, 16_000));
-        agent["tail"] = Value::String(suffix(&text, 300));
+        agent.activity = Some(studio_runtime_store::AgentActivity {
+            phase: Some("thinking".into()),
+            at: Some(observed_at),
+            ..Default::default()
+        });
+        agent.last_answer = Some(suffix(&text, 16_000));
+        agent.tail = Some(suffix(&text, 300));
     } else {
-        agent["activity"] = json!({"phase":"writing", "at":observed_at});
+        agent.activity = Some(studio_runtime_store::AgentActivity {
+            phase: Some("writing".into()),
+            at: Some(observed_at),
+            ..Default::default()
+        });
     }
     Ok(true)
 }
@@ -1571,7 +1566,7 @@ pub fn flush_notification_streams(
             observed_at,
         )?;
         if agent != before {
-            persist_agent(transaction, agent_id, &agent)?;
+            persist_agent(transaction, agent_id, &mut agent)?;
         }
         Ok(next.changed_from(streams).then_some(next))
     })
@@ -1580,8 +1575,8 @@ pub fn flush_notification_streams(
 /// Whether `turn` already settled (`turn/completed`). It owns the drop of a late
 /// delta, so a finished stream needs no closed key once its turn has settled.
 /// A turn without an id never settles; its keys go with any turn of the thread.
-fn turn_settled(agent: &Value, turn: Option<&str>) -> bool {
-    turn.is_some_and(|turn| agent.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn))
+fn turn_settled(agent: &AgentRecord, turn: Option<&str>) -> bool {
+    turn.is_some_and(|turn| agent.last_completed_turn.value().map(String::as_str) == Some(turn))
 }
 
 /// Why a delta of a settled turn is dropped.
@@ -1630,10 +1625,10 @@ pub(crate) fn prune_inactive_streams(
         if active && recovering && !streams.has_pending(&key) && streams.has_base(&key) {
             let owner = stream_owner(transaction, &key)?;
             if let Some((id, raw)) = owner {
-                let mut projection: Value =
+                let mut projection: AgentRecord =
                     studio_json::from_str(&raw).map_err(|_| stored("runtime_agents", &id))?;
-                projection["turnId"] = json!(key.turn);
-                projection["deletedAt"] = Value::Null;
+                projection.turn_id = key.turn.clone();
+                projection.deleted_at = None;
                 flush_one_stream(
                     transaction,
                     &id,
@@ -1648,10 +1643,10 @@ pub(crate) fn prune_inactive_streams(
         }
         if !active {
             if let Some((id, raw)) = stream_owner(transaction, &key)? {
-                let mut projection: Value =
+                let mut projection: AgentRecord =
                     studio_json::from_str(&raw).map_err(|_| stored("runtime_agents", &id))?;
-                projection["turnId"] = json!(key.turn);
-                projection["deletedAt"] = Value::Null;
+                projection.turn_id = key.turn.clone();
+                projection.deleted_at = None;
                 flush_one_stream(
                     transaction,
                     &id,
@@ -1692,7 +1687,7 @@ fn stream_owner(
 fn flush_one_stream(
     transaction: &Transaction<'_>,
     agent_id: &str,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     key: &StreamKey,
     observed_at: f64,
@@ -1738,7 +1733,7 @@ const REASONING_DELTA_METHODS: [&str; 2] = [
 /// The stream of a reasoning delta that can be buffered: current turn, an
 /// item id, and no retry status that the delta clears.
 fn reasoning_stream_key(
-    agent: &Value,
+    agent: &AgentRecord,
     agent_id: &str,
     identity: &ProviderDeliveryIdentity,
     kind: &str,
@@ -1755,12 +1750,18 @@ fn reasoning_stream_key(
         return None;
     }
     let delta = Delta::deserialize(params).ok()?;
-    let current_turn = agent.get("turnId").and_then(Value::as_str);
+    let current_turn = agent.turn_id.as_deref();
     if delta.item_id.is_empty()
         || delta
             .turn_id
             .is_some_and(|turn| !turn.is_empty() && current_turn != Some(turn))
-        || agent["nativeStatus"]["phase"] == "retrying"
+        || agent
+            .native_status
+            .as_ref()
+            .and_then(|status| status.phase)
+            .is_some_and(|phase| {
+                phase == studio_runtime_schema::agent_entity_nested::NativeStatusPhase::Retrying
+            })
     {
         return None;
     }
@@ -1771,16 +1772,16 @@ fn reasoning_stream_key(
 
 /// Count the buffered reasoning deltas of `key` as agent events.
 fn flush_reasoning_stream(
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     key: &StreamKey,
     observed_at: f64,
 ) -> Result<(), NotificationDispatchError> {
     if let Some((_, count, params)) = streams.flush(key, "") {
         update_common_agent_fields(agent, &key.method, &params, observed_at)?;
-        agent["events"] = Value::from(
-            agent["events"]
-                .as_u64()
+        agent.events = Some(
+            agent
+                .events
                 .unwrap_or_default()
                 .saturating_add(count.saturating_sub(1)),
         );
@@ -1791,7 +1792,7 @@ fn flush_reasoning_stream(
 fn flush_selected(
     transaction: &Transaction<'_>,
     agent_id: &str,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     terminal: Option<&StreamKey>,
     observed_at: f64,
@@ -1811,7 +1812,7 @@ fn flush_selected(
 fn flush_keys(
     transaction: &Transaction<'_>,
     agent_id: &str,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     keys: Vec<StreamKey>,
     close: bool,
@@ -1819,26 +1820,20 @@ fn flush_keys(
 ) -> Result<(), NotificationDispatchError> {
     for key in keys {
         if key.agent_id != agent_id
-            || agent.get("threadId").and_then(Value::as_str) != Some(key.thread.as_str())
-            || agent
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                != key.account
+            || agent.thread_id.as_deref() != Some(key.thread.as_str())
+            || agent.account_key.as_str() != key.account
         {
             continue;
         }
-        if agent.get("deletedAt").is_none_or(Value::is_null)
-            && key.method != "item/commandExecution/outputDelta"
-        {
-            streams.flush_analytics(&key, agent);
+        if agent.deleted_at.is_none() && key.method != "item/commandExecution/outputDelta" {
+            streams.flush_analytics(&key, agent)?;
         }
-        if agent.get("deletedAt").is_some_and(|v| !v.is_null())
+        if agent.deleted_at.is_some()
             || (key.method != "item/commandExecution/outputDelta"
                 && key
                     .turn
                     .as_deref()
-                    .is_some_and(|turn| agent.get("turnId").and_then(Value::as_str) != Some(turn)))
+                    .is_some_and(|turn| agent.turn_id.as_deref() != Some(turn)))
         {
             streams.discard(&key);
             if close {
@@ -1885,13 +1880,13 @@ fn flush_keys(
 fn flush_text_stream(
     transaction: &Transaction<'_>,
     agent_id: &str,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     key: &StreamKey,
     observed_at: f64,
     delta: Option<&str>,
 ) -> Result<(), NotificationDispatchError> {
-    streams.flush_analytics(key, agent);
+    streams.flush_analytics(key, agent)?;
     if delta.is_none() && !streams.has_pending(key) {
         return Ok(());
     }
@@ -1914,10 +1909,7 @@ fn flush_text_stream(
             .and_then(|(record, _)| record.get("phase"))
             .cloned()
             .unwrap_or(Value::Null);
-        let turn = key
-            .turn
-            .as_deref()
-            .or_else(|| agent.get("turnId").and_then(Value::as_str));
+        let turn = key.turn.as_deref().or(agent.turn_id.as_deref());
         let record = assistant_item_record(&id, &text, observed_at, true, turn, phase);
         NotificationDispatchRepository::put_transcript_item(
             transaction,
@@ -1930,14 +1922,18 @@ fn flush_text_stream(
             false,
         )?;
         update_common_agent_fields(agent, "item/agentMessage/delta", &params, observed_at)?;
-        agent["events"] = Value::from(
-            agent["events"]
-                .as_u64()
+        agent.events = Some(
+            agent
+                .events
                 .unwrap_or_default()
                 .saturating_add(count.saturating_sub(1)),
         );
-        agent["activity"] = json!({"phase":"writing", "at":observed_at});
-        agent["tail"] = Value::String(suffix(&text, 300));
+        agent.activity = Some(studio_runtime_store::AgentActivity {
+            phase: Some("writing".into()),
+            at: Some(observed_at),
+            ..Default::default()
+        });
+        agent.tail = Some(suffix(&text, 300));
     }
     Ok(())
 }
@@ -2012,7 +2008,7 @@ enum TokenUsageObservation {
 }
 
 fn apply_token_usage(
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     observation: &TokenUsageObservation,
     observed_at: f64,
 ) -> Result<DispatchOutcome, NotificationDispatchError> {
@@ -2020,7 +2016,11 @@ fn apply_token_usage(
     let observation = match observation {
         TokenUsageObservation::Typed(usage) => usage,
         TokenUsageObservation::Legacy(usage) => {
-            agent["contextUsage"] = json!({"tokens":usage.last_total_tokens,"window":usage.model_context_window,"at":observed_at});
+            agent.context_usage = Some(studio_runtime_store::AgentContextUsage {
+                tokens: usage.last_total_tokens,
+                window: usage.model_context_window,
+                at: observed_at,
+            });
             return Ok(DispatchOutcome::Written);
         }
     };
@@ -2043,12 +2043,12 @@ fn apply_token_usage(
         } => {
             if last.is_none() {
                 if let Some(window) = model_context_window {
-                    let tokens = agent
-                        .pointer("/contextUsage/tokens")
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    agent["contextUsage"] =
-                        json!({"tokens":tokens,"window":window,"at":observed_at});
+                    let tokens = agent.context_usage.as_ref().and_then(|usage| usage.tokens);
+                    agent.context_usage = Some(studio_runtime_store::AgentContextUsage {
+                        tokens,
+                        window: Some(*window),
+                        at: observed_at,
+                    });
                 }
                 return Ok(DispatchOutcome::Written);
             }
@@ -2059,23 +2059,23 @@ fn apply_token_usage(
     let tokens = tokens
         .map(|tokens| tokens.total().ok_or(NotificationDispatchError::invalid()))
         .transpose()?;
-    agent["contextUsage"] = json!({"tokens":tokens,"window":window,"at":observed_at});
+    agent.context_usage = Some(studio_runtime_store::AgentContextUsage {
+        tokens,
+        window,
+        at: observed_at,
+    });
     Ok(DispatchOutcome::Written)
 }
 
 fn update_common_agent_fields(
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     method: &str,
     params: &Value,
     observed_at: f64,
 ) -> Result<(), NotificationDispatchError> {
     if !method.is_empty() {
-        let events = agent
-            .get("events")
-            .and_then(Value::as_u64)
-            .unwrap_or_default();
-        agent["events"] = Value::from(events.saturating_add(1));
-        agent["lastEvent"] = Value::String(format_utc(observed_at)?);
+        agent.events = Some(agent.events.unwrap_or_default().saturating_add(1));
+        agent.last_event = Some(format_utc(observed_at)?);
     }
     if method == "item/agentMessage/delta"
         || (matches!(method, "item/started" | "item/completed")
@@ -2088,56 +2088,46 @@ fn update_common_agent_fields(
             .get("turnId")
             .and_then(Value::as_str)
             .filter(|turn| !turn.is_empty())
-            .or_else(|| {
-                agent
-                    .get("turnId")
-                    .and_then(Value::as_str)
-                    .filter(|turn| !turn.is_empty())
-            })
-            .map(str::to_owned);
-        if turn.as_deref() == agent.get("turnId").and_then(Value::as_str) {
-            if let Some(turn) = &turn {
-                agent["nativeResponseTurn"] = json!(turn);
-            } else if let Some(fields) = agent.as_object_mut() {
-                fields.remove("nativeResponseTurn");
-            }
+            .or_else(|| agent.turn_id.as_deref().filter(|turn| !turn.is_empty()));
+        if turn == agent.turn_id.as_deref() {
+            agent.native_response_turn = turn.map(str::to_owned);
             let mut clear_safety = false;
-            if let Some(buffering) = agent
-                .get_mut("nativeSafetyBuffering")
-                .and_then(Value::as_object_mut)
-                && buffering.get("turnId").and_then(Value::as_str) == turn.as_deref()
+            if let Some(buffering) = &mut agent.native_safety_buffering
+                && buffering.turn_id.as_deref() == turn
             {
-                buffering.insert("responseStarted".to_owned(), Value::Bool(true));
-                buffering.insert("showBufferingUi".to_owned(), Value::Bool(false));
+                buffering.response_started = Some(true);
+                buffering.show_buffering_ui = Some(false);
                 clear_safety = true;
             }
             if clear_safety
                 && agent
-                    .get("nativeStatus")
-                    .and_then(|status| status.get("phase"))
-                    .and_then(Value::as_str)
-                    == Some("safety")
-                && let Some(fields) = agent.as_object_mut()
+                    .native_status
+                    .as_ref()
+                    .and_then(|status| status.phase)
+                    .is_some_and(|phase| {
+                        phase
+                            == studio_runtime_schema::agent_entity_nested::NativeStatusPhase::Safety
+                    })
             {
-                let _removed = fields.remove("nativeStatus").is_some();
+                agent.native_status = None;
             }
         }
     }
     if matches!(
         method,
         "item/agentMessage/delta" | "item/started" | "item/completed"
-    ) && agent.get("nativeStatus").is_some_and(|status| {
-        status.get("phase").and_then(Value::as_str) == Some("retrying")
-            && status.get("turnId").unwrap_or(&Value::Null)
-                == params.get("turnId").unwrap_or(&Value::Null)
-    }) && let Some(fields) = agent.as_object_mut()
-    {
-        fields.remove("nativeStatus");
+    ) && agent.native_status.as_ref().is_some_and(|status| {
+        status.phase.is_some_and(|phase| {
+            phase == studio_runtime_schema::agent_entity_nested::NativeStatusPhase::Retrying
+        }) && status.turn_id.as_deref() == params.get("turnId").and_then(Value::as_str)
+    }) {
+        agent.native_status = None;
         if params["item"]["type"] == "userMessage" {
-            fields.insert(
-                "activity".into(),
-                json!({"phase":"thinking","at":observed_at}),
-            );
+            agent.activity = Some(studio_runtime_store::AgentActivity {
+                phase: Some("thinking".into()),
+                at: Some(observed_at),
+                ..Default::default()
+            });
         }
     }
     Ok(())
@@ -2147,16 +2137,11 @@ fn update_common_agent_fields(
 fn persist_agent(
     transaction: &Transaction<'_>,
     agent_id: &str,
-    agent: &Value,
-) -> Result<Value, NotificationDispatchError> {
-    // typed-boundary: caller still Value-based
-    let mut typed =
-        studio_runtime_store::AgentRecord::from_value(agent.clone()).map_err(StoreError::from)?;
-    crate::agents_create::mode_fields(&mut typed);
-    let normalized = typed.value();
-    let agent = &normalized;
+    agent: &mut AgentRecord,
+) -> Result<(), NotificationDispatchError> {
+    crate::agents_create::mode_fields(agent);
     NotificationDispatchRepository::put_agent_record(transaction, agent_id, agent)?;
-    Ok(normalized)
+    Ok(())
 }
 
 /// The stored agent after one dispatch, when the dispatch knows it.
@@ -2166,7 +2151,7 @@ enum AfterAgent {
     /// The dispatch stored nothing; the stored agent is `before`.
     Unchanged,
     /// The value this dispatch stored last.
-    Stored(Value),
+    Stored(Box<AgentRecord>),
 }
 
 fn has_questions(value: Option<&Value>) -> bool {
@@ -2276,6 +2261,61 @@ mod tests {
         NotificationDispatchRepository, QueueEvent, QueueEventId, QueueEventRepository,
         RuntimeStore, SchedulerRepository, StoreError, TranscriptRepository,
     };
+
+    #[test]
+    fn notification_agent_write_preserves_legacy_row_bytes_with_typed_shell_observation() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        crate::shell_policy::observe(
+            &tx,
+            &agent,
+            &json!({"id":"cleanup","kind":"cleanup_requested","message":"Cleanup requested"}),
+            1.0,
+        )
+        .unwrap();
+        assert!(
+            NotificationDispatchRepository::notification_item(
+                &tx,
+                "agent",
+                "agent:shell-policy:cleanup"
+            )
+            .unwrap()
+            .is_some()
+        );
+        assert_eq!(
+            agent,
+            NotificationDispatchRepository::agent_record(&tx, "agent")
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn notification_agent_write_preserves_legacy_row_bytes_with_typed_extension_storage() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        agent
+            .extra
+            .insert("futureExtension".into(), json!([1, 2, 3]));
+        let allocation = agent.extra["futureExtension"].as_array().unwrap().as_ptr();
+        super::persist_agent(&tx, "agent", &mut agent).unwrap();
+        assert_eq!(
+            allocation,
+            agent.extra["futureExtension"].as_array().unwrap().as_ptr()
+        );
+        assert_eq!(
+            NotificationDispatchRepository::agent_record(&tx, "agent")
+                .unwrap()
+                .unwrap(),
+            agent
+        );
+    }
 
     #[test]
     fn plan_notification_updates_typed_record() {
@@ -3444,20 +3484,33 @@ mod tests {
     #[test]
     fn the_event_counter_is_optional_but_never_malformed() {
         let base = |events: Value| {
-            let mut agent = json!({"id":"a","rootId":"a","epoch":1,"status":"idle"});
+            let mut agent =
+                json!({"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default"});
             if !events.is_null() {
                 agent["events"] = events;
             }
             agent
         };
         for ok in [Value::Null, json!(0), json!(7)] {
-            assert!(super::validate_agent_write_fields(&base(ok), "a").is_ok());
+            assert!(
+                AgentRecord::from_value(base(ok))
+                    .map_err(StoreError::from)
+                    .and_then(|agent| super::validate_agent_write_fields(&agent, "a")
+                        .map_err(|e| StoreError::SchemaMismatch(e.to_string())))
+                    .is_ok()
+            );
         }
         let mut explicit_null = base(Value::Null);
         explicit_null["events"] = Value::Null;
-        assert!(super::validate_agent_write_fields(&explicit_null, "a").is_ok());
+        assert!(
+            AgentRecord::from_value(explicit_null)
+                .map_err(StoreError::from)
+                .and_then(|agent| super::validate_agent_write_fields(&agent, "a")
+                    .map_err(|e| StoreError::SchemaMismatch(e.to_string())))
+                .is_ok()
+        );
         for bad in [json!(-1), json!("7"), json!(1.5), json!([])] {
-            assert!(super::validate_agent_write_fields(&base(bad), "a").is_err());
+            assert!(AgentRecord::from_value(base(bad)).is_err());
         }
     }
 
@@ -3775,6 +3828,31 @@ mod tests {
 
     /// A new agent has no event counter yet; its first notification counts from zero.
     #[test]
+    fn notification_agent_write_preserves_legacy_row_bytes() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
+            .unwrap()
+            .unwrap();
+        agent["idleCompactionEpisode"] = json!({"id":"legacy","future":{"count":1}});
+        agent["nativeTurnError"] = json!({"turnId":null,"error":{"vendor":true}});
+        let typed = studio_runtime_store::AgentRecord::from_value(agent).unwrap();
+        NotificationDispatchRepository::put_agent_record(&tx, "agent", &typed).unwrap();
+        let before = studio_runtime_store::AgentRepository::get_raw(&tx, &"agent".into())
+            .unwrap()
+            .unwrap();
+        let current = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        NotificationDispatchRepository::put_agent_record(&tx, "agent", &current).unwrap();
+        let after = studio_runtime_store::AgentRepository::get_raw(&tx, &"agent".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.as_bytes(), after.as_bytes());
+    }
+
+    #[test]
     fn agent_without_event_counter_accepts_first_notification() {
         let mut connection = database();
         connection
@@ -3797,6 +3875,7 @@ mod tests {
             DispatchOutcome::Written
         );
         let agent = NotificationDispatchRepository::agent_record(&transaction, "agent")
+            .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
             .expect("agent reads")
             .expect("agent exists");
         assert_eq!(agent["events"], 1);
@@ -3842,6 +3921,7 @@ mod tests {
                 .expect("read transaction begins"),
             "agent",
         )
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
         .expect("agent reads")
         .expect("agent exists");
         assert_eq!(agent["events"], 1);
@@ -4006,6 +4086,7 @@ mod tests {
                 .expect("read transaction begins"),
             "agent",
         )
+        .map(|record| record.map(studio_runtime_store::AgentRecord::into_value))
         .expect("agent reads")
         .expect("agent exists");
         assert_eq!(agent["events"], 0);

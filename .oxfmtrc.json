@@ -6,7 +6,6 @@
   "trailingComma": "all",
   "ignorePatterns": [
     "workspaces/client/apps/native/src-tauri/gen/",
-    "workspaces/runtime/apps/layr/",
     "workspaces/runtime/packages/runtime-http/openapi.json",
     "workspaces/runtime/packages/runtime-http/draft-payload.schema.json",
     "workspaces/runtime/packages/runtime-schema/src/schemas/usage-observation.schema.json",

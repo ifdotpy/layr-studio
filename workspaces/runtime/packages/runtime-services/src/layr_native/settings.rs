@@ -14,7 +14,7 @@ fn path(state: &Path) -> PathBuf {
     state.join(NATIVE_LAYR_DIRECTORY).join("settings.json")
 }
 
-fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
+pub fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
     let settings = match fs::read(path(state)) {
         Ok(bytes) => studio_json::from_slice::<Settings>(&bytes)
             .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}")))?,
@@ -64,10 +64,46 @@ pub fn check_project_overlap(root: &Path, project: &Path) -> Result<()> {
     let project = CanonicalPath::missing_tail(project)
         .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the project folder".into()))?
         .into_path_buf();
+    // Compare canonical paths on both sides: /var is a link to /private/var on macOS.
+    let root = CanonicalPath::missing_tail(root)
+        .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the Layr store".into()))?
+        .into_path_buf();
+    let root = root.as_path();
     if root.starts_with(&project) || project.starts_with(root) {
         return Err(NativeLayrError::Refused(
             "The Layr store must be outside the project folder".into(),
         ));
+    }
+    Ok(())
+}
+
+/// Check every registered folder on this server, including logical project locations.
+pub fn check_projects_overlap(
+    root: &Path,
+    projects: &[(String, Value)],
+    local: Option<&str>,
+) -> Result<()> {
+    for (_, project) in projects {
+        let paths = project
+            .get("path")
+            .and_then(Value::as_str)
+            .into_iter()
+            .chain(
+                project
+                    .get("locations")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|location| {
+                        (location.get("serverId").and_then(Value::as_str) == local
+                            && local.is_some())
+                        .then(|| location.get("path").and_then(Value::as_str))
+                        .flatten()
+                    }),
+            );
+        for path in paths.filter(|path| Path::new(path).is_absolute()) {
+            check_project_overlap(root, Path::new(path))?;
+        }
     }
     Ok(())
 }
@@ -152,18 +188,6 @@ pub(super) fn same_root(left: &Path, right: &Path) -> bool {
         == CanonicalPath::existing(right)
             .map(CanonicalPath::into_path_buf)
             .unwrap_or_else(|_| right.to_owned())
-}
-
-/// A link to an operator's store does not make that store Studio-owned.
-pub(super) fn owns_store(state: &Path, root: &Path) -> bool {
-    let expected = CanonicalPath::existing(state)
-        .map(CanonicalPath::into_path_buf)
-        .unwrap_or_else(|_| state.to_owned())
-        .join(NATIVE_LAYR_DIRECTORY)
-        .join(STORE_DIRECTORY);
-    CanonicalPath::missing_tail(root).is_some_and(|root| root.as_path() == expected)
-        && !fs::symlink_metadata(store_path(state))
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
 }
 
 /// Keep the original metadata location for old Studio imports.
@@ -286,6 +310,12 @@ mod tests {
         assert!(check_project_overlap(project.path(), &store).is_err());
         let other = tempfile::tempdir().expect("other");
         assert!(check_project_overlap(other.path(), project.path()).is_ok());
+        let projects = vec![(
+            "project:logical".to_owned(),
+            json!({"path":"project:logical", "locations":[{"serverId":"local", "path":project.path()}]}),
+        )];
+        assert!(check_projects_overlap(&store, &projects, Some("local")).is_err());
+        assert!(check_projects_overlap(&store, &projects, Some("remote")).is_ok());
     }
 
     #[test]
@@ -321,27 +351,6 @@ mod tests {
                 .unwrap()
                 .into_path_buf()
         );
-    }
-
-    #[test]
-    fn native_layr_owned_store_detection_resolves_aliases_before_first_import() {
-        let fixture = tempfile::tempdir().expect("fixture");
-        let root = store_path(fixture.path());
-        assert!(!root.exists());
-        assert!(owns_store(fixture.path(), &root));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn native_layr_a_default_path_symlink_does_not_make_a_developer_store_owned() {
-        let fixture = tempfile::tempdir().expect("fixture");
-        let state = fixture.path().join("state");
-        let developer = fixture.path().join("developer");
-        fs::create_dir_all(state.join(NATIVE_LAYR_DIRECTORY)).expect("native folder");
-        fs::create_dir(&developer).expect("developer store");
-        std::os::unix::fs::symlink(&developer, store_path(&state)).expect("store link");
-        assert!(!owns_store(&state, &developer));
-        assert!(!owns_store(&state, &store_path(&state)));
     }
 
     #[test]

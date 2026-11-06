@@ -289,6 +289,33 @@ fn project_schema_value(
     }
 }
 
+fn project_agent_legacy_field<T: serde::Serialize>(
+    value: &T,
+    name: &str,
+) -> Result<Value, studio_json::Error> {
+    // public shape is a schema-filtered subset of the stored owner; filtering stays with project_schema_value
+    let value = serde::Serialize::serialize(value, studio_json::value::Serializer)?;
+    Ok(project_agent_property(&value, name))
+}
+
+/// `SCHEMA_FILTERED_AGENT_FIELDS` is the Rust-only generator's field list.
+fn project_agent_property(value: &Value, name: &str) -> Value {
+    let document = openapi_document();
+    let schema = document
+        .pointer("/components/schemas/AgentEntityDto")
+        .expect("agent schema exists");
+    let property = schema_projection_properties()[&(schema as *const Value as usize)][name];
+    project_schema_value(
+        value,
+        property,
+        name,
+        document,
+        1,
+        true,
+        AGENT_SHORT_STRING_OBJECTS.contains(&name),
+    )
+}
+
 use studio_runtime_schema::process_controls::TaskProjection;
 
 pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<TaskProjection> {
@@ -403,7 +430,7 @@ pub struct WorkDetailView {
 pub enum WorkView {
     Summary(WorkProjection),
     Detail(WorkDetailView),
-    Entry(Value),
+    Entry(WorkHistoryEntry),
 }
 
 pub fn work_detail_view(
@@ -438,23 +465,82 @@ pub fn work_detail_view(
     })
 }
 
+/// Generated renderer envelopes for work history rows.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum WorkHistoryEntry {
+    Result(studio_runtime_schema::generated::WorkResultEntityDto),
+    Decision(studio_runtime_schema::generated::WorkDecisionEntityDto),
+    Release(studio_runtime_schema::generated::WorkReleaseEntityDto),
+}
+
+impl WorkHistoryEntry {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Result(entry) => &entry.id,
+            Self::Decision(entry) => &entry.id,
+            Self::Release(entry) => &entry.id,
+        }
+    }
+}
+
 /// One history entry, keyed `{task}:{index}`. None when the index is absent.
 pub fn work_history_view(
     id: &str,
     record: &Value,
     kind: WorkHistoryKind,
     index: usize,
-) -> Option<Value> {
+) -> Option<WorkHistoryEntry> {
     let value = record[kind.field()].as_array()?.get(index)?;
-    Some(work_history_entry(id, &record["rootId"], index, value))
+    Some(work_history_entry(
+        kind,
+        id,
+        studio_json::to_raw_value(&record["rootId"]).ok()?,
+        index,
+        studio_json::to_raw_value(value).ok()?,
+    ))
 }
 
-/// The published entry of one history row. `value` is the stored entry.
-pub fn work_history_entry(id: &str, root_id: &Value, index: usize, value: &Value) -> Value {
-    json!({
-        "id": format!("{id}:{index}"), "taskId": id, "rootId": root_id,
-        "index": index, "value": value,
-    })
+/// The published entry of one history row, with its stored value forwarded intact.
+pub fn work_history_entry(
+    kind: WorkHistoryKind,
+    id: &str,
+    root_id: studio_json::OwnedRawJson,
+    index: usize,
+    value: studio_json::OwnedRawJson,
+) -> WorkHistoryEntry {
+    let row_id = format!("{id}:{index}");
+    let task_id = id.to_owned();
+    let index = index as u64;
+    match kind {
+        WorkHistoryKind::Result => {
+            WorkHistoryEntry::Result(studio_runtime_schema::generated::WorkResultEntityDto {
+                id: row_id,
+                index,
+                root_id,
+                task_id,
+                value,
+            })
+        }
+        WorkHistoryKind::Decision => {
+            WorkHistoryEntry::Decision(studio_runtime_schema::generated::WorkDecisionEntityDto {
+                id: row_id,
+                index,
+                root_id,
+                task_id,
+                value,
+            })
+        }
+        WorkHistoryKind::Release => {
+            WorkHistoryEntry::Release(studio_runtime_schema::generated::WorkReleaseEntityDto {
+                id: row_id,
+                index,
+                root_id,
+                task_id,
+                value,
+            })
+        }
+    }
 }
 
 /// Every work collection row for one record: summary, detail, then each
@@ -530,7 +616,7 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
     {
         projected["taskDefaultGate"] = gate.clone();
     }
-    if collection == "agentSummary" {
+    if matches!(collection, "agent" | "agentSummary") {
         projected["projectPath"] = crate::project_path::project_path(record)
             .map(|path| Value::String(path.as_str().to_owned()))
             .unwrap_or(Value::Null);
@@ -639,43 +725,665 @@ pub(crate) fn agent_start_wait(
         <AgentStartWait as serde::Deserialize>::deserialize(d).map(Some)
     }
     let source = <Source as serde::Deserialize>::deserialize(record)?;
+    Ok(project_agent_start_wait(
+        source.status.as_ref(),
+        source.epoch,
+        source.auto_wake,
+        source.native_failure_hold.is_some_and(NativeHold::active),
+        source.account_transfer_id.is_some(),
+        source.start_wait,
+    ))
+}
+
+fn project_agent_start_wait(
+    status: Option<&studio_runtime_store::AgentStatus>,
+    epoch: i64,
+    auto_wake: bool,
+    native_failure_hold: bool,
+    account_transfer: bool,
+    start_wait: Option<studio_runtime_schema::agent_progress::AgentStartWait>,
+) -> Option<studio_runtime_schema::agent_progress::AgentStartWait> {
+    use studio_runtime_schema::agent_progress::AgentStartWait;
     if !matches!(
-        source.status,
+        status,
         Some(
             studio_runtime_store::AgentStatus::Queued | studio_runtime_store::AgentStatus::Starting
         )
     ) {
-        return Ok(None);
+        return None;
     }
-    if source.status == Some(studio_runtime_store::AgentStatus::Queued) {
-        let hold = if !source.auto_wake {
-            Some(AgentStartWait::Paused {
-                epoch: source.epoch,
-            })
-        } else if source.native_failure_hold.is_some_and(NativeHold::active) {
-            Some(AgentStartWait::NativeFailure {
-                epoch: source.epoch,
-            })
-        } else if source.account_transfer_id.is_some() {
-            Some(AgentStartWait::AccountTransfer {
-                epoch: source.epoch,
-            })
+    if status == Some(&studio_runtime_store::AgentStatus::Queued) {
+        let hold = if !auto_wake {
+            Some(AgentStartWait::Paused { epoch })
+        } else if native_failure_hold {
+            Some(AgentStartWait::NativeFailure { epoch })
+        } else if account_transfer {
+            Some(AgentStartWait::AccountTransfer { epoch })
         } else {
             None
         };
         if hold.is_some() {
-            return Ok(hold);
+            return hold;
         }
     }
-    let persisted = source
-        .start_wait
-        .filter(|wait| wait.epoch() == source.epoch);
-    if source.status == Some(studio_runtime_store::AgentStatus::Starting) {
-        return Ok(persisted);
+    let persisted = start_wait.filter(|wait| wait.epoch() == epoch);
+    if status == Some(&studio_runtime_store::AgentStatus::Starting) {
+        return persisted;
     }
-    Ok(Some(persisted.unwrap_or(AgentStartWait::DispatchPending {
-        epoch: source.epoch,
-    })))
+    Some(persisted.unwrap_or(AgentStartWait::DispatchPending { epoch }))
+}
+
+pub(crate) fn agent_start_wait_record(
+    record: &studio_runtime_store::AgentRecord,
+) -> Result<Option<studio_runtime_schema::agent_progress::AgentStartWait>, ()> {
+    use studio_runtime_store::NativeFailureHold;
+    let native_failure_hold = match record.native_failure_hold.value() {
+        None => false,
+        Some(NativeFailureHold::Boolean(value)) => *value,
+        Some(NativeFailureHold::Terminal { .. }) => true,
+        Some(NativeFailureHold::Unreadable(Value::Object(fields))) => !fields.is_empty(),
+        Some(NativeFailureHold::Unreadable(_)) => return Err(()),
+    };
+    Ok(project_agent_start_wait(
+        Some(&record.status),
+        record.epoch,
+        record.auto_wake.unwrap_or(false),
+        native_failure_hold,
+        record.account_transfer_id.value().is_some(),
+        record.start_wait.clone(),
+    ))
+}
+
+// Generated DTOs use nested options to distinguish absent fields from explicit null.
+#[allow(clippy::option_option)]
+fn nullable_field<T>(field: studio_runtime_schema::queue_command::Field<T>) -> Option<Option<T>> {
+    use studio_runtime_schema::queue_command::Field;
+    match field {
+        Field::Missing => None,
+        Field::Null => Some(None),
+        Field::Value(value) => Some(Some(value)),
+    }
+}
+
+#[allow(clippy::option_option)]
+fn bounded_field(
+    field: &studio_runtime_schema::queue_command::Field<String>,
+    name: &str,
+) -> Option<Option<String>> {
+    nullable_field(field.clone().map(|value| bound_sync_text(&value, name)))
+}
+
+#[allow(clippy::option_option)]
+fn filtered_field<T: serde::Serialize>(
+    field: &studio_runtime_schema::queue_command::Field<T>,
+    name: &str,
+) -> Result<Option<Option<Value>>, studio_json::Error> {
+    use studio_runtime_schema::queue_command::Field;
+    match field {
+        Field::Missing => Ok(None),
+        Field::Null => Ok(Some(None)),
+        Field::Value(value) => Ok(Some(Some(project_agent_legacy_field(value, name)?))),
+    }
+}
+
+#[allow(clippy::option_option)]
+fn filtered_option<T: serde::Serialize>(
+    value: Option<&T>,
+    name: &str,
+) -> Result<Option<Option<Value>>, studio_json::Error> {
+    value
+        .map(|value| project_agent_legacy_field(value, name).map(|value| Some(Some(value))))
+        .unwrap_or(Ok(None))
+}
+
+fn permission_mode(
+    mode: studio_runtime_schema::claude_permissions::PermissionMode,
+) -> studio_runtime_schema::generated::AgentPermissionMode {
+    use studio_runtime_schema::{
+        claude_permissions::PermissionMode as Input, generated::AgentPermissionMode as Output,
+    };
+    match mode {
+        Input::Default => Output::Default,
+        Input::AcceptEdits => Output::AcceptEdits,
+        Input::Auto => Output::Auto,
+        Input::Plan => Output::Plan,
+        Input::BypassPermissions => Output::BypassPermissions,
+    }
+}
+
+fn agent_role(
+    role: studio_runtime_schema::creation_intent::AgentRole,
+) -> studio_runtime_schema::generated::AgentRole {
+    use studio_runtime_schema::{
+        creation_intent::AgentRole as Input, generated::AgentRole as Output,
+    };
+    match role {
+        Input::Orchestrator => Output::Orchestrator,
+        Input::Implementer => Output::Implementer,
+        Input::Reviewer => Output::Reviewer,
+    }
+}
+
+fn bound_review_defaults(
+    mut value: studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto,
+) -> studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+    value.model = value.model.map(|s| bound_sync_text(&s, "model"));
+    value.effort = value.effort.map(|s| bound_sync_text(&s, "effort"));
+    value
+}
+
+fn bound_stall(
+    stall: Option<studio_runtime_schema::agent_progress::AgentStall>,
+) -> Option<studio_runtime_schema::agent_progress::AgentStall> {
+    stall.map(|mut stall| {
+        stall.task_id = bound_sync_text(&stall.task_id, "taskId");
+        stall
+    })
+}
+
+fn projected_account_destinations(
+    context: &AgentViewContext,
+    excluded: Option<&[String]>,
+    thread_id: Option<&str>,
+    in_flight: Option<bool>,
+) -> Vec<studio_runtime_schema::account_destination::AccountDestination> {
+    context.account_destinations.iter().cloned().map(|mut destination| {
+        if !(context.empty_lead && thread_id.is_none_or(str::is_empty) && in_flight != Some(true))
+            && crate::account_transfer_driver::account_is_excluded(excluded, destination.account_key.as_str())
+        {
+            destination.eligibility = studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
+                reason: "This account is excluded for this chat's agents. Include it first, or choose another account.".into(),
+            };
+        }
+        destination
+    }).collect()
+}
+
+pub(crate) fn agent_entity_from_record(
+    record: studio_runtime_store::AgentRecord,
+    context: &AgentViewContext,
+) -> Option<studio_runtime_schema::generated::AgentEntityDto> {
+    use studio_runtime_schema::agent_progress::{AccountChange, AccountTransferProgress};
+    use studio_runtime_schema::generated::{
+        AgentEntityDto, AgentKind, AgentSource, AgentWorktree, JsonValue,
+    };
+    use studio_runtime_schema::queue_command::Field;
+    use studio_runtime_store::transfer_record::AgentTransferState;
+    if record.id.0.is_empty() {
+        return None;
+    }
+    #[cfg(test)]
+    crate::scheduler::publication_work::projection(&record.id.0);
+    // Recovery eligibility still reads the record as Value; typed view deferred.
+    let legacy_record = record.value();
+    let native_block = native_thread_block(&legacy_record);
+    let manual_check = crate::recovery_policy::RecoverySnapshot::from_record(legacy_record)
+        .map(|snapshot| snapshot.manual_connection_check())
+        .unwrap_or_default();
+    let start_wait = agent_start_wait_record(&record).ok()?;
+    let mut extra = record.extra;
+    let is_lead = record.is_lead == Some(true);
+    let server_id = extra
+        .get("remoteWorker")
+        .and_then(|v| v.pointer("/server"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .or(context.project_server_id.as_deref())
+        .map(|s| bound_sync_text(s, "serverId"));
+    let can_send = native_block.is_none()
+        && !truthy(extra.get("movedTo"))
+        && !truthy(extra.get("moveImportPending"));
+    let native_thread_block =
+        native_block.map(|v| Some(project_agent_property(&v, "nativeThreadBlock")));
+    let mut transfer_progress = match &context.transfer {
+        TransferObservation::Unreadable { reason } => AccountTransferProgress::Unreadable {
+            reason: reason.clone(),
+        },
+        observation @ (TransferObservation::Absent
+        | TransferObservation::Cancellable
+        | TransferObservation::Held) => crate::account_transfer::progress_view(
+            record
+                .account_transfer
+                .value()
+                .and_then(|value| match value {
+                    studio_runtime_store::StoredTransferObject::Known(value) => Some(value),
+                    studio_runtime_store::StoredTransferObject::Unreadable(_) => None,
+                }),
+            matches!(observation, TransferObservation::Cancellable),
+        ),
+    };
+    match &mut transfer_progress {
+        AccountTransferProgress::Unreadable { reason }
+        | AccountTransferProgress::Waiting { reason, .. }
+        | AccountTransferProgress::Blocked { reason, .. } => {
+            *reason = bound_sync_text(reason, "reason")
+        }
+        AccountTransferProgress::None
+        | AccountTransferProgress::Moving { .. }
+        | AccountTransferProgress::Completed { .. }
+        | AccountTransferProgress::Cancelled { .. } => {}
+    }
+    let account_transfer = match &record.account_transfer {
+        Field::Missing => None,
+        Field::Null => Some(None),
+        Field::Value(studio_runtime_store::StoredTransferObject::Known(
+            AgentTransferState::Summary(summary),
+        )) => {
+            let dto: studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto =
+                (**summary).clone().into();
+            Some(Some(
+                project_agent_legacy_field(&dto, "accountTransfer").ok()?,
+            ))
+        }
+        Field::Value(value) => Some(Some(
+            project_agent_legacy_field(value, "accountTransfer").ok()?,
+        )),
+    };
+    let account_destinations = if is_lead {
+        let destinations = projected_account_destinations(
+            context,
+            record.excluded_account_keys.value().map(Vec::as_slice),
+            record.thread_id.as_deref(),
+            record.in_flight,
+        );
+        Some(project_agent_legacy_field(&destinations, "accountDestinations").ok()?)
+    } else {
+        extra
+            .remove("accountDestinations")
+            .map(|v| project_agent_property(&v, "accountDestinations"))
+    };
+    let account_change = if !is_lead {
+        AccountChange::Unavailable {
+            reason: "Choose the lead chat to change its account".into(),
+        }
+    } else if matches!(
+        transfer_progress,
+        AccountTransferProgress::Waiting { .. }
+            | AccountTransferProgress::Moving { .. }
+            | AccountTransferProgress::Blocked { .. }
+            | AccountTransferProgress::Unreadable { .. }
+    ) {
+        AccountChange::Unavailable {
+            reason: "Finish or cancel the current transfer first".into(),
+        }
+    } else if context.empty_lead
+        && record.thread_id.as_deref().is_none_or(str::is_empty)
+        && record.in_flight != Some(true)
+    {
+        AccountChange::Select
+    } else {
+        AccountChange::Transfer
+    };
+    let command_progress = context
+        .command_progress
+        .iter()
+        .take(SYNC_ARRAY_ITEMS)
+        .cloned()
+        .map(|mut progress| {
+            progress.monitor_id = bound_sync_text(&progress.monitor_id, "monitorId");
+            progress.stage = bound_sync_text(&progress.stage, "stage");
+            progress.last_output_line =
+                bound_sync_text(&progress.last_output_line, "lastOutputLine");
+            progress
+        })
+        .collect();
+    let team_counts = if is_lead {
+        context
+            .team_counts
+            .as_ref()
+            .map(|v| project_agent_legacy_field(v, "teamCounts"))
+            .transpose()
+            .ok()?
+            .or_else(|| {
+                extra
+                    .remove("teamCounts")
+                    .map(|v| project_agent_property(&v, "teamCounts"))
+            })
+    } else {
+        extra
+            .remove("teamCounts")
+            .map(|v| project_agent_property(&v, "teamCounts"))
+    };
+    let empty = if is_lead {
+        Some(Some(Value::Bool(context.empty_lead)))
+    } else {
+        extra
+            .remove("empty")
+            .map(|v| Some(project_agent_property(&v, "empty")))
+    };
+    let overview = if is_lead {
+        None
+    } else {
+        let task = record.prompt.value().map_or("", String::as_str);
+        let result = if record
+            .last_completed_turn
+            .value()
+            .is_some_and(|s| !s.is_empty())
+            && record.turn_id.as_deref().is_none_or(str::is_empty)
+            && !record.in_flight.unwrap_or(false)
+            && record.status == studio_runtime_store::AgentStatus::Completed
+        {
+            record.last_answer.as_deref().unwrap_or_default()
+        } else {
+            ""
+        };
+        Some(Some(
+            studio_runtime_schema::agent_entity_nested::AgentOverview {
+                task: Field::Value(task.chars().take(4000).collect()),
+                task_truncated: Field::Value(task.chars().count() > 4000),
+                result: Field::Value(result.chars().take(4000).collect()),
+                result_truncated: Field::Value(result.chars().count() > 4000),
+                result_turn_id: if result.is_empty() {
+                    Field::Null
+                } else {
+                    match &record.last_completed_turn {
+                        Field::Value(value) => Field::Value(bound_sync_text(value, "resultTurnId")),
+                        Field::Null => Field::Null,
+                        Field::Missing => Field::Missing,
+                    }
+                },
+                result_file: context
+                    .latest_work_result_file
+                    .as_ref()
+                    .map_or(Field::Null, |s| {
+                        Field::Value(bound_sync_text(s, "resultFile"))
+                    }),
+            },
+        ))
+    };
+    let workspace_cleanup_intent = match extra.remove("workspaceCleanupIntent") {
+        Some(value) if value.is_object() => {
+            let dto = cleanup_summary(&value, record.cwd.as_deref());
+            Some(Some(
+                project_agent_legacy_field(&dto, "workspaceCleanupIntent").ok()?,
+            ))
+        }
+        Some(value) => Some(Some(project_agent_property(
+            &value,
+            "workspaceCleanupIntent",
+        ))),
+        None => None,
+    };
+    Some(AgentEntityDto {
+        account_change: Some(account_change),
+        account_destinations,
+        account_key: Some(Some(bound_sync_text(&record.account_key, "accountKey"))),
+        account_transfer,
+        account_transfer_id: nullable_field(
+            record
+                .account_transfer_id
+                .clone()
+                .map(|v| bound_sync_text(v.as_str(), "accountTransferId")),
+        ),
+        account_transfer_progress: Some(transfer_progress),
+        activity: filtered_option(record.activity.as_ref(), "activity").ok()?,
+        agent_mode: record.agent_mode.clone().map(Some),
+        agent_mode_revision: record.agent_mode_revision.map(|n| Some(n as i64)),
+        agent_mode_supported: record.agent_mode_supported.map(Some),
+        archived: nullable_field(record.archived.clone()),
+        auto_wake: record.auto_wake.map(Some),
+        can_send: Some(Some(can_send)),
+        capacity: Some(record.capacity.clone()),
+        capacity_retry: extra
+            .remove("capacityRetry")
+            .map(|v| Some(project_agent_property(&v, "capacityRetry"))),
+        command_progress: Some(command_progress),
+        compactions: Some(record.compactions.map(|n| n as i64)),
+        concurrency: record.concurrency.map(|n| Some(n.get())),
+        connection_check: filtered_field(&record.connection_check, "connectionCheck").ok()?,
+        context_repair_wait: extra
+            .remove("contextRepairWait")
+            .map(|v| Some(project_agent_property(&v, "contextRepairWait"))),
+        context_usage: filtered_option(record.context_usage.as_ref(), "contextUsage").ok()?,
+        converted_from_lead: filtered_field(&record.converted_from_lead, "convertedFromLead")
+            .ok()?,
+        created: nullable_field(record.created.clone()),
+        cwd: record
+            .cwd
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "cwd"))),
+        cyber_access_program: filtered_field(&record.cyber_access_program, "cyberAccessProgram")
+            .ok()?,
+        daybreak_enabled: record.daybreak_enabled.map(Some),
+        deleted_at: record.deleted_at.map(Some),
+        effort: bounded_field(&record.effort, "effort"),
+        empty,
+        environment: filtered_field(&record.environment, "environment").ok()?,
+        epoch: Some(Some(record.epoch)),
+        error: filtered_field(&record.error, "error").ok()?,
+        excluded_account_keys: nullable_field(record.excluded_account_keys.clone().map(|items| {
+            items
+                .into_iter()
+                .take(SYNC_ARRAY_ITEMS)
+                .map(|text| bound_sync_text(&text, ""))
+                .collect()
+        })),
+        execution_mode: filtered_option(record.execution_mode.as_ref(), "executionMode").ok()?,
+        fast_mode: record.fast_mode.map(Some),
+        has_approval: context.has_approval.then_some(Some(true)),
+        has_background_work: (!context.command_progress.is_empty()).then_some(true),
+        has_question: context.has_question.then_some(Some(true)),
+        has_unread: extra
+            .remove("hasUnread")
+            .map(|v| Some(project_agent_property(&v, "hasUnread"))),
+        host_project_path: bounded_field(&record.host_project_path, "hostProjectPath"),
+        id: bound_sync_text(&record.id.0, "id"),
+        in_flight: record.in_flight.map(Some),
+        is_lead: record.is_lead.map(Some),
+        kind: Some(Some(AgentKind::Agent)),
+        last_answer: record
+            .last_answer
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "lastAnswer"))),
+        last_completed_turn: bounded_field(&record.last_completed_turn, "lastCompletedTurn"),
+        last_completed_turn_status: bounded_field(
+            &record.last_completed_turn_status,
+            "lastCompletedTurnStatus",
+        ),
+        last_event: record
+            .last_event
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "lastEvent"))),
+        last_read_at: extra
+            .remove("lastReadAt")
+            .map(|v| Some(project_agent_property(&v, "lastReadAt"))),
+        launcher_alive: Some(Some(context.launcher_alive)),
+        layr_error: extra
+            .remove("layrError")
+            .map(|v| Some(project_agent_property(&v, "layrError"))),
+        layr_line: match record.layr_line {
+            Field::Missing => None,
+            Field::Null => Some(Some(project_agent_property(&Value::Null, "layrLine"))),
+            Field::Value(value) => Some(Some(project_agent_property(
+                &Value::String(value),
+                "layrLine",
+            ))),
+        },
+        layr_project_id: record
+            .layr_project_id
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "layrProjectId"))),
+        legacy_vm_workspace: None,
+        layr_ready: record.layr_ready.map(Some),
+        layr_state_id: extra
+            .remove("layrStateId")
+            .map(|v| Some(project_agent_property(&v, "layrStateId"))),
+        manual_connection_check: Some(
+            project_agent_legacy_field(&manual_check, "manualConnectionCheck").ok()?,
+        ),
+        model: record
+            .model
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "model"))),
+        move_import_pending: extra
+            .remove("moveImportPending")
+            .map(|v| project_agent_property(&v, "moveImportPending")),
+        moved_from: filtered_field(&record.moved_from, "movedFrom").ok()?,
+        moved_to: extra
+            .remove("movedTo")
+            .map(|v| Some(project_agent_property(&v, "movedTo"))),
+        name: record
+            .name
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "name"))),
+        naming: Some(record.naming),
+        native_error: extra
+            .remove("nativeError")
+            .map(|v| Some(project_agent_property(&v, "nativeError"))),
+        native_limit_error_at: extra
+            .remove("nativeLimitErrorAt")
+            .map(|v| Some(project_agent_property(&v, "nativeLimitErrorAt"))),
+        native_release: filtered_option(record.native_release.as_ref(), "nativeRelease").ok()?,
+        native_safety_buffering: filtered_option(
+            record.native_safety_buffering.as_ref(),
+            "nativeSafetyBuffering",
+        )
+        .ok()?,
+        native_safety_retry: extra
+            .remove("nativeSafetyRetry")
+            .map(|v| Some(project_agent_property(&v, "nativeSafetyRetry"))),
+        native_status: filtered_option(record.native_status.as_ref(), "nativeStatus").ok()?,
+        native_thread_block,
+        native_turn_error: (!record.native_turn_error.is_missing()).then(|| {
+            Some(project_agent_property(
+                &studio_runtime_store::projection_value(&record.native_turn_error),
+                "nativeTurnError",
+            ))
+        }),
+        next_turn_settings_supported: Some(Some(true)),
+        orchestrator_id: extra
+            .remove("orchestratorId")
+            .map(|v| Some(project_agent_property(&v, "orchestratorId"))),
+        orchestrator_name: extra
+            .remove("orchestratorName")
+            .map(|v| Some(project_agent_property(&v, "orchestratorName"))),
+        overview,
+        panel_data_version: extra
+            .remove("panelDataVersion")
+            .map(|v| Some(project_agent_property(&v, "panelDataVersion"))),
+        panel_version: extra
+            .remove("panelVersion")
+            .map(|v| Some(project_agent_property(&v, "panelVersion"))),
+        parent_id: record
+            .parent_id
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "parentId"))),
+        parked_event: record
+            .parked_event
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "parkedEvent"))),
+        pending_settings: filtered_field(&record.pending_settings, "pendingSettings").ok()?,
+        pending_settings_account_key: filtered_field(
+            &record.pending_settings_account_key,
+            "pendingSettingsAccountKey",
+        )
+        .ok()?,
+        permission_mode: record
+            .permission_mode
+            .map(|mode| Some(permission_mode(mode))),
+        pinned: nullable_field(record.pinned.clone()),
+        project: extra
+            .remove("project")
+            .map(|v| Some(project_agent_property(&v, "project"))),
+        project_folder: bounded_field(&record.project_folder, "projectFolder"),
+        project_folder_revision: filtered_field(
+            &record.project_folder_revision,
+            "projectFolderRevision",
+        )
+        .ok()?,
+        project_id: record
+            .project_id
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "projectId"))),
+        project_path: Some(
+            crate::project_path::project_path_from_fields(
+                record.host_project_path.value().map(String::as_str),
+                record.cwd.as_deref(),
+            )
+            .map(|path| path.as_str().to_owned()),
+        ),
+        project_server_id: record
+            .project_server_id
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "projectServerId"))),
+        provider: nullable_field(record.provider.clone()),
+        queued_settings: extra
+            .remove("queuedSettings")
+            .map(|v| Some(project_agent_property(&v, "queuedSettings"))),
+        quick_create: record
+            .quick_create
+            .map(|v| Some(Box::new(JsonValue::Boolean(v)))),
+        read_state: extra
+            .remove("readState")
+            .map(|v| Some(project_agent_property(&v, "readState"))),
+        read_state_supported: Some(Some(true)),
+        remote_anchor: extra
+            .remove("remoteAnchor")
+            .map(|v| Some(project_agent_property(&v, "remoteAnchor"))),
+        remote_origin: extra
+            .remove("remoteOrigin")
+            .map(|v| Some(project_agent_property(&v, "remoteOrigin"))),
+        remote_worker: extra
+            .remove("remoteWorker")
+            .map(|v| Some(project_agent_property(&v, "remoteWorker"))),
+        retry_at: extra
+            .remove("retryAt")
+            .map(|v| Some(project_agent_property(&v, "retryAt"))),
+        review_defaults: record
+            .review_defaults
+            .as_deref()
+            .cloned()
+            .map(|v| Some(bound_review_defaults(v))),
+        role: nullable_field(record.role.clone().map(agent_role)),
+        root_id: Some(Some(bound_sync_text(&record.root_id.0, "rootId"))),
+        server_id: Some(server_id),
+        shared_room_id: bounded_field(&record.shared_room_id, "sharedRoomId"),
+        source: Some(Some(AgentSource::Managed)),
+        stall: Some(bound_stall(context.stall.clone())),
+        start_attempt: filtered_option(record.start_attempt.as_ref(), "startAttempt").ok()?,
+        start_wait: Some(start_wait),
+        status: Some(Some(bound_sync_text(record.status.as_str(), "status"))),
+        status_detail: extra
+            .remove("statusDetail")
+            .map(|v| Some(project_agent_property(&v, "statusDetail"))),
+        subagent_concurrency_version: record.subagent_concurrency_version.map(Some),
+        tail: record
+            .tail
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "tail"))),
+        task_default_gate: nullable_field(record.task_default_gate.clone()),
+        team_counts,
+        thread_id: record
+            .thread_id
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "threadId"))),
+        tokens_used: record.tokens_used.map(Some),
+        turn_id: record
+            .turn_id
+            .as_deref()
+            .map(|s| Some(bound_sync_text(s, "turnId"))),
+        turn_status: extra
+            .remove("turnStatus")
+            .map(|v| Some(project_agent_property(&v, "turnStatus"))),
+        unread_count: extra
+            .remove("unreadCount")
+            .map(|v| Some(project_agent_property(&v, "unreadCount"))),
+        updated: extra
+            .remove("updated")
+            .map(|v| Some(project_agent_property(&v, "updated"))),
+        usage_resume: filtered_field(&record.usage_resume, "usageResume").ok()?,
+        voice_state: extra
+            .remove("voiceState")
+            .map(|v| Some(project_agent_property(&v, "voiceState"))),
+        worker_defaults: filtered_field(&record.worker_defaults, "workerDefaults").ok()?,
+        workspace_cleanup_intent,
+        workspace_mode: record.workspace_mode.map(Some),
+        workspace_operation: bounded_field(&record.workspace_operation, "workspaceOperation"),
+        worktree: record.worktree.map(|v| Some(AgentWorktree::Boolean(v))),
+        worktree_preparation: extra
+            .remove("worktreePreparation")
+            .map(|v| Some(project_agent_property(&v, "worktreePreparation"))),
+    })
 }
 
 /// Build the managed renderer view from a record and explicit runtime context.
@@ -756,23 +1464,12 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     }
     let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
     if source.is_lead == Some(true) {
-        let destinations = context
-            .account_destinations
-            .iter()
-            .cloned()
-            .map(|mut destination| {
-                if crate::account_transfer_driver::account_is_excluded(
-                    source.excluded_account_keys.as_deref(),
-                    destination.account_key.as_str(),
-                ) {
-                    destination.eligibility =
-                        studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
-                            reason: "This account is disabled for this chat".into(),
-                        };
-                }
-                destination
-            })
-            .collect::<Vec<_>>();
+        let destinations = projected_account_destinations(
+            context,
+            source.excluded_account_keys.as_deref(),
+            source.thread_id.as_deref(),
+            source.in_flight,
+        );
         view.insert(
             "accountDestinations".into(),
             serde::Serialize::serialize(&destinations, studio_json::value::Serializer).ok()?,
@@ -1038,6 +1735,76 @@ struct RetainedEffect<'a> {
     kind: Option<&'a str>,
 }
 
+fn cleanup_summary(
+    value: &Value,
+    cwd: Option<&str>,
+) -> studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto {
+    let phase = value
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned();
+    let reason = value
+        .pointer("/receipt/reason")
+        .or_else(|| value.get("reason"))
+        .and_then(Value::as_str)
+        .map(|s| bound_sync_text(s, "error"));
+    let path = match value
+        .pointer("/effect/identity/cwd")
+        .or_else(|| value.get("path"))
+    {
+        Some(value) => value.as_str().map(str::to_owned),
+        None => cwd.map(str::to_owned),
+    }
+    .map(|path| bound_sync_text(&path, "path"));
+    studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto {
+        phase,
+        reason,
+        path,
+    }
+}
+
+pub(crate) fn retained_worktree_from_record(
+    member: &studio_runtime_store::AgentRecord,
+) -> Option<studio_runtime_schema::generated::RetainedWorktreeEntityDto> {
+    let intent = member.extra.get("workspaceCleanupIntent")?.as_object()?;
+    if member
+        .extra
+        .get("remoteWorker")
+        .is_some_and(|value| !value.is_null())
+        || !matches!(
+            intent.get("phase").and_then(Value::as_str),
+            Some("not_sent" | "unknown")
+        )
+        || !intent
+            .get("effect")
+            .and_then(|value| value.get("kind"))
+            .and_then(Value::as_str)
+            .is_some_and(|kind| {
+                crate::workspace_cleanup_runtime::RETAINED_WORKTREE_EFFECTS.contains(&kind)
+            })
+    {
+        return None;
+    }
+    let cleanup = cleanup_summary(
+        member.extra.get("workspaceCleanupIntent")?,
+        member.cwd.as_deref(),
+    );
+    Some(
+        studio_runtime_schema::generated::RetainedWorktreeEntityDto {
+            id: member.id.0.clone(),
+            root_id: member.root_id.0.clone(),
+            name: Some(
+                member
+                    .name
+                    .as_ref()
+                    .map(|name| bound_sync_text(name, "name")),
+            ),
+            cleanup,
+        },
+    )
+}
+
 /// Public retained-folder entity. Cleanup operation identities never leave the server.
 pub fn retained_worktree_entity(member: &Value) -> Option<Value> {
     use serde::Deserialize;
@@ -1072,6 +1839,14 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use studio_json::{Value, json};
+
+    fn legacy_agent_projection_bytes(mut projected: Value) -> Vec<u8> {
+        assert_eq!(
+            projected.as_object_mut().unwrap().remove("projectPath"),
+            Some(Value::Null)
+        );
+        studio_json::to_vec(&projected).unwrap()
+    }
 
     #[test]
     fn task_entity_payload_hash_is_stable_after_projection_move() {
@@ -1112,13 +1887,502 @@ mod projection_plan_tests {
                 super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
             let summary = super::project_persisted_record("agentSummary", &view).unwrap();
             assert_eq!(summary.get("projectPath"), Some(&expected));
+            assert_eq!(view.get("projectPath"), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn agent_projection_adds_only_project_path_and_token_usage() {
+        let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+            "isLead":false, "status":"idle", "accountKey":"default", "cwd":"/source/project",
+            "projectPath":"/untrusted/stored", "tokensUsed":42});
+        let view = super::agent_entity_view(&record, &Default::default()).unwrap();
+        assert_eq!(view["projectPath"], "/source/project");
+        assert_eq!(view["tokensUsed"], 42);
+        let summary = super::project_persisted_record("agentSummary", &view).unwrap();
+        let detail = super::project_persisted_record("agentDetail", &view).unwrap();
+        assert_eq!(summary["projectPath"], "/source/project");
+        assert_eq!(detail["tokensUsed"], 42);
+    }
+
+    #[test]
+    fn agent_projection_bounds_nested_legacy_values() {
+        let mut deep = json!("leaf");
+        for _ in 0..40 {
+            deep = json!({"child": deep});
+        }
+        let opaque = json!({"items": (0..300).collect::<Vec<_>>(), "deep": deep,
+            "unknownNested": "preserved"});
+        let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+            "status":"future-agent-state", "turnStatus":"future-turn-state", "accountKey":"default", "isLead":true,
+            "nativeStatus":{"message":"x".repeat(2500), "unknownNested":"removed"},
+            "movedTo":{"server":"peer", "move":"id", "unknownNested":"removed"},
+            "voiceState":opaque, "unknownTopLevel":"removed"});
+        let context = super::AgentViewContext {
+            account_destinations: (0..300)
+                .map(
+                    |id| studio_runtime_schema::account_destination::AccountDestination {
+                        account_key: format!("account-{id}").try_into().unwrap(),
+                        eligibility:
+                            studio_runtime_schema::agent_progress::AccountEligibility::Available,
+                    },
+                )
+                .collect(),
+            ..Default::default()
+        };
+        let full = super::agent_entity_view(&record, &context).unwrap();
+        let summary = super::project_persisted_record("agentSummary", &full).unwrap();
+        let detail = super::project_persisted_record("agentDetail", &full).unwrap();
+        for (view, expected) in [
+            (
+                &full,
+                "bf2c98c63772f315aea388ba876057bbe22bba1dd75e0804363acaee9de51c00",
+            ),
+            (
+                &summary,
+                "4de158105e9b6cfe7f1198fccc912793c0b43dcbae3af01a454f82abdb73611e",
+            ),
+            (
+                &detail,
+                "35793af0b19edc03e1e9a06687c6b829f3ecb155c2897f3d165f65264c0d7062",
+            ),
+        ] {
+            assert_eq!(
+                studio_runtime_store::sha256_hex(studio_json::to_string(view).unwrap().as_bytes()),
+                expected
+            );
+        }
+        assert_eq!(
+            full["nativeStatus"]["message"].as_str().unwrap().len(),
+            2000
+        );
+        assert_eq!(full["accountDestinations"].as_array().unwrap().len(), 200);
+        assert_eq!(
+            summary["accountDestinations"].as_array().unwrap().len(),
+            200
+        );
+        assert_eq!(detail["accountDestinations"].as_array().unwrap().len(), 200);
+        assert_eq!(detail["voiceState"]["items"].as_array().unwrap().len(), 200);
+        assert!(full.get("unknownTopLevel").is_none());
+        assert_eq!(full["status"], "future-agent-state");
+        assert_eq!(summary["status"], "future-agent-state");
+        assert_eq!(detail["turnStatus"], "future-turn-state");
+        assert!(full["nativeStatus"].get("unknownNested").is_none());
+        assert!(full["movedTo"].get("unknownNested").is_none());
+        let mut nested = &full["voiceState"]["deep"];
+        for _ in 0..40 {
+            if nested.is_null() {
+                break;
+            }
+            nested = &nested["child"];
+        }
+        assert!(nested.is_null());
+    }
+
+    #[test]
+    fn agent_projection_keeps_pending_settings_legacy_shapes() {
+        for (pending, full_hash, detail_hash) in [
+            (
+                json!([1, 2]),
+                "8d48bb13f03b71ff558ddc7558cac7fb01f31beecf87466ea4aebc0b8286c056",
+                "615c8c0127c8ee682188a889a8162d5d156c419ab59c87ed8d092bc9120455ca",
+            ),
+            (
+                json!({"unknown":42}),
+                "490f61e3dc73d4cf4b2634e55430090dddf5e5529b9a3d4ebc798950f16c6075",
+                "b52f064c5f0ad7ae2c6c8708fb3c384a0545d4f2bb3e49fd6974ce522cb4d1b6",
+            ),
+            (
+                json!({"model":"m"}),
+                "b5e142927a7b0faaa6b21abff36fc1525e6e4791f73c71dac9255f6ae6ff5c2b",
+                "bcba321db8239694c9b00bb2b8262c12038f83b2bfeb377a54df7ea1d9d6ab1a",
+            ),
+            (
+                json!({"model":"m", "accountKey":"default", "effort":"high", "fastMode":true, "daybreakEnabled":true, "nativeEffort":"high", "cyberAccessProgram":"test", "updatedAt":123.0}),
+                "468c8d0603d02e4e6b8986bdf332a03b8a8fe5eb65069a4801dbf9a49e0c3ed6",
+                "c3f1b73b62f8e172b6e0aa9b8ed0ba11e5be3aad4808c777380847c8b907418d",
+            ),
+        ] {
+            let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+                "status":"idle", "accountKey":"default", "isLead":true,
+                "pendingSettings":pending});
+            let full = super::agent_entity_view(&record, &Default::default()).unwrap();
+            let summary = super::project_persisted_record("agentSummary", &full).unwrap();
+            let detail = super::project_persisted_record("agentDetail", &full).unwrap();
+            let stored = studio_runtime_store::AgentRecord::from_value(record.clone()).unwrap();
+            assert_eq!(
+                super::project_agent_legacy_field(
+                    stored.pending_settings.value().unwrap(),
+                    "pendingSettings"
+                )
+                .unwrap(),
+                full["pendingSettings"]
+            );
+            let stored_full =
+                super::agent_entity_view(&stored.value(), &Default::default()).unwrap();
+            let stored_summary =
+                super::project_persisted_record("agentSummary", &stored_full).unwrap();
+            let stored_detail =
+                super::project_persisted_record("agentDetail", &stored_full).unwrap();
+            let mapped = super::agent_entity_from_record(stored, &Default::default()).unwrap();
+            let mapped_summary =
+                studio_runtime_schema::generated::AgentSummaryEntityDto::from(&mapped);
+            let mapped_detail =
+                studio_runtime_schema::generated::AgentDetailEntityDto::from(&mapped);
+            for (actual, expected) in [
+                (
+                    studio_json::to_string(&mapped).unwrap(),
+                    studio_json::to_string(&stored_full).unwrap(),
+                ),
+                (
+                    studio_json::to_string(&mapped_summary).unwrap(),
+                    studio_json::to_string(&stored_summary).unwrap(),
+                ),
+                (
+                    studio_json::to_string(&mapped_detail).unwrap(),
+                    studio_json::to_string(&stored_detail).unwrap(),
+                ),
+            ] {
+                let actual: Value = studio_json::from_str(&actual).unwrap();
+                let expected: Value = studio_json::from_str(&expected).unwrap();
+                assert_eq!(actual, expected);
+            }
+            for (view, expected) in [
+                (&full, full_hash),
+                (
+                    &summary,
+                    "5d1874e6eca9a93b83922359ea8ddb05121245821eb70bdf21c1adc462cecc2f",
+                ),
+                (&detail, detail_hash),
+            ] {
+                assert_eq!(
+                    studio_runtime_store::sha256_hex(
+                        studio_json::to_string(view).unwrap().as_bytes()
+                    ),
+                    expected
+                );
+            }
+            assert_eq!(full["pendingSettings"], detail["pendingSettings"]);
+        }
+    }
+
+    #[test]
+    fn agent_projection_layr_line_matches_legacy_presence() {
+        for suffix in ["", r#","layrLine":null"#, r#","layrLine":"main""#] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{suffix}}}"#
+            );
+            let value: Value = studio_json::from_str(&raw).unwrap();
+            let legacy = super::agent_entity_view(&value, &Default::default()).unwrap();
+            let legacy_detail = super::project_persisted_record("agentDetail", &legacy).unwrap();
+            let record = studio_runtime_store::AgentRecord::from_value(value).unwrap();
+            let typed = super::agent_entity_from_record(record, &Default::default()).unwrap();
+            let detail = studio_runtime_schema::generated::AgentDetailEntityDto::from(&typed);
+            let typed =
+                serde::Serialize::serialize(&typed, studio_json::value::Serializer).unwrap();
+            let detail =
+                serde::Serialize::serialize(&detail, studio_json::value::Serializer).unwrap();
+            assert_eq!(typed.get("layrLine"), legacy.get("layrLine"));
+            assert_eq!(detail.get("layrLine"), legacy_detail.get("layrLine"));
+        }
+    }
+
+    #[test]
+    fn agent_projection_filters_partial_activity_without_narrowing_it() {
+        let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+            "status":"idle", "accountKey":"default", "activity":{
+                "phase":"working", "tools":[{"name":"tool"}], "dismissed":true}});
+        let full = super::agent_entity_view(&record, &Default::default()).unwrap();
+        let stored = studio_runtime_store::AgentRecord::from_value(record).unwrap();
+        assert_eq!(
+            super::project_agent_legacy_field(stored.activity.as_ref().unwrap(), "activity")
+                .unwrap(),
+            full["activity"]
+        );
+        assert_eq!(full["activity"]["tools"][0], json!({"name":"tool"}));
+        assert!(full["activity"].get("dismissed").is_none());
+    }
+
+    #[test]
+    fn review_regression_bounds_turn_id_and_retained_path() {
+        let long = "x".repeat(12001);
+        let raw = json!({"id":"worker","rootId":"lead","epoch":1,"status":"completed",
+            "accountKey":"default","lastCompletedTurn":long,"lastAnswer":"answer",
+            "workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":long}}}});
+        let record = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+        let stored = record.value();
+        let legacy = super::agent_entity_view(&stored, &Default::default()).unwrap();
+        let retained = super::retained_worktree_entity(&stored).unwrap();
+        let typed_retained = super::retained_worktree_from_record(&record).unwrap();
+        let typed = super::agent_entity_from_record(record, &Default::default()).unwrap();
+        let typed = serde::Serialize::serialize(&typed, studio_json::value::Serializer).unwrap();
+        let typed_retained =
+            serde::Serialize::serialize(&typed_retained, studio_json::value::Serializer).unwrap();
+        assert_eq!(
+            typed["overview"]["resultTurnId"],
+            legacy["overview"]["resultTurnId"]
+        );
+        assert_eq!(
+            typed_retained["cleanup"]["path"],
+            retained["cleanup"]["path"]
+        );
+        assert_eq!(
+            typed_retained["cleanup"]["path"].as_str().unwrap().len(),
+            12000
+        );
+    }
+
+    #[test]
+    fn typed_retained_worktree_matches_legacy_projection() {
+        for intent in [
+            json!({"phase":"unknown","effect":{"kind":"remove_worktree"}}),
+            json!({"phase":"not_sent","path":"/fallback","reason":"reason",
+                "receipt":{"reason":null},"effect":{"kind":"save_worktree_ref","identity":{"cwd":"/path"}}}),
+            json!({"phase":"confirmed","effect":{"kind":"remove_worktree"}}),
+        ] {
+            let raw = json!({"id":"agent","rootId":"lead","epoch":1,"status":"idle",
+                "accountKey":"default","name":"name","workspaceCleanupIntent":intent});
+            let old = super::retained_worktree_entity(&raw);
+            let record = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+            let typed = super::retained_worktree_from_record(&record)
+                .map(|v| serde::Serialize::serialize(&v, studio_json::value::Serializer).unwrap());
+            assert_eq!(typed, old);
+        }
+    }
+
+    #[test]
+    fn agent_projection_accepts_legacy_transfer_fields() {
+        for (transfer, context) in [
+            (
+                json!({"accountTransfer":{"kind":"unreadable"}}),
+                super::AgentViewContext {
+                    transfer: super::TransferObservation::Unreadable {
+                        reason: "Transfer data is unreadable".into(),
+                    },
+                    ..Default::default()
+                },
+            ),
+            (
+                json!({"accountTransferId":""}),
+                super::AgentViewContext::default(),
+            ),
+        ] {
+            let mut raw = json!({"id":"agent", "rootId":"agent", "epoch":1,
+                "status":"idle", "accountKey":"default"});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(transfer.as_object().unwrap().clone());
+            let legacy_raw = super::agent_entity_view(&raw, &context).unwrap();
+            let stored = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+            let legacy = super::agent_entity_view(&stored.value(), &context).unwrap();
+            let mapped = super::agent_entity_from_record(stored, &context).unwrap();
+            let actual =
+                serde::Serialize::serialize(&mapped, studio_json::value::Serializer).unwrap();
+            if legacy_raw.get("accountTransferId") == Some(&json!("")) {
+                assert!(actual.get("accountTransferId").is_none());
+            }
+            assert_eq!(actual, legacy);
+        }
+    }
+
+    #[test]
+    fn agent_projection_preserves_malformed_turn_status() {
+        let raw = json!({"id":"agent", "rootId":"agent", "epoch":1,
+            "status":"idle", "accountKey":"default", "turnStatus":{"future":true}});
+        let stored = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+        let legacy = super::agent_entity_view(&stored.value(), &Default::default()).unwrap();
+        let mapped = super::agent_entity_from_record(stored, &Default::default()).unwrap();
+        assert_eq!(mapped.turn_status, Some(Some(json!({"future":true}))));
+        let serialized = studio_json::to_string(&mapped).unwrap();
+        let actual: Value = studio_json::from_str(&serialized).unwrap();
+        assert_eq!(actual, legacy);
+    }
+
+    #[test]
+    fn agent_projection_matches_legacy_for_queued_and_worker_records() {
+        for raw in [
+            json!({"id":"lead", "rootId":"lead", "epoch":2, "status":"queued",
+                "accountKey":"default", "isLead":true, "autoWake":true,
+                "excludedAccountKeys":["blocked"], "turnStatus":null}),
+            json!({"id":"worker", "rootId":"lead", "epoch":2, "status":"completed",
+                "accountKey":"default", "isLead":false, "prompt":"task", "lastAnswer":"done",
+                "lastCompletedTurn":"turn", "activity":{"phase":"working", "tools":[{"name":"tool"}]}}),
+        ] {
+            let stored = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+            let context = super::AgentViewContext {
+                command_progress: vec![
+                    studio_runtime_schema::agent_progress::AgentCommandProgress {
+                        monitor_id: "monitor".into(),
+                        stage: "stage".into(),
+                        started_at: 12.0,
+                        last_output_line: "output".into(),
+                    },
+                ],
+                ..Default::default()
+            };
+            let legacy = super::agent_entity_view(&stored.value(), &context).unwrap();
+            let mapped = super::agent_entity_from_record(stored, &context).unwrap();
+            let text = studio_json::to_string(&mapped).unwrap();
+            let actual: Value = studio_json::from_str(&text).unwrap();
+            assert_eq!(actual, legacy);
+        }
+    }
+
+    #[test]
+    fn typed_agent_start_wait_matches_the_stored_projection() {
+        for (status, auto_wake, hold, transfer) in [
+            ("queued", false, json!(false), Value::Null),
+            ("queued", true, json!({"diagnostic":"held"}), Value::Null),
+            ("queued", true, json!(false), json!("transfer")),
+            ("queued", true, json!(false), Value::Null),
+            ("starting", true, json!(false), Value::Null),
+            ("idle", true, json!(false), Value::Null),
+        ] {
+            let raw = json!({"id":"agent", "rootId":"agent", "epoch":2,
+                "status":status, "accountKey":"default", "autoWake":auto_wake,
+                "nativeFailureHold":hold, "accountTransferId":transfer});
+            let stored = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+            let legacy = super::agent_start_wait(&stored.value()).unwrap();
+            assert_eq!(super::agent_start_wait_record(&stored).unwrap(), legacy);
+        }
+    }
+
+    #[test]
+    fn agent_projection_decoded_record_compatibility_baseline() {
+        let mut nested = json!("leaf");
+        for _ in 0..40 {
+            nested = json!({"next":nested});
+        }
+        let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+            "status":"future-agent-state", "accountKey":"default", "compactions":0,
+            "isLead":true, "cwd":"/fallback", "hostProjectPath":"x".repeat(12_001),
+            "error":"e".repeat(2_500), "nativeStatus":{"phase":"safety", "message":"n".repeat(2_500)},
+            "taskDefaultGate":{"command":"g".repeat(12_001), "timeout_ms":1000},
+            "voiceState":{"items":(0..300).collect::<Vec<_>>(), "deep":nested},
+            "workspaceCleanupIntent":{"phase":"unknown", "path":"/intent", "reason":"fallback",
+                "effect":{"kind":"remove_worktree", "identity":{"cwd":null}}, "receipt":{"reason":false}},
+            "pendingSettings":[1,2], "futureField":"removed"});
+        let stored = studio_runtime_store::AgentRecord::from_value(record).unwrap();
+        let source = stored.value();
+        let full = super::agent_entity_view(&source, &Default::default()).unwrap();
+        let summary = super::project_persisted_record("agentSummary", &full).unwrap();
+        let detail = super::project_persisted_record("agentDetail", &full).unwrap();
+        let mapped = super::agent_entity_from_record(stored.clone(), &Default::default()).unwrap();
+        let repeated = super::agent_entity_from_record(stored, &Default::default()).unwrap();
+        assert_eq!(
+            studio_json::to_string(&mapped).unwrap(),
+            studio_json::to_string(&repeated).unwrap()
+        );
+        assert_eq!(
+            studio_json::to_string(
+                &studio_runtime_schema::generated::AgentSummaryEntityDto::from(&mapped)
+            )
+            .unwrap(),
+            studio_json::to_string(
+                &studio_runtime_schema::generated::AgentSummaryEntityDto::from(&repeated)
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            studio_json::to_string(
+                &studio_runtime_schema::generated::AgentDetailEntityDto::from(&mapped)
+            )
+            .unwrap(),
+            studio_json::to_string(
+                &studio_runtime_schema::generated::AgentDetailEntityDto::from(&repeated)
+            )
+            .unwrap()
+        );
+        let mut mapped_summary =
+            studio_runtime_schema::generated::AgentSummaryEntityDto::from(&mapped);
+        let mapped_detail = studio_runtime_schema::generated::AgentDetailEntityDto::from(&mapped);
+        assert_eq!(mapped_summary.project_path, mapped.project_path);
+        // Compare the old summary after accounting for the approved long-path change.
+        mapped_summary.project_path = Some(Some("x".repeat(12_000)));
+        for (actual, expected) in [
+            (studio_json::to_string(&mapped).unwrap(), &full),
+            (studio_json::to_string(&mapped_summary).unwrap(), &summary),
+            (studio_json::to_string(&mapped_detail).unwrap(), &detail),
+        ] {
+            let actual: Value = studio_json::from_str(&actual).unwrap();
+            assert_eq!(&actual, expected);
+        }
+        for (view, expected) in [
+            (
+                &full,
+                "4dd73cdcfd8f15839f31cd724775df7ebf434e5a8a8f2fba51108c8e575c2cac",
+            ),
+            (
+                &summary,
+                "202a774cc00e953857d6dae48354ca60451df85d479c5fb128a24e2ce9fc5648",
+            ),
+            (
+                &detail,
+                "859f594095fa74c1ba4c1d50de34fa80bda8d5dbfb3a8fac25e4f462c0e04ad9",
+            ),
+        ] {
+            assert_eq!(
+                studio_runtime_store::sha256_hex(studio_json::to_string(view).unwrap().as_bytes()),
+                expected
+            );
+        }
+        assert_eq!(full["workspaceCleanupIntent"]["reason"], Value::Null);
+        assert_eq!(full["workspaceCleanupIntent"]["path"], Value::Null);
+        assert_eq!(
+            full["taskDefaultGate"]["command"].as_str().unwrap().len(),
+            12_001
+        );
+        assert_eq!(full["projectPath"].as_str().unwrap().len(), 12_001);
+        assert_eq!(summary["projectPath"].as_str().unwrap().len(), 12_000);
+    }
+
+    #[test]
+    fn native_error_projection_preserves_legacy_shapes() {
+        for error in [
+            json!(null),
+            json!("legacy"),
+            json!({"turnId":"turn","error":{"codexErrorInfo":"misalignmentPolicyViolation"},"future":1}),
+            json!({"turnId":null,"error":false}),
+        ] {
+            let input = json!({"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"threadId":"thread","turnId":"turn","nativeTurnError":error});
+            let record = studio_runtime_store::AgentRecord::from_value(input).unwrap();
+            let source = record.value();
+            let legacy = super::agent_entity_view(&source, &Default::default()).unwrap();
+            let typed = super::agent_entity_from_record(record, &Default::default()).unwrap();
+            // Recreate the former extra-map field projection inside the same DTO:
+            // sync hashes the DTO's serialized bytes, including field order.
+            let mut previous = typed.clone();
+            previous.native_turn_error = source
+                .get("nativeTurnError")
+                .map(|value| Some(super::project_agent_property(value, "nativeTurnError")));
+            assert_eq!(
+                studio_json::to_vec(&typed).unwrap(),
+                studio_json::to_vec(&previous).unwrap()
+            );
+            let projected = studio_runtime_store::projection_value(&typed);
+            assert_eq!(projected, legacy);
+        }
+    }
+
+    #[test]
+    fn shared_agent_components_preserve_legacy_projection_values() {
+        for native in [json!("idle"), json!({"phase":"safety","message":"waiting"})] {
+            let record = json!({"id":"agent", "kind":"agent", "environment":"host",
+                "error":"error", "executionMode":"native", "nativeStatus":native,
+                "permissionMode":"plan", "worktree":true, "worktreePreparation":"waiting"});
+            let mut expected = record.clone();
+            expected["projectPath"] = Value::Null;
+            assert_eq!(
+                super::project_persisted_record("agent", &record).unwrap(),
+                expected
+            );
         }
     }
 
     #[test]
     fn destination_eligibility_includes_chat_exclusions() {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
-            "provider":"codex","excludedAccountKeys":["blocked"]});
+            "provider":"codex","status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked"]});
         let context = super::AgentViewContext {
             account_destinations: studio_json::from_str(
                 r#"[
@@ -1136,6 +2400,22 @@ mod projection_plan_tests {
         );
         assert_eq!(
             view["accountDestinations"][1]["eligibility"]["kind"],
+            "available"
+        );
+        let empty_context = super::AgentViewContext {
+            empty_lead: true,
+            ..context
+        };
+        let empty = super::agent_entity_view(&lead, &empty_context).unwrap();
+        let stored = studio_runtime_store::AgentRecord::from_value(lead).unwrap();
+        let typed = super::agent_entity_from_record(stored, &empty_context).unwrap();
+        let typed = serde::Serialize::serialize(&typed, studio_json::value::Serializer).unwrap();
+        assert_eq!(
+            typed["accountDestinations"][0]["eligibility"]["kind"],
+            "available"
+        );
+        assert_eq!(
+            empty["accountDestinations"][0]["eligibility"]["kind"],
             "available"
         );
     }
@@ -1174,7 +2454,7 @@ mod projection_plan_tests {
         assert!(projected.get("complaintsPresented").is_none());
         assert!(projected.get("workspaceBackend").is_none());
         assert_eq!(
-            studio_runtime_store::sha256_hex(&studio_json::to_vec(&projected).unwrap()),
+            studio_runtime_store::sha256_hex(&legacy_agent_projection_bytes(projected)),
             "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
@@ -1187,7 +2467,7 @@ mod projection_plan_tests {
             super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
         assert!(projected.get("compactionsObservedOnly").is_none());
         assert_eq!(
-            studio_runtime_store::sha256_hex(&studio_json::to_vec(&projected).unwrap()),
+            studio_runtime_store::sha256_hex(&legacy_agent_projection_bytes(projected)),
             "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
@@ -1220,7 +2500,7 @@ mod projection_plan_tests {
         let projected =
             super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
         assert_eq!(
-            studio_runtime_store::sha256_hex(&studio_json::to_vec(&projected).unwrap()),
+            studio_runtime_store::sha256_hex(&legacy_agent_projection_bytes(projected)),
             "80e14a8a655e664574ce206954aa188b700430e6c5c27f4b0fe887101a76cc64"
         );
     }
@@ -1232,7 +2512,7 @@ mod projection_plan_tests {
         let context = super::AgentViewContext::default();
         let project = |raw: &str| {
             let record = studio_json::from_str(raw).unwrap();
-            studio_json::to_vec(&super::agent_entity_view(&record, &context).unwrap()).unwrap()
+            legacy_agent_projection_bytes(super::agent_entity_view(&record, &context).unwrap())
         };
         let legacy = project(before);
         let normalized = project(after);
@@ -1438,8 +2718,8 @@ mod projection_plan_tests {
         }
     }
 
-    /// The agent view publishes no team budget or token count, also when an
-    /// older build stored them. The older view never published an empty pattern list, and
+    /// The agent view publishes token usage but no team budget, also when an
+    /// older build stored budget fields. The older view never published an empty pattern list, and
     /// the client reads a missing one as its default. Set patterns are
     /// published.
     #[test]
@@ -1453,10 +2733,10 @@ mod projection_plan_tests {
                         "completedWorkerTurns":2,"terminalReason":"worker_max_turns"}),
             )
             .expect("agent view");
+            assert_eq!(view["tokensUsed"], 120);
             for field in [
                 "tokenBudget",
                 "budgetBlocked",
-                "tokensUsed",
                 "tokenUsageAccounting",
                 "completedWorkerTurns",
                 "terminalReason",
@@ -1522,6 +2802,30 @@ mod work_views_tests {
     use super::work_views;
     use std::collections::BTreeMap;
     use studio_json::{Value, json};
+
+    #[test]
+    fn history_entry_preserves_noncanonical_legacy_json_value() {
+        use studio_runtime_store::entity_publication::WorkHistoryKind;
+        for (root, value) in [
+            (r#""lead""#, r#"{ "z": 2, "id": "r0" }"#),
+            ("null", "null"),
+            ("42", r#"[ "legacy", 1 ]"#),
+        ] {
+            let root = studio_json::OwnedRawJson::from_string(root.into()).unwrap();
+            let value = studio_json::OwnedRawJson::from_string(value.into()).unwrap();
+            let expected_root: Value = studio_json::from_str(root.as_str()).unwrap();
+            let expected_value: Value = studio_json::from_str(value.as_str()).unwrap();
+            for kind in WorkHistoryKind::ALL {
+                let row = super::work_history_entry(kind, "w", root.clone(), 0, value.clone());
+                let encoded = studio_json::to_string(&row).unwrap();
+                let actual: Value = studio_json::from_str(&encoded).unwrap();
+                assert_eq!(
+                    actual,
+                    json!({"id":"w:0","index":0,"rootId":expected_root,"taskId":"w","value":expected_value})
+                );
+            }
+        }
+    }
 
     #[test]
     fn work_views_build_results_decisions_and_releases() {

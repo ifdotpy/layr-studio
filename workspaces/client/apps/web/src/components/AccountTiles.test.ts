@@ -1,11 +1,61 @@
-import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
+import {
+  AccountStatus as GeneratedApiAccountStatus,
+  ProviderKind,
+} from "../generated/api.ts";
 import { createElement } from "react";
+import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 import { projectedLimits } from "../usage/accountLimits.fixture";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
 import type { Account } from "./Accounts";
-import { accountLimitView, AccountTileLabel } from "./AccountTiles";
+import {
+  accountLimitView,
+  AccountTileLabel,
+  AccountTiles,
+} from "./AccountTiles";
+
+test("account tiles distinguish the lead choice from worker exclusions", () => {
+  const accounts: Account[] = [
+    {
+      id: "lead",
+      label: "Lead",
+      home: "",
+      source: "fixture",
+      provider: ProviderKind.codex,
+      status: GeneratedApiAccountStatus.ready,
+    },
+    {
+      id: "worker",
+      label: "Worker",
+      home: "",
+      source: "fixture",
+      provider: ProviderKind.codex,
+      status: GeneratedApiAccountStatus.ready,
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(AccountTiles, {
+        label: "Chat accounts",
+        accounts,
+        value: "lead",
+        onChange: () => {},
+        excludedAccountKeys: ["lead"],
+        onExcludedAccountKeysChange: () => {},
+      }),
+    ),
+  );
+  expect(html).toContain(
+    'aria-label="Exclude Lead from workers and reviewers"',
+  );
+  expect(html).toContain('aria-label="Select account Lead"');
+  expect(html).toContain(
+    'aria-label="Exclude Worker from workers and reviewers"',
+  );
+});
 
 const reading = (fields: object = {}) =>
   ({

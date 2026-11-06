@@ -859,7 +859,7 @@ mod tests {
         fs::write(
             &binary,
             format!(
-                "#!/bin/sh\ncase \"$*\" in\n*store-version*) printf '%s\\n' '{{\"binary\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"store\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"compatible\":true,\"state\":\"current\"}}' ;;\n*) printf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]' ;;\nesac\n",
+                "#!/bin/sh\ncase \"$*\" in\n*store-version*) printf '%s\\n' '{{\"binary\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"store\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"compatible\":true,\"state\":\"compatible\"}}' ;;\n*) printf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]' ;;\nesac\n",
                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
             ),
         )
@@ -905,7 +905,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS"]
+    #[ignore = "requires the real installed Layr binary on APFS"]
     fn review_migration_state_keeps_empty_directories_and_modes() {
         let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
             crate::layr_native::test_binary().expect("test binary"),
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS"]
+    #[ignore = "requires the real installed Layr binary on APFS"]
     fn migration_cache_path_can_hold_versioned_files_in_another_line() {
         let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
             crate::layr_native::test_binary().expect("test binary"),
@@ -1266,7 +1266,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS"]
+    #[ignore = "requires the real installed Layr binary on APFS"]
     fn migration_imports_worktrees_that_share_an_internal_project_store() {
         let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
             crate::layr_native::test_binary().expect("test binary"),

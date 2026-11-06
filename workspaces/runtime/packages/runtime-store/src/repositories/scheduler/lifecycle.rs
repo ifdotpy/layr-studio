@@ -281,7 +281,7 @@ impl SchedulerRepository {
         agent.native_response_turn = None;
         agent.native_safety_buffering = None;
         agent.native_status = None;
-        agent.extra.remove("nativeTurnError");
+        agent.native_turn_error = studio_runtime_schema::queue_command::Field::Missing;
         if current_attempt(&agent, identity.epoch) {
             agent.status = AgentStatus::Running;
             agent.in_flight = Some(true);
@@ -1825,13 +1825,20 @@ impl SchedulerRepository {
         agent.native_response_turn = None;
         agent.native_safety_buffering = None;
         agent.native_status = None;
-        agent.extra.remove("nativeTurnError");
+        agent.native_turn_error = studio_runtime_schema::queue_command::Field::Missing;
         if let Some(error) = error.as_ref()
             && known_error_kind(error) == Some(KnownCodexErrorKind::MisalignmentPolicyViolation)
         {
-            agent.extra.insert(
-                "nativeThreadBlock".into(),
-                json!({"threadId":agent.thread_id.as_deref(),"error":error}),
+            agent.native_thread_block = studio_runtime_schema::queue_command::Field::Value(
+                crate::records::StoredTransferObject::Known(crate::records::NativeThreadBlock {
+                    thread_id: match &agent.thread_id {
+                        Some(id) => studio_runtime_schema::queue_command::Field::Value(
+                            crate::records::StoredTransferValue::Known(id.clone()),
+                        ),
+                        None => studio_runtime_schema::queue_command::Field::Null,
+                    },
+                    extra: [("error".into(), error.clone())].into_iter().collect(),
+                }),
             );
         }
         if current_attempt || recovering(&agent, epoch) {
@@ -2839,9 +2846,9 @@ pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
                 .and_then(|v| v["phase"].as_str()),
             Some("preparing" | "submitted" | "unknown" | "ready")
         )
-        && !agent.extra.get("nativeThreadBlock").is_some_and(|block| {
-            block["threadId"].is_string()
-                && block.get("threadId").and_then(Value::as_str) == agent.thread_id.as_deref()
+        && !agent.native_thread_block.value().is_some_and(|block| {
+            matches!(block, crate::records::StoredTransferObject::Known(block)
+                if matches!(block.thread_id.value(), Some(crate::records::StoredTransferValue::Known(id)) if Some(id.as_str()) == agent.thread_id.as_deref()))
         })
         && !agent.error.value().is_some_and(|error| {
             error.known_kind() == Some(KnownCodexErrorKind::MisalignmentPolicyViolation)
@@ -3332,8 +3339,12 @@ mod account_scope_tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("plan text");
         assert!(
-            plan.iter()
-                .any(|step| step.contains("USING INDEX runtime_agent_account ")),
+            plan.iter().any(|step| {
+                step.starts_with("SEARCH runtime_agents USING INDEX ")
+                    && step.contains("(account_key=?")
+            }) && plan
+                .iter()
+                .all(|step| !step.contains("SCAN ") && !step.contains("TEMP B-TREE")),
             "{plan:?}"
         );
     }

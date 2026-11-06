@@ -170,6 +170,7 @@ async function setup() {
           checkpoint: { seq: 0 },
           initialHigh: 0,
           maxSeq: 0,
+          complete: true,
         },
   );
   mocks.watch.mockImplementation((_ref, callback) => {
@@ -589,6 +590,124 @@ it.each(["degraded", "offline", "stopped"] as const)(
     expect(f.pulls()).toHaveLength(1);
   },
 );
+
+it("heals a truncated ready cache on reload and recovers the missing chat", async () => {
+  const f = await setup();
+  const { createEntitySequenceScope } = await import("./entitySequence");
+  const { createTranscriptCache } = await import("./transcriptCache");
+  const { subscriptionKey } = await import("./subscriptions/contracts");
+  const state = { kind: "state" } as const;
+  const storage = {
+    get: vi.fn().mockResolvedValue({
+      version: 2,
+      contractHash:
+        "c3ad6f495d4abc98b28f8d992e16505f11369c5f6f8976540792f8d886de314c",
+      subscription: subscriptionKey(state),
+      cursor: { workspaceId: f.workspaceId, seq: 100 },
+      data: [],
+    }),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const client = f.client.createSyncClient({
+    api: {
+      syncGet: mocks.syncGet,
+      syncPost: vi.fn(),
+      saved: (_key, fallback) => fallback,
+      save: vi.fn(),
+      setWorkspace: vi.fn(),
+      isApiSchemaMismatch: () => false,
+    },
+    resources: {
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    },
+    sequences: createEntitySequenceScope(),
+    transcripts: createTranscriptCache(),
+    cacheStorage: storage,
+    databaseSuffix: "truncated-cache-test",
+  });
+  mocks.syncGet.mockImplementation(
+    async (path: string, options: { query: { after: number } }) => {
+      if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
+      return {
+        workspaceId: f.workspaceId,
+        initialHigh: 100,
+        maxSeq: 100,
+        checkpoint: { seq: 100 },
+        complete: true,
+        documents:
+          options.query.after === 0
+            ? [
+                {
+                  op: "upsert",
+                  collection: "agentSummary",
+                  id: "missing",
+                  seq: 4,
+                  value: {
+                    id: "missing",
+                    rootId: "missing",
+                    name: "Missing chat",
+                    status: AgentStatus.completed,
+                  },
+                },
+              ]
+            : [],
+      };
+    },
+  );
+  await client.readSubscriptionCursor(state);
+  const snapshot = await client.refreshProjection();
+  expect(snapshot.threads.map((chat) => chat.id)).toContain("missing");
+  expect(f.pulls()[0]?.[1].query.after).toBe(0);
+  client.disposeCache();
+});
+
+it("continues an entity pull when the server declares it incomplete", async () => {
+  const f = await setup();
+  let pages = 0;
+  mocks.syncGet.mockImplementation(async (path: string) => {
+    if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
+    pages++;
+    return {
+      workspaceId: f.workspaceId,
+      initialHigh: 100,
+      maxSeq: 100,
+      checkpoint: { seq: pages === 1 ? 100 : 101 },
+      complete: pages > 1,
+      documents: [],
+    };
+  });
+  f.subscribe();
+  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
+  f.connection("degraded");
+  await vi.waitFor(() =>
+    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+  );
+  expect(f.pulls()).toHaveLength(2);
+});
+
+it("stops an entity pull when the server declares it complete", async () => {
+  const f = await setup();
+  mocks.syncGet.mockImplementation(async (path: string) => {
+    if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
+    return {
+      workspaceId: f.workspaceId,
+      initialHigh: 100,
+      maxSeq: 100,
+      checkpoint: { seq: 4 },
+      complete: true,
+      documents: [],
+    };
+  });
+  f.subscribe();
+  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
+  f.connection("degraded");
+  await vi.waitFor(() =>
+    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+  );
+  expect(f.pulls()).toHaveLength(1);
+});
 
 it("does not use HTTP recovery to bypass a schema-mismatched stream", async () => {
   const f = await setup();

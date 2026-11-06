@@ -39,11 +39,18 @@ impl ProjectPath {
 }
 
 pub(crate) fn project_path(record: &Value) -> Option<ProjectPath> {
-    record
-        .get("hostProjectPath")
-        .and_then(Value::as_str)
-        .or_else(|| record.get("cwd").and_then(Value::as_str))
-        .map(ProjectPath::from_stored)
+    project_path_from_fields(
+        record.get("hostProjectPath").and_then(Value::as_str),
+        record.get("cwd").and_then(Value::as_str),
+    )
+}
+
+pub(crate) fn project_path_from_fields(
+    host_project_path: Option<&str>,
+    cwd: Option<&str>,
+) -> Option<ProjectPath> {
+    // Summary and full use the same unbounded path, including paths over 12,000 characters.
+    host_project_path.or(cwd).map(ProjectPath::from_stored)
 }
 
 #[cfg(test)]

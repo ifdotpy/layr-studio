@@ -117,6 +117,54 @@ async fn call(app: &axum::Router, path: &str, body: Value) -> (u16, Value) {
 }
 
 #[tokio::test]
+async fn owner_restores_deleted_root_through_retry_safe_command() {
+    let root = fixtures::tempdir();
+    let _ = fixtures::corpus(root.path());
+    let store = Arc::new(fixtures::store(root.path(), "restore-http").await);
+    store.transaction(|tx| {
+        for (id, parent, deleted) in [("restore-root", None, 10.0), ("restore-child", Some("restore-root"), 10.0), ("older-child", Some("restore-child"), 5.0)] {
+            let agent = AgentRecord::from_value(json!({"compactions":0,"provider":"codex","id":id,"rootId":"restore-root","parentId":parent,"epoch":4,"status":"paused","isLead":parent.is_none(),"cwd":"/missing-worktree","autoWake":false,"inFlight":false,"accountKey":"default","deletedAt":deleted}))?;
+            AgentRepository::put(tx, &agent)?;
+        }
+        let other = AgentRecord::from_value(json!({"compactions":0,"provider":"codex","id":"other-root","rootId":"other-root","parentId":null,"epoch":4,"status":"paused","isLead":true,"cwd":"/missing-worktree","autoWake":false,"inFlight":false,"accountKey":"default","deletedAt":10.0}))?;
+        AgentRepository::put(tx, &other)?;
+        Ok(())
+    }).await.expect("seed deleted tree");
+    let state = HttpState::new(
+        "fixture-token".into(),
+        "fixture".into(),
+        store.root().to_string_lossy().into(),
+        49171,
+        None,
+        Some(store.clone()),
+        None,
+    );
+    let app = router(state).expect("router");
+    let request = json!({"id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"client":"restore-test","number":1,"kind":"restore_deleted_root","target":"restore-root","body":{}});
+    let (status, first) = call(&app, "/api/commands", request.clone()).await;
+    assert_eq!(status, 200, "{first}");
+    let (status, replay) = call(&app, "/api/commands", request.clone()).await;
+    assert_eq!(status, 200, "{replay}");
+    assert_eq!(first["rev"], replay["rev"]);
+    let mut conflict = request;
+    conflict["target"] = json!("other-root");
+    assert_eq!(call(&app, "/api/commands", conflict).await.0, 409);
+    let db = store.test_reader().expect("read");
+    for (id, deleted, epoch) in [
+        ("restore-root", None, 5),
+        ("restore-child", None, 5),
+        ("older-child", Some(5.0), 4),
+        ("other-root", Some(10.0), 4),
+    ] {
+        let agent = AgentRepository::get(&db, &id.into())
+            .expect("read agent")
+            .expect("agent");
+        assert_eq!(agent.deleted_at, deleted);
+        assert_eq!(agent.epoch, epoch);
+    }
+}
+
+#[tokio::test]
 async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route() {
     let root = fixtures::tempdir();
     let _ = fixtures::corpus(root.path());

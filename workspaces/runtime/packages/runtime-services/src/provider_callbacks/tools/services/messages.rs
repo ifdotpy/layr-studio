@@ -700,7 +700,8 @@ fn send_as_actor(
         let recipient =
             records::get(tx, "runtime_agents", recipient_id)?.ok_or(CallbackError::Stale)?;
         let active = recipient["autoWake"] == true
-            && !crate::sync_entity_context::agent_view_context(tx, &recipient, None)?.empty_lead
+            && !crate::sync_entity_context::agent_view_context_value_adapter(tx, &recipient, None)?
+                .empty_lead
             && !(target == "broadcast"
                 && (studio_runtime_store::truthy(recipient.get("nativeFailureHold"))
                     || !matches!(
@@ -870,9 +871,11 @@ fn radio_guard_error(error: crate::projects::ProjectsError) -> CallbackError {
         E::Store(error) => CallbackError::Store(error),
         E::Sqlite(error) => CallbackError::Store(error.into()),
         E::InvalidStored { table, id } => CallbackError::Stored(format!("{table}/{id}")),
-        E::Conflict(_) | E::BadRequest(_) | E::Requires(_) | E::PreparationWorker => {
-            CallbackError::Stored("runtime_rooms radio".into())
-        }
+        E::Conflict(_)
+        | E::BadRequest(_)
+        | E::InvalidStore(_)
+        | E::Requires(_)
+        | E::PreparationWorker => CallbackError::Stored("runtime_rooms radio".into()),
     }
 }
 

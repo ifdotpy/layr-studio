@@ -51,6 +51,25 @@
   height: 100%;
   border-radius: inherit;
 }
+/* A tile with a limit bar: the name line, then the bar below it, with the
+   same space above the text as below the bar. The bottom padding holds the
+   bar, so the text centers in the space above it and never meets the bar. */
+/* Mantine's button padding would start the name 2px right of the bar and of
+   the model names below; the tile keeps the shared inline inset. */
+.setup-accounts .setup-account:not(.setup-account-status) {
+  padding-inline: var(--mantine-spacing-xs);
+}
+.setup-account:not(.setup-account-status):has(.setup-limit) {
+  --setup-tile-inset: calc(var(--mantine-spacing-xs) * 0.6);
+  padding-top: var(--setup-tile-inset);
+  padding-bottom: calc(
+    var(--setup-tile-inset) + var(--studio-rail-size) +
+      var(--mantine-spacing-xs) * 0.5
+  );
+}
+.setup-account:not(.setup-account-status) .setup-limit {
+  bottom: var(--setup-tile-inset);
+}
 
 /* Phone and tablet controls stack at this content breakpoint. */
 @media (max-width: 47.5rem) {
@@ -138,43 +157,18 @@
   background: transparent;
 }
 
-.setup-account-automatic {
-  padding-block: var(--mantine-spacing-xs);
-  cursor: pointer;
+.setup-account-choice {
+  background: var(--mantine-color-default-hover);
+  border-radius: var(--studio-radius-control);
 }
-.setup-account-automatic .mantine-Radio-body {
-  align-items: center;
+.setup-account-choice .setup-account {
+  width: 100%;
 }
-.setup-account-automatic .mantine-Radio-label,
-.setup-account-automatic .mantine-Radio-radio {
-  cursor: pointer;
-}
-.setup-account-automatic:has(:focus-visible) {
-  outline: calc(2 * var(--studio-border-width)) solid var(--accent);
-  outline-offset: calc(2 * var(--studio-border-width));
+.setup-account-exclusion {
+  padding: var(--mantine-spacing-xs);
 }
 
-.setup-account-automatic:not(:has(input:disabled)) {
-  border-color: var(--line-strong);
-}
-.setup-account-automatic:has(input:checked) {
-  border-color: var(--mantine-primary-color-filled);
-}
-.setup-automatic-label {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: calc(var(--mantine-spacing-xs) / 2);
-}
-.setup-automatic-label > svg {
-  flex: none;
-  width: var(--mantine-font-size-sm);
-  height: var(--mantine-font-size-sm);
-  color: var(--mantine-primary-color-light-color);
-}
-
-/* One tile for every account choice: Automatic, each account, and the
-   read-only account of the main agent share height, border and radius;
+/* Every account choice and read-only account share height, border and radius;
    the selected one takes the text-colored border. */
 .setup-accounts {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.5rem), 1fr));
@@ -197,7 +191,7 @@
   font-size: var(--studio-text-body);
 }
 /* Each grid cell holds one tile at the cell's full width, its label
-   centered like the Automatic tile. */
+   at the full cell width. */
 .setup-accounts > div > .setup-account {
   width: 100%;
 }
@@ -209,12 +203,12 @@
   align-items: center;
 }
 /* The main agent's only account is the chosen one: it reads as selected. */
-.setup-accounts .setup-account-status {
+.setup-accounts .setup-account-status[data-selected] {
   border-color: var(--text);
   background: var(--selected);
   color: var(--text);
 }
-.setup-accounts .setup-account-status .setup-account-name {
+.setup-accounts .setup-account-status[data-selected] .setup-account-name {
   color: var(--text);
   font-size: var(--studio-text-body);
 }
@@ -229,27 +223,4 @@
   left: var(--mantine-spacing-sm);
   right: var(--mantine-spacing-sm);
   bottom: 0.1875rem;
-}
-/* Automatic is a tile, not a radio row: the native input stays for keyboard
-   and assistive technology, the circle is hidden. */
-.setup-account-automatic .mantine-Radio-inner {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-}
-.setup-account-automatic .mantine-Radio-body,
-.setup-account-automatic .mantine-Radio-labelWrapper {
-  width: 100%;
-}
-.setup-account-automatic .mantine-Radio-label {
-  padding: 0;
-}
-.setup-automatic-label > svg {
-  color: var(--muted);
-}
-.account-tiles-help {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--studio-text-meta);
-  line-height: 1.45;
 }

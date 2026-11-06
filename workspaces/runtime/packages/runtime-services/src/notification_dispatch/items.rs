@@ -1,10 +1,11 @@
 //! Pure task and non-text item transitions; the transaction adapter applies the intents.
-use super::notices::{json_text, remove};
+use super::notices::json_text;
 use super::{NotificationDispatchError, suffix};
 use serde::Deserialize;
 use studio_json::{Value, json};
 use studio_runtime_schema::task_record::{NonnegativeNumber, ProcessId, TaskStatus, TaskType};
 use studio_runtime_store::TaskRecord;
+use studio_runtime_store::{AgentActiveTool, AgentActivity, AgentRecord};
 
 pub(super) const TOOL_OUTPUT_CHARS: usize = 12_000;
 
@@ -46,7 +47,7 @@ pub(super) struct ItemDecision {
 }
 
 pub(super) fn task_transition(
-    agent: &Value,
+    agent: &AgentRecord,
     method: &str,
     params: &Value,
     previous: Option<&TaskRecord>,
@@ -71,7 +72,7 @@ pub(super) fn task_transition(
         && matches!(method, "item/started" | "item/completed")
         && previous.is_some_and(|t| {
             t.kind() == studio_runtime_schema::task_record::TaskKind::Tool
-                && Some(t.agent()) == agent["id"].as_str()
+                && t.agent() == agent.id.as_ref()
                 && t.item_id() == item_id
                 && Some(t.turn_id()) == params["turnId"].as_str()
                 && t.task_type().as_str() == kind
@@ -116,14 +117,11 @@ pub(super) fn task_transition(
     let mut task = if let Some(previous) = previous {
         previous.clone()
     } else {
-        let agent_id = agent["id"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(NotificationDispatchError::invalid)?;
+        let agent_id = agent.id.as_ref();
         let turn = params["turnId"]
             .as_str()
             .filter(|s| !s.is_empty())
-            .or_else(|| agent["turnId"].as_str().filter(|s| !s.is_empty()))
+            .or_else(|| agent.turn_id.as_deref().filter(|s| !s.is_empty()))
             .ok_or_else(NotificationDispatchError::invalid)?;
         let created = NonnegativeNumber::deserialize(serde::de::value::F64Deserializer::<
             serde::de::value::Error,
@@ -277,7 +275,7 @@ pub(super) fn task_transition(
 }
 
 pub(super) fn non_text(
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     method: &str,
     params: &Value,
     previous_task: Option<&TaskRecord>,
@@ -295,41 +293,56 @@ pub(super) fn non_text(
         ..ItemDecision::default()
     };
     if kind == "reasoning" {
-        agent["activity"] = json!({"phase":"thinking","at":at});
+        agent.activity = Some(AgentActivity {
+            phase: Some("thinking".into()),
+            at: Some(at),
+            ..Default::default()
+        });
         return Ok(decision);
     }
     if kind == "userMessage" {
         return Ok(decision);
     }
-    let mut active: Vec<Value> = agent["activeTools"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|t| t["id"] != item["id"])
-        .cloned()
-        .collect();
+    let mut active = agent.active_tools.clone().unwrap_or_default();
+    active.retain(|tool| tool.id.as_deref() != item["id"].as_str());
     if started {
-        active.push(json!({"id":item["id"],"type":kind,"name":item.get("tool").filter(|v|v.as_str().is_some_and(|s|!s.is_empty())).cloned().unwrap_or(json!(kind))}));
+        active.push(AgentActiveTool {
+            id: Option::<String>::deserialize(&item["id"])?,
+            kind: Some(kind.to_owned()),
+            name: Some(
+                item.get("tool")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or(kind)
+                    .to_owned(),
+            ),
+        });
     }
-    agent["activity"] =
-        json!({"phase":if active.is_empty(){"thinking"}else{"tool"},"tools":active,"at":at});
-    agent["activeTools"] = json!(active);
+    agent.activity = Some(AgentActivity {
+        phase: Some(
+            if active.is_empty() {
+                "thinking"
+            } else {
+                "tool"
+            }
+            .into(),
+        ),
+        tools: Some(active.clone()),
+        at: Some(at),
+        ..Default::default()
+    });
+    agent.active_tools = Some(active);
     if kind == "contextCompaction" && !started && !already_compacted {
         decision.compacted = true;
-        agent["compactions"] = json!(
-            agent["compactions"]
-                .as_u64()
-                .unwrap_or_default()
-                .saturating_add(1)
-        );
-        agent["contextUsage"] = Value::Null;
+        agent.compactions = Some(agent.compactions.unwrap_or_default().saturating_add(1));
+        agent.context_usage = None;
     }
     if kind == "exitedReviewMode"
         && !started
         && let Some(review) = item["review"].as_str()
     {
-        agent["lastAnswer"] = json!(suffix(review, 16_000));
-        agent["tail"] = json!(suffix(review, 300));
+        agent.last_answer = Some(suffix(review, 16_000));
+        agent.tail = Some(suffix(review, 300));
     }
     let mut displayed = item.clone();
     if kind == "commandExecution"
@@ -392,12 +405,21 @@ pub(super) fn tool_status(item: &Value, started: bool) -> TaskStatus {
     }
 }
 
-pub(super) fn advance_reasoning(agent: &mut Value, params: &Value, at: f64) {
-    if agent["nativeStatus"]["phase"] == "retrying"
-        && agent["nativeStatus"]["turnId"] == params["turnId"]
+pub(super) fn advance_reasoning(agent: &mut AgentRecord, params: &Value, at: f64) {
+    if agent.native_status.as_ref().and_then(|status| status.phase)
+        == Some(studio_runtime_schema::agent_entity_nested::NativeStatusPhase::Retrying)
+        && agent
+            .native_status
+            .as_ref()
+            .and_then(|status| status.turn_id.as_deref())
+            == params["turnId"].as_str()
     {
-        remove(agent, "nativeStatus");
-        agent["activity"] = json!({"phase":"thinking","at":at});
+        agent.native_status = None;
+        agent.activity = Some(AgentActivity {
+            phase: Some("thinking".into()),
+            at: Some(at),
+            ..Default::default()
+        });
     }
 }
 

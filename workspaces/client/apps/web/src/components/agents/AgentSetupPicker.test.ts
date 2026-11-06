@@ -1,3 +1,4 @@
+import { AccountStatus, ProviderKind } from "../../generated/api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
@@ -68,4 +69,36 @@ test("no provider picked yet keeps both fields visible", () => {
   const markup = render({ provider: "" });
   expect(markup).toContain("Test model");
   expect(markup).toContain("Test reasoning");
+});
+
+test("workers can browse Claude models with a Codex lead", () => {
+  const markup = render({
+    role: "worker",
+    provider: "codex",
+    providers: ["codex", "claude"],
+    showAccountChooser: false,
+    accounts: [
+      {
+        id: "lead",
+        label: "Lead",
+        home: "",
+        source: "fixture",
+        provider: ProviderKind.codex,
+        status: AccountStatus.ready,
+      },
+      {
+        id: "claude",
+        label: "Claude",
+        home: "",
+        source: "fixture",
+        provider: ProviderKind.claude,
+        status: AccountStatus.ready,
+      },
+    ],
+    excludedAccountKeys: [],
+    onExcludedAccountKeysChange: () => {},
+  });
+  expect(markup).toContain('aria-label="Subagent account provider"');
+  expect(markup).toContain("Claude");
+  expect(markup).toContain("Exclude Lead from workers and reviewers");
 });

@@ -362,6 +362,7 @@ test("chat prefetch ui @performance", async ({ browser }) => {
           json: {
             workspaceId,
             documents,
+            complete: true,
             checkpoint: { seq: documents.at(-1)?.seq ?? after },
             maxSeq: entityMaxSeq,
             initialHigh,
@@ -373,6 +374,7 @@ test("chat prefetch ui @performance", async ({ browser }) => {
           json: {
             workspaceId,
             documents: [],
+            complete: true,
             checkpoint: { seq: after },
           } satisfies LegacyPullFixture,
         });
@@ -430,6 +432,7 @@ test("chat prefetch ui @performance", async ({ browser }) => {
                   },
                 ]
               : [],
+          complete: true,
           checkpoint: { seq: Math.max(after, value.seq) },
         } satisfies LegacyPullFixture,
       });

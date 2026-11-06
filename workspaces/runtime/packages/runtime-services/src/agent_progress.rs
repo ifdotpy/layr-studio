@@ -3,19 +3,8 @@ use crate::monitor_policy::MonitorStatus;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Deserialize;
 use studio_runtime_schema::agent_progress::{AgentCommandProgress, AgentStall};
-use studio_runtime_store::{AgentStatus, StoreResult, WorkItemRecord, WorkStatus};
+use studio_runtime_store::{AgentRecord, AgentStatus, StoreResult, WorkItemRecord, WorkStatus};
 
-// These are projections of open persisted records: unrelated stored fields are ignored.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentSource {
-    id: String,
-    status: Option<AgentStatus>,
-    #[serde(default)]
-    is_lead: bool,
-    deleted_at: Option<f64>,
-    active_execution: Option<ActiveExecution>,
-}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ActiveExecution {
@@ -69,10 +58,15 @@ pub(crate) fn publish_monitor_owner_change(
 
 pub(crate) fn derive<'a>(
     connection: &Connection,
-    record: &studio_json::Value,
+    agent: &AgentRecord,
     assignments: impl IntoIterator<Item = &'a Assignment>,
 ) -> StoreResult<AgentProgress> {
-    let agent: AgentSource = studio_json::from_value(record.clone())?;
+    let active_execution = agent
+        .extra
+        .get("activeExecution")
+        .filter(|value| !value.is_null())
+        .map(ActiveExecution::deserialize)
+        .transpose()?;
     let mut commands = Vec::new();
     if crate::sync_policy::table_exists(connection, "runtime_monitors")? {
         // This runs for every agent write inside the writer transaction. The
@@ -91,7 +85,7 @@ pub(crate) fn derive<'a>(
                  THEN json_extract(record,'$.agent')=?1 ELSE 1 END ORDER BY rowid"
             },
         )?;
-        let rows = statement.query_map([&agent.id], |row| {
+        let rows = statement.query_map([&agent.id.0], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         for row in rows {
@@ -105,7 +99,7 @@ pub(crate) fn derive<'a>(
                     continue;
                 }
             };
-            if monitor.agent != agent.id {
+            if monitor.agent != agent.id.0 {
                 continue;
             }
             if let Some((id, stage, started_at, last_output_line)) = command_progress(&monitor) {
@@ -119,27 +113,25 @@ pub(crate) fn derive<'a>(
         }
     }
     let assignment = assignments.into_iter().find(|task| {
-        task.owner() == Some(&agent.id)
+        task.owner() == Some(&agent.id.0)
             && matches!(
                 task.status(),
                 WorkStatus::Ready | WorkStatus::Running | WorkStatus::Blocked
             )
     });
-    let stall = if !agent.is_lead
+    let stall = if agent.is_lead != Some(true)
         && agent.deleted_at.is_none()
-        && matches!(
-            agent.status,
-            Some(AgentStatus::Idle | AgentStatus::Completed)
-        )
+        && matches!(agent.status, AgentStatus::Idle | AgentStatus::Completed)
         && commands.is_empty()
     {
         if let Some(task) = assignment {
             let mut since = task.updated();
-            if let Some(execution) = &agent.active_execution {
+            if let Some(execution) = active_execution {
+                let run_id = execution.run_id;
                 let raw: Option<String> = connection
                     .query_row(
                         "SELECT record FROM runtime_execution_runs WHERE id=?1 AND agent=?2",
-                        rusqlite::params![execution.run_id, agent.id],
+                        rusqlite::params![run_id, agent.id.0],
                         |row| row.get(0),
                     )
                     .optional()?;
@@ -193,6 +185,20 @@ mod tests {
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
     use std::cell::Cell;
     use studio_json::json;
+
+    fn derive_value<'a>(
+        connection: &Connection,
+        value: &studio_json::Value,
+        assignments: impl IntoIterator<Item = &'a Assignment>,
+    ) -> StoreResult<AgentProgress> {
+        let mut value = value.clone();
+        let object = value.as_object_mut().expect("agent object");
+        object.entry("rootId").or_insert(json!("lead"));
+        object.entry("epoch").or_insert(json!(0));
+        object.entry("accountKey").or_insert(json!("default"));
+        object.entry("compactions").or_insert(json!(0));
+        derive(connection, &AgentRecord::from_value(value)?, assignments)
+    }
 
     thread_local! { static AGENT_PUBLICATIONS: Cell<usize> = const { Cell::new(0) }; }
     fn trace_agent_publication(event: TraceEvent<'_>) {
@@ -278,7 +284,7 @@ mod tests {
         .expect("test fixture value");
         let mut agent = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","epoch":0,"status":"completed","activeExecution":{"runId":"current","attemptId":"attempt"}});
         let mut tasks = vec![task];
-        let progress = derive(&connection, &agent, &tasks).expect("test fixture value");
+        let progress = derive_value(&connection, &agent, &tasks).expect("test fixture value");
         assert_eq!(
             progress.stall,
             Some(AgentStall {
@@ -313,7 +319,7 @@ mod tests {
         ] {
             agent["status"] = json!(status);
             assert!(
-                derive(&connection, &agent, &tasks)
+                derive_value(&connection, &agent, &tasks)
                     .expect("test fixture value")
                     .stall
                     .is_none(),
@@ -322,7 +328,7 @@ mod tests {
         }
         agent["status"] = json!("waiting_on_monitor");
         assert!(
-            derive(&connection, &agent, &tasks)
+            derive_value(&connection, &agent, &tasks)
                 .expect("test fixture value")
                 .stall
                 .is_none()
@@ -335,7 +341,7 @@ mod tests {
         ] {
             tasks[0].set_status(status);
             assert!(
-                derive(&connection, &agent, &tasks)
+                derive_value(&connection, &agent, &tasks)
                     .expect("test fixture value")
                     .stall
                     .is_none()
@@ -345,7 +351,7 @@ mod tests {
         for (id, status) in [("m1", "running"), ("m2", "starting"), ("old", "completed")] {
             connection.execute("INSERT INTO runtime_monitors(id,record,monitor_status) VALUES(?1,?2,COALESCE(CASE WHEN json_valid(?2) THEN json_extract(?2,'$.status') END,'lost'))",rusqlite::params![id,crate::monitor_policy::complete_test_monitor(json!({"id":id,"agent":"worker","status":status,"command":"just test-fast\nsecond line","created":5,"tail":"old output\nfinal output\n"})).to_string()]).expect("test fixture value");
         }
-        let progress = derive(&connection, &agent, &tasks).expect("test fixture value");
+        let progress = derive_value(&connection, &agent, &tasks).expect("test fixture value");
         assert!(progress.stall.is_none());
         assert_eq!(progress.commands.len(), 2);
         assert_eq!(progress.commands[0].stage, "just test-fast");
@@ -382,7 +388,7 @@ mod tests {
                 }),
             )
             .expect("progress counter");
-        let progress = derive(connection, agent, &[]).expect("projection");
+        let progress = derive_value(connection, agent, &[]).expect("projection");
         connection
             .progress_handler(1, None::<fn() -> bool>)
             .expect("progress counter");
@@ -438,7 +444,7 @@ mod tests {
         ] {
             connection.execute("INSERT INTO runtime_monitors(id,record,monitor_status) VALUES(?1,?2,COALESCE(CASE WHEN json_valid(?2) THEN json_extract(?2,'$.status') END,'lost'))", [id,&raw]).expect("test fixture value");
         }
-        let progress = derive(&connection, &json!({"id":"worker","status":"idle"}), &[])
+        let progress = derive_value(&connection, &json!({"id":"worker","status":"idle"}), &[])
             .expect("test fixture value");
         assert_eq!(progress.commands.len(), 1);
         assert_eq!(progress.commands[0].monitor_id, "live");

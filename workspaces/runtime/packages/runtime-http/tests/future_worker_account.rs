@@ -202,16 +202,11 @@ impl Fixture {
             started,
         }
     }
-    fn selection_uri(automatic: bool) -> String {
-        if automatic {
-            format!("/api/models?account_key={LEAD_ACCOUNT}&workers=1&fresh=1")
-        } else {
-            format!("/api/models?account_key={TARGET}&fresh=1")
-        }
+    fn selection_uri() -> String {
+        format!("/api/models?account_key={LEAD_ACCOUNT}&workers=1&fresh=1")
     }
-    fn settings(automatic: bool) -> Value {
+    fn settings() -> Value {
         json!({"id":LEAD,"expected_account_key":LEAD_ACCOUNT,"worker_defaults":{
-            "account_key":if automatic { Value::Null } else { json!(TARGET) },
             "model":MODEL,"effort":"medium","fast_mode":false,"daybreak_enabled":false,"delegation_depth":1
         }})
     }
@@ -261,12 +256,12 @@ fn actor(store: &RuntimeStore, id: &str) -> Value {
 
 #[tokio::test]
 async fn fresh_get_then_real_future_worker_settings_post_preserves_existing_workers() {
-    for automatic in [false, true] {
+    {
         let fixture = Fixture::new(false).await;
         let before = actor(&fixture.store, LEAD);
         let child = actor(&fixture.store, CHILD);
         let app = fixture.app.clone();
-        let uri = Fixture::selection_uri(automatic);
+        let uri = Fixture::selection_uri();
         let pending = tokio::spawn(async move { call(&app, "GET", &uri, None).await });
         tokio::time::timeout(std::time::Duration::from_secs(5), fixture.started)
             .await
@@ -293,21 +288,14 @@ async fn fresh_get_then_real_future_worker_settings_post_preserves_existing_work
             &fixture.app,
             "POST",
             "/api/conversation",
-            Some(Fixture::settings(automatic)),
+            Some(Fixture::settings()),
         )
         .await;
         assert_eq!(
             status, 200,
             "future-worker settings after fresh GET: {saved}"
         );
-        assert_eq!(
-            saved["workerDefaults"]["accountKey"],
-            if automatic {
-                Value::Null
-            } else {
-                json!(TARGET)
-            }
-        );
+        assert!(saved["workerDefaults"].get("accountKey").is_none());
         assert_eq!(saved["workerDefaults"]["model"], MODEL);
         let after = actor(&fixture.store, LEAD);
         for key in [
@@ -328,12 +316,12 @@ async fn fresh_get_then_real_future_worker_settings_post_preserves_existing_work
 
 #[tokio::test]
 async fn failed_fresh_metadata_cannot_change_future_defaults_or_existing_workers() {
-    for automatic in [false, true] {
+    {
         let fixture = Fixture::new(true).await;
         let before = actor(&fixture.store, LEAD);
         let child = actor(&fixture.store, CHILD);
         let app = fixture.app.clone();
-        let uri = Fixture::selection_uri(automatic);
+        let uri = Fixture::selection_uri();
         let pending = tokio::spawn(async move { call(&app, "GET", &uri, None).await });
         tokio::time::timeout(std::time::Duration::from_secs(5), fixture.started)
             .await

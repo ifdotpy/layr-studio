@@ -11,6 +11,34 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn summary_marks_legacy_vm_records() {
+    for extra in [
+        json!({"workspaceMode":"layr"}),
+        json!({"layrReady":true}),
+        json!({"layrLine":"old-line"}),
+        json!({"executionMode":"vm"}),
+    ] {
+        let (_dir, store) = store().await;
+        seed_chat(&store, chat(extra.clone())).await;
+        assert_eq!(
+            client_entity(&store, "agentSummary", CHAT).unwrap().1["legacyVmWorkspace"],
+            true,
+            "{extra}"
+        );
+    }
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"workspaceMode":"layr-native", "layrReady":true})),
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).unwrap().1["legacyVmWorkspace"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn unreadable_limits_do_not_block_publication_or_startup() {
     let (_dir, store) = store().await;
     store
@@ -839,7 +867,8 @@ async fn work_detail_refusal_is_derived_on_every_publish() {
                     tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
                         row.get(0)
                     })?;
-                let record: Value = studio_json::from_str(&raw).expect("stored work record");
+                let record: studio_runtime_store::WorkItemRecord =
+                    studio_json::from_str(&raw).expect("stored work record");
                 Ok(crate::work_write::current_submission_refusal(tx, &record)
                     .expect("derived refusal"))
             })

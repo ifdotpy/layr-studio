@@ -302,10 +302,14 @@ pub(super) async fn lifecycle_completion(
         move |tx, agent, account, generation, turn, item, timestamp| {
             let streams = super::store::current_streams(tx, account, Some(&cached))
                 .map_err(stream_store_error)?;
-            let Some(mut next) = streams.recover_agent_message_in_transaction(
-                tx, agent, account, generation, turn, item, timestamp,
-            )?
-            else {
+            // TODO(agent-record-chain r3: recovery slice): recovery_store.rs::RecoveryMessageWriter owns this JSON boundary.
+            let mut typed = AgentRecord::from_value(agent.clone())
+                .map_err(studio_runtime_store::StoreError::from)?;
+            let update = streams.recover_agent_message_in_transaction(
+                tx, &mut typed, account, generation, turn, item, timestamp,
+            )?;
+            *agent = typed.into_value();
+            let Some(mut next) = update else {
                 return Ok(None);
             };
             let item_id = item["id"]

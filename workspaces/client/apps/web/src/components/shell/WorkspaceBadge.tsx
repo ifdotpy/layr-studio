@@ -2,16 +2,23 @@ import { AgentRole as GeneratedApiAgentRole } from "../../generated/api.ts";
 import type { Agent } from "../../types";
 
 export type WorkspaceBadgeInfo = {
-  label: "Layr" | "WT" | "SHARED";
+  label: "Layr" | "Unavailable" | "WT" | "SHARED";
   title: string;
 };
 
 export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
   if (!agent) return null;
+  if (agent.legacyVmWorkspace) {
+    const title = "Legacy workspace unavailable";
+    return {
+      label: "Unavailable",
+      title: !agent.isLead && agent.cwd ? `${title} · ${agent.cwd}` : title,
+    };
+  }
   if (agent.remoteWorker && (!agent.cwd || !agent.workspaceMode)) return null;
   // Legacy rows without a mode keep only the inference their flags prove.
   const mode =
-    agent.workspaceMode ??
+    (agent.workspaceMode as string | null | undefined) ??
     (agent.isLead
       ? undefined
       : agent.worktree === true

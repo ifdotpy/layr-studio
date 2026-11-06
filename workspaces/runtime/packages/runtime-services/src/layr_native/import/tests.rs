@@ -468,7 +468,7 @@ mod lifecycle_tests {
     }
 
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS or btrfs"]
+    #[ignore = "requires the real installed Layr binary on APFS or btrfs"]
     fn native_import_excludes_ignored_data_and_keeps_main_and_migration_caches_warm() {
         let _binary_override = crate::layr_native::override_layr_binary(PathBuf::from(crate::layr_native::test_binary().expect("test binary")));
         let binary =
@@ -606,7 +606,7 @@ mod lifecycle_tests {
     }
 
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS or btrfs"]
+    #[ignore = "requires the real installed Layr binary on APFS or btrfs"]
     fn native_import_without_git_preserves_source_and_records_receipt() {
         let _binary_override = crate::layr_native::override_layr_binary(PathBuf::from(crate::layr_native::test_binary().expect("test binary")));
         let fixture = tempfile::tempdir().expect("fixture");

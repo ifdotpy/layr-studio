@@ -113,6 +113,8 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
                             row.agent_mode_revision = value.as_u64();
                         } else if key == "accountTransferId" {
                             row.account_transfer_id = serde::Deserialize::deserialize(value).expect("typed transfer id");
+                        } else if key == "nativeThreadBlock" {
+                            row.native_thread_block = serde::Deserialize::deserialize(value).expect("typed native thread block");
                         } else {
                             row.extra.insert(key.into(),value);
                         }

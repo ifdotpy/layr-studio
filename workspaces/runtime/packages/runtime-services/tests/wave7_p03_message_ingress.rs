@@ -534,6 +534,11 @@ fn assert_json(actual: &Value, expected: &Value, path: &str) {
             let mut a = a.clone();
             let mut b = b.clone();
             crate::agent_view_fixtures::normalize_frozen_projection(&mut a);
+            if b.get("kind").and_then(Value::as_str) == Some("agent") {
+                let mut projection = Value::Object(b);
+                crate::agent_view_fixtures::expect_project_path(&mut projection);
+                b = projection.as_object().expect("agent projection").clone();
+            }
             if !a.contains_key("sync_versions") {
                 b.remove("sync_versions");
             }

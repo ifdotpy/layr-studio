@@ -921,12 +921,12 @@ fn work_units(
             let rows = match (deleted, record, work, index, root) {
                 (true, ..) => tombstones(&[collection], wanted, &id, seq),
                 (false, Some(raw), Some(work), Some(index), Some(root)) => {
-                    let value: Value = studio_json::from_str(&raw)?;
                     let entry = crate::sync_views::work_history_entry(
+                        kind,
                         &work,
-                        &json!(root),
+                        studio_json::to_raw_value(&root)?,
                         index as usize,
-                        &value,
+                        studio_json::OwnedRawJson::from_string(raw)?,
                     );
                     vec![upsert(collection, &id, seq, &entry)?]
                 }
@@ -1034,7 +1034,7 @@ fn work_docs(
         rows.push(upsert("work", id, seq, summary)?);
     }
     if wanted.contains("workDetail") {
-        let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
+        let refusal = current_submission_refusal(transaction, &item).map_err(work_error)?;
         let mut statuses: BTreeMap<String, WorkStatus> = BTreeMap::new();
         for dependency in item.dependencies() {
             match WorkItemsRepository::work_record(transaction, dependency) {

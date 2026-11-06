@@ -1731,12 +1731,11 @@ pub(crate) async fn prepare_ready(
             .read_async(
                 "runtime-services/idle_compaction_input_mode",
                 move |connection| {
-                    let agent =
+                    let is_lead =
                         AgentRepository::get(connection, &AgentId::from(agent_id.as_str()))?
-                            .map(|agent| agent.value())
-                            .unwrap_or_default();
+                            .is_some_and(|agent| agent.is_lead == Some(true));
                     studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(
-                        connection, &agent,
+                        connection, is_lead,
                     )
                     .map(|settings| settings.mode)
                 },
@@ -1821,8 +1820,11 @@ pub(crate) fn commit(
         )
     })?;
     if let Some(expected) = guard.idle_compaction_mode
-        && studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(tx, &record)?
-            .mode
+        && studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(
+            tx,
+            record["isLead"] == true,
+        )?
+        .mode
             != expected
     {
         return Err(refusal("idle-compaction/mode-changed".into()));

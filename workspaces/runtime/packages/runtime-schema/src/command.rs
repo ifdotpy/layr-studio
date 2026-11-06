@@ -154,6 +154,11 @@ pub enum Command {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
         body: StopBody,
     },
+    /// Restore a soft-deleted root chat and the descendants deleted with it.
+    RestoreDeletedRoot {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: EmptyBody,
+    },
     /// Answer an approval of the user. `target` is the approval id.
     Answer {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
@@ -182,6 +187,7 @@ impl Command {
             Self::Stop { .. } => "stop",
             Self::Resolve { .. } => "resolve",
             Self::Pause { .. } => "pause",
+            Self::RestoreDeletedRoot { .. } => "restore_deleted_root",
             Self::Answer { .. } => "answer",
             Self::LeadMessage { .. } => "lead_message",
             Self::Delete { .. } => "delete",
@@ -196,12 +202,17 @@ impl Command {
             | Self::Stop { target, .. }
             | Self::Resolve { target, .. }
             | Self::Pause { target, .. }
+            | Self::RestoreDeletedRoot { target, .. }
             | Self::Answer { target, .. }
             | Self::LeadMessage { target, .. }
             | Self::Delete { target, .. } => target.as_str(),
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyBody {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -316,6 +327,7 @@ pub enum CommandOutcome {
     Stop,
     Resolve,
     Pause,
+    RestoreDeletedRoot,
     /// `deleted` is the chat and every descendant that the delete removed.
     Delete {
         result: DeleteResult,
@@ -372,6 +384,7 @@ impl CommandOutcome {
             Command::Stop { .. } => Self::Stop,
             Command::Resolve { .. } => Self::Resolve,
             Command::Pause { .. } => Self::Pause,
+            Command::RestoreDeletedRoot { .. } => Self::RestoreDeletedRoot,
             Command::Answer { .. } | Command::LeadMessage { .. } | Command::Delete { .. } => {
                 return None;
             }
@@ -437,6 +450,35 @@ mod tests {
         assert_eq!(request.command.name(), "withdraw");
         assert_eq!(request.command.target(), "chat");
         assert_eq!(studio_json::to_value(&request).expect("encode"), wire);
+    }
+
+    #[test]
+    fn restore_deleted_root_openapi_matches_command_owner() {
+        let wire = studio_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"restore_deleted_root","target":"chat","body":{}});
+        let request: CommandRequest = studio_json::from_value(wire).expect("command owner");
+        let openapi: studio_json::Value =
+            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
+                .expect("OpenAPI");
+        let schemas = &openapi["components"]["schemas"];
+        let kind = request.command.name();
+        assert_eq!(
+            schemas["CommandRequest"]["discriminator"]["mapping"][kind],
+            "#/components/schemas/CommandRequestRestoreDeletedRoot"
+        );
+        assert_eq!(
+            schemas["CommandRequestRestoreDeletedRoot"]["properties"]["kind"]["const"],
+            kind
+        );
+        assert_eq!(
+            schemas["CommandResponse"]["discriminator"]["mapping"][kind],
+            "#/components/schemas/CommandResponseApplied"
+        );
+        assert!(
+            schemas["CommandResponseApplied"]["properties"]["kind"]["enum"]
+                .as_array()
+                .expect("kinds")
+                .contains(&studio_json::json!(kind))
+        );
     }
 
     #[test]

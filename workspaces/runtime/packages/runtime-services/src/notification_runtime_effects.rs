@@ -1,13 +1,14 @@
 //! Runtime notification effects. The main writer captures the move cache;
 //! analytics and volatile rates are immutable values for the caller after commit.
 use crate::notification_dispatch::{
-    DispatchOutcome, NotificationDispatchError, NotificationEffects, NotificationObservation,
-    NotificationPostCommit, ObservationTime, ProviderDeliveryIdentity, SharedJson,
+    DispatchOutcome, NotificationAgent, NotificationDispatchError, NotificationEffects,
+    NotificationObservation, NotificationPostCommit, ObservationTime, ProviderDeliveryIdentity,
+    SharedJson,
 };
 use std::future::Future;
 use std::pin::Pin;
 use studio_json::Value;
-use studio_runtime_store::Transaction;
+use studio_runtime_store::{AgentId, Transaction};
 
 pub struct RuntimeNotificationEffects;
 
@@ -15,14 +16,12 @@ impl NotificationEffects for RuntimeNotificationEffects {
     fn capture_move_cache(
         &self,
         tx: &Transaction<'_>,
-        agent: &Value,
+        agent: &AgentId,
         params: &Value,
         usage: &studio_runtime_schema::usage::UsageObservation,
         at: f64,
     ) -> Result<(), NotificationDispatchError> {
-        let agent_id = agent["id"]
-            .as_str()
-            .ok_or(NotificationDispatchError::invalid())?;
+        let agent_id = agent.as_ref();
         crate::agent_move::capture_cache(tx, agent_id, params, usage, at)?;
         Ok(())
     }
@@ -44,8 +43,8 @@ impl NotificationEffects for RuntimeNotificationEffects {
 
     fn post_commit(
         &self,
-        before: Option<&Value>,
-        after: Option<&Value>,
+        before: Option<&NotificationAgent<'_>>,
+        after: Option<&NotificationAgent<'_>>,
         frame: &Value,
         identity: &ProviderDeliveryIdentity,
         at: ObservationTime,
@@ -96,16 +95,16 @@ impl NotificationEffects for RuntimeNotificationEffects {
         // Native notices skipped by turn affinity never reach Python analytics.
         if crate::notification_dispatch::notices::is_notice(method)
             && !crate::notification_dispatch::notices::captures_analytics(
-                before,
+                before.turn_id.value().copied(),
+                before.in_flight.value() == Some(&true),
                 method,
                 &frame["params"],
             )
         {
             return result;
         }
-        let analytics_agent = SharedJson::agent_projection(before);
         result.push(NotificationPostCommit::Analytics {
-            observation: observation(Some(&analytics_agent)),
+            observation: observation(before_observation.as_ref()),
             budget_capture_value: None,
             usage_conflict: None,
             ledger_since: Default::default(),
@@ -324,16 +323,36 @@ fn event_time(frame: &Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use studio_runtime_store::AgentRecord;
+
+    #[test]
+    fn agent_observation_projection_preserves_frozen_bytes() {
+        let agent = AgentRecord::from_value(studio_json::json!({
+            "id":"agent", "rootId":"root", "epoch":4, "status":"idle",
+            "compactions":0, "accountKey":"default", "provider":"claude",
+            "name":"Agent", "parentId":"parent", "accountHistory":null,
+            "threadId":"thread", "turnId":"turn", "inFlight":false, "events":0,
+            "model":"model", "effort":null, "fastMode":false, "daybreakEnabled":true,
+            "cyberAccessProgram":{"legacy":true}, "cwd":"/work", "deletedAt":1.5,
+            "unrelatedTranscript":"not projected"
+        }))
+        .unwrap();
+        let projection = SharedJson::agent_projection(&NotificationAgent::from(&agent));
+        assert_eq!(
+            studio_json::to_string(&projection).unwrap(),
+            r#"{"accountHistory":null,"accountKey":"default","cwd":"/work","cyberAccessProgram":{"legacy":true},"daybreakEnabled":true,"deletedAt":1.5,"effort":null,"epoch":4,"events":0,"fastMode":false,"id":"agent","inFlight":false,"model":"model","name":"Agent","parentId":"parent","provider":"claude","rootId":"root","threadId":"thread","turnId":"turn"}"#
+        );
+    }
 
     #[test]
     fn observations_project_agents_and_share_immutable_params() {
-        let agent = studio_json::json!({
-            "id":"agent", "name":"Agent", "rootId":"root", "accountKey":"default",
+        let agent = AgentRecord::from_value(studio_json::json!({
+            "id":"agent", "status":"idle", "compactions":0, "name":"Agent", "rootId":"root", "accountKey":"default",
             "accountHistory":[], "provider":"codex", "threadId":"thread", "epoch":4,
             "turnId":"turn", "inFlight":false, "model":"model", "effort":"high",
             "fastMode":false, "daybreakEnabled":false, "cyberAccessProgram":false,
             "cwd":"/workspace", "deletedAt":null, "unrelatedTranscript": "x".repeat(64 * 1024)
-        });
+        })).unwrap();
         let frame = studio_json::json!({
             "method":"turn/completed",
             "params":{"threadId":"thread","turnId":"turn"}
@@ -344,9 +363,10 @@ mod tests {
             cursor: 9,
         };
 
+        let view = NotificationAgent::from(&agent);
         let effects = RuntimeNotificationEffects.post_commit(
-            Some(&agent),
-            Some(&agent),
+            Some(&view),
+            Some(&view),
             &frame,
             &identity,
             ObservationTime::new(12.0).unwrap(),

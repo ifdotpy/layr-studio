@@ -1,3 +1,4 @@
+import { AgentPermissionMode } from "../../generated/api";
 import { ProviderKind as GeneratedApiProviderKind } from "../../generated/api.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -53,7 +54,7 @@ test("legacy modes use provider-specific yolo defaults and invalid modes fail cl
     inheritedClaudeMode({
       id: "lead",
       provider: GeneratedApiProviderKind.claude,
-      permissionMode: "bypassPermissions",
+      permissionMode: AgentPermissionMode["bypassPermissions"],
     }),
   ).toBe("bypassPermissions");
   expect(

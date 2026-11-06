@@ -471,8 +471,10 @@ pub fn reserve(
         tx,
         &studio_runtime_store::AgentId::from(request.agent.as_str()),
     )?
-    .and_then(|current| current.extra.get("idleCompactionEpisode").cloned())
-    {
+    .and_then(|current| {
+        (!current.idle_compaction_episode.is_missing())
+            .then(|| studio_runtime_store::projection_value(&current.idle_compaction_episode))
+    }) {
         agent["idleCompactionEpisode"] = episode;
     }
     agent["status"] = json!("starting");
@@ -649,7 +651,7 @@ pub fn claim(tx: &Transaction<'_>, id: &str, ticket: &ProviderTicket) -> Result<
         params["idleCompaction"]["mode"] = json!(
             studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(
                 tx,
-                &snapshot.agent
+                snapshot.agent["isLead"] == true
             )?
             .mode
         );

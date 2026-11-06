@@ -1,10 +1,10 @@
 //! Indexed agent fields as typed columns of `runtime_agents`.
 //!
 //! Storage format introduced on 2026-10-20; the dated migrations apply the explicit-provider cutover of 2026-10-26. Every agent
-//! field that an index or an indexed query reads is a STORED generated column
-//! of `runtime_agents`, computed by SQLite from the record when the row is
-//! written. Indexes are plain column indexes, and queries filter and sort on
-//! the columns. The record stays the one source of truth: a column cannot
+//! field that an index or an indexed query reads is a generated column
+//! of `runtime_agents`. STORED columns are computed on write; VIRTUAL columns
+//! used by covering indexes are computed when the index is maintained.
+//! Indexes are plain column indexes, and queries filter and sort on the columns. The record stays the one source of truth: a column cannot
 //! disagree with its record, and every writer (including raw test fixtures)
 //! keeps writing `(id, record)` only.
 //!
@@ -35,6 +35,8 @@ pub const AGENT_TABLE: &str = "runtime_agents";
 
 /// One generated column of [`AGENT_TABLE`].
 pub struct AgentColumn {
+    /// Whether the value is materialized in the table.
+    pub stored: bool,
     /// Column name, used verbatim in SQL.
     pub name: &'static str,
     /// Declared SQLite type (affinity); empty keeps the value's own type.
@@ -52,10 +54,21 @@ const fn column(
     constraint: &'static str,
 ) -> AgentColumn {
     AgentColumn {
+        stored: true,
         name,
         sql_type,
         value,
         constraint,
+    }
+}
+
+const fn virtual_column(name: &'static str, value: &'static str) -> AgentColumn {
+    AgentColumn {
+        name,
+        sql_type: "",
+        value,
+        constraint: "",
+        stored: false,
     }
 }
 
@@ -101,7 +114,13 @@ const PROVIDER_COLUMN: AgentColumn =
 
 /// The indexed agent fields; see the module documentation. Changing this list
 /// changes the table and needs a new dated migration.
-pub const AGENT_COLUMNS: [AgentColumn; 31] = [
+pub const AGENT_COLUMNS: [AgentColumn; 34] = [
+    virtual_column("account_transfer_id", "record->>'$.accountTransferId'"),
+    virtual_column(
+        "native_release_reset_pending",
+        "record->>'$.nativeRelease.resetPending'",
+    ),
+    virtual_column("is_lead", "record->>'$.isLead'"),
     column("root_id", "TEXT", "record->>'$.rootId'", ""),
     column("parent_id", "TEXT", "record->>'$.parentId'", ""),
     column(
@@ -257,10 +276,14 @@ pub const AGENT_COLUMNS: [AgentColumn; 31] = [
 /// The `CREATE TABLE` statement of [`AGENT_TABLE`] named `name`. The columns
 /// precede `record`: a row's large record spills to overflow pages, and a
 /// column stored after it could be read only by walking that chain.
-fn column_sql(column: &AgentColumn) -> String {
+pub(crate) fn column_sql(column: &AgentColumn) -> String {
     format!(
-        "\"{}\" {} GENERATED ALWAYS AS ({}) STORED {}",
-        column.name, column.sql_type, column.value, column.constraint
+        "\"{}\" {} GENERATED ALWAYS AS ({}) {} {}",
+        column.name,
+        column.sql_type,
+        column.value,
+        if column.stored { "STORED" } else { "VIRTUAL" },
+        column.constraint
     )
 }
 
@@ -302,7 +325,12 @@ pub(crate) fn has_columns(transaction: &Transaction<'_>) -> StoreResult<bool> {
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
     let expected = std::iter::once("id")
-        .chain(AGENT_COLUMNS.iter().map(|column| column.name))
+        .chain(
+            AGENT_COLUMNS
+                .iter()
+                .filter(|column| column.stored)
+                .map(|column| column.name),
+        )
         .chain(std::iter::once("record"));
     let receipt_names: Vec<_> = crate::schema::receipt_owner_columns()
         .into_iter()
@@ -312,7 +340,12 @@ pub(crate) fn has_columns(transaction: &Transaction<'_>) -> StoreResult<bool> {
     Ok(names
         .iter()
         .map(String::as_str)
-        .filter(|name| !receipt_names.contains(name))
+        .filter(|name| {
+            !receipt_names.contains(name)
+                && !AGENT_COLUMNS
+                    .iter()
+                    .any(|column| !column.stored && column.name == *name)
+        })
         .eq(expected))
 }
 

@@ -15,6 +15,10 @@ vi.mock("react", async (original) => ({
 vi.mock("../servers/ServerServicesContext", () => ({
   useServerApi: () => ({ post: vi.fn() }),
   useServerResources: () => ({ watchResourceChanges: vi.fn() }),
+  useServerFileDialogs: () => ({
+    canPickDirectory: () => false,
+    pickDirectory: vi.fn(),
+  }),
 }));
 import { LayrWorktreesSettings } from "./LayrWorktreesSettings";
 import { studioSettingsTabs } from "./StudioSettingsTabs";
@@ -43,6 +47,8 @@ it("lists the settings tab and displays the installed version and store", () => 
   });
   expect(html).toContain("0.14.2 (a6879be)");
   expect(html).toContain("Default store directory");
+  expect(html).toContain("Choose a folder");
+  expect(html).toContain("Reset");
 });
 it("displays the missing binary", () => {
   expect(render({ version: null, storeRoot: "/store" })).toContain(

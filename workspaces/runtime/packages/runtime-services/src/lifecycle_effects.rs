@@ -1599,7 +1599,7 @@ fn enqueue_turn_result(
             .to_owned(),
     };
     let assignments = crate::agent_progress::assignments(tx, &agent.id.0)?;
-    let progress = crate::agent_progress::derive(tx, value, &assignments)?;
+    let progress = crate::agent_progress::derive(tx, agent, &assignments)?;
     let payload = ChildTurnResultPayload {
         agent_id: Some(agent.id.0.clone()),
         name: agent.name.clone(),

@@ -295,7 +295,6 @@ fn radio_create_error(error: CreateError) -> ProjectsError {
         | CreateError::BaseUnresolved
         | CreateError::ModelUnavailable
         | CreateError::Stale
-        | CreateError::CurrentAccountExcluded
         | CreateError::InFlight => {
             ProjectsError::Invalid("radio participant creation was rejected")
         }
@@ -1452,6 +1451,7 @@ fn projects_error(error: ProjectsError) -> ApiError {
     match error {
         ProjectsError::Invalid(_) => ApiError::validation(vec![Value::String("body".to_owned())]),
         ProjectsError::BadRequest(message) => ApiError::new(StatusCode::BAD_REQUEST, message),
+        ProjectsError::InvalidStore(message) => ApiError::native_layr_store(message),
         ProjectsError::Conflict(message) => ApiError::new(StatusCode::CONFLICT, message),
         ProjectsError::Requires(dependency) => ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
@@ -2273,6 +2273,52 @@ mod local_registration_tests {
         assert_eq!(status, axum::http::StatusCode::OK, "{cleared}");
         assert!(cleared["workspacePolicy"].is_null());
         assert_eq!(cleared["workspacePolicyRevision"], 2);
+        let (status, reset) = post_project(
+            &app,
+            &json!({"action":"set_layr_store_root","path":path,"expected_revision":0,"layr_store_root":null}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{reset}");
+        assert!(reset["layrStoreRoot"].is_null());
+        assert!(reset.get("layrStoreRootRevision").is_none());
+        let (status, _) = post_project(
+            &app,
+            &json!({"action":"set_layr_store_root","path":path,"expected_revision":0,"layr_store_root":"relative"}),
+        )
+        .await;
+        assert_ne!(status, axum::http::StatusCode::OK);
+        let (status, overlap) = post_project(
+            &app,
+            &json!({"action":"set_layr_store_root","path":path,"expected_revision":0,"layr_store_root":path}),
+        ).await;
+        assert_ne!(status, axum::http::StatusCode::OK);
+        assert!(
+            overlap.to_string().contains("outside the project folder"),
+            "{overlap}"
+        );
+        let project_for_reset = path.to_string();
+        store.transaction(move |tx| {
+            tx.execute("UPDATE runtime_projects SET record=json_set(record,'$.layrStoreRoot','/old/store','$.layrStoreRootRevision',1) WHERE json_extract(record,'$.path')=?1", [&project_for_reset])?;
+            Ok(())
+        }).await.expect("seed an existing store association");
+        let (status, _) = post_project(
+            &app,
+            &json!({"action":"set_layr_store_root","path":path,"expected_revision":0,"layr_store_root":null}),
+        ).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        let (status, reset) = post_project(
+            &app,
+            &json!({"action":"set_layr_store_root","path":path,"expected_revision":1,"layr_store_root":null}),
+        ).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{reset}");
+        assert!(reset["layrStoreRoot"].is_null());
+        assert_eq!(reset["layrStoreRootRevision"], 2);
+        let (status, replay) = post_project(
+            &app,
+            &json!({"action":"set_layr_store_root","path":path,"expected_revision":1,"layr_store_root":null}),
+        ).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(replay["layrStoreRootRevision"], 2);
     }
 }
 

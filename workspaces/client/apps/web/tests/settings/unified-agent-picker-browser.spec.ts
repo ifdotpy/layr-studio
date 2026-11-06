@@ -170,86 +170,10 @@ test("unified agent picker roles, accounts and project/shared flows", async ({
         page.getByRole("listbox", { name: "Default subagent model" }),
       ).toBeVisible();
       await capture("worker-codex");
-      await chooseSetupValue(
-        page.getByLabel("Subagent account", { exact: true }),
-        "account-4",
-      );
-      // A new subagent account saves the defaults; nothing moves.
-      await page.waitForFunction(() =>
-        window.pickerCalls.some(
-          (call) =>
-            call.endpoint === "/api/conversation" &&
-            call.worker_defaults?.account_key === "account-4",
-        ),
-      );
-      assert.equal(
-        await page.evaluate(
-          () =>
-            window.pickerCalls.filter(
-              (call) => call.endpoint === "/api/agents/account-transfer",
-            ).length,
-        ),
-        0,
-      );
-      await expect(
-        page.getByRole("option", {
-          name: "Opus 5.5 recommended",
-          exact: true,
-        }),
-      ).toBeVisible();
-      await capture("worker-claude");
-      assert.equal(
-        await page
-          .getByRole("switch", { name: "Daybreak", exact: true })
-          .count(),
-        0,
-      );
-      assert.equal(
-        await page
-          .getByRole("switch", { name: "Fast mode", exact: true })
-          .count(),
-        0,
-      );
-      // Another provider's tab lists the models of all its ready accounts. A
-      // model there is saved with Automatic, and the server picks the account.
-      await page
-        .getByLabel("Subagent account provider", { exact: true })
-        .locator("label")
-        .filter({ hasText: "Codex" })
-        .click();
-      const luna = page.getByRole("option", { name: "Luna 6", exact: true });
-      await expect(luna).toBeVisible();
-      const mark = await page.evaluate(() => window.pickerCalls.length);
-      await luna.click();
-      await page.waitForFunction(
-        (mark) =>
-          window.pickerCalls
-            .slice(mark)
-            .some(
-              (call) =>
-                call.endpoint === "/api/conversation" &&
-                call.worker_defaults?.account_key === null &&
-                call.worker_defaults?.model === "gpt-6-luna",
-            ),
-        mark,
-      );
-      assert.equal(
-        await page.evaluate(
-          (mark) =>
-            window.pickerCalls
-              .slice(mark)
-              .filter(
-                (call) => call.endpoint === "/api/agents/account-transfer",
-              ).length,
-          mark,
-        ),
-        0,
-      );
-      await expect(luna).toHaveAttribute("aria-selected", "true");
       await page.getByText("Review", { exact: true }).click();
       await expect(
         page.getByLabel("Review account", { exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       assert.equal(
         await page.getByLabel("Subagent account", { exact: true }).count(),
         0,

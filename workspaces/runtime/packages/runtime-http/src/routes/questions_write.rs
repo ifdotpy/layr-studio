@@ -220,6 +220,7 @@ fn async_question_error(error: QuestionsWriteError) -> ApiError {
             other @ studio_runtime_services::projects::ProjectsError::Invalid(_)
             | other @ studio_runtime_services::projects::ProjectsError::Conflict(_)
             | other @ studio_runtime_services::projects::ProjectsError::BadRequest(_)
+            | other @ studio_runtime_services::projects::ProjectsError::InvalidStore(_)
             | other @ studio_runtime_services::projects::ProjectsError::InvalidStored { .. }
             | other @ studio_runtime_services::projects::ProjectsError::Sqlite(_)
             | other @ studio_runtime_services::projects::ProjectsError::PreparationWorker => {

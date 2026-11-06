@@ -10,23 +10,20 @@ use rusqlite::{OptionalExtension, params};
 use studio_json::{Value, json};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
-    AgentId, NotificationDispatchRepository, PlanRecord, StoreError, Table, TaskId, TaskRecord,
-    Transaction,
+    AgentId, AgentRecord, NotificationDispatchRepository, PlanRecord, StoreError, Table, TaskId,
+    TaskRecord, Transaction,
 };
 
 pub(super) fn apply(
     tx: &Transaction<'_>,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     method: &str,
     p: &Value,
     identity: &ProviderDeliveryIdentity,
     publication: &super::PublicationContext,
     at: f64,
 ) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
-    let id = agent["id"]
-        .as_str()
-        .ok_or(NotificationDispatchError::invalid())?
-        .to_owned();
+    let id = agent.id.as_ref().to_owned();
     let account = identity
         .provider_handle
         .strip_prefix("account:")
@@ -37,36 +34,17 @@ pub(super) fn apply(
     }
     if method == "thread/idleCompaction/updated" {
         if let Some(request) = p["preparedSummary"]["requestId"].as_str() {
-            if agent["idleCompactionEpisode"]["id"] == request
+            if idle_episode_id(agent) == Some(request)
                 && crate::idle_compaction::settled(tx, request)?
             {
-                agent["idleSummaryPrepared"] = json!(request);
+                agent.idle_summary_prepared = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(request.to_owned()),
+                );
                 persist_agent(tx, &id, agent)?;
             }
             return Ok(Some(DispatchOutcome::Written));
         }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct StoredEpisode {
-            idle_compaction_episode: crate::idle_compaction::Episode,
-        }
-        let previous = if agent["provider"] == studio_runtime_providers::ProviderKind::Claude.key()
-            && agent.get("idleCompactionEpisode").is_some()
-        {
-            let raw =
-                studio_runtime_store::AgentRepository::get_raw(tx, &AgentId::from(id.as_str()))?
-                    .ok_or_else(|| {
-                        StoreError::SchemaMismatch("missing idle compaction agent".into())
-                    })?;
-            Some(
-                studio_json::from_str::<StoredEpisode>(&raw)
-                    .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
-                    .idle_compaction_episode,
-            )
-        } else {
-            None
-        };
-        crate::idle_compaction::observe(tx, agent, &p["report"], previous.as_ref())?;
+        crate::idle_compaction::observe(tx, agent, &p["report"])?;
         persist_agent(tx, &id, agent)?;
         return Ok(Some(DispatchOutcome::Written));
     }
@@ -110,7 +88,10 @@ pub(super) fn apply(
                 tx,
                 &id,
                 &item.key,
-                ("system", notices::provider_label(agent)),
+                (
+                    "system",
+                    notices::provider_label(agent.provider.value().copied()),
+                ),
                 &item.text,
                 item.metadata,
                 at,
@@ -146,11 +127,17 @@ pub(super) fn apply(
             update_common_agent_fields(agent, method, p, at)?;
             persist_agent(tx, &id, agent)?;
         } else if dependency == NotificationDependency::ThreadUnloaded
-            && agent["nativeRelease"]["threadId"] == p["threadId"]
-            && !agent["nativeRelease"].is_null()
+            && agent
+                .native_release
+                .as_ref()
+                .and_then(|release| release.extra.get("threadId"))
+                == p.get("threadId")
+            && agent.native_release.is_some()
         {
-            agent["nativeRelease"]["closedAt"] = json!(at);
-            agent["nativeRelease"]["resetPending"] = json!(false);
+            if let Some(release) = &mut agent.native_release {
+                release.extra.insert("closedAt".into(), json!(at));
+                release.extra.insert("resetPending".into(), json!(false));
+            }
             persist_agent(tx, &id, agent)?;
         }
         return Ok(Some(required(dependency)));
@@ -173,7 +160,7 @@ pub(super) fn apply(
     let stale = method.starts_with("item/")
         && p["turnId"]
             .as_str()
-            .is_some_and(|t| !t.is_empty() && agent["turnId"] != t);
+            .is_some_and(|t| !t.is_empty() && agent.turn_id.as_deref() != Some(t));
     let task_key = format!(
         "{id}:{}",
         p["item"]["id"]
@@ -208,7 +195,7 @@ pub(super) fn apply(
                 };
                 if !crate::scheduler::settle_user_message_receipt_in_transaction(
                     tx,
-                    agent,
+                    snapshot.agent(),
                     event_id,
                     account,
                     identity.generation,
@@ -268,7 +255,7 @@ pub(super) fn apply(
                 items::non_text(agent, method, p, snapshot.task(), already_compacted, at)?;
             if let Some(mut task) = decision.task {
                 if snapshot.task().is_none() {
-                    task.owner_epoch = agent["epoch"].as_i64();
+                    task.owner_epoch = Some(agent.epoch);
                     let source = publication.native_source.as_ref().filter(|source| {
                         source.account == account
                             && source.generation.is_none_or(|g| g == identity.generation)
@@ -281,7 +268,7 @@ pub(super) fn apply(
                     );
                     task.source_connection_id = source.map(|source| source.connection.clone());
                     task.source_thread_id = if source.is_some() {
-                        agent["threadId"].as_str().map(str::to_owned)
+                        agent.thread_id.clone()
                     } else {
                         None
                     };
@@ -294,18 +281,30 @@ pub(super) fn apply(
             }
             if decision.compacted {
                 let deferred = p["item"]["idleCompactionOnReturn"] == true
-                    && p["item"]["idleCompactionRequestId"] == agent["idleCompactionEpisode"]["id"];
+                    && p["item"]["idleCompactionRequestId"].as_str() == idle_episode_id(agent);
                 if let Some(request_id) = if deferred {
                     p["item"]["idleCompactionRequestId"].as_str()
                 } else {
-                    agent["startAttempt"]["actionRequestId"].as_str()
+                    agent
+                        .start_attempt
+                        .as_ref()
+                        .and_then(|attempt| attempt.action_request_id.as_deref())
                 }
                 .map(str::to_owned)
-                    && agent["idleCompactionEpisode"]["id"].as_str() == Some(request_id.as_str())
+                    && idle_episode_id(agent) == Some(request_id.as_str())
                 {
-                    agent["idleCompactionEpisode"]["outcome"] =
-                        json!(studio_runtime_schema::persistence::IdleEpisodeOutcome::Compacted);
-                    agent["idleCompactionEpisode"]["completedAt"] = json!(at);
+                    if let studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferObject::Known(episode),
+                    ) = &mut agent.idle_compaction_episode
+                    {
+                        episode.extra.insert(
+                            "outcome".into(),
+                            json!(
+                                studio_runtime_schema::persistence::IdleEpisodeOutcome::Compacted
+                            ),
+                        );
+                        episode.extra.insert("completedAt".into(), json!(at));
+                    }
                     write_item(
                         tx,
                         &id,
@@ -379,7 +378,7 @@ pub(super) fn apply(
                 let mut plan = Table::<PlanRecord>::new(tx)
                     .get(&key)?
                     .map(Ok)
-                    .unwrap_or_else(|| PlanRecord::from_value(json!({"id":id,"rootId":agent["rootId"],"text":"","version":0,"updated":null})))?;
+                    .unwrap_or_else(|| PlanRecord::from_value(json!({"id":id,"rootId":agent.root_id,"text":"","version":0,"updated":null})))?;
                 plan.update_native(p.clone(), at)?;
                 Table::<PlanRecord>::new(tx).put_at(&key, &plan)?;
             }
@@ -411,12 +410,12 @@ pub(super) fn apply(
     persist_agent(tx, &id, agent)?;
     Ok(Some(DispatchOutcome::Written))
 }
-fn turn(agent: &Value, params: &Value) -> Value {
+fn turn(agent: &AgentRecord, params: &Value) -> Value {
     params
         .get("turnId")
         .filter(|v| !v.is_null() && **v != "")
-        .unwrap_or(&agent["turnId"])
-        .clone()
+        .cloned()
+        .unwrap_or_else(|| json!(agent.turn_id))
 }
 fn required(service: NotificationDependency) -> DispatchOutcome {
     DispatchOutcome::RequiresService { service }
@@ -505,7 +504,7 @@ fn write_item(
 pub(super) fn flush_command(
     tx: &Transaction<'_>,
     agent_id: &str,
-    agent: &mut Value,
+    agent: &mut AgentRecord,
     streams: &mut super::NotificationStreamBuffer,
     key: &super::StreamKey,
     close: bool,
@@ -524,8 +523,8 @@ pub(super) fn flush_command(
     let stale = key
         .turn
         .as_deref()
-        .is_some_and(|turn| agent["turnId"] != turn);
-    streams.flush_analytics(key, agent);
+        .is_some_and(|turn| agent.turn_id.as_deref() != Some(turn));
+    streams.flush_analytics(key, agent)?;
     if stale
         && !task.as_ref().is_some_and(|task| {
             task.kind() == studio_runtime_schema::task_record::TaskKind::Command
@@ -566,7 +565,7 @@ pub(super) fn flush_command(
                 .chain(["aggregatedOutput", "outputTruncated"].map(str::to_owned)),
         );
         let (preview, truncated) = studio_runtime_store::text_blobs::item_preview(&text);
-        let record = json!({"id":id,"role":"output","title":"commandExecution","text":preview,"truncated":truncated,"at":at,"toolStatus":"running","turnId":key.turn.as_ref().map(|v|json!(v)).unwrap_or_else(||agent["turnId"].clone())});
+        let record = json!({"id":id,"role":"output","title":"commandExecution","text":preview,"truncated":truncated,"at":at,"toolStatus":"running","turnId":key.turn.as_ref().map(|v|json!(v)).unwrap_or_else(||json!(agent.turn_id))});
         NotificationDispatchRepository::put_notification_item(
             tx, &id, agent_id, &record, at, &text, false,
         )?;
@@ -581,13 +580,8 @@ pub(super) fn flush_command(
             put_checked_task(tx, task)?;
         }
         if !stale {
-            agent["events"] = json!(
-                agent["events"]
-                    .as_u64()
-                    .unwrap_or_default()
-                    .saturating_add(count)
-            );
-            agent["lastEvent"] = json!(super::format_utc(at)?);
+            agent.events = Some(agent.events.unwrap_or_default().saturating_add(count));
+            agent.last_event = Some(super::format_utc(at)?);
         }
     }
     if close {
@@ -719,4 +713,16 @@ pub(super) fn write_historical_item(
         json!({"toolStatus":task.status(),"turnId":task.turn_id()}),
         at,
     )
+}
+
+fn idle_episode_id(agent: &AgentRecord) -> Option<&str> {
+    let studio_runtime_store::StoredTransferObject::Known(episode) =
+        agent.idle_compaction_episode.value()?
+    else {
+        return None;
+    };
+    let studio_runtime_store::StoredTransferValue::Known(id) = episode.id.value()? else {
+        return None;
+    };
+    Some(id)
 }

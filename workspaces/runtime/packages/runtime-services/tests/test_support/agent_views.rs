@@ -17,6 +17,17 @@ pub(crate) fn normalize_frozen_projection(fields: &mut studio_json::Map<String, 
     }
 }
 
+/// Add the full-agent project path now published alongside the summary path.
+pub(crate) fn expect_project_path(value: &mut Value) {
+    let fields = value.as_object_mut().expect("agent projection");
+    let path = fields
+        .get("hostProjectPath")
+        .and_then(Value::as_str)
+        .or_else(|| fields.get("cwd").and_then(Value::as_str))
+        .map(str::to_owned);
+    fields.insert("projectPath".into(), studio_json::json!(path));
+}
+
 #[allow(dead_code)]
 pub(crate) fn materialize_agent_defaults(value: &mut Value) {
     let fields = value.as_object_mut().expect("agent fixture");

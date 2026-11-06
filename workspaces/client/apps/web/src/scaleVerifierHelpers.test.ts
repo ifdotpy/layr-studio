@@ -1,3 +1,4 @@
+import { AgentWorktreePreparation } from "./generated/api";
 import { WorkspaceMode, AccountStatus, ProviderKind } from "./generated/api";
 import { required } from "./components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
@@ -208,8 +209,8 @@ describe("scale verifier helpers", () => {
       { workspaceMode: WorkspaceMode.shared },
       { cwd: "/project" },
       { cwd: "relative" },
-      { worktreePreparation: "waiting" },
-      { worktreePreparation: "preparing" },
+      { worktreePreparation: AgentWorktreePreparation["waiting"] },
+      { worktreePreparation: AgentWorktreePreparation["preparing"] },
     ] satisfies Partial<
       NonNullable<Parameters<typeof callbackWorktreeCwd>[0]>
     >[])
@@ -233,7 +234,6 @@ describe("scale verifier helpers", () => {
         "claude-profile-fixture",
       ]),
     ).toEqual({
-      account_key: "claude-profile-fixture",
       model: "claude-haiku-fixture",
       effort: "low",
       fast_mode: false,
@@ -285,8 +285,8 @@ describe("scale verifier helpers", () => {
     expect(scaleWorkerDefaults("gpt-6-luna", codex, keys)).not.toHaveProperty(
       "account_key",
     );
-    expect(scaleWorkerDefaults("m", codex, ["default"]).account_key).toBe(
-      "default",
+    expect(scaleWorkerDefaults("m", codex, ["default"])).not.toHaveProperty(
+      "account_key",
     );
     expect(scaleAccountKeys(accounts, scaleProfile("claude-sonnet"))).toEqual([
       "claude-profile-fixture",

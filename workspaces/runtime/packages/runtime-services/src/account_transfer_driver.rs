@@ -18,8 +18,9 @@ use studio_runtime_store::transfer_record::TransferRecord;
 
 /// The operation named by a nonterminal, readable agent summary.
 pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Option<&str> {
-    let studio_runtime_store::transfer_record::AgentTransferState::Summary(summary) =
-        agent.account_transfer.value()?
+    let studio_runtime_store::StoredTransferObject::Known(
+        studio_runtime_store::transfer_record::AgentTransferState::Summary(summary),
+    ) = agent.account_transfer.value()?
     else {
         return None;
     };
@@ -332,18 +333,23 @@ pub async fn request(
                 &target,
             ) {
                 return Err(TransferError::Refused(
-                    "This account is disabled for this chat",
+                    "This account is excluded for this chat's agents. Include it first, or choose another account.",
                 ));
             }
             let summary = match actor.account_transfer.value() {
-                Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_)) => {
+                Some(
+                    studio_runtime_store::StoredTransferObject::Unreadable(_)
+                    | studio_runtime_store::StoredTransferObject::Known(
+                        studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_),
+                    ),
+                ) => {
                     return Err(TransferError::Refused(
                         "Current transfer data is unreadable",
                     ));
                 }
-                Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(value)) => {
-                    Some(value)
-                }
+                Some(studio_runtime_store::StoredTransferObject::Known(
+                    studio_runtime_store::transfer_record::AgentTransferState::Summary(value),
+                )) => Some(value),
                 None => None,
             };
             if let Some(active) = summary.filter(|value| {
@@ -517,9 +523,9 @@ fn persist_request(
         .agents
         .get(operation.lead_id.as_str())
         .and_then(|agent| match agent.account_transfer.value() {
-            Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) => {
-                Some(summary.id.as_str())
-            }
+            Some(studio_runtime_store::StoredTransferObject::Known(
+                studio_runtime_store::transfer_record::AgentTransferState::Summary(summary),
+            )) => Some(summary.id.as_str()),
             _ => None,
         });
     let previous_created = old
@@ -2163,7 +2169,7 @@ mod request_tests {
         }))
         .expect("test fixture operation succeeds");
         let before_blocked = snapshot();
-        assert!(
+        assert_eq!(
             request(
                 &store,
                 "5a300f72-4ea6-4d30-8a0e-9b2c13c4226f",
@@ -2173,7 +2179,9 @@ mod request_tests {
                 "codex",
                 10.0
             )
-            .is_err()
+            .unwrap_err()
+            .to_string(),
+            "This account is excluded for this chat's agents. Include it first, or choose another account."
         );
         assert_eq!(
             snapshot(),

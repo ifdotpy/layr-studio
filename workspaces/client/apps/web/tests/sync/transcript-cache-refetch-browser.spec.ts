@@ -51,6 +51,7 @@ test("legacy transcript rows refetch online and stay hidden offline", async ({
           json: {
             workspaceId,
             documents: [],
+            complete: true,
             checkpoint: { seq: 0 },
           } satisfies FixturePullResponse,
         });
@@ -60,6 +61,7 @@ test("legacy transcript rows refetch online and stay hidden offline", async ({
             workspaceId,
             generation: 1,
             documents: [],
+            complete: true,
             checkpoint: { seq: 0 },
           } satisfies FixturePullResponse,
         });
@@ -79,6 +81,7 @@ test("legacy transcript rows refetch online and stay hidden offline", async ({
                 }),
               },
             ],
+            complete: true,
             checkpoint: { seq: 2 },
           } satisfies FixturePullResponse,
         });
@@ -93,6 +96,7 @@ test("legacy transcript rows refetch online and stay hidden offline", async ({
             after === 0
               ? [{ id: scope, seq: 1, payload: JSON.stringify(snapshot) }]
               : [],
+          complete: true,
           checkpoint: { seq: after === 0 ? 1 : after },
         } satisfies FixturePullResponse,
       });

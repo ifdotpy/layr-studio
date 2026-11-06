@@ -20,6 +20,7 @@ pub mod agent_entity_remote;
 pub mod agent_entity_transfer;
 pub mod agent_limits;
 pub mod agent_progress;
+pub mod agent_projection_fields;
 pub mod annotation_command;
 pub mod annotation_record;
 pub mod api_schema;
@@ -1668,3 +1669,24 @@ pub mod claude_permissions;
 
 pub mod review;
 pub mod workspace_modes;
+
+#[cfg(test)]
+mod generated_agent_view_tests {
+    use super::generated::{AgentDetailEntityDto, AgentEntityDto, AgentSummaryEntityDto};
+    use studio_json::json;
+
+    #[test]
+    fn generated_agent_views_keep_shared_fields_and_nulls() {
+        let full: AgentEntityDto = studio_json::from_str(
+            r#"{"id":"agent-1","projectPath":"/project","tokensUsed":42,"accountKey":null,"startWait":null}"#,
+        )
+        .expect("full agent DTO");
+        let summary = studio_json::to_value(AgentSummaryEntityDto::from(&full)).unwrap();
+        let detail = studio_json::to_value(AgentDetailEntityDto::from(&full)).unwrap();
+        assert_eq!(summary["projectPath"], "/project");
+        assert_eq!(detail["tokensUsed"], 42);
+        assert_eq!(summary.get("accountKey"), Some(&json!(null)));
+        assert_eq!(summary.get("startWait"), Some(&json!(null)));
+        assert_eq!(detail.get("startWait"), Some(&json!(null)));
+    }
+}

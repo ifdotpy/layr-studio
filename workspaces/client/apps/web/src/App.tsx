@@ -174,7 +174,7 @@ type LeadCreateRequest = Omit<
   reuse_empty: boolean;
   cwd?: string;
   project_folder?: string;
-  account_key?: string;
+  account_key?: string | undefined;
 };
 function isLeadCreateRequest(value: Json): value is LeadCreateRequest {
   return (

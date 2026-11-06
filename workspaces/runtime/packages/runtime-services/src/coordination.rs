@@ -712,10 +712,11 @@ fn require_not_excluded(
     agent: &studio_runtime_store::AgentRecord,
 ) -> Result<(), CoordinationError> {
     let account = agent.account_key.as_str();
-    if root
-        .excluded_account_keys
-        .value()
-        .is_some_and(|keys| keys.iter().any(|key| key == account))
+    if agent.id != root.id
+        && root
+            .excluded_account_keys
+            .value()
+            .is_some_and(|keys| keys.iter().any(|key| key == account))
     {
         return Err(CoordinationError::InvalidRequest(
             "This account is disabled for this chat",
@@ -728,31 +729,23 @@ fn assert_native_thread_open(
     agent: &studio_runtime_store::AgentRecord,
 ) -> Result<(), CoordinationError> {
     let thread = agent.thread_id.as_deref();
-    let block = agent
-        .extra
-        .get("nativeThreadBlock")
-        .and_then(Value::as_object);
-    let blocked = block
-        .filter(|block| {
-            block
-                .get("threadId")
-                .and_then(Value::as_str)
-                .is_some_and(|id| Some(id) == thread)
-        })
-        .is_some()
+    use studio_runtime_store::{StoredTransferObject, StoredTransferValue};
+    let blocked = agent.native_thread_block.value().is_some_and(|block| {
+        matches!(block, StoredTransferObject::Known(block)
+            if matches!(block.thread_id.value(), Some(StoredTransferValue::Known(id)) if Some(id.as_str()) == thread))
+    })
         || (thread.is_some()
             && agent.error.value().is_some_and(|error| error.known_kind() == Some(studio_runtime_schema::provider_errors::KnownCodexErrorKind::MisalignmentPolicyViolation)))
         || (thread.is_some()
-            && agent
-                .extra
-                .get("nativeTurnError")
-                .and_then(Value::as_object)
-                .is_some_and(|previous| {
-                    previous.get("turnId").and_then(Value::as_str) == agent.turn_id.as_deref()
-                        && previous
-                            .get("error")
-                            .is_some_and(is_misalignment_policy_violation)
-                }));
+            && agent.native_turn_error.value().is_some_and(|previous| {
+                let StoredTransferObject::Known(previous) = previous else { return false };
+                let turn_id = match previous.turn_id.value() {
+                    Some(StoredTransferValue::Known(id)) => Some(id.as_str()),
+                    _ => None,
+                };
+                turn_id == agent.turn_id.as_deref()
+                    && previous.extra.get("error").is_some_and(is_misalignment_policy_violation)
+            }));
     if blocked {
         return Err(CoordinationError::InvalidRequest(
             "This chat is stopped as a precaution. Start or resume another chat.",
@@ -1159,6 +1152,14 @@ mod tests {
     };
 
     #[test]
+    fn exclusions_do_not_block_the_lead_but_block_workers() {
+        let root = studio_runtime_store::AgentRecord::from_value(json!({"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]})).unwrap();
+        let child = studio_runtime_store::AgentRecord::from_value(json!({"id":"child","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"blocked","provider":"codex"})).unwrap();
+        assert!(super::require_not_excluded(&root, &root).is_ok());
+        assert!(super::require_not_excluded(&root, &child).is_err());
+    }
+
+    #[test]
     fn message_limit_counts_unicode_characters_for_paired_inputs() {
         assert!(message_text_within_limit(&"🙂".repeat(10_000)));
         assert!(!message_text_within_limit(&"🙂".repeat(32_001)));
@@ -1248,6 +1249,8 @@ mod tests {
         .expect("lead lookup succeeds")
         .expect("lead exists");
         lead.auto_wake = Some(true);
+        lead.excluded_account_keys =
+            studio_runtime_schema::queue_command::Field::Value(vec!["default".into()]);
         lead.profile_id = studio_runtime_schema::queue_command::Field::Value("profile-1".into());
         lead.profile_instructions =
             studio_runtime_schema::queue_command::Field::Value("Use the project profile.".into());

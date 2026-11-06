@@ -220,6 +220,14 @@
         "id": {
           "type": "string"
         },
+        "layrStoreRoot": {
+          "type": ["string", "null"]
+        },
+        "layrStoreRootRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
         "locationIntents": {
           "additionalProperties": {
             "$ref": "#/$defs/ProjectLocationIntent"

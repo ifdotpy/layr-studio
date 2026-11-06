@@ -9,8 +9,8 @@ The chat selector calls this mode **Layr**.
 Studio defaults to the host store at `<Studio state>/layr-native/store`. The built-in default resolves at use time.
 An operator can select an existing host store with `native-layr configure --store-root`.
 Studio saves this setting in `<Studio state>/layr-native/settings.json`.
-The general Studio settings can select the same default, and the new-chat dialog offers an optional store override when Layr is selected. The override wins over the default. Each prepared chat records its store in `layrStoreRoot`.
-A root switch changes the destination for new chats. Existing chats retain their store and line.
+The general Studio settings can select the same default. Project settings can select a store override, which takes precedence over the global default and built-in store. Each prepared chat records its store in `layrStoreRoot`.
+A root switch changes the destination for new independent chats. Existing chats and their descendants retain their store and line.
 The agent's `PATH` selects the managed Git guard, which refuses Git writes in native lines.
 `NATIVE_LAYR_DIRECTORY` in `runtime-store/src/path.rs` owns the native metadata directory.
 `STORE_DIRECTORY` in `layr_native.rs` owns the store subdirectory.
@@ -96,18 +96,11 @@ Those caches do not automatically belong to named main.
 Studio requires a compatible Layr store format before it prepares a line.
 `layr store-version --json` reports the store format, package version, and build identity.
 An incompatible store returns an error that names the root and both versions.
-Studio can adopt its default store when Layr reports an older format with a metadata-only upgrade.
-The upgrade uses a durable receipt and runs once for the target format.
-A repeat reads the current compatible marker without another upgrade.
-Studio never automatically upgrades an operator-selected store or a link to an external store.
-An operator-selected store requires an explicit upgrade with the approved Layr binary.
-Make a copy of the store before the upgrade.
-Wait for its current Layr commands to finish.
-Then run:
-
-```sh
-studio-runtime-server native-layr upgrade-store --state /path/to/studio-state
-```
+Layr 0.36 reports an unmarked store as `unmarked`, with no store identity and
+`compatible: true`. The next normal Layr command that opens the store writes its
+marker. Studio's readiness check only inspects the store; it does not write the marker.
+Studio refuses incompatible stores. Use a compatible Layr binary for the store,
+or select a compatible store with `native-layr configure --store-root`.
 
 To select the original default for new chats, run:
 

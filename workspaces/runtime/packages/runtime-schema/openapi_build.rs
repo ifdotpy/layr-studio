@@ -10,6 +10,63 @@ use std::path::PathBuf;
 use openapi_to_rust::analysis::{ObjectAdditionalProperties, PropertyConstraints, SchemaType};
 use openapi_to_rust::{CodeGenerator, GeneratorConfig, SchemaAnalyzer};
 
+#[path = "src/agent_projection_fields.rs"]
+mod agent_projection_fields;
+
+// Derive the narrower client views from the generated full contract. Compare the
+// generated Rust types, so even changes in the generator cannot silently drift.
+fn agent_view_conversions(source: &str) -> Result<String, Box<dyn Error>> {
+    let parsed = syn::parse_file(source)?;
+    let fields = |name: &str| -> Result<
+        &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+        Box<dyn Error>,
+    > {
+        parsed
+            .items
+            .iter()
+            .find_map(|item| {
+                let syn::Item::Struct(item) = item else {
+                    return None;
+                };
+                if item.ident != name {
+                    return None;
+                }
+                let syn::Fields::Named(fields) = &item.fields else {
+                    return None;
+                };
+                Some(&fields.named)
+            })
+            .ok_or_else(|| format!("generated {name} is missing or has unnamed fields").into())
+    };
+    let full = fields("AgentEntityDto")?;
+    let mut output = String::new();
+    for target in ["AgentSummaryEntityDto", "AgentDetailEntityDto"] {
+        output.push_str(&format!("\nimpl From<&AgentEntityDto> for {target} {{\nfn from(source: &AgentEntityDto) -> Self {{\nSelf {{\n"));
+        for field in fields(target)? {
+            let name = field
+                .ident
+                .as_ref()
+                .ok_or("generated agent field has no name")?;
+            let original = full
+                .iter()
+                .find(|candidate| candidate.ident.as_ref() == Some(name))
+                .ok_or_else(|| {
+                    format!("{target}.{name} has no corresponding AgentEntityDto field")
+                })?;
+            if original.ty != field.ty {
+                return Err(format!(
+                    "{target}.{name} type {:?} differs from AgentEntityDto type {:?}",
+                    field.ty, original.ty
+                )
+                .into());
+            }
+            output.push_str(&format!("{name}: source.{name}.clone(),\n"));
+        }
+        output.push_str("}\n}\n}\n");
+    }
+    Ok(output)
+}
+
 // Only ingress schemas whose consumers and full constraints have been audited.
 const CONSTRAINED_INGRESS: &[&str] = &[
     "CheckpointPreviewRequest",
@@ -603,6 +660,93 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
         rust_type: "studio_runtime_schema::DeliveryMoment".to_owned(),
         serde_with: Some("studio_runtime_schema::delivery::compatibility".to_owned()),
     };
+    // Stored statuses admit future strings that the current web schema does not
+    // yet name. Keep the schema unchanged until both sides share that owner.
+    for name in [
+        "AgentEntityDto",
+        "AgentSummaryEntityDto",
+        "AgentDetailEntityDto",
+    ] {
+        let SchemaType::Object { properties, .. } = &mut analysis
+            .schemas
+            .get_mut(name)
+            .ok_or("missing agent entity schema")?
+            .schema_type
+        else {
+            return Err("agent entity schema must be an object".into());
+        };
+        if let Some(property) = properties.get_mut("status") {
+            property.schema_type = SchemaType::Primitive {
+                rust_type: "String".to_owned(),
+                serde_with: None,
+            };
+        }
+        // AgentRecord already owns the normalized gate, which is forwarded
+        // without schema filtering or bounds.
+        if let Some(property) = properties.get_mut("taskDefaultGate") {
+            property.schema_type = SchemaType::Primitive {
+                rust_type: "studio_runtime_schema::task_gate::Gate".to_owned(),
+                serde_with: None,
+            };
+        }
+        // Stored counters are u64; the legacy projector does not narrow them.
+        if let Some(property) = properties.get_mut("tokensUsed") {
+            property.schema_type = SchemaType::Primitive {
+                rust_type: "u64".to_owned(),
+                serde_with: None,
+            };
+        }
+        // Preserve the original integer or floating-point spelling of created.
+        if let Some(property) = properties.get_mut("created") {
+            property.schema_type = SchemaType::Primitive {
+                rust_type: "studio_runtime_schema::NonnegativeNumber".to_owned(),
+                serde_with: None,
+            };
+        }
+        // These fields are either unknown stored extensions or legacy unions
+        // whose public shape needs the existing schema filter.
+        for &field in agent_projection_fields::SCHEMA_FILTERED_AGENT_FIELDS {
+            if let Some(property) = properties.get_mut(field) {
+                property.schema_type = SchemaType::Primitive {
+                    rust_type: "studio_json::Value".to_owned(),
+                    serde_with: None,
+                };
+            }
+        }
+    }
+    // History entries forward the stored JSON without narrowing legacy records.
+    // OpenAPI remains the owner of their envelope and the web contract.
+    for name in [
+        "WorkResultEntityDto",
+        "WorkDecisionEntityDto",
+        "WorkReleaseEntityDto",
+    ] {
+        let SchemaType::Object { properties, .. } = &mut analysis
+            .schemas
+            .get_mut(name)
+            .ok_or("missing work history entity schema")?
+            .schema_type
+        else {
+            return Err("work history entity schema must be an object".into());
+        };
+        for field in ["rootId", "value"] {
+            let property = properties
+                .get_mut(field)
+                .ok_or("missing work history field")?;
+            property.schema_type = SchemaType::Primitive {
+                rust_type: "studio_json::OwnedRawJson".to_owned(),
+                serde_with: None,
+            };
+            property.nullable = false;
+        }
+        properties
+            .get_mut("index")
+            .ok_or("missing work history index")?
+            .schema_type = SchemaType::Primitive {
+            rust_type: "u64".to_owned(),
+            serde_with: None,
+        };
+    }
     // Normalization already validates each collection DTO. Keep its parsed value
     // in place rather than deserialize it into a second owned object tree. The
     // OpenAPI oneOf still generates the fully typed TypeScript discriminated union.
@@ -797,7 +941,11 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
         module_lines.push(format!(
             "{attributes}pub mod {module} {{ include!(concat!(env!(\"OUT_DIR\"), \"/generated/{module}.rs\")); }}"
         ));
-        fs::write(path, body.replace("serde_json::", "studio_json::"))?;
+        let mut body = body.replace("serde_json::", "studio_json::");
+        if module == "types" {
+            body.push_str(&agent_view_conversions(&body)?);
+        }
+        fs::write(path, body)?;
     }
     if modules.iter().any(|module| module == "types") {
         module_lines.push("pub use types::*;".to_owned());

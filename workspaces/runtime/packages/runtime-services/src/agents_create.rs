@@ -47,8 +47,6 @@ pub enum MutationError {
     Internal,
     #[error("The team changed. Reload before saving")]
     Stale,
-    #[error("Switch this chat to another account before disabling its current account")]
-    CurrentAccountExcluded,
     #[error("Wait for this turn to end before changing execution settings")]
     InFlight,
     #[error("invalid stored object {table}/{id}")]
@@ -225,12 +223,15 @@ pub(crate) fn sync_projection(
     // typed-boundary: caller still Value-based
     let mut typed = AgentRecord::from_value(record.clone())?;
     mode_fields(&mut typed);
-    let record = typed.value();
     let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
     let context =
-        crate::sync_entity_context::agent_view_context(transaction, &record, server_id.as_deref())?;
-    crate::sync_views::agent_entity_view(&record, &context)
-        .ok_or_else(|| StoreError::SchemaMismatch("agent sync projection has no id".to_owned()))
+        crate::sync_entity_context::agent_view_context(transaction, &typed, server_id.as_deref())?;
+    let view = crate::sync_views::agent_entity_from_record(typed, &context)
+        .ok_or_else(|| StoreError::SchemaMismatch("agent sync projection has no id".to_owned()))?;
+    Ok(serde::Serialize::serialize(
+        &view,
+        studio_json::value::Serializer,
+    )?)
 }
 
 pub fn publish_agent(transaction: &Transaction<'_>, record: &Value) -> Result<Value, StoreError> {
@@ -461,6 +462,8 @@ pub(crate) fn ensure_project(
         worker_environment_revision: Field::Missing,
         workspace_policy: Field::Missing,
         workspace_policy_revision: Field::Missing,
+        layr_store_root: Field::Missing,
+        layr_store_root_revision: Field::Missing,
         location_intents: Field::Missing,
         registration: Field::Missing,
     };
@@ -619,13 +622,6 @@ fn update_exclusions(
     };
     if record.get("isLead").and_then(Value::as_bool) != Some(true) {
         return Err(SettingsError::LeadRequired);
-    }
-    let account = record
-        .get("accountKey")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
-    if excluded.iter().any(|value| value == account) {
-        return Err(SettingsError::CurrentAccountExcluded);
     }
     record["excludedAccountKeys"] = json!(excluded);
     save_agent(transaction, &record, &validate)
@@ -812,6 +808,24 @@ mod tests {
     #[test]
     fn legacy_lead_signature_is_not_equivalent_to_new_bytes() {
         assert!(!super::same_intent(r#"{"id": "lead"}"#, r#"{"id":"lead"}"#));
+    }
+
+    #[test]
+    fn lead_account_can_be_excluded_from_worker_selection() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let record = json!({"id":"lead","rootId":"lead","isLead":true,"epoch":0,"status":"idle","accountKey":"lead-account","provider":"codex","compactions":0});
+        super::save_agent(&tx, &record, &|_, _| true).unwrap();
+        let result = super::update_exclusions(
+            &tx,
+            "lead",
+            None,
+            Some(&["lead-account".into()]),
+            false,
+            |_, _| true,
+        )
+        .unwrap();
+        assert_eq!(result["excludedAccountKeys"], json!(["lead-account"]));
     }
 
     #[test]

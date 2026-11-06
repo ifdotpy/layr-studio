@@ -149,6 +149,35 @@
 :is(.execution-dropdown, .new-chat-model-settings) .execution-profile > * {
   flex-shrink: 0;
 }
+:is(.execution-dropdown, .new-chat-model-settings)
+  .execution-profile
+  > .model-field {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: var(--studio-control-size);
+}
+:is(.execution-dropdown, .new-chat-model-settings)
+  .execution-profile
+  > .account-tiles {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(var(--studio-model-picker-height) * 0.4);
+}
+:is(.execution-dropdown, .new-chat-model-settings)
+  .account-tiles
+  > .mantine-SegmentedControl-root {
+  flex: none;
+}
+:is(.execution-dropdown, .new-chat-model-settings)
+  .account-tiles
+  > .setup-accounts {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 :is(.execution-dropdown, .new-chat-model-settings) .model-picker-role-switch {
   position: sticky;
   top: 0;
