@@ -243,7 +243,8 @@ it("message info reads on open and reopen but not streamed turn metadata changes
     });
   let view = render(read);
   expect(h.get).not.toHaveBeenCalled();
-  view.props.onChange(true);
+  // The closed message info is its plain trigger; the popover mounts on open.
+  view.props.onClick();
   render(read);
   await settle();
   message = {
@@ -275,7 +276,7 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
       onCopy: vi.fn(),
     });
   let view = render(read);
-  view.props.onChange(true);
+  view.props.onClick();
   render(read);
   const notify = required(required(h.subscribe.mock.calls[0])[0]);
   const cost = {

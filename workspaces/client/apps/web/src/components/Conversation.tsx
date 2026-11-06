@@ -1411,7 +1411,11 @@ export default function Conversation(p: {
       p.notify(`Could not remove this message: ${errorText(error)}`);
     }
   });
-  const renderMessage = (m: Message) => (
+  const renderMessage = (m: Message) => {
+    reportPromptComposerRender("message", m.id);
+    return renderMessageArticle(m);
+  };
+  const renderMessageArticle = (m: Message) => (
     <article
       key={messageRenderKey(m)}
       data-message={m.id}
