@@ -21,7 +21,7 @@ describe("peer leads in a team", () => {
               id: "lead",
               name: "Line-backed lead",
               isLead: true,
-              source: AgentSource.managed,
+          source: AgentSource.managed,
               cwd: "/store/projects/id/lines/main",
               projectPath: "/source",
             },
