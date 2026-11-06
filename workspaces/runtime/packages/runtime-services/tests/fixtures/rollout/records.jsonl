@@ -1,0 +1,8 @@
+{"type":"session_meta","timestamp":1,"payload":{"id":"thread","context_window":8192,"future":"ignored"}}
+{"type":"turn_context","timestamp":2,"payload":{"turn_id":"turn","model":"model","effort":"high"}}
+{"type":"event_msg","timestamp":3,"payload":{"type":"task_started","turn_id":"turn"}}
+{"type":"response_item","timestamp":4,"payload":{"type":"message","role":"assistant","content":"synthetic"}}
+{"type":"compacted","timestamp":5,"payload":{"window_number":2,"replacement_history":[{"type":"message","role":"user","content":"replacement"}],"guardian_history":[{"type":"message","role":"assistant","content":"guardian"}]}}
+{"type":"event_msg","timestamp":6,"payload":{"type":"item_completed","item":{"id":"item","type":"AgentMessage","content":[{"text":"synthetic"}],"duration":{"secs":1,"nanos":500000000}}}}
+{"type":"event_msg","timestamp":7,"payload":{"type":"task_complete"}}
+{"type":"future_row","payload":{"future":true},"unknown":42}

@@ -84,6 +84,33 @@ pub struct TranscriptItem {
     pub record: TranscriptItemRecord,
 }
 
+/// A compatibility view for archive and raw full-text readers. Fields not used
+/// by those readers are deliberately ignored, including provider extensions.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredTranscriptView {
+    pub id: Option<String>,
+    pub role: Option<String>,
+    #[serde(default)]
+    pub text: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(default)]
+    pub inputs: studio_runtime_schema::queue_command::Field<Vec<StoredTranscriptInput>>,
+    pub truncated: Option<bool>,
+    after_restore: Option<studio_json::OwnedRawJson>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct StoredTranscriptInput {
+    pub id: Option<String>,
+    pub truncated: Option<bool>,
+}
+
+impl StoredTranscriptView {
+    pub fn after_restore(&self) -> bool {
+        crate::schema::raw_truthy(self.after_restore.as_ref())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TranscriptSearchKind<'a> {
     pub indexed: bool,
@@ -272,27 +299,10 @@ impl TranscriptRepository {
         connection: &Connection,
         item: &TranscriptItem,
     ) -> TranscriptStoreResult<Option<String>> {
-        if let Some(full) = Self::stored_full_text(connection, &item.id)? {
-            return Ok(Some(full));
-        }
-        match item.record.text() {
-            studio_runtime_schema::transcript_record::TranscriptText::InFulltextMissing => Ok(None),
-            studio_runtime_schema::transcript_record::TranscriptText::InFulltextNull => {
-                Err(invalid_record("runtime_items", &item.id))
-            }
-            studio_runtime_schema::transcript_record::TranscriptText::Inline(text) => {
-                if item.record.truncated() != Some(true)
-                    && (item.record.inputs().is_missing() || !text.is_empty())
-                {
-                    Ok(Some(text.clone()))
-                } else {
-                    Ok(None)
-                }
-            }
-        }
+        Self::full_text_record(connection, &item.id, &item.record)
     }
 
-    /// Legacy raw ingress is intentionally not narrowed to the persisted schema.
+    /// Legacy raw ingress and portable history share this compatibility view.
     pub fn full_text_raw(
         connection: &Connection,
         id: &str,
@@ -312,6 +322,53 @@ impl TranscriptRepository {
             }
         }
         Ok(None)
+    }
+
+    pub fn full_text_view(
+        connection: &Connection,
+        id: &str,
+        record: &StoredTranscriptView,
+    ) -> TranscriptStoreResult<Option<String>> {
+        use studio_runtime_schema::queue_command::Field;
+        if let Some(full) = Self::stored_full_text(connection, id)? {
+            return Ok(Some(full));
+        }
+        match &record.text {
+            Field::Missing => Ok(None),
+            Field::Null => Err(invalid_record("runtime_items", id)),
+            Field::Value(text)
+                if record.truncated != Some(true)
+                    && (record.inputs.is_missing() || !text.is_empty()) =>
+            {
+                Ok(Some(text.clone()))
+            }
+            Field::Value(_) => Ok(None),
+        }
+    }
+
+    fn full_text_record(
+        connection: &Connection,
+        id: &str,
+        record: &TranscriptItemRecord,
+    ) -> TranscriptStoreResult<Option<String>> {
+        if let Some(full) = Self::stored_full_text(connection, id)? {
+            return Ok(Some(full));
+        }
+        match record.text() {
+            studio_runtime_schema::transcript_record::TranscriptText::InFulltextMissing => Ok(None),
+            studio_runtime_schema::transcript_record::TranscriptText::InFulltextNull => {
+                Err(invalid_record("runtime_items", id))
+            }
+            studio_runtime_schema::transcript_record::TranscriptText::Inline(text) => {
+                if record.truncated() != Some(true)
+                    && (record.inputs().is_missing() || !text.is_empty())
+                {
+                    Ok(Some(text.clone()))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
     }
 
     fn stored_full_text(
@@ -1350,6 +1407,78 @@ mod tests {
         data_encoding::HEXLOWER
             .decode(STORED_FORMAT_1_GOLDEN.as_bytes())
             .expect("golden hex")
+    }
+
+    #[test]
+    fn legacy_stored_view_accepts_missing_role_and_id() {
+        let view: super::StoredTranscriptView =
+            studio_json::from_str(r#"{"text":"legacy","turnId":7}"#).unwrap();
+        assert!(view.id.is_none());
+        assert!(view.role.is_none());
+    }
+
+    #[test]
+    fn legacy_stored_view_accepts_unknown_role() {
+        let view: super::StoredTranscriptView =
+            studio_json::from_str(r#"{"role":"future","text":"legacy"}"#).unwrap();
+        assert_eq!(view.role.as_deref(), Some("future"));
+    }
+
+    #[test]
+    fn legacy_stored_view_accepts_nullable_text_and_partial_inputs() {
+        let view: super::StoredTranscriptView = studio_json::from_str(
+            r#"{"text":null,"inputs":[{"id":"event","text":"preview","truncated":true}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            view.text,
+            studio_runtime_schema::queue_command::Field::Null
+        ));
+        assert_eq!(view.inputs.value().unwrap()[0].id.as_deref(), Some("event"));
+    }
+
+    #[test]
+    fn legacy_stored_view_accepts_restore_boolean() {
+        let view: super::StoredTranscriptView =
+            studio_json::from_str(r#"{"afterRestore":true}"#).unwrap();
+        assert!(view.after_restore());
+    }
+
+    #[test]
+    fn legacy_stored_view_accepts_restore_empty_array() {
+        let view: super::StoredTranscriptView =
+            studio_json::from_str(r#"{"afterRestore":[]}"#).unwrap();
+        assert!(!view.after_restore());
+    }
+
+    #[test]
+    fn legacy_stored_view_accepts_restore_empty_object() {
+        let view: super::StoredTranscriptView =
+            studio_json::from_str(r#"{"afterRestore":{}}"#).unwrap();
+        assert!(!view.after_restore());
+    }
+
+    #[test]
+    fn raw_full_text_reads_legacy_roles_and_fulltext_null() {
+        let (connection, _) = fulltext_fixture(rusqlite::types::Value::Text("full".into()));
+        for item in [
+            json!({"text":"inline","role":"future","turnId":7}),
+            json!({"text":"inline"}),
+        ] {
+            assert_eq!(
+                TranscriptRepository::full_text_raw(&connection, "other", &item)
+                    .unwrap()
+                    .as_deref(),
+                Some("inline")
+            );
+        }
+        let item = json!({"text":null, "afterRestore":[], "inputs":[{"id":"legacy"}]});
+        assert_eq!(
+            TranscriptRepository::full_text_raw(&connection, "agent:long", &item)
+                .unwrap()
+                .as_deref(),
+            Some("full")
+        );
     }
 
     #[test]

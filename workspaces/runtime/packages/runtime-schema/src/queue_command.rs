@@ -303,8 +303,7 @@ mod tests {
 
     #[test]
     fn queue_command_schema_matches_committed_openapi() {
-        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI");
+        let openapi = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         check_schema_parity(&openapi).expect("queue schemas match their owner");
     }
 

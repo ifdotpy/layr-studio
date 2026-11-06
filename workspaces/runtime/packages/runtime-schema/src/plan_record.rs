@@ -154,11 +154,6 @@ impl PlanRecord {
         view
     }
     pub fn update_native(&mut self, native: Value, updated: f64) -> Result<(), studio_json::Error> {
-        let steps = native
-            .get("plan")
-            .map(Deserialize::deserialize)
-            .transpose()?
-            .unwrap_or_default();
         let native = match native {
             Value::Object(mut fields) => {
                 fields.retain(|key, _| {
@@ -171,6 +166,10 @@ impl PlanRecord {
                 return Err(serde::de::Error::custom("native plan must be an object"));
             }
         };
+        let steps = native
+            .as_ref()
+            .and_then(|plan| plan.plan.clone())
+            .unwrap_or_default();
         self.native = native.map_or(Field::Null, Field::Value);
         self.steps = Some(steps);
         self.updated = Number::from_f64(updated);
@@ -195,6 +194,35 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 mod tests {
     use super::*;
     use studio_json::json;
+
+    #[test]
+    fn native_plan_update_stored_bytes_preserve_projection() {
+        let mut record: PlanRecord = studio_json::from_str(
+            r#"{"id":"a","rootId":"r","text":"x","version":1,"updated":null}"#,
+        )
+        .unwrap();
+        record
+            .update_native(
+                json!({"threadId":"t","plan":[{"future":[1.0,null]}],"ignored":true}),
+                2.0,
+            )
+            .unwrap();
+        assert_eq!(
+            studio_json::to_string(&record).unwrap(),
+            r#"{"id":"a","rootId":"r","text":"x","version":1,"updated":2.0,"native":{"threadId":"t","plan":[{"future":[1.0,null]}]},"steps":[{"future":[1.0,null]}]}"#
+        );
+        let before = studio_json::to_vec(&record).unwrap();
+        assert!(record.update_native(json!({"plan":null}), 3.0).is_err());
+        assert_eq!(studio_json::to_vec(&record).unwrap(), before);
+        let error = record
+            .update_native(json!({"plan":null,"explanation":3}), 3.0)
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid type: integer `3`, expected a string"
+        );
+        assert_eq!(studio_json::to_vec(&record).unwrap(), before);
+    }
 
     #[test]
     fn public_plan_omits_agent_without_changing_stored_record() {

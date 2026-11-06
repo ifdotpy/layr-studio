@@ -158,10 +158,17 @@
 }
 
 .setup-account-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   background: var(--mantine-color-default-hover);
   border-radius: var(--studio-radius-control);
 }
 .setup-account-choice .setup-account {
+  flex: 1;
+  min-width: 0;
+}
+.setup-account-choice > small {
   width: 100%;
 }
 .setup-account-exclusion {

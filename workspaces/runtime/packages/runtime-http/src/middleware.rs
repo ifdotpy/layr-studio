@@ -403,6 +403,11 @@ pub(crate) async fn diagnostics_http_timing(request: Request<Body>, next: Next) 
         );
     }
     if let Some(route) = route {
+        #[cfg(feature = "perf-reporting")]
+        studio_runtime_store::perf_reporting::record_route(
+            &format!("{method} {route}"),
+            started.elapsed(),
+        );
         let response_bytes = response
             .body()
             .size_hint()

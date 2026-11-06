@@ -377,6 +377,31 @@ export function AccountTiles(p: AccountTilesProps) {
               key={account.id}
               className={excluded ? "setup-account-choice" : undefined}
             >
+              {excluded && onExcludedChange && (
+                <Tooltip
+                  label="Exclude from workers and reviewers"
+                  events={{ hover: true, focus: true, touch: false }}
+                >
+                  <Checkbox
+                    className="setup-account-exclusion"
+                    aria-label={`Exclude ${setupAccountName(account)} from workers and reviewers`}
+                    checked={excluded.includes(account.id)}
+                    disabled={
+                      p.disabled ||
+                      (p.accounts.filter((item) => !excluded.includes(item.id))
+                        .length === 1 &&
+                        !excluded.includes(account.id))
+                    }
+                    onChange={(event) =>
+                      onExcludedChange(
+                        event.currentTarget.checked
+                          ? [...excluded, account.id]
+                          : excluded.filter((key) => key !== account.id),
+                      )
+                    }
+                  />
+                </Tooltip>
+              )}
               <AccountTile
                 account={account}
                 selected={
@@ -400,27 +425,6 @@ export function AccountTiles(p: AccountTilesProps) {
                 }
                 onSelect={() => select(account.id)}
               />
-              {excluded && onExcludedChange && (
-                <Checkbox
-                  className="setup-account-exclusion"
-                  label="Exclude for workers and reviewers"
-                  aria-label={`Exclude ${setupAccountName(account)} from workers and reviewers`}
-                  checked={excluded.includes(account.id)}
-                  disabled={
-                    p.disabled ||
-                    (p.accounts.filter((item) => !excluded.includes(item.id))
-                      .length === 1 &&
-                      !excluded.includes(account.id))
-                  }
-                  onChange={(event) =>
-                    onExcludedChange(
-                      event.currentTarget.checked
-                        ? [...excluded, account.id]
-                        : excluded.filter((key) => key !== account.id),
-                    )
-                  }
-                />
-              )}
               {p.accountUnavailableReason?.(account) && (
                 <small>{p.accountUnavailableReason(account)}</small>
               )}

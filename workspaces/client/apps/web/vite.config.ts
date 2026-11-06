@@ -2,15 +2,58 @@ import type {
   ShellManifest,
   RendererManifest,
 } from "./scripts/build-manifests.ts";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { API_SCHEMA_HASH } from "./src/generated/apiSchema.ts";
+import { perfInstrumentation } from "./scripts/perf-instrumentation.ts";
 import { precompressAssets } from "./scripts/precompress-assets.ts";
+const perfRoot: Plugin = {
+  name: "studio-perf-root",
+  enforce: "pre",
+  resolveId(source, importer) {
+    if (source !== "react-dom/client") return;
+    return this.resolve(
+      importer?.endsWith("/src/perf/root.tsx")
+        ? "react-dom/profiling"
+        : fileURLToPath(new URL("./src/perf/root.tsx", import.meta.url)),
+      importer,
+      { skipSelf: true },
+    );
+  },
+};
 const target = "http://127.0.0.1:4620";
 export default defineConfig({
   base: "./",
+  define: {
+    __STUDIO_PERF_REPORTING__: JSON.stringify(
+      process.env.STUDIO_PERF_REPORTING === "1",
+    ),
+  },
+  resolve: {
+    alias:
+      process.env.STUDIO_PERF_REPORTING === "1"
+        ? [
+            {
+              find: "./prompt-composer/PromptComposer",
+              replacement: fileURLToPath(
+                new URL("./src/perf/ProfiledComposer.tsx", import.meta.url),
+              ),
+            },
+            {
+              find: "./conversation/transcript/TurnHistory",
+              replacement: fileURLToPath(
+                new URL("./src/perf/ProfiledHistory.tsx", import.meta.url),
+              ),
+            },
+          ]
+        : [],
+  },
   plugins: [
+    ...(process.env.STUDIO_PERF_REPORTING === "1"
+      ? [perfRoot, perfInstrumentation()]
+      : []),
     precompressAssets(),
     {
       name: "studio-offline-shell",

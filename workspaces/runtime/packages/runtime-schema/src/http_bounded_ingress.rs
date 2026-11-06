@@ -48,8 +48,7 @@ mod tests {
 
     #[test]
     fn ingress_limit_owners_match_openapi_consumers() {
-        let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let checks: &[(&str, u64)] = &[
             (
                 "AccountNameRequest/properties/label/maxLength",

@@ -340,6 +340,8 @@ fn stored(db: &Connection, handle: &str, buffered: u64) -> Result<Option<StoredH
 impl SupervisorJournal {
     pub fn open(root: &Path) -> Result<Self> {
         let mut db = Connection::open(root.join("supervisor.sqlite3"))?;
+        #[cfg(feature = "perf-reporting")]
+        crate::install_profile(&db, crate::StoreDatabaseKind::Other);
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         crate::sqlite_durability::configure_writer(&db)?;
         let page_size: u64 = db.query_row("PRAGMA page_size", [], |r| {

@@ -259,6 +259,8 @@ impl WalBackup {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(io::Error::other)?;
+        #[cfg(feature = "perf-reporting")]
+        crate::install_profile(&reader, crate::StoreDatabaseKind::Canvas);
         reader
             .execute_batch("BEGIN; SELECT count(*) FROM sqlite_master;")
             .map_err(io::Error::other)?;

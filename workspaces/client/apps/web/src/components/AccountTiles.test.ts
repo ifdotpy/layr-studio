@@ -15,7 +15,34 @@ import {
   AccountTiles,
 } from "./AccountTiles";
 
+const checkboxProps = vi.hoisted(() => vi.fn());
+const tooltipProps = vi.hoisted(() => vi.fn());
+vi.mock("@mantine/core", async (load) => {
+  const actual = await load<typeof import("@mantine/core")>();
+  return {
+    ...actual,
+    Checkbox: (props: Parameters<typeof actual.Checkbox>[0]) => {
+      checkboxProps(props);
+      return createElement("input", {
+        type: "checkbox",
+        "aria-label": props["aria-label"],
+      });
+    },
+    Tooltip: (props: {
+      label: string;
+      children: React.ReactNode;
+      events?: object;
+    }) => {
+      tooltipProps(props);
+      return createElement("span", { title: props.label }, props.children);
+    },
+  };
+});
+
 test("account tiles distinguish the lead choice from worker exclusions", () => {
+  checkboxProps.mockClear();
+  tooltipProps.mockClear();
+  const onExcludedChange = vi.fn();
   const accounts: Account[] = [
     {
       id: "lead",
@@ -44,7 +71,7 @@ test("account tiles distinguish the lead choice from worker exclusions", () => {
         value: "lead",
         onChange: () => {},
         excludedAccountKeys: ["lead"],
-        onExcludedAccountKeysChange: () => {},
+        onExcludedAccountKeysChange: onExcludedChange,
       }),
     ),
   );
@@ -55,6 +82,26 @@ test("account tiles distinguish the lead choice from worker exclusions", () => {
   expect(html).toContain(
     'aria-label="Exclude Worker from workers and reviewers"',
   );
+  expect(html).not.toContain("Exclude for workers and reviewers");
+  expect(checkboxProps.mock.calls[0]![0].label).toBeUndefined();
+  expect(html).toContain('title="Exclude from workers and reviewers"');
+  expect(tooltipProps).toHaveBeenCalledWith(
+    expect.objectContaining({
+      label: "Exclude from workers and reviewers",
+      events: { hover: true, focus: true, touch: false },
+    }),
+  );
+  expect(html.indexOf('aria-label="Exclude Lead')).toBeLessThan(
+    html.indexOf('aria-label="Select account Lead"'),
+  );
+  checkboxProps.mock.calls[0]![0].onChange({
+    currentTarget: { checked: false },
+  });
+  expect(onExcludedChange).toHaveBeenCalledWith([]);
+  checkboxProps.mock.calls[1]![0].onChange({
+    currentTarget: { checked: true },
+  });
+  expect(onExcludedChange).toHaveBeenCalledWith(["lead", "worker"]);
 });
 
 const reading = (fields: object = {}) =>
