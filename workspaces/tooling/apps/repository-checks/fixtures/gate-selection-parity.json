@@ -1,7 +1,7 @@
 {
   "baselineRevision": "7946e68cfc30b82a5f5787a3ced7728848234177",
   "platform": "linux-x86_64",
-  "evidence": "Native nextest evaluates both the pre-migration scoped facade union and profile.fast against the same current workspace test binaries. The sole explicit addition is the schema-lazy preparation witness requested during integration.",
+  "evidence": "Native nextest evaluates both the pre-migration scoped facade union and profile.fast against the same current workspace test binaries. The sole explicit addition is the schema-lazy preparation witness requested during integration. This is historical evidence before VM removal; clause descriptions, counts and digest do not describe the current selection.",
   "selectionOwner": ".config/nextest.toml profile.fast",
   "beforeUnique": 526,
   "afterUnique": 527,
