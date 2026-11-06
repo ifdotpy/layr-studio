@@ -997,6 +997,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_pause_for_an_ended_turn_changes_nothing() {
+        let (app, store, _directory) = app_with_queue().await;
+        store
+            .transaction(|tx| {
+                let mut agent = AgentRepository::get(tx, &"workspace".into())?.expect("agent");
+                agent.turn_id = Some("now".into());
+                agent.in_flight = Some(true);
+                AgentRepository::put(tx, &agent)?;
+                Ok(())
+            })
+            .await
+            .expect("running turn");
+        let before = agent_epoch(&store).await;
+        let mut late = pause(&RequestIdentity::issue_root(), 1);
+        late["body"]["turn"] = json!("old");
+        let (status, body) = post(&app, None, late).await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            agent_epoch(&store).await,
+            before,
+            "the running turn is not paused"
+        );
+        let mut current = pause(&RequestIdentity::issue_root(), 2);
+        current["body"]["turn"] = json!("now");
+        let (status, body) = post(&app, None, current).await;
+        // The named turn runs, so the pause goes to interrupt it; this app has no worker.
+        assert_eq!(status, 501, "{body}");
+        assert_eq!(
+            body["error"],
+            "Not implemented: requires account-worker/agent-interrupt"
+        );
+    }
+
+    #[tokio::test]
     async fn pause_applies_once_and_replays() {
         let (app, store, _directory) = app_with_queue().await;
         let before = agent_epoch(&store).await;

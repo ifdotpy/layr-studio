@@ -23180,6 +23180,12 @@
           "descendants": {
             "default": true,
             "type": "boolean"
+          },
+          "turn": {
+            "description": "The turn to interrupt. When set, the command acts only while that turn still runs, so a late stop never interrupts the next turn. Absent stops whatever runs.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "type": "object"

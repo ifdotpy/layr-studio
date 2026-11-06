@@ -632,22 +632,22 @@ pub fn execute_sync(
             }
             reference
         }
-        Command::Stop { target, body } => {
-            reply = run_stop(
+        Command::Stop { target, body } | Command::Pause { target, body } => {
+            let pause = matches!(request.command, Command::Pause { .. });
+            if turn_still_runs(
                 tx,
-                &stop_action(principal, target.as_str(), body.descendants, false),
-                now,
-                ports,
-            )?;
-            agent_reference(tx, target.as_str())?
-        }
-        Command::Pause { target, body } => {
-            reply = run_stop(
-                tx,
-                &stop_action(principal, target.as_str(), body.descendants, true),
-                now,
-                ports,
-            )?;
+                target.as_str(),
+                body.turn.as_ref().map(|turn| turn.as_str()),
+            )? {
+                reply = run_stop(
+                    tx,
+                    &stop_action(principal, target.as_str(), body.descendants, pause),
+                    now,
+                    ports,
+                )?;
+            } else {
+                reply = studio_json::json!({"stopped": [], "turnEnded": true});
+            }
             agent_reference(tx, target.as_str())?
         }
         Command::Delete { target, .. } => {
@@ -747,6 +747,24 @@ pub fn execute_agent_send(
 
 /// Reference of an answered approval. An approval row has no revision of its own, so the
 /// revision is 0 and the id alone names it.
+/// True when a stop that names `turn` still applies: the chat runs that turn now. An idle
+/// chat keeps the id of its last turn, so the turn must also be in flight. A stop that
+/// names no turn always applies.
+fn turn_still_runs(
+    tx: &Transaction<'_>,
+    chat: &str,
+    turn: Option<&str>,
+) -> Result<bool, CommandError> {
+    let Some(turn) = turn else {
+        return Ok(true);
+    };
+    Ok(
+        AgentRepository::get(tx, &AgentId::from(chat))?.is_some_and(|agent| {
+            agent.in_flight == Some(true) && agent.turn_id.as_deref() == Some(turn)
+        }),
+    )
+}
+
 pub fn approval_reference(id: &str) -> RequestReference {
     RequestReference {
         kind: RequestReferenceKind::Approval,

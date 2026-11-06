@@ -294,6 +294,10 @@ fn answer_fields(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 pub struct StopBody {
     #[serde(default = "default_true")]
     pub descendants: bool,
+    /// The turn to interrupt. When set, the command acts only while that turn still runs,
+    /// so a late stop never interrupts the next turn. Absent stops whatever runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<BoundedText<1, COMMAND_TARGET_MAX_CHARS>>,
 }
 
 fn default_true() -> bool {
@@ -480,7 +484,10 @@ mod tests {
             pause.command,
             Command::Pause {
                 target: "chat".to_owned().try_into().expect("target"),
-                body: StopBody { descendants: true }
+                body: StopBody {
+                    descendants: true,
+                    turn: None,
+                }
             }
         );
         let answer: CommandRequest = studio_json::from_str(&format!(
@@ -522,7 +529,10 @@ mod tests {
             request.command,
             Command::Stop {
                 target: "t".to_owned().try_into().expect("target"),
-                body: StopBody { descendants: true }
+                body: StopBody {
+                    descendants: true,
+                    turn: None,
+                }
             }
         );
     }

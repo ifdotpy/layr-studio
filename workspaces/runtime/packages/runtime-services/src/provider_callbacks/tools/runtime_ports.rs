@@ -573,7 +573,10 @@ impl super::runtime_dispatch::InterruptPort for ManagedInterruptAdapter {
                         .to_owned()
                         .try_into()
                         .map_err(|_| Error::Invalid("Invalid target"))?,
-                    body: StopBody { descendants: false },
+                    body: StopBody {
+                        descendants: false,
+                        turn: None,
+                    },
                 },
             )
             .map_err(|_| Error::Invalid("Invalid command client id"))?;

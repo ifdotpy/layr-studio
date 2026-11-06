@@ -11311,6 +11311,8 @@ export interface components {
     CommandStopBody: {
       /** @default true */
       descendants?: boolean | undefined;
+      /** @description The turn to interrupt. When set, the command acts only while that turn still runs, so a late stop never interrupts the next turn. Absent stops whatever runs. */
+      turn?: string | undefined;
     };
     CommandWithdrawBody: {
       message: string;

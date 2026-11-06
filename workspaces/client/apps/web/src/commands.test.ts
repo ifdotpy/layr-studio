@@ -77,6 +77,18 @@ describe("command client", () => {
     expect(sent[0]!.id).not.toBe(sent[1]!.id);
   });
 
+  it("names the running turn in a stop only when it is given", async () => {
+    const sent: CommandRequest[] = [];
+    const client = createCommandClient(memoryStorage(), async (body) => {
+      sent.push(body);
+      return applied;
+    });
+    await client.stop("chat", false, "turn-1");
+    await client.stop("chat", false);
+    expect(sent[0]!.body).toEqual({ descendants: false, turn: "turn-1" });
+    expect(sent[1]!.body).toEqual({ descendants: false });
+  });
+
   it("sends a peer lead message with the grant as target and keeps id and number on retry", async () => {
     const sent: CommandRequest[] = [];
     const client = createCommandClient(memoryStorage(), async (body) => {

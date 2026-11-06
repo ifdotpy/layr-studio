@@ -167,8 +167,17 @@ export function createCommandClient(
   return {
     make,
     run,
-    stop: (chat: string, descendants: boolean, options?: CommandOptions) =>
-      run(make("stop", chat, { descendants }), options),
+    /** Stop the chat. A named `turn` stops only that turn, so a late click never stops the next. */
+    stop: (
+      chat: string,
+      descendants: boolean,
+      turn?: string,
+      options?: CommandOptions,
+    ) =>
+      run(
+        make("stop", chat, { descendants, ...(turn ? { turn } : {}) }),
+        options,
+      ),
     withdraw: (chat: string, message: string, options?: CommandOptions) =>
       run(make("withdraw", chat, { message }), options),
     /** Pause the chat. `descendants` pauses its workers too. */

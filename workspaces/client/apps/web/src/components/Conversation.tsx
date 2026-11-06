@@ -2419,8 +2419,12 @@ export default function Conversation(p: {
                               if (stopShown || !agentId) return;
                               const attempt = ++stopAttempt.current;
                               setStopping(true);
+                              const turn =
+                                agent.inFlight && agent.turnId
+                                  ? agent.turnId
+                                  : undefined;
                               void command
-                                .stop(agentId, false)
+                                .stop(agentId, false, turn)
                                 .then(p.refresh)
                                 .catch((e) => p.notify(errorText(e)))
                                 .finally(() => {
