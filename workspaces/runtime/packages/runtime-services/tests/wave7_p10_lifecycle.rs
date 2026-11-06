@@ -94,6 +94,12 @@ fn cases() -> Vec<Value> {
             .expect("frozen lifecycle cases");
     // The frozen corpus names the former stop, which is now the `pause` action.
     for case in &mut cases {
+        if case["action"]["action"] == "delete" {
+            case["action"]["request_id"] =
+                json!(studio_runtime_schema::persistence::RequestIdentity::issue_root());
+            // This fixture has no running commands or unresolved provider interrupt.
+            case["expected"]["result"]["stopped"] = json!("confirmed");
+        }
         if case["action"]["action"] == "stop" {
             case["action"]["action"] = json!("pause");
         }
@@ -1479,12 +1485,12 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                     assert_eq!(interrupt["outcome"], "unknown");
                     assert_eq!(interrupt["requestTicket"], request.operation);
                 } else {
-                    // The command cleanup follows the settled interrupt.
+                    // The receipt is recorded after command cleanup completes.
                     assert_eq!(
                         request.method,
                         studio_runtime_providers::Method::ThreadBackgroundTerminalsClean
                     );
-                    assert_eq!(interrupt["outcome"], "accepted");
+                    assert_eq!(interrupt["outcome"], "unknown");
                     assert_eq!(request.params, json!({"threadId":agent["threadId"]}));
                 }
                 self.calls.lock().expect("calls lock").push(request.clone());
@@ -2128,11 +2134,8 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
         .collect::<Vec<_>>();
     assert_eq!(
         sent.iter().map(|(method, _)| *method).collect::<Vec<_>>(),
-        [
-            studio_runtime_providers::Method::TurnInterrupt,
-            studio_runtime_providers::Method::ThreadBackgroundTerminalsClean
-        ],
-        "an unknown interrupt is still followed by the command cleanup once"
+        [studio_runtime_providers::Method::TurnInterrupt],
+        "cleanup waits until the unknown interrupt is confirmed"
     );
     ports
         .execute(&action, case["now"].as_f64().expect("time"))
