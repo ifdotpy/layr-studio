@@ -127,6 +127,7 @@ test("Chat prefetch browser", async ({
         const result = {
           workspaceId,
           documents: current && current.seq > after ? [current] : [],
+          complete: true,
           checkpoint: { seq: current?.seq || after },
         } satisfies LegacyPullFixture;
         const hold = holds.get(`${name}:${scope}`);

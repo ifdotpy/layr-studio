@@ -667,6 +667,7 @@ test(
                     },
                   ]
                 : [],
+            complete: true,
             checkpoint: { seq: Math.max(after, seq) },
           } satisfies LegacyPullFixture,
         });

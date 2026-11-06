@@ -38,7 +38,9 @@ export type FixturePull = { scope: string | null; after: number };
 export function legacyPullResponse(
   value: LegacySyncPullResponse | LegacyEntityPullResponse,
 ): string {
-  return JSON.stringify(value);
+  return JSON.stringify(
+    "reset" in value && value.reset ? value : { complete: true, ...value },
+  );
 }
 
 // The old entity-delivery fixture uses an empty partial value as its tombstone.
@@ -71,12 +73,12 @@ export type LegacyEntityFrame = Omit<
 };
 
 export type LegacySyncPullResponse =
-  | Omit<components["schemas"]["SyncPullResponse"], "generation">
+  | Omit<components["schemas"]["SyncPullResponse"], "generation" | "complete">
   | Omit<components["schemas"]["SyncPullResetResponse"], "generation">;
 
 type LegacyEntityPullResponse = Omit<
   components["schemas"]["SyncPullResponse"],
-  "generation" | "documents"
+  "generation" | "complete" | "documents"
 > & {
   documents: LegacyAgentChange[];
 };

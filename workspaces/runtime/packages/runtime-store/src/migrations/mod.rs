@@ -95,6 +95,7 @@ mod m2026_11_04_direct_read_time;
 mod m2026_11_04_window_read_time;
 mod m2026_11_04_work_read_time;
 mod m2026_11_05_repair_event_order;
+pub(crate) mod m2026_11_06_idle_unload;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -209,6 +210,11 @@ const NOVEMBER_5: MigrationDate = MigrationDate {
     year: 2026,
     month: 11,
     day: 5,
+};
+const NOVEMBER_6: MigrationDate = MigrationDate {
+    year: 2026,
+    month: 11,
+    day: 6,
 };
 const OCTOBER_30: MigrationDate = MigrationDate {
     year: 2026,
@@ -1582,6 +1588,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_05_repair_event_order::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-idle-unload",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with idle-unload source tables",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_idle_unload::apply(c.transaction),
     },
 ];
 

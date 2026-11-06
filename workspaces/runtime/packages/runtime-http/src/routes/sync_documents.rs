@@ -160,6 +160,7 @@ pub(crate) async fn pull(
             .map_err(super::transcript::map_transcript_error)?;
         // Python samples generation after transcript maintenance commits.
         let generation_store = store.clone();
+        response["complete"] = json!(true);
         response["generation"] = json!(
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/sync_documents/transcript-generation",
@@ -204,6 +205,7 @@ pub(crate) async fn pull(
                         .map_err(|_| ApiError::internal())?;
                     let checkpoint = documents.last().map_or(after, |document| document.sequence);
                     let response = crate::generated::SyncPullResponse {
+                        complete: (documents.len() as i64) < limit,
                         checkpoint: crate::generated::SyncCheckpoint { seq: checkpoint },
                         documents: documents
                             .into_iter()
@@ -900,6 +902,7 @@ fn pull_entities(
         };
     }
     let response = crate::generated::SyncPullResponse {
+        complete: checkpoint >= max_sequence,
         checkpoint: crate::generated::SyncCheckpoint { seq: checkpoint },
         documents,
         floor: None,
@@ -1318,6 +1321,7 @@ mod vault_maintenance_tests {
         let page_json = json!({
             "workspaceId":"workspace-1",
             "generation":7,
+            "complete":false,
             "documents":[{"id":"entity:agent:a","payload":"{}","seq":8,"_deleted":false}],
             "checkpoint":{"seq":8},
             "maxSeq":10,
@@ -1326,6 +1330,7 @@ mod vault_maintenance_tests {
         let page: crate::generated::SyncPullResponse =
             studio_json::from_value(page_json.clone()).expect("legacy page projects to DTO");
         let direct_page = crate::generated::SyncPullResponse {
+            complete: false,
             checkpoint: crate::generated::SyncCheckpoint { seq: 8 },
             documents: vec![
                 crate::generated::SyncPullResponseDocumentsItemUnion::SyncDocument(
@@ -1474,6 +1479,7 @@ mod vault_maintenance_tests {
         .expect("pull retries against the updated room snapshot");
 
         assert!(response_value(&response)["documents"].is_array());
+        assert_eq!(response_value(&response)["complete"], true);
         assert_eq!(
             interleavings.load(std::sync::atomic::Ordering::Relaxed),
             2,
@@ -1901,6 +1907,7 @@ mod vault_maintenance_tests {
         let cold_elapsed = started.elapsed();
         let response = response_value(&response);
         assert_eq!(response["documents"].as_array().unwrap().len(), 100);
+        assert_eq!(response["complete"], false);
         assert_eq!(store.committed_change_generation(), seeded_generation);
         let reader = store.test_reader().expect("store reader");
         assert!(sync_policy::has_complete_entity_seed(&reader).expect("seed marker reads"));
