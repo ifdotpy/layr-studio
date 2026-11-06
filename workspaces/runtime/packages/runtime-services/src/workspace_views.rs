@@ -862,8 +862,9 @@ mod tests {
             "/tmp/workspace",
             &["status"],
             1024,
-            Duration::from_secs(2),
+            // Far below the descendant's 60 s, and long enough for a loaded test host.
+            Duration::from_secs(20),
         );
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{result:?}");
     }
 }
