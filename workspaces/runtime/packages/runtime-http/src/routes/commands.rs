@@ -85,6 +85,7 @@ async fn command(
         | Command::Resolve { .. }
         | Command::Pause { .. }
         | Command::Delete { .. }
+        | Command::RestoreDeletedRoot { .. }
         | Command::LeadMessage { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, transaction_request) = (ports.clone(), request.clone());

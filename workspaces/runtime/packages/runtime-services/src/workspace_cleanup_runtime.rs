@@ -1537,6 +1537,154 @@ mod tests {
     }
 
     #[test]
+    fn restore_keeps_cleaned_workspaces_deleted_and_refuses_a_cleaned_root() {
+        use crate::agent_management::{Action, ManagementSnapshot, Records, decide_with_effects};
+        use std::collections::BTreeMap;
+
+        for cleaned_root in [false, true] {
+            for native in [false, true] {
+                let make = |id: &str, parent: Option<&str>| {
+                    json!({
+                        "id":id, "rootId":"root", "parentId":parent, "epoch":1,
+                        "status":"paused", "isLead":parent.is_none(), "compactions":0,
+                        "provider":"codex", "accountKey":"default", "workspaceMode":"layr-native",
+                        "layrReady":true, "layrLine":id, "cwd":"/project"
+                    })
+                };
+                let snapshot = ManagementSnapshot::from_records(Records {
+                    tables: BTreeMap::from([(
+                        "runtime_agents".into(),
+                        vec![make("root", None), make("child", Some("root"))],
+                    )]),
+                })
+                .expect("snapshot");
+                let deleted = decide_with_effects(
+                    &snapshot,
+                    &Action::Delete {
+                        target: "root".into(),
+                        request_id: "delete".into(),
+                    },
+                    10.0,
+                )
+                .expect("delete");
+                let mut rows: Vec<_> = deleted
+                    .writes
+                    .into_iter()
+                    .filter(|w| w.table == "runtime_agents")
+                    .map(|w| w.record)
+                    .collect();
+                for row in &mut rows {
+                    row.as_object_mut()
+                        .expect("record")
+                        .remove("workspaceCleanupIntent");
+                    if row["id"] == if cleaned_root { "root" } else { "child" } {
+                        let effect = if native {
+                            super::CompletedEffect::ReleaseNativeLine
+                        } else {
+                            row["workspaceMode"] = json!("worktree");
+                            super::CompletedEffect::RemoveWorktree {
+                                identity: json!({"repository":"/project","relative":"worker"}),
+                                bytes: Value::Null,
+                            }
+                        };
+                        super::apply_effect_result(row, &effect).expect("cleanup completed");
+                    }
+                }
+                let snapshot = ManagementSnapshot::from_records(Records {
+                    tables: BTreeMap::from([("runtime_agents".into(), rows)]),
+                })
+                .expect("deleted snapshot");
+                let restore = decide_with_effects(
+                    &snapshot,
+                    &Action::RestoreDeletedRoot {
+                        target: "root".into(),
+                    },
+                    20.0,
+                );
+                if cleaned_root {
+                    assert!(restore.is_err(), "cleaned root, native={native}");
+                } else {
+                    let restored = restore.expect("restore root");
+                    assert_eq!(restored.writes.len(), 1, "cleaned child, native={native}");
+                    assert_eq!(restored.writes[0].record["id"], "root");
+                }
+            }
+        }
+    }
+
+    fn restore_after_vm_cleanup(cleaned_root: bool) {
+        use crate::agent_management::{Action, ManagementSnapshot, Records, decide_with_effects};
+        use std::collections::BTreeMap;
+        let make = |id: &str, parent: Option<&str>| {
+            json!({
+                "id":id, "rootId":"root", "parentId":parent, "epoch":1,
+                "status":"paused", "isLead":parent.is_none(), "compactions":0,
+                "provider":"codex", "accountKey":"default", "executionMode":"vm",
+                "layrReady":true, "cwd":"/project"
+            })
+        };
+        let snapshot = ManagementSnapshot::from_records(Records {
+            tables: BTreeMap::from([(
+                "runtime_agents".into(),
+                vec![make("root", None), make("child", Some("root"))],
+            )]),
+        })
+        .expect("snapshot");
+        let deleted = decide_with_effects(
+            &snapshot,
+            &Action::Delete {
+                target: "root".into(),
+                request_id: "delete".into(),
+            },
+            10.0,
+        )
+        .expect("delete");
+        let mut rows: Vec<_> = deleted
+            .writes
+            .into_iter()
+            .filter(|w| w.table == "runtime_agents")
+            .map(|w| w.record)
+            .collect();
+        for row in &mut rows {
+            row.as_object_mut()
+                .expect("record")
+                .remove("workspaceCleanupIntent");
+            if row["id"] == if cleaned_root { "root" } else { "child" } {
+                super::apply_effect_result(row, &super::CompletedEffect::ReleaseVmLine)
+                    .expect("cleanup completed");
+            }
+        }
+        let snapshot = ManagementSnapshot::from_records(Records {
+            tables: BTreeMap::from([("runtime_agents".into(), rows)]),
+        })
+        .expect("deleted snapshot");
+        let restore = decide_with_effects(
+            &snapshot,
+            &Action::RestoreDeletedRoot {
+                target: "root".into(),
+            },
+            20.0,
+        );
+        if cleaned_root {
+            assert!(restore.is_err(), "cleaned VM root");
+        } else {
+            let restored = restore.expect("restore root");
+            assert_eq!(restored.writes.len(), 1, "cleaned VM child");
+            assert_eq!(restored.writes[0].record["id"], "root");
+        }
+    }
+
+    #[test]
+    fn restore_refuses_cleaned_vm_root() {
+        restore_after_vm_cleanup(true);
+    }
+
+    #[test]
+    fn restore_keeps_cleaned_vm_child_deleted() {
+        restore_after_vm_cleanup(false);
+    }
+
+    #[test]
     fn shared_workspace_agent_never_plans_a_directory_removal() {
         let agent = json!({
             "id":"shared-child", "cwd":"/project", "workspaceMode":"shared",
