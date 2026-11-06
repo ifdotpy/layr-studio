@@ -23521,6 +23521,8 @@ export interface components {
     /** SyncPullResponse */
     SyncPullResponse: {
       checkpoint: components["schemas"]["SyncCheckpoint"];
+      /** Complete */
+      complete: boolean;
       /** Documents */
       documents: (
         | components["schemas"]["SyncDocument"]
