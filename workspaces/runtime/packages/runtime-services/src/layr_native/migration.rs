@@ -866,7 +866,7 @@ mod tests {
         .expect("fixture operation succeeds");
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
             .expect("fixture operation succeeds");
-        let _binary_override = crate::layr_native::override_layr_binary(binary.clone());
+        let _binary_override = crate::layr_native::override_layr_binary(binary);
         let initial = migrate(&state, &project, true).expect("fixture operation succeeds");
         let id = initial["projectId"]
             .as_str()

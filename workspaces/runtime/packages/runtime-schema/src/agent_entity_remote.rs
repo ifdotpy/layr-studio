@@ -129,8 +129,7 @@ mod tests {
 
     #[test]
     fn published_components_match_owners() {
-        let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }

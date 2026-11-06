@@ -325,8 +325,7 @@ mod tests {
 
     #[test]
     fn agent_role_matches_openapi_and_its_wire_names() {
-        let openapi: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let openapi: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let roles = [
             AgentRole::Orchestrator,
             AgentRole::Implementer,
