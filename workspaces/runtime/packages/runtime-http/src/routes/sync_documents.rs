@@ -1474,6 +1474,7 @@ mod vault_maintenance_tests {
         .expect("pull retries against the updated room snapshot");
 
         assert!(response_value(&response)["documents"].is_array());
+        assert_eq!(response_value(&response)["complete"], true);
         assert_eq!(
             interleavings.load(std::sync::atomic::Ordering::Relaxed),
             2,

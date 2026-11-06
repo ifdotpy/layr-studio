@@ -40,6 +40,28 @@ function recordPuts(storage: { put: { mock: { calls: unknown[][] } } }) {
   );
 }
 
+// Captured from the release that could persist a truncated initial pull.
+it("discards a ready state cache from the truncated-pull release", async () => {
+  const state = { kind: "state" } as const;
+  const storage = {
+    get: vi.fn().mockResolvedValue({
+      version: 2,
+      contractHash: "3717ac2c35e940d644d7aed8e2e1f05c7ebd32e96bc308ac788568f956cfe412",
+      subscription: subscriptionKey(state),
+      cursor,
+      data: [],
+    }),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const collection = new LocalCollection("fixture");
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  expect(await cache.load(state)).toBeUndefined();
+  expect(collection.all()).toEqual([]);
+  expect(storage.delete).toHaveBeenCalledOnce();
+  cache.stop();
+});
+
 it("hydrates the cached data before returning its resume cursor", async () => {
   const storage = {
     get: vi.fn().mockResolvedValue({
