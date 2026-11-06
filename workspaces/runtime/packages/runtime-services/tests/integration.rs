@@ -54,6 +54,7 @@ mod recovery_history;
 mod recovery_store;
 mod relocation_corpus;
 mod removed_budget_fields;
+mod rollout_characterization;
 mod rules_engine_corpus;
 mod rules_tick_atomic;
 mod scheduler_python_parity;

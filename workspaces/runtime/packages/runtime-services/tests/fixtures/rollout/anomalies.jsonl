@@ -1,0 +1,7 @@
+{"type":"session_meta","timestamp":1,"payload":{"session_id":"thread","context_window":4096}}
+{"payload":{"type":"task_started","turn_id":"missing"}}
+{"type":7,"payload":{"type":"task_started","turn_id":"number"}}
+{"type":"future_row","type":"event_msg","timestamp":2,"payload":{"type":"task_started","turn_id":"duplicate"}}
+{"type":"future_row","payload":{"ignored":true},"unknown_field":"synthetic"}
+not-json
+[]
