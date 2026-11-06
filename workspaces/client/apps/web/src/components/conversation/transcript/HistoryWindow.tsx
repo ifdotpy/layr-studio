@@ -700,7 +700,9 @@ export default function HistoryWindow({
       for (const entry of entries) {
         const row = entry.target as HTMLElement;
         const id = row.dataset.historyRow!;
-        const height = row.getBoundingClientRect().height;
+        const height =
+          entry.borderBoxSize[0]?.blockSize ??
+          row.getBoundingClientRect().height;
         if (heights.current.get(id) !== height) {
           heights.current.set(id, height);
           changed = true;

@@ -20,7 +20,11 @@ import { useWorkspacePanelWidth } from "./components/shell/workspacePanelWidth";
 import { useWorkspaceLayout } from "./layout/useWorkspaceLayout";
 import { layoutQueries } from "./layout/layout-contract.generated";
 import { restoreSidebarFocus } from "./components/sidebar/SidebarFrame";
-import { sendsTextFile, type SendMessageBody } from "./commands";
+import {
+  codePointsExceed,
+  sendsTextFile,
+  type SendMessageBody,
+} from "./commands";
 import {
   StudioErrorsScope,
   useStudioErrorsState,
@@ -975,7 +979,7 @@ export default function App({ active = true }: { active?: boolean }) {
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {
         const value = typeof text === "function" ? text(old[id] || "") : text;
-        if (Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS) {
+        if (codePointsExceed(value, MAX_DRAFT_TEXT_CODEPOINTS)) {
           notify(
             `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
           );

@@ -32,7 +32,21 @@ export function useWorkspaceLayout(options: {
     if (!host) return;
     const document = host.ownerDocument;
     const view = document.defaultView!;
+    const root = document.documentElement;
+    // Root style writes come every frame during drags (custom properties);
+    // only these inputs change the root font size or the landscape flag.
+    const inputs = () =>
+      `${root.className}|${root.style.fontSize}|${root.getAttribute("data-viewport-short-landscape")}`;
+    let measured: string | undefined;
+    let rootFontPx = Number.NaN;
+    let frame = 0;
     const update = () => {
+      frame = 0;
+      const key = inputs();
+      if (key !== measured) {
+        measured = key;
+        rootFontPx = Number.parseFloat(view.getComputedStyle(root).fontSize);
+      }
       const bounds = host.getBoundingClientRect();
       const next = {
         host: {
@@ -48,31 +62,34 @@ export function useWorkspaceLayout(options: {
           width: view.innerWidth,
           height: view.innerHeight,
         },
-        rootFontPx: Number.parseFloat(
-          view.getComputedStyle(document.documentElement).fontSize,
-        ),
-        shortTouchLandscape: document.documentElement.hasAttribute(
-          "data-viewport-short-landscape",
-        ),
+        rootFontPx,
+        shortTouchLandscape: root.hasAttribute("data-viewport-short-landscape"),
       };
       setGeometry((old) =>
         JSON.stringify(old) === JSON.stringify(next) ? old : next,
       );
     };
-    const resize = new ResizeObserver(update);
+    // One measurement per frame, after the frame's own changes.
+    const schedule = () => {
+      if (!frame) frame = view.requestAnimationFrame(update);
+    };
+    const resize = new ResizeObserver(schedule);
     resize.observe(host);
-    resize.observe(document.documentElement);
-    const preferences = new MutationObserver(update);
-    preferences.observe(document.documentElement, {
+    resize.observe(root);
+    const preferences = new MutationObserver(() => {
+      if (inputs() !== measured) schedule();
+    });
+    preferences.observe(root, {
       attributes: true,
       attributeFilter: ["style", "class", "data-viewport-short-landscape"],
     });
-    view.addEventListener("resize", update);
+    view.addEventListener("resize", schedule);
     update();
     return () => {
+      view.cancelAnimationFrame(frame);
       resize.disconnect();
       preferences.disconnect();
-      view.removeEventListener("resize", update);
+      view.removeEventListener("resize", schedule);
     };
   }, [host]);
   return {

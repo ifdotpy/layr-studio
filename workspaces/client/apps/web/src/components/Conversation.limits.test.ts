@@ -103,7 +103,10 @@ function render(agent: Props["agent"], reloadLimits: () => void) {
       matches: false,
     }),
   });
-  vi.stubGlobal("document", { querySelector: () => null, documentElement: {} });
+  vi.stubGlobal("document", {
+    querySelector: () => null,
+    documentElement: { dataset: {}, style: { getPropertyValue: () => "" } },
+  });
   vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
   vi.stubGlobal(
     "MutationObserver",

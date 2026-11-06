@@ -49,11 +49,14 @@ export function BottomInsetBand({ children }: { children: ReactNode }) {
         return;
       }
       if (!watchingContent) {
+        // The sidebar and workspace mount, unmount or change presentation;
+        // their size changes reach the ResizeObserver. Any class or style
+        // change in the app would run this every frame while text streams.
         content.observe(root, {
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ["class", "style", "data-presentation"],
+          attributeFilter: ["data-presentation"],
         });
         watchingContent = true;
       }
