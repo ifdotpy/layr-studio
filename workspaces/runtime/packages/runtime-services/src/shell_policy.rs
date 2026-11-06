@@ -423,10 +423,11 @@ async fn sweep(
     let (settings, agents) = store.read_async("runtime-services/shell-policy", move |db| {
         let settings = OrchestrationSettingsRepository::shell_policy(db)?;
         if settings.quiet_threshold_ms == 0 && !critical { return Ok((settings,Vec::new())); }
-        let mut statement = db.prepare("SELECT record FROM runtime_agents a WHERE json_extract(record,'$.provider')='claude' AND json_extract(record,'$.threadId') IS NOT NULL AND a.id IN (SELECT json_extract(record,'$.agent') FROM runtime_tasks WHERE json_extract(record,'$.status')='running' AND json_extract(record,'$.name')='local_bash') ORDER BY a.id")?;
-        let agents = statement.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        let mut statement = db.prepare("SELECT a.id,a.record FROM runtime_agents a WHERE json_extract(record,'$.provider')='claude' AND json_extract(record,'$.threadId') IS NOT NULL AND a.id IN (SELECT json_extract(record,'$.agent') FROM runtime_tasks WHERE json_extract(record,'$.status')='running' AND json_extract(record,'$.name')='local_bash') ORDER BY a.id")?;
+        let agents = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+        let agents = studio_runtime_store::agent_volatile::merged_rows(db, agents)?;
         // Parse through a map so duplicate keys retain the historical last value.
-        let agents = agents.into_iter().map(|raw| {
+        let agents = agents.into_iter().map(|(_, raw)| {
             let value: Value = studio_json::from_str(&raw)?;
             ShellPolicyAgent::deserialize(value).map_err(StoreError::from)
         }).collect::<Result<Vec<_>, _>>()?;

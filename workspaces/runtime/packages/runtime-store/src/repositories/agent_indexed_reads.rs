@@ -118,7 +118,8 @@ impl AgentIndexedReads {
         crate::agent_volatile::merged_rows(connection, rows)
     }
 
-    /// Unmerged records for named agents and, for broadcasts, one team root.
+    /// Records for named agents and, for broadcasts, one team root (SQL of
+    /// [`Self::message_records`], which merges the chat-owned fields).
     pub const MESSAGE_RECORDS_SQL: &'static str = "SELECT id,record FROM runtime_agents WHERE id IN (?1,?2,?3,?4) OR root_id=?5 ORDER BY rowid";
     pub const MESSAGE_PREFIX_SQL: &'static str = "SELECT id,record FROM runtime_agents WHERE id IN (?1,?2,?3,?4) OR root_id=?5 OR (id>=?6 AND id<?7) ORDER BY rowid";
     const MESSAGE_FINAL_PREFIX_SQL: &'static str = "SELECT id,record FROM runtime_agents WHERE id IN (?1,?2,?3,?4) OR root_id=?5 OR id GLOB ?6 ORDER BY rowid";
@@ -150,11 +151,12 @@ impl AgentIndexedReads {
             (None, _) => Self::MESSAGE_RECORDS_SQL,
         };
         let mut statement = connection.prepare_cached(sql)?;
-        Ok(statement
+        let rows = statement
             .query_map(rusqlite::params_from_iter(parameters), |row| {
                 Ok((row.get(0)?, row.get(1)?))
             })?
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()?;
+        crate::agent_volatile::merged_rows(connection, rows)
     }
 
     /// SQL counting the live (not deleted) team members that are not finished.
@@ -509,6 +511,31 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn message_records_carry_the_chat_owned_fields() {
+        let connection = database();
+        let record = json!({"id":"vm","provider":"codex","rootId":"vm","status":"idle","executionMode":"vm","autoWake":true});
+        crate::domain::project(&connection, "vm", &record).expect("chat row");
+        // The stored record leaves the chat-owned fields out.
+        insert(
+            &connection,
+            json!({"id":"vm","provider":"codex","rootId":"vm"}),
+        );
+        let rows = AgentIndexedReads::message_records(
+            &connection,
+            [Some("vm"), None, None, None],
+            None,
+            None,
+        )
+        .unwrap();
+        let [(_, raw)] = rows.as_slice() else {
+            panic!("one row: {rows:?}");
+        };
+        let value: Value = studio_json::from_str(raw).unwrap();
+        assert_eq!(value["executionMode"], "vm");
+        assert_eq!(value["autoWake"], true);
     }
 
     #[test]
