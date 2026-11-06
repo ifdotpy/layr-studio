@@ -6796,7 +6796,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "studio-json",
- "studio-test-deps",
 ]
 
 [[package]]
@@ -6835,7 +6834,6 @@ dependencies = [
  "studio-runtime-proc-sys",
  "studio-runtime-process",
  "studio-runtime-store",
- "studio-test-deps",
  "tempfile",
  "tokio",
 ]
@@ -6874,7 +6872,6 @@ dependencies = [
  "studio-runtime-schema",
  "studio-runtime-services",
  "studio-runtime-store",
- "studio-test-deps",
  "subtle",
  "tempfile",
  "tokio",
@@ -6917,7 +6914,6 @@ dependencies = [
  "studio-runtime-proc-sys",
  "studio-runtime-providers",
  "studio-runtime-store",
- "studio-test-deps",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -6930,7 +6926,6 @@ dependencies = [
  "serde",
  "studio-json",
  "studio-runtime-schema",
- "studio-test-deps",
  "thiserror 2.0.21",
 ]
 
@@ -6979,7 +6974,6 @@ dependencies = [
  "studio-runtime-schema",
  "studio-runtime-services",
  "studio-runtime-store",
- "studio-test-deps",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -7034,7 +7028,6 @@ dependencies = [
  "studio-runtime-schema",
  "studio-runtime-services",
  "studio-runtime-store",
- "studio-test-deps",
  "subtle",
  "sysinfo",
  "tar",
@@ -7066,51 +7059,12 @@ dependencies = [
  "studio-runtime-providers",
  "studio-runtime-schema",
  "studio-runtime-store",
- "studio-test-deps",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-rusqlite",
  "uuid",
  "zstd-safe",
-]
-
-[[package]]
-name = "studio-test-deps"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.23.1",
- "brotli",
- "bytes",
- "chrono",
- "data-encoding",
- "flate2",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "jsonschema 0.60.0",
- "mime_guess",
- "notify",
- "process-wrap",
- "regex",
- "rustix",
- "serde",
- "serde_path_to_error",
- "sha2 0.11.1",
- "studio-json",
- "sysinfo",
- "tar",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "toml 1.1.8+spec-1.1.0",
- "tower",
- "tower-http 0.7.1",
- "url",
- "uuid",
 ]
 
 [[package]]

@@ -568,8 +568,8 @@ mod macos_environment_tests {
         // macOS omits the environment of restricted platform binaries such as
         // /bin/sleep from KERN_PROCARGS2, so the probe is this test binary, as
         // a provider child is a third-party binary.
-        // Test binaries link the standard library dynamically (studio-test-deps), so the
-        // child keeps the loader search path that cargo set; it is part of the expected set.
+        // The child keeps the loader search path that cargo set for the test binary;
+        // it is part of the expected set.
         let loader: BTreeMap<String, String> = ["DYLD_FALLBACK_LIBRARY_PATH", "DYLD_LIBRARY_PATH"]
             .into_iter()
             .filter_map(|name| Some((name.to_owned(), std::env::var(name).ok()?)))
