@@ -301,8 +301,7 @@ mod tests {
 
     #[test]
     fn accept_invite_expiry_schema_matches_ingress() {
-        let doc: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let schemas = &doc["components"]["schemas"];
         assert_eq!(
             schemas["AcceptInvite"]["properties"]["invitation"]["$ref"],
@@ -327,8 +326,7 @@ mod tests {
     #[test]
     fn request_limits_match_openapi() {
         use super::*;
-        let doc: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let schemas = &doc["components"]["schemas"];
         for schema in [
             "AcceptInvite",

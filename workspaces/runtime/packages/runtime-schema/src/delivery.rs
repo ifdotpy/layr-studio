@@ -396,8 +396,7 @@ mod tests {
 
     #[test]
     fn managed_message_schema_accepts_supported_input_and_rejects_unknown_values() {
-        let openapi = studio_json::from_slice(include_bytes!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI");
+        let openapi = studio_json::from_slice(crate::OPENAPI_TEXT.as_bytes()).expect("OpenAPI");
         let registry = crate::registry_for_document(&openapi).expect("request registry");
         let schema = studio_json::json!({"$ref":format!("{}#/components/schemas/ManagedMessageBody", crate::OPENAPI_URI)});
         let validator = jsonschema::options()

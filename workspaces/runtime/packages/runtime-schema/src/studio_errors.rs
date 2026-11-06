@@ -420,8 +420,7 @@ mod tests {
 
     #[test]
     fn incident_schema_and_all_components_derive_from_the_owner() {
-        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI");
+        let openapi = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         check_schema_parity(&openapi).expect("incident contract parity");
         let monitor: Value =
             studio_json::from_str(include_str!("schemas/persisted-monitor-record.schema.json"))
@@ -470,8 +469,7 @@ mod tests {
             },
         };
         let value = studio_json::to_value(incident).expect("typed incident");
-        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         let registry = crate::registry_for_document(&openapi).expect("registry");
         let validator = jsonschema::options()
             .with_registry(&registry)

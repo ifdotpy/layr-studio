@@ -114,7 +114,13 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../runtime-http/openapi.json");
     println!("cargo:rerun-if-changed=openapi_build.rs");
 
-    let document: studio_json::Value = studio_json::from_slice(&fs::read(&spec_path)?)?;
+    let spec = fs::read(&spec_path)?;
+    // The crate includes this copy (`OPENAPI_TEXT` in lib.rs): its dep-info path is portable.
+    fs::write(
+        PathBuf::from(env::var("OUT_DIR")?).join("openapi.json"),
+        &spec,
+    )?;
+    let document: studio_json::Value = studio_json::from_slice(&spec)?;
     let mut analyzer = SchemaAnalyzer::new(document.clone())?;
     let mut analysis = analyzer.analyze()?;
     analysis

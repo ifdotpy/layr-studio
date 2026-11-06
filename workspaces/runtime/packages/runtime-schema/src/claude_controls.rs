@@ -426,8 +426,7 @@ mod tests {
 
     #[test]
     fn claude_control_schema_parity_rejects_drift() {
-        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         check_schema_parity(&openapi).expect("generated command schemas");
         for (name, _) in schemas() {
             let mut drifted = openapi.clone();
@@ -442,8 +441,7 @@ mod tests {
 
     #[test]
     fn settings_schema_rejects_null_nonnullable_fields() {
-        let openapi: Value = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI");
+        let openapi: Value = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         let validator =
             jsonschema::validator_for(&openapi["components"]["schemas"]["ClaudeSettings"])
                 .expect("settings schema");

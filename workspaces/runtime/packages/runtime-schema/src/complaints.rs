@@ -50,8 +50,7 @@ mod tests {
 
     #[test]
     fn complaint_response_status_is_closed_and_matches_openapi() {
-        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI parses");
+        let openapi = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI parses");
         check_schema_parity(&openapi).expect("complaint status owner parity");
         for status in ["in_progress", "resolved", "declined"] {
             let parsed: ComplaintResponseStatus =
