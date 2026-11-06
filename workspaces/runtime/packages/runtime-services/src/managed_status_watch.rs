@@ -624,7 +624,7 @@ fn capacity_snapshot(
         .filter(|agent| agent.status == AgentStatus::Queued)
     {
         let id = agent.id.0.as_str();
-        let wait = crate::sync_views::agent_start_wait(&agent.value())
+        let wait = crate::sync_views::agent_start_wait_record(agent)
             .map_err(|_| StatusError::InvalidArguments)?;
         let mut row = json!({"id":id,"reasons":wait.into_iter().collect::<Vec<_>>()});
         if let Some(blocker) = paths
