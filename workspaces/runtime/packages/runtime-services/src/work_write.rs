@@ -771,12 +771,13 @@ async fn retry_refused_reviewer_archives(store: &Arc<RuntimeStore>) -> Result<()
     store
         .transaction_with_error(move |tx| -> Result<(), WorkWriteError> {
             let mut statement = tx
-                .prepare(
+                .prepare(&format!(
                     "SELECT id,record FROM runtime_agents \
                      WHERE json_extract(record,'$.role')='reviewer' \
-                       AND json_extract(record,'$.status')='completed' \
+                       AND {}='completed' \
                        AND substr(json_extract(record,'$.reviewArchiveError'),1,?1)=?2",
-                )
+                    studio_runtime_store::domain::chat_status_sql("runtime_agents.id")
+                ))
                 .map_err(studio_runtime_store::StoreError::from)?;
             let rows = statement
                 .query_map(

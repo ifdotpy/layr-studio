@@ -1339,13 +1339,16 @@ async fn a_broadcast_with_no_member_that_can_be_checked_is_refused_by_location()
     let (_directory, store, _) = frozen::state().await;
     let connection = store.test_reader().unwrap();
     let mut statement = connection
-        .prepare("SELECT record FROM runtime_agents WHERE json_extract(record,'$.rootId')=?1 AND id!=?1 ORDER BY id")
+        .prepare("SELECT id FROM runtime_agents WHERE json_extract(record,'$.rootId')=?1 AND id!=?1 ORDER BY id")
         .unwrap();
     let broken = statement
         .query_map([lead], |row| row.get::<_, String>(0))
         .unwrap()
-        .map(|raw| {
-            let mut record: Value = studio_json::from_str(&raw.unwrap()).unwrap();
+        .map(|id| {
+            let mut record =
+                studio_runtime_store::agent_volatile::merged_record(&connection, &id.unwrap())
+                    .unwrap()
+                    .unwrap();
             record["cwd"] = json!("relative/cwd");
             record
         })

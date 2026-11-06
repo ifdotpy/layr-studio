@@ -288,14 +288,9 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
     let db = store.test_reader().unwrap();
     let before: String = db.query_row("SELECT json_extract(record,'$.tree') FROM runtime_checkpoints WHERE json_extract(record,'$.label')='Before restore'",[],|row|row.get(0)).unwrap();
     assert_eq!(json!(before), preview["expectedTree"]);
-    let agent: String = db
-        .query_row(
-            "SELECT record FROM runtime_agents WHERE id='worker'",
-            [],
-            |row| row.get(0),
-        )
+    let agent = studio_runtime_store::agent_volatile::merged_record(&db, "worker")
+        .unwrap()
         .unwrap();
-    let agent: Value = studio_json::from_str(&agent).unwrap();
     assert_eq!(agent["threadId"], "restored");
     assert_eq!(agent["status"], "paused");
     let projected = studio_runtime_services::entity_scope::direct_document(&db, "agent", "worker")

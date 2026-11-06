@@ -45,14 +45,9 @@ impl AccountSessionPort for InterruptBroker {
     ) -> AccountSessionFuture<'_, SessionReceipt> {
         assert_eq!(request.expected_scope.as_ref(), Some(&self.scope));
         let reader = self.store.test_reader().expect("committed store read");
-        let raw: String = reader
-            .query_row(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("stopped agent exists");
-        let agent: Value = studio_json::from_str(&raw).expect("agent record");
+        let agent: Value = studio_runtime_store::agent_volatile::merged_record(&reader, "agent")
+            .expect("stopped agent exists")
+            .expect("agent record");
         assert_eq!(agent["status"], self.status);
         let interrupt = &agent["startAttempt"]["interrupt"];
         if request.method == Method::TurnInterrupt {
@@ -188,7 +183,7 @@ async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route()
     let state = store.test_reader().expect("diagnostic store read");
     let raw: Option<String> = state
         .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
+            "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )
@@ -219,7 +214,7 @@ async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route()
     let reader = store.test_reader().expect("final state");
     let raw: String = reader
         .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
+            "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )
@@ -337,7 +332,7 @@ async fn production_delete_route_interrupts_and_settles_active_turn() {
     let reader = store.test_reader().expect("diagnostic store read");
     let raw: String = reader
         .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
+            "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='agent'",
             [],
             |row| row.get(0),
         )

@@ -310,8 +310,12 @@ mod tests {
             })
             .expect("agents query runs")
             .map(|row| {
-                let (id, record) = row.expect("agent row reads");
-                json!({"id":id,"record":studio_json::from_str::<Value>(&record).expect("agent JSON reads")})
+                let (id, _) = row.expect("agent row reads");
+                // The chat and turn rows own some agent fields; compare the merged record.
+                let record = studio_runtime_store::agent_volatile::merged_record(connection, &id)
+                    .expect("agent JSON reads")
+                    .expect("agent row");
+                json!({"id":id,"record":record})
             })
             .collect::<Vec<_>>();
         let rooms = connection
@@ -436,6 +440,8 @@ mod tests {
         expected_agents[0]["record"]["accountKey"] = json!("default");
         expected_agents[0]["record"]["capacity"] = json!({"kind":"automatic","max":64});
         expected_agents[0]["record"]["naming"] = json!("automatic");
+        // The rewrite projects the chat and turn rows, which give the in-flight flag.
+        expected_agents[0]["record"]["inFlight"] = json!(false);
         expected_agents[0]["record"]
             .as_object_mut()
             .expect("agent record object")

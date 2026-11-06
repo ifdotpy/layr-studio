@@ -228,11 +228,9 @@ async fn send_now_recovers_proven_unsent_failed_batch_and_replays_lost_http_succ
     let queued: String = store
         .test_reader()
         .unwrap()
-        .query_row(
-            "SELECT json_extract(record,'$.status') FROM runtime_agents WHERE id=?1",
-            [ACTOR],
-            |row| row.get(0),
-        )
+        .query_row("SELECT status FROM chats WHERE id=?1", [ACTOR], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(queued, "queued", "the source transaction queues the agent");
     let claim = store

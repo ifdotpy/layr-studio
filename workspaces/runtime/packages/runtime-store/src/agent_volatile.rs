@@ -48,17 +48,32 @@ pub const AGENT_VOLATILE_FIELDS: [&str; 9] = [
 /// back together with the volatile fields (#630 item 63).
 pub const START_ATTEMPT_FIELD: &str = "startAttempt";
 
-/// Agent fields that the chat row owns (`chats`, written by `domain::project` on every
-/// agent write). The agent record never holds them; readers get them back like the
-/// start attempt (#630 item 63, group 4).
-pub const CHAT_FIELDS: [&str; 4] = [
+/// Agent fields that the chat and turn rows own (`chats` and `turns`, written by
+/// `domain::project` on every agent write). The agent record never holds them; readers
+/// get them back like the start attempt (#630 item 63). `inFlight` is whether the chat
+/// has an unfinished turn.
+pub const CHAT_FIELDS: [&str; 6] = [
     "autoWake",
     "usageResumeEnabled",
     "executionMode",
     "turnEpoch",
+    "status",
+    "inFlight",
 ];
 
-type ChatValues = [Option<Value>; 4];
+type ChatValues = [Option<Value>; 6];
+
+/// SQL for the [`CHAT_FIELDS`] values of the chat row `c` of chat `chat`.
+macro_rules! chat_values_sql {
+    ($chat:literal) => {
+        concat!(
+            "c.auto_wake,c.usage_resume_enabled,c.execution_mode,c.turn_epoch,c.status,",
+            "EXISTS(SELECT 1 FROM turns t WHERE t.chat=",
+            $chat,
+            " AND t.state IN ('starting','running'))"
+        )
+    };
+}
 
 fn chat_values_of_row(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<ChatValues> {
     Ok([
@@ -66,6 +81,8 @@ fn chat_values_of_row(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result
         row.get::<_, Option<bool>>(first + 1)?.map(Value::Bool),
         row.get::<_, Option<String>>(first + 2)?.map(Value::String),
         row.get::<_, Option<i64>>(first + 3)?.map(Value::from),
+        row.get::<_, Option<String>>(first + 4)?.map(Value::String),
+        row.get::<_, Option<bool>>(first + 5)?.map(Value::Bool),
     ])
 }
 
@@ -73,7 +90,11 @@ fn chat_values_of_row(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result
 /// before the move, or a reduced test schema).
 fn stored_chat_values(connection: &Connection, id: &str) -> StoreResult<Option<ChatValues>> {
     match connection.query_row_cached(
-        "SELECT auto_wake,usage_resume_enabled,execution_mode,turn_epoch FROM chats WHERE id=?1",
+        concat!(
+            "SELECT ",
+            chat_values_sql!("c.id"),
+            " FROM chats c WHERE c.id=?1"
+        ),
         [id],
         |row| chat_values_of_row(row, 0),
     ) {
@@ -105,7 +126,7 @@ fn merge_typed_chat_fields(
     agent: &mut crate::AgentRecord,
     values: ChatValues,
 ) -> StoreResult<()> {
-    let [auto_wake, usage_resume, mode, epoch] = values;
+    let [auto_wake, usage_resume, mode, epoch, status, busy] = values;
     if agent.auto_wake.is_none() {
         agent.auto_wake = auto_wake.and_then(|value| value.as_bool());
     }
@@ -120,18 +141,28 @@ fn merge_typed_chat_fields(
     if agent.turn_epoch.is_none() {
         agent.turn_epoch = epoch.and_then(|value| value.as_i64());
     }
+    // A record without a status decodes as missing; the chat row owns the status.
+    if agent.status.is_missing()
+        && let Some(status) = status
+    {
+        agent.status = studio_json::from_value(status).map_err(|_| invalid(id))?;
+    }
+    if agent.in_flight.is_none() {
+        agent.in_flight = busy.and_then(|value| value.as_bool());
+    }
     Ok(())
 }
 
 /// SQL for the chat-owned columns of the `runtime_agents a` row, for bulk agent reads:
-/// whether the chat row exists, then the four values in [`CHAT_FIELDS`] order.
-pub(crate) const CHAT_COLUMNS_SQL: &str = "(SELECT 1 FROM chats c WHERE c.id=a.id),\
-    (SELECT c.auto_wake FROM chats c WHERE c.id=a.id),\
-    (SELECT c.usage_resume_enabled FROM chats c WHERE c.id=a.id),\
-    (SELECT c.execution_mode FROM chats c WHERE c.id=a.id),\
-    (SELECT c.turn_epoch FROM chats c WHERE c.id=a.id)";
+/// whether the chat row exists, then the six values in [`CHAT_FIELDS`] order. The
+/// `LEFT JOIN chats c ON c.id=a.id` of the read supplies `c`.
+pub(crate) const CHAT_COLUMNS_SQL: &str =
+    concat!("(c.id IS NOT NULL OR NULL),", chat_values_sql!("a.id"));
 
-/// Add the chat-owned fields that columns `index..index+5` of a bulk agent read hold.
+/// The join that [`CHAT_COLUMNS_SQL`] reads.
+pub(crate) const CHAT_JOIN_SQL: &str = " LEFT JOIN chats c ON c.id=a.id";
+
+/// Add the chat-owned fields that columns `index..index+7` of a bulk agent read hold.
 pub(crate) fn merge_chat_columns(
     row: &rusqlite::Row<'_>,
     index: usize,
@@ -819,6 +850,9 @@ mod tests {
                         params![agent["id"].as_str(), agent.to_string()],
                     )?;
                 }
+                // The status leaves the record in its own step; this test checks the
+                // volatile move alone.
+                crate::migrations::migrate_status_to_chats(tx)?;
                 tx.execute(
                     "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
                     [],
@@ -880,6 +914,12 @@ mod tests {
                     normalized.as_object_mut().unwrap().remove(field);
                 }
             }
+            // The turn rows give every read an in-flight flag.
+            normalized
+                .as_object_mut()
+                .unwrap()
+                .entry("inFlight")
+                .or_insert(json!(false));
             assert_eq!(typed.value(), normalized);
             assert_eq!(
                 system_reads::get(&connection, "runtime_agents", id).expect("checked read"),
@@ -946,6 +986,8 @@ mod tests {
                 agent.as_object_mut().unwrap().remove(field);
             }
         }
+        // The turn rows give every read an in-flight flag.
+        agent["inFlight"] = json!(false);
         assert_eq!(read, agent);
         transaction.commit().expect("writes commit");
         Ok(())

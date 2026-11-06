@@ -373,7 +373,8 @@ async fn tool_replay_rebuilds_the_same_reply_without_reexecuting_effect() {
 async fn failed_store_calls_roll_back_card_outbox_and_publication_before_handoff() {
     for (table, event, phase) in [
         ("approvals", "INSERT", "admit"),
-        ("runtime_agents", "UPDATE", "admit"),
+        // The approval status lives on the chat row, not in the agent record.
+        ("chats", "UPDATE", "admit"),
         ("runtime_tool_requests", "INSERT", "admit"),
         ("durable_rows", "UPDATE", "admit"),
         ("approvals", "UPDATE", "answer"),

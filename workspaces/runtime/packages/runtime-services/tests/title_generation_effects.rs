@@ -656,12 +656,9 @@ async fn late_name_epoch_or_deletion_changes_discard_without_renaming() {
 
         store
             .transaction(move |tx| {
-                let raw: String = tx.query_row(
-                    "SELECT record FROM runtime_agents WHERE id='title-agent'",
-                    [],
-                    |row| row.get(0),
-                )?;
-                let mut record: Value = studio_json::from_str(&raw)?;
+                let mut record: Value =
+                    studio_runtime_store::agent_volatile::merged_record(tx, "title-agent")?
+                        .expect("record");
                 record
                     .as_object_mut()
                     .expect("record")

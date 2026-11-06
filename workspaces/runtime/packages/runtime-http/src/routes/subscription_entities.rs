@@ -235,7 +235,7 @@ mod tests {
         );
         let summary = documents
             .iter()
-            .find(|row| row["collection"] == "agentSummary")
+            .find(|row| row["collection"] == "agentSummary" && row["id"] == "chat")
             .expect("summary");
         assert_eq!(summary["value"]["name"], "List chat");
         assert!(summary["value"].get("lastAnswer").is_none());

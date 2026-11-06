@@ -1544,16 +1544,12 @@ mod tests {
     }
 
     fn agent(store: &RuntimeStore) -> Value {
-        let record = store
-            .test_reader()
-            .expect("test reader")
-            .query_row(
-                "SELECT record FROM runtime_agents WHERE id='cleanup-agent'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("agent reads");
-        studio_json::from_str(&record).expect("stored agent parses")
+        studio_runtime_store::agent_volatile::merged_record(
+            &store.test_reader().expect("test reader"),
+            "cleanup-agent",
+        )
+        .expect("agent reads")
+        .expect("stored agent parses")
     }
 
     #[test]

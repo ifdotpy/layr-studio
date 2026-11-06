@@ -66,6 +66,18 @@ pub use studio_runtime_schema::transcript_record::TranscriptItemId;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnknownAgentStatus(String);
 
+impl AgentStatus {
+    /// The status of a stored agent record before the chat row is merged: empty, which
+    /// no writer accepts.
+    pub fn missing() -> Self {
+        Self::Other(UnknownAgentStatus(String::new()))
+    }
+
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Self::Other(status) if status.0.is_empty())
+    }
+}
+
 impl UnknownAgentStatus {
     pub fn new(value: String) -> Option<Self> {
         (!AgentStatus::VALUES.contains(&value.as_str())).then_some(Self(value))
@@ -350,6 +362,10 @@ pub struct AgentRecord {
     pub root_id: AgentId,
     #[serde(deserialize_with = "deserialize_agent_epoch")]
     pub epoch: i64,
+    /// The chat row owns the status (#630 item 63): a stored record has none and decodes
+    /// as [`AgentStatus::missing`] until the reader merges the chat row. A write of a
+    /// record that still lacks it fails (`domain::project` refuses the empty status).
+    #[serde(default = "AgentStatus::missing")]
     pub status: AgentStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
@@ -2630,10 +2646,11 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
         let where_clause = where_sql.map_or_else(String::new, |sql| format!(" WHERE {sql}"));
         let sql = if R::TABLE == AgentRecord::TABLE {
             format!(
-                "SELECT {},a.id,a.record,v.id IS NOT NULL,{},{} FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
+                "SELECT {},a.id,a.record,v.id IS NOT NULL,{},{} FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id{} ORDER BY a.rowid",
                 crate::agent_volatile::columns("v."),
                 crate::agent_volatile::ATTEMPT_COLUMN_SQL,
-                crate::agent_volatile::CHAT_COLUMNS_SQL
+                crate::agent_volatile::CHAT_COLUMNS_SQL,
+                crate::agent_volatile::CHAT_JOIN_SQL
             )
         } else {
             format!(
@@ -4611,9 +4628,9 @@ mod tests {
         connection
             .execute_batch(
                 "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-                 CREATE TABLE turns(chat TEXT, attempt TEXT);
+                 CREATE TABLE turns(chat TEXT, attempt TEXT, state TEXT);
                  CREATE TABLE chats(id TEXT, auto_wake INTEGER, usage_resume_enabled INTEGER,
-                   execution_mode TEXT, turn_epoch INTEGER);",
+                   execution_mode TEXT, turn_epoch INTEGER, status TEXT);",
             )
             .unwrap();
         connection

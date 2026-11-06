@@ -102,6 +102,22 @@ async fn agent_limit_failure_republishes_account_recovery() {
 }
 
 #[tokio::test]
+async fn a_status_only_write_publishes_the_agent_view() {
+    // The chat row owns the status, so this write leaves the agent record unchanged.
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    store
+        .transaction(|tx| {
+            let mut agent = AgentRepository::get(tx, &CHAT.into())?.expect("chat");
+            agent.status = studio_runtime_store::AgentStatus::Paused;
+            AgentRepository::put(tx, &agent)
+        })
+        .await
+        .unwrap();
+    assert_eq!(chat_view(&store, CHAT)["status"], "paused");
+}
+
+#[tokio::test]
 async fn room_roots_follow_live_agent_root_change() {
     let (_dir, store) = store().await;
     seed_chat(

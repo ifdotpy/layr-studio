@@ -1713,8 +1713,9 @@ mod tests {
 
     fn assert_stored_status(store: &RuntimeStore, id: &str, expected: &str) {
         let db = store.test_reader().expect("reader");
-        let (status, count): (String, i64) = db.query_row("SELECT json_extract(record,'$.status'), (SELECT count(*) FROM json_each(record) WHERE key='status') FROM runtime_agents WHERE id=?1", [id], |row| Ok((row.get(0)?, row.get(1)?))).expect("agent status");
-        assert_eq!((status.as_str(), count), (expected, 1));
+        let (status, count): (String, i64) = db.query_row("SELECT (SELECT status FROM chats WHERE chats.id=runtime_agents.id), (SELECT count(*) FROM json_each(record) WHERE key='status') FROM runtime_agents WHERE id=?1", [id], |row| Ok((row.get(0)?, row.get(1)?))).expect("agent status");
+        // The chat row owns the status; the record holds none.
+        assert_eq!((status.as_str(), count), (expected, 0));
     }
 
     #[tokio::test]

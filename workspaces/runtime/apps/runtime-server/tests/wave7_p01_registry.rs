@@ -235,11 +235,9 @@ async fn wait_for_durable_agent_status(fixture: &Fixture, agent_id: &str, expect
                 .store
                 .test_reader()
                 .unwrap()
-                .query_row(
-                    "SELECT json_extract(record,'$.status') FROM runtime_agents WHERE id=?1",
-                    [agent_id],
-                    |row| row.get(0),
-                )
+                .query_row("SELECT status FROM chats WHERE id=?1", [agent_id], |row| {
+                    row.get(0)
+                })
                 .unwrap();
             if status == expected {
                 break;
@@ -1131,7 +1129,7 @@ async fn production_reconcile_admits_radio_queue_event_to_retained_worker() {
             .unwrap();
         let agent: String = db
             .query_row(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='a'",
+                "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='a'",
                 [],
                 |row| row.get(0),
             )
@@ -1534,7 +1532,7 @@ async fn claude_account_without_a_readable_login_holds_its_start_for_sign_in() {
         .test_reader()
         .unwrap()
         .query_row(
-            "SELECT json_extract(record,'$.status'),json_extract(record,'$.error'),json_extract(record,'$.startWait.reason') FROM runtime_agents WHERE id=?1",
+            "SELECT (SELECT status FROM chats WHERE chats.id=runtime_agents.id),json_extract(record,'$.error'),json_extract(record,'$.startWait.reason') FROM runtime_agents WHERE id=?1",
             [agent_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -1854,7 +1852,7 @@ async fn callback_only_saved_reply_starts_its_account_without_any_pending_input(
                 .unwrap()
                 .collect::<Result<_, _>>()
                 .unwrap();
-            let actor: String = db.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='managed-actor'", [], |row| row.get(0)).unwrap();
+            let actor: String = db.query_row("SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='managed-actor'", [], |row| row.get(0)).unwrap();
             panic!("the saved callback reply is missing; phases={phases:?}, actor={actor}")
         })
         .unwrap();
@@ -2156,11 +2154,11 @@ fn seed_backlog_rows(
                 SELECT 0 WHERE ?1 > 0
                 UNION ALL SELECT i + 1 FROM seq WHERE i + 1 < ?1
             ), source(record) AS (
-                SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id = ?2
+                SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id = ?2
             )";
     // Seed the current split storage format; migration is not under test.
     let record: String = tx.query_row(
-        "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+        "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
         [&source],
         |row| row.get(0),
     )?;
@@ -2302,10 +2300,10 @@ async fn account_backlog_rejects_invalid_stored_account() {
     let source = fixture.agents[0]["id"].as_str().unwrap();
     let source = source.to_owned();
     fixture.store.transaction(move |tx| {
-        let raw: String = tx.query_row("SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1", [&source], |row| row.get(0))?;
+        let raw: String = tx.query_row("SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1", [&source], |row| row.get(0))?;
         tx.execute("INSERT INTO runtime_agents(id,record) VALUES('bad-account-key',json_set(?1,'$.id','bad-account-key','$.accountKey',7))", [raw])?;
         tx.execute("INSERT INTO chats(id,state,status,auto_wake,usage_resume_enabled,execution_mode,turn_epoch) SELECT 'bad-account-key',state,status,auto_wake,usage_resume_enabled,execution_mode,turn_epoch FROM chats WHERE id=?1", [&source])?;
-        tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('bad-account-key-event','bad-account-key','user','fixture','pending',0,json_extract((SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='bad-account-key'),'$.epoch'))", [])?;
+        tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('bad-account-key-event','bad-account-key','user','fixture','pending',0,json_extract((SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='bad-account-key'),'$.epoch'))", [])?;
         Ok(())
     }).await.unwrap();
     assert!(matches!(
@@ -3380,7 +3378,7 @@ async fn host_start_reattaches_existing_launch_and_delivers_http_input() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -3720,7 +3718,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [&agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -3954,7 +3952,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [&agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4171,7 +4169,7 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4507,7 +4505,7 @@ async fn direct_child_sigkill_settles_unknown_without_resend() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4668,7 +4666,7 @@ async fn direct_child_crash_before_turn_write_retries_queued_input_once() {
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4747,7 +4745,7 @@ async fn make_direct_agent_runnable(store: &RuntimeStore, agent_id: &str, accoun
     store
         .transaction_with(move |tx| {
             let raw: String = tx.query_row(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                 [&agent_id],
                 |row| row.get(0),
             )?;
@@ -4771,7 +4769,7 @@ fn direct_agent_debug(store: &RuntimeStore, agent_id: &str) -> String {
     let db = store.test_reader().unwrap();
     let raw = db
         .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+            "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
             [agent_id],
             |row| row.get::<_, String>(0),
         )
@@ -4845,7 +4843,7 @@ async fn wait_for_direct_completion<T: Clone + Send + Sync + 'static>(
                 .test_reader()
                 .unwrap()
                 .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                    "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id=?1",
                     [agent_id],
                     |row| row.get::<_, String>(0),
                 )
@@ -4952,16 +4950,9 @@ fn restart_provider_count(root: &std::path::Path, method: &str, thread: &str) ->
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn restart_agent(store: &RuntimeStore, id: &str) -> Value {
-    let raw: String = store
-        .test_reader()
+    studio_runtime_store::agent_volatile::merged_record(&store.test_reader().unwrap(), id)
         .unwrap()
-        .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    studio_json::from_str(&raw).unwrap()
+        .unwrap()
 }
 
 /// The recovery fields of an agent record, for a failure message.

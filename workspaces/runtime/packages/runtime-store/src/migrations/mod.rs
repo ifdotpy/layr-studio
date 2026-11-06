@@ -101,6 +101,7 @@ mod m2026_11_06_item_hidden_by;
 mod m2026_11_06_one_draft_per_chat;
 mod m2026_11_06_process_exit_check;
 pub(crate) mod m2026_11_06_start_attempt_on_turns;
+mod m2026_11_06_status_on_chats;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -128,6 +129,7 @@ pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 pub use m2026_10_31_room_record::apply as migrate_room_record;
 pub use m2026_11_06_chat_fields_on_chats::apply as migrate_chat_fields_to_chats;
 pub use m2026_11_06_start_attempt_on_turns::apply as migrate_start_attempts_to_turns;
+pub use m2026_11_06_status_on_chats::apply as migrate_status_to_chats;
 
 /// Normalize historical agent fixtures inserted after the database was opened.
 #[cfg(any(test, feature = "test-support"))]
@@ -1650,6 +1652,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_chat_fields_on_chats::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-status-on-chats",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with status and inFlight inside agent records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_status_on_chats::apply(c.transaction),
     },
 ];
 

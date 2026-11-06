@@ -1022,14 +1022,16 @@ fn rows_by_id(
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             })
             .optional()?
-            && valid_stored_record(table, id, &raw)
         {
+            // The chat and turn rows own some agent fields: check the merged record.
             let raw = if table == agent_volatile::AGENT_TABLE {
                 agent_volatile::merged_text(transaction, id, raw)?
             } else {
                 raw
             };
-            rows.push((rowid, id.clone(), raw));
+            if valid_stored_record(table, id, &raw) {
+                rows.push((rowid, id.clone(), raw));
+            }
         }
     }
     rows.sort_unstable_by_key(|(rowid, _, _)| *rowid);
@@ -1532,9 +1534,8 @@ pub(crate) fn projection_records(
 /// refuse malformed JSON at write). The `runtime_agent_live_root_v2` partial
 /// index serves the predicate, so tombstones are not read.
 pub(crate) fn live_agent_records(connection: &Connection) -> StoreResult<Vec<(String, String)>> {
-    agent_volatile::merged_rows(
-        connection,
-        live_agent_record_rows(connection)?
+    Ok(
+        agent_volatile::merged_rows(connection, live_agent_record_rows(connection)?)?
             .into_iter()
             .filter(|(id, raw)| valid_stored_record("runtime_agents", id, raw))
             .collect(),

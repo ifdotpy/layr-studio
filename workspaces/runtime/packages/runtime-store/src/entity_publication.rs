@@ -124,6 +124,10 @@ enum Source {
     Monitor,
     /// Read only by the Studio error list (dismissals).
     Incident,
+    /// A chat row: its agent changed (the chat row owns the agent status).
+    Chat,
+    /// A turn row: its agent changed (an unfinished turn is the in-flight flag).
+    Turn,
 }
 
 impl Source {
@@ -140,6 +144,8 @@ impl Source {
             "user_terminals" => Some(Self::Terminal),
             "runtime_monitors" => Some(Self::Monitor),
             "runtime_error_incidents" => Some(Self::Incident),
+            "chats" => Some(Self::Chat),
+            "turns" => Some(Self::Turn),
             _ => None,
         }
     }
@@ -166,6 +172,8 @@ impl Source {
             Self::Terminal => "user_terminals",
             Self::Monitor => "runtime_monitors",
             Self::Incident => "runtime_error_incidents",
+            Self::Chat => "chats",
+            Self::Turn => "turns",
         }
     }
 }
@@ -260,6 +268,9 @@ pub(crate) fn pending(
     transaction: &Transaction<'_>,
     Journal(events): Journal,
 ) -> StoreResult<PendingEntities> {
+    // A chat or turn row write is a change of its agent: a status-only write leaves the
+    // agent record unchanged and writes only these rows (#630 item 63).
+    let events = agent_events(transaction, events)?;
     let mut ids: HashMap<(Source, i64), Option<String>> = HashMap::new();
     for event in &events {
         if let Event::Row(source, row_id) = event
@@ -281,7 +292,9 @@ pub(crate) fn pending(
                     | Source::Work
                     | Source::Terminal
                     | Source::Monitor
-                    | Source::Incident => {
+                    | Source::Incident
+                    | Source::Chat
+                    | Source::Turn => {
                         format!("SELECT id FROM {} WHERE rowid=?1", source.table())
                     }
                 })?
@@ -429,10 +442,45 @@ pub(crate) fn pending(
             | Source::QueueAsset
             | Source::Terminal
             | Source::Monitor
-            | Source::Incident => false,
+            | Source::Incident
+            | Source::Chat
+            | Source::Turn => false,
         };
     }
     Ok(pending)
+}
+
+/// `events` with each chat or turn row write replaced by a write of its agent row. A
+/// row whose agent row is gone is dropped; the agent delete owns that removal.
+fn agent_events(transaction: &Transaction<'_>, events: Vec<Event>) -> StoreResult<Vec<Event>> {
+    let mut agents: HashMap<(Source, i64), Option<i64>> = HashMap::new();
+    let mut result = Vec::with_capacity(events.len());
+    for event in events {
+        let Event::Row(source @ (Source::Chat | Source::Turn), row_id) = event else {
+            result.push(event);
+            continue;
+        };
+        let agent = match agents.get(&(source, row_id)) {
+            Some(agent) => *agent,
+            None => {
+                let sql = if source == Source::Chat {
+                    "SELECT a.rowid FROM chats c JOIN runtime_agents a ON a.id=c.id WHERE c.rowid=?1"
+                } else {
+                    "SELECT a.rowid FROM turns t JOIN runtime_agents a ON a.id=t.chat WHERE t.rowid=?1"
+                };
+                let agent = transaction
+                    .prepare_cached(sql)?
+                    .query_row([row_id], |row| row.get::<_, i64>(0))
+                    .optional()?;
+                agents.insert((source, row_id), agent);
+                agent
+            }
+        };
+        if let Some(agent) = agent {
+            result.push(Event::Row(Source::Agent, agent));
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

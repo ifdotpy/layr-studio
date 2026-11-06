@@ -963,7 +963,10 @@ mod native_review_preflight_tests {
             )
             .expect("count unchanged receipts");
         assert_eq!(before_agent["remoteOrigin"], true);
-        assert_eq!(after_agent, vm_agent.value());
+        // The turn rows give the read an in-flight flag that the written value lacked.
+        let mut expected = vm_agent.value();
+        expected["inFlight"] = studio_json::json!(false);
+        assert_eq!(after_agent, expected);
         assert_eq!(after_receipts, before_receipts);
     }
 

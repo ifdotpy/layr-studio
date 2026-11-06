@@ -164,12 +164,10 @@ pub(super) async fn record_of(state: &State, agent: &str) -> Value {
     state
         .bridge
         .run(move |store| async move {
-            let raw: String = store.test_reader()?.query_row(
-                "SELECT record FROM runtime_agents WHERE id=?1",
-                [agent],
-                |row| row.get(0),
-            )?;
-            Ok(studio_json::from_str(&raw).unwrap())
+            Ok(
+                studio_runtime_store::agent_volatile::merged_record(&store.test_reader()?, &agent)?
+                    .expect("agent row"),
+            )
         })
         .await
         .unwrap()

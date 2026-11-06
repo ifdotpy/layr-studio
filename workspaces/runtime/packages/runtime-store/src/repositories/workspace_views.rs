@@ -156,9 +156,10 @@ impl WorkspaceViewsRepository {
         let fields = crate::agent_volatile::columns("v.");
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {fields},a.id,a.record,v.id IS NOT NULL,{attempt},{chat} FROM runtime_agents a \
-             LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
+             LEFT JOIN runtime_agent_volatile v ON v.id=a.id{join} ORDER BY a.rowid",
             attempt = crate::agent_volatile::ATTEMPT_COLUMN_SQL,
-            chat = crate::agent_volatile::CHAT_COLUMNS_SQL
+            chat = crate::agent_volatile::CHAT_COLUMNS_SQL,
+            join = crate::agent_volatile::CHAT_JOIN_SQL
         ))?;
         let mut rows = statement.query([])?;
         let mut records = Vec::new();

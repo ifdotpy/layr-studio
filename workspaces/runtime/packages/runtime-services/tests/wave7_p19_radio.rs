@@ -416,6 +416,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             studio_runtime_store::migrations::migrate_project_record_kind(db)?;
             studio_runtime_store::migrations::migrate_start_attempts_to_turns(db)?;
             studio_runtime_store::migrations::migrate_chat_fields_to_chats(db)?;
+            studio_runtime_store::migrations::migrate_status_to_chats(db)?;
             for id in completed_turns {
                 let (chat, turn) = id.split_once(':').expect("completed turn id");
                 studio_runtime_store::domain::complete_turn(db, chat, turn)?;
@@ -559,21 +560,41 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
                 if let Some(attempt) = attempt {
                     merged["startAttempt"] = studio_json::from_str(&attempt).expect("attempt");
                 }
-                #[allow(clippy::type_complexity)] // The four chat columns, read once.
-                let chat: Option<(Option<bool>, Option<bool>, Option<String>, Option<i64>)> = db
+                #[allow(clippy::type_complexity)] // The six chat columns, read once.
+                let chat: Option<(
+                    Option<bool>,
+                    Option<bool>,
+                    Option<String>,
+                    Option<i64>,
+                    String,
+                    bool,
+                )> = db
                     .query_row(
-                        "SELECT auto_wake,usage_resume_enabled,execution_mode,turn_epoch FROM chats WHERE id=?1",
+                        "SELECT auto_wake,usage_resume_enabled,execution_mode,turn_epoch,status,\
+                         EXISTS(SELECT 1 FROM turns t WHERE t.chat=chats.id \
+                         AND t.state IN ('starting','running')) FROM chats WHERE id=?1",
                         [id],
-                        |found| Ok((found.get(0)?, found.get(1)?, found.get(2)?, found.get(3)?)),
+                        |found| {
+                            Ok((
+                                found.get(0)?,
+                                found.get(1)?,
+                                found.get(2)?,
+                                found.get(3)?,
+                                found.get(4)?,
+                                found.get(5)?,
+                            ))
+                        },
                     )
                     .ok();
-                if let Some((auto_wake, usage, mode, epoch)) = chat {
+                if let Some((auto_wake, usage, mode, epoch, status, busy)) = chat {
                     let fields = merged.as_object_mut().expect("agent object");
                     for (key, value) in [
                         ("autoWake", auto_wake.map(Value::Bool)),
                         ("usageResumeEnabled", usage.map(Value::Bool)),
                         ("executionMode", mode.map(Value::String)),
                         ("turnEpoch", epoch.map(Value::from)),
+                        ("status", Some(Value::String(status))),
+                        ("inFlight", Some(Value::Bool(busy))),
                     ] {
                         if let Some(value) = value {
                             fields.entry(key.to_owned()).or_insert(value);
@@ -621,6 +642,11 @@ fn normalize(value: &mut Value) {
                     if map.get(key).is_some_and(Value::is_null) {
                         map.remove(key);
                     }
+                }
+                // The turn rows own the in-flight flag; an idle agent reads false whether
+                // or not its frozen record held the key.
+                if map.get("inFlight") == Some(&json!(false)) {
+                    map.remove("inFlight");
                 }
             }
             for (key, value) in map.iter_mut() {

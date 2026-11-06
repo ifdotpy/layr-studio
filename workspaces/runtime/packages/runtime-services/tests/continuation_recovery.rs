@@ -61,13 +61,9 @@ fn read(store: &RuntimeStore) -> Value {
             .expect("row"),
     )
     .expect("record");
-    let a: Value = studio_json::from_str(
-        &db.query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |r| {
-            r.get::<_, String>(0)
-        })
-        .expect("agent"),
-    )
-    .expect("agent JSON");
+    let a: Value = studio_runtime_store::agent_volatile::merged_record(&db, "a")
+        .expect("agent")
+        .expect("agent row");
     let events: i64 = db
         .query_row(
             "SELECT count(*) FROM runtime_events WHERE id='usage-resume:resume'",
@@ -317,7 +313,7 @@ async fn every_store_boundary_rolls_back_or_replays_the_one_committed_followup()
 async fn changed_task_cancels_resume_and_notifies_parent_atomically() {
     let (_root, store) = seeded("usage").await;
     store.transaction(|tx|{
-        let mut a:Value=studio_json::from_str(&tx.query_row("SELECT record FROM runtime_agents WHERE id='a'",[],|r|r.get::<_,String>(0))?)?;
+        let mut a:Value=studio_runtime_store::agent_volatile::merged_record(tx,"a")?.expect("agent row");
         a["isLead"]=json!(false);a["parentId"]=json!("parent");a["rootId"]=json!("parent");
         tx.execute("UPDATE runtime_agents SET record=?1 WHERE id='a'",[a.to_string()])?;
         let parent=json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"parent","rootId":"parent","epoch":1,"status":"waiting","autoWake":true});
@@ -369,13 +365,14 @@ async fn foreign_followup_identity_refuses_and_rolls_back() {
 #[tokio::test]
 async fn corrupt_continuation_rows_name_the_table_and_identity() {
     let (_root, store) = seeded("capacity").await;
-    let agent: String = store
-        .test_reader()
-        .expect("reader")
-        .query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |r| {
-            r.get(0)
-        })
-        .expect("seeded agent");
+    // The isolated copy below has no chat rows, so it gets the merged record.
+    let agent = studio_runtime_store::agent_volatile::merged_record(
+        &store.test_reader().expect("reader"),
+        "a",
+    )
+    .expect("seeded agent")
+    .expect("agent row")
+    .to_string();
     for (table, id) in [
         (ContinuationTable::Usage, "resume"),
         (ContinuationTable::Capacity, "retry"),
@@ -415,11 +412,10 @@ fn capacity_state(store: &RuntimeStore) -> Value {
             |r| r.get(0),
         )
         .expect("retry");
-    let agent: String = db
-        .query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |r| {
-            r.get(0)
-        })
-        .expect("agent");
+    let agent = studio_runtime_store::agent_volatile::merged_record(&db, "a")
+        .expect("agent")
+        .expect("agent row")
+        .to_string();
     let events: i64 = db
         .query_row("SELECT count(*) FROM runtime_events", [], |r| r.get(0))
         .expect("events");
@@ -431,11 +427,8 @@ async fn pending_settings_cannot_claim_a_replaced_capacity_retry() {
     let (_root, store) = seeded("capacity").await;
     store
         .transaction_with(|tx| {
-            let raw: String =
-                tx.query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |r| {
-                    r.get(0)
-                })?;
-            let mut agent: Value = studio_json::from_str(&raw).expect("agent");
+            let mut agent: Value =
+                studio_runtime_store::agent_volatile::merged_record(tx, "a")?.expect("agent");
             let mut replacement = agent["capacityRetry"].clone();
             replacement["id"] = json!("replacement");
             agent["pendingSettings"] = json!({"capacityRetry":replacement});
@@ -558,13 +551,8 @@ async fn automatic_capacity_retry_cancels_an_excluded_account_with_a_permanent_h
     let (_root, store) = seeded("capacity").await;
     store
         .transaction_with(|tx| {
-            let mut agent: Value = tx
-                .query_row(
-                    "SELECT record FROM runtime_agents WHERE id='a'",
-                    [],
-                    |row| row.get::<_, String>(0),
-                )
-                .map(|raw| studio_json::from_str(&raw).expect("agent JSON"))?;
+            let mut agent: Value =
+                studio_runtime_store::agent_volatile::merged_record(tx, "a")?.expect("agent JSON");
             agent["excludedAccountKeys"] = json!(["default"]);
             studio_runtime_store::ContinuationRepository::put_agent(tx, &agent)?;
             let stage = studio_runtime_services::continuation_runtime::stage_capacity_retry(
@@ -701,14 +689,9 @@ async fn a_disk_full_turn_failure_creates_a_free_space_retry() {
         .expect("disk-full failure stages a continuation");
     assert!(staged.changed());
     let db = store.test_reader().expect("reader");
-    let agent: Value = db
-        .query_row(
-            "SELECT record FROM runtime_agents WHERE id='a'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .map(|raw| studio_json::from_str(&raw).expect("agent JSON"))
-        .expect("agent");
+    let agent: Value = studio_runtime_store::agent_volatile::merged_record(&db, "a")
+        .expect("agent")
+        .expect("agent JSON");
     let retry = &agent["capacityRetry"];
     assert_eq!(retry["cause"], "diskFull");
     assert_eq!(retry["status"], "scheduled");

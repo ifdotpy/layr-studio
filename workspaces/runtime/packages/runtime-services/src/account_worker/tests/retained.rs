@@ -179,6 +179,15 @@ fn seed_manual_authorization(
         outbox::{Outbox, OutboxRow},
         request_results::{Admission, RequestResults},
     };
+    // A real authorization holds the stored rows as readers see them (with the fields
+    // that the chat and turn rows own).
+    let stored = |value: Value| -> Result<Value, StoreError> {
+        let id = value["id"].as_str().unwrap_or_default().to_owned();
+        Ok(AgentRepository::get(tx, &AgentId::from(id.as_str()))?
+            .map_or(value, |agent| agent.value()))
+    };
+    let lead = stored(lead)?;
+    let target = stored(target)?;
     let identity = manual_fixture_id(label);
     let admission = match RequestResults::admit(
         tx,
@@ -2669,12 +2678,10 @@ async fn restart_terminal_commit_before_wake_converges_on_next_worker_start() {
     state
         .bridge
         .run(move |store| async move {
-            let raw: String = store.test_reader()?.query_row(
-                "SELECT record FROM runtime_agents WHERE id=?1",
-                [&agent],
-                |row| row.get(0),
-            )?;
-            let snapshot = RecoverySnapshot::from_record(studio_json::from_str(&raw).unwrap())
+            let record =
+                studio_runtime_store::agent_volatile::merged_record(&store.test_reader()?, &agent)?
+                    .expect("agent row");
+            let snapshot = RecoverySnapshot::from_record(record)
                 .map_err(|error| StoreError::SchemaMismatch(error.to_string()))
                 .map_err(WorkerError::from)?;
             let scope = ConnectionScope {

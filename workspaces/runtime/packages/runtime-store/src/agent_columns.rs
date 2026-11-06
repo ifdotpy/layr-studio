@@ -473,6 +473,7 @@ mod tests {
             // so this test sees only the retired columns change.
             crate::migrations::migrate_start_attempts_to_turns(tx)?;
             crate::migrations::migrate_chat_fields_to_chats(tx)?;
+            crate::migrations::migrate_status_to_chats(tx)?;
             let triggers = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='runtime_agents'")?
                 .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
             let old_table = table_sql("runtime_agents_legacy_start_fixture").replace(

@@ -1149,7 +1149,7 @@ async fn accepted_start_after_concurrent_stop_stages_interrupt_then_commits_life
     store
         .transaction_with(|tx| {
             let raw: String = tx.query_row(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
+                "SELECT json_set(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END,'$.status',COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),json_extract(record,'$.status')),'$.inFlight',json(CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND state IN ('starting','running')) THEN 'true' ELSE 'false' END)) FROM runtime_agents WHERE id='agent'",
                 [],
                 |row| row.get(0),
             )?;
@@ -1232,14 +1232,9 @@ async fn rejected_safety_start_settles_the_empty_event_attempt() {
         .is_err()
     );
     let db = store.test_reader().expect("state read");
-    let raw: String = db
-        .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='agent'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("settled agent");
-    let agent: Value = studio_json::from_str(&raw).expect("agent JSON");
+    let agent: Value = studio_runtime_store::agent_volatile::merged_record(&db, "agent")
+        .expect("settled agent")
+        .expect("agent JSON");
     assert_eq!(agent["status"], "failed");
     assert_eq!(agent["inFlight"], false);
     assert_eq!(agent["startAttempt"]["executionOutcome"], "rejected");

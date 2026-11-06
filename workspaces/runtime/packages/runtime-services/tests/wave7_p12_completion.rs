@@ -446,14 +446,9 @@ async fn auth_proof_cursors_survive_two_accounts_and_wake_errors_do_not_drop_lat
     let store = RuntimeStore::open(Some(root.path())).await.expect("store");
     let (first, second) = store
         .transaction_with(|tx| -> std::result::Result<_, ContinuationError> {
-            let base: String = tx
-                .query_row(
-                    "SELECT record FROM runtime_agents WHERE id='a'",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(StoreError::from)?;
-            let base_agent: Value = studio_json::from_str(&base).map_err(StoreError::from)?;
+            // Raw copies have no chat rows, so they start from the merged record.
+            let base_agent: Value =
+                studio_runtime_store::agent_volatile::merged_record(tx, "a")?.expect("agent row");
             let base_resume: String = tx
                 .query_row(
                     "SELECT record FROM runtime_usage_resumes WHERE id='resume'",
@@ -609,14 +604,9 @@ async fn a_sign_in_makes_the_auth_waits_of_its_account_due_now() {
     let store = RuntimeStore::open(Some(root.path())).await.expect("store");
     let changed = store
         .transaction_with(|tx| -> std::result::Result<_, ContinuationError> {
-            let base_agent: String = tx
-                .query_row(
-                    "SELECT record FROM runtime_agents WHERE id='a'",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(StoreError::from)?;
-            let base_agent: Value = studio_json::from_str(&base_agent).map_err(StoreError::from)?;
+            // Raw copies have no chat rows, so they start from the merged record.
+            let base_agent: Value =
+                studio_runtime_store::agent_volatile::merged_record(tx, "a")?.expect("agent row");
             let base_resume: String = tx
                 .query_row(
                     "SELECT record FROM runtime_usage_resumes WHERE id='resume'",

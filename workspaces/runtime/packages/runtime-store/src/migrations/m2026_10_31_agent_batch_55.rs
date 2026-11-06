@@ -201,6 +201,8 @@ mod tests {
         store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES('agent',?1)", [r#"{"id":"agent","rootId":"agent","epoch":0,"status":"failed","accountKey":"default","provider":"codex","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#])?;
                 super::super::normalize_agent_fixtures(tx)?;
+                // The status leaves the record at startup; do it before the reopen check.
+                super::super::migrate_status_to_chats(tx)?;
             Ok(())
         }).await.unwrap();
         drop(store);
