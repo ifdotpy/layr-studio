@@ -69,7 +69,7 @@ impl StoreChatNotices {
 fn vm_notice_chats_sql() -> String {
     format!(
         "SELECT id FROM runtime_agents WHERE deleted_at IS NULL \
-         AND json_extract(record,'$.executionMode')='vm' \
+         AND COALESCE(json_extract(record,'$.executionMode'),(SELECT execution_mode FROM chats WHERE chats.id=runtime_agents.id))='vm' \
          AND ({} IN ('running','starting','approval') OR {}) \
          ORDER BY id",
         studio_runtime_store::domain::chat_status_sql("runtime_agents.id"),

@@ -449,25 +449,9 @@ fn project_monitor_bound(
     }
 }
 
-fn raw(connection: &Connection, table: &str, id: &str) -> Result<Option<Value>, Error> {
-    let text: Option<String> = connection
-        .query_row(
-            &format!("SELECT record FROM {table} WHERE id=?"),
-            [id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StoreError::from)?;
-    text.map(|text| {
-        studio_json::from_str(&text)
-            .map_err(StoreError::from)
-            .map_err(Error::from)
-    })
-    .transpose()
-}
 pub fn owner(connection: &Connection, scope: &str) -> Result<Value, Error> {
-    let root =
-        raw(connection, "runtime_agents", scope)?.ok_or(Error::Invalid("Unknown process owner"))?;
+    let root = studio_runtime_store::agent_volatile::merged_record(connection, scope)?
+        .ok_or(Error::Invalid("Unknown process owner"))?;
     if studio_runtime_store::truthy(root.get("deletedAt")) {
         return Err(Error::Invalid("This process owner was deleted"));
     }
@@ -484,18 +468,21 @@ pub fn owners(connection: &Connection, scope: &str) -> Result<Vec<Value>, Error>
              SELECT ?1 UNION SELECT child.id FROM runtime_agents child
              JOIN descendants parent ON child.parent_id=parent.id
              WHERE child.deleted_at IS NULL
-         ) SELECT agent.record FROM descendants JOIN runtime_agents agent ON agent.id=descendants.id
+         ) SELECT agent.id FROM descendants JOIN runtime_agents agent ON agent.id=descendants.id
            WHERE descendants.id != ?1",
         )
         .map_err(StoreError::from)?;
-    let rows = statement
+    let ids = statement
         .query_map([scope], |row| row.get::<_, String>(0))
+        .map_err(StoreError::from)?
+        .collect::<Result<Vec<_>, _>>()
         .map_err(StoreError::from)?;
     let mut result = vec![root];
-    for row in rows {
-        result.push(
-            studio_json::from_str(&row.map_err(StoreError::from)?).map_err(StoreError::from)?,
-        );
+    for id in ids {
+        if let Some(record) = studio_runtime_store::agent_volatile::merged_record(connection, &id)?
+        {
+            result.push(record);
+        }
     }
     Ok(result)
 }
@@ -1522,4 +1509,34 @@ fn typed_task_keeps_numeric_process_identity_projection() {
     assert_eq!(after.process_id, typed.process_id().cloned());
     assert_eq!(after.item_id.as_deref(), Some("i"));
     assert_eq!(after.view.source, ProcessSourceKind::CodexTask);
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use studio_runtime_store::RuntimeStore;
+
+    #[tokio::test]
+    async fn process_owners_carry_the_chat_owned_fields() {
+        let root = tempfile::tempdir().expect("state");
+        let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+        store
+            .transaction(|tx| {
+                for (id, parent, mode) in [("lead", "null", "host"), ("child", "\"lead\"", "vm")] {
+                    tx.execute(
+                        "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                        [id, &format!(r#"{{"id":"{id}","rootId":"lead","parentId":{parent},"epoch":1,"status":"idle","compactions":0,"provider":"codex","accountKey":"default","cwd":"/w","autoWake":true,"executionMode":"{mode}"}}"#)],
+                    )?;
+                }
+                studio_runtime_store::migrations::migrate_chat_fields_to_chats(tx)
+            })
+            .await
+            .expect("agents");
+        let db = store.test_reader().expect("reader");
+        let owners = super::owners(&db, "lead").expect("owners");
+        assert_eq!(owners.len(), 2);
+        assert_eq!(owners[0]["autoWake"], true);
+        assert_eq!(owners[0]["executionMode"], "host");
+        assert_eq!(owners[1]["id"], "child");
+        assert_eq!(owners[1]["executionMode"], "vm");
+    }
 }

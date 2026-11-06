@@ -415,6 +415,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             studio_runtime_store::migrations::migrate_project_teams(db)?;
             studio_runtime_store::migrations::migrate_project_record_kind(db)?;
             studio_runtime_store::migrations::migrate_start_attempts_to_turns(db)?;
+            studio_runtime_store::migrations::migrate_chat_fields_to_chats(db)?;
             for id in completed_turns {
                 let (chat, turn) = id.split_once(':').expect("completed turn id");
                 studio_runtime_store::domain::complete_turn(db, chat, turn)?;
@@ -542,23 +543,44 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
             .expect("rows read");
         let mut rows = rows;
         if table == "agents" {
-            // The start attempt lives on the chat's turn row; the oracle keeps it in the record.
-            use rusqlite::OptionalExtension;
+            // The chat and turn rows own some agent fields; the oracle keeps them in the record.
             for row in &mut rows {
                 let (Some(id), Some(record)) = (row["id"].as_str(), row["record"].as_str()) else {
                     continue;
                 };
-                if let Some(merged) = db
+                let mut merged: Value = studio_json::from_str(record).expect("agent JSON");
+                let attempt: Option<String> = db
                     .query_row(
-                        "SELECT json_set(?1,'$.startAttempt',json(attempt)) FROM turns WHERE chat=?2 AND attempt IS NOT NULL",
-                        [record, id],
-                        |merged| merged.get::<_, String>(0),
+                        "SELECT attempt FROM turns WHERE chat=?1 AND attempt IS NOT NULL",
+                        [id],
+                        |found| found.get(0),
                     )
-                    .optional()
-                    .expect("attempt")
-                {
-                    row["record"] = json!(merged);
+                    .ok();
+                if let Some(attempt) = attempt {
+                    merged["startAttempt"] = studio_json::from_str(&attempt).expect("attempt");
                 }
+                #[allow(clippy::type_complexity)] // The four chat columns, read once.
+                let chat: Option<(Option<bool>, Option<bool>, Option<String>, Option<i64>)> = db
+                    .query_row(
+                        "SELECT auto_wake,usage_resume_enabled,execution_mode,turn_epoch FROM chats WHERE id=?1",
+                        [id],
+                        |found| Ok((found.get(0)?, found.get(1)?, found.get(2)?, found.get(3)?)),
+                    )
+                    .ok();
+                if let Some((auto_wake, usage, mode, epoch)) = chat {
+                    let fields = merged.as_object_mut().expect("agent object");
+                    for (key, value) in [
+                        ("autoWake", auto_wake.map(Value::Bool)),
+                        ("usageResumeEnabled", usage.map(Value::Bool)),
+                        ("executionMode", mode.map(Value::String)),
+                        ("turnEpoch", epoch.map(Value::from)),
+                    ] {
+                        if let Some(value) = value {
+                            fields.entry(key.to_owned()).or_insert(value);
+                        }
+                    }
+                }
+                row["record"] = json!(merged.to_string());
             }
         }
         if table == "sync_entities" {

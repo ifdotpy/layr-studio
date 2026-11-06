@@ -379,22 +379,27 @@ async fn transcript_cases(group: usize) {
                 transcript::pull_scope(Arc::clone(&store), "transcript:agent", "agent", after)
                     .await
                     .expect("pull");
-            // The workspace limits write and every agent, request and work number come
-            // before the transcript allocations, so the highest durable number is the shift.
-            let durable_high: i64 = store
+            // The workspace limits write, the room write and every agent, request and
+            // work number come before the transcript allocations, in any order, so the
+            // highest of those numbers is the shift.
+            let migrated_high: i64 = store
                 .test_reader()
                 .expect("reader")
-                .query_row("SELECT COALESCE(MAX(seq),0) FROM durable_rows", [], |row| {
-                    row.get(0)
-                })
-                .expect("durable high");
+                .query_row(
+                    "SELECT MAX((SELECT COALESCE(MAX(seq),0) FROM durable_rows),\
+                     (SELECT COALESCE(MAX(seq),0) FROM sync_entities \
+                      WHERE collection<>'transcript:agent'))",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("migrated high");
             assert_pull(
                 &got,
                 expected,
                 fixture_sync_high - 1,
                 // A nonzero cursor observes the newly projected transcript after
                 // removing compactionsObservedOnly, which allocates one more sequence.
-                (durable_high - fixture_sync_high + 1).max(1)
+                (migrated_high - fixture_sync_high).max(1)
                     + i64::from(after > 0)
                     + room_migration_writes,
                 case["phase"] == "prune",

@@ -194,7 +194,7 @@ async fn vm_launch_request(
                     // A host agent, the common case, needs only its mode, not its record.
                     let vm = connection
                         .prepare_cached(
-                            "SELECT json_extract(record,'$.executionMode')='vm' \
+                            "SELECT COALESCE(json_extract(record,'$.executionMode'),(SELECT execution_mode FROM chats WHERE chats.id=runtime_agents.id))='vm' \
                              FROM runtime_agents WHERE id=?1",
                         )?
                         .query_row([&lookup_id], |row| row.get::<_, Option<bool>>(0))

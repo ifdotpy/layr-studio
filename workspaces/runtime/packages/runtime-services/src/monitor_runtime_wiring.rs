@@ -1297,7 +1297,7 @@ const MONITOR_DEADLINE_SQL: &str = "WITH active_monitors AS MATERIALIZED (
                 WHERE m.monitor_status IN ('running','starting','approval') AND m.monitor_status='running'
                   AND COALESCE(json_extract(m.record,'$.reattachRecovery.status'),'')!='running'
                   AND COALESCE(json_extract(m.record,'$.cancelRequested'),0)=0
-                  AND json_extract(a.record,'$.autoWake')=1
+                  AND COALESCE(json_extract(a.record,'$.autoWake'),(SELECT wc.auto_wake FROM chats wc WHERE wc.id=a.id))=1
                   AND COALESCE(json_extract(a.record,'$.deletedAt'),0)=0
                   AND json_extract(a.record,'$.epoch')=COALESCE(json_extract(m.record,'$.epoch'),json_extract(m.record,'$.operation.epoch'))
                   AND COALESCE(json_extract(m.record,'$.stallTimeoutSeconds'),?2)>0
@@ -1310,7 +1310,7 @@ const MONITOR_DEADLINE_SQL: &str = "WITH active_monitors AS MATERIALIZED (
                 FROM active_monitors m CROSS JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent')
                 WHERE m.monitor_status IN ('running','starting','approval') AND m.monitor_status='running'
                   AND COALESCE(json_extract(m.record,'$.reattachRecovery.status'),'')!='running'
-                  AND json_extract(a.record,'$.autoWake')=1
+                  AND COALESCE(json_extract(a.record,'$.autoWake'),(SELECT wc.auto_wake FROM chats wc WHERE wc.id=a.id))=1
                   AND COALESCE(json_extract(a.record,'$.deletedAt'),0)=0
                   AND json_extract(a.record,'$.epoch')=json_extract(m.record,'$.epoch')
                   AND json_extract(m.record,'$.ruleId') IS NULL
@@ -1358,7 +1358,7 @@ fn next_deadline_in(connection: &rusqlite::Connection) -> Result<Option<f64>, Mo
                 FROM runtime_rules r JOIN runtime_agents a ON a.id=json_extract(r.record,'$.agent')
                 WHERE json_extract(r.record,'$.status')='active'
                   AND COALESCE(json_extract(r.record,'$.inFlight'),0)=0
-                  AND json_extract(a.record,'$.autoWake')=1
+                  AND COALESCE(json_extract(a.record,'$.autoWake'),(SELECT wc.auto_wake FROM chats wc WHERE wc.id=a.id))=1
                   AND COALESCE(json_extract(a.record,'$.deletedAt'),0)=0
                   AND json_extract(a.record,'$.epoch')=json_extract(r.record,'$.epoch')
                   AND COALESCE((
@@ -2937,6 +2937,7 @@ mod tests {
         db.execute_batch(
             "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL);
              CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+             CREATE TABLE chats(id TEXT PRIMARY KEY,auto_wake INTEGER);
              CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL);
              CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval');
              INSERT INTO runtime_monitors VALUES('old','{','lost');
@@ -2950,7 +2951,7 @@ mod tests {
     #[ignore = "manual Callgrind fixture"]
     fn monitor_deadline_callgrind_50() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
-        db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval'); INSERT INTO runtime_agents VALUES('a','{\"autoWake\":true,\"epoch\":1}');").expect("schema");
+        db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE chats(id TEXT PRIMARY KEY,auto_wake INTEGER); CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval'); INSERT INTO runtime_agents VALUES('a','{\"autoWake\":true,\"epoch\":1}');").expect("schema");
         for i in 0..50 {
             let record = studio_json::json!({"status":"running", "agent":"a", "epoch":1, "created":10.0, "activityAt":10.0, "activityGeneration":1, "outputMatchesPending":{}, "outputMatchExcerpts":{"example":"x".repeat(4096)}});
             db.execute(
@@ -2970,6 +2971,7 @@ mod tests {
         db.execute_batch(
             "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT,monitor_status TEXT);
              CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT);
+             CREATE TABLE chats(id TEXT PRIMARY KEY,auto_wake INTEGER);
              CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval');
              ANALYZE;
              INSERT INTO sqlite_stat1 VALUES('runtime_agents','sqlite_autoindex_runtime_agents_1','3 1');

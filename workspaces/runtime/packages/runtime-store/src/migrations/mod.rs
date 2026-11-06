@@ -95,6 +95,7 @@ mod m2026_11_04_direct_read_time;
 mod m2026_11_04_event_read_time;
 mod m2026_11_04_window_read_time;
 mod m2026_11_04_work_read_time;
+mod m2026_11_06_chat_fields_on_chats;
 mod m2026_11_06_immutable_rows;
 mod m2026_11_06_item_hidden_by;
 mod m2026_11_06_one_draft_per_chat;
@@ -125,6 +126,7 @@ pub use m2026_10_31_message_send_projections::apply as migrate_message_send_proj
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_room_record::apply as migrate_room_record;
+pub use m2026_11_06_chat_fields_on_chats::apply as migrate_chat_fields_to_chats;
 pub use m2026_11_06_start_attempt_on_turns::apply as migrate_start_attempts_to_turns;
 
 /// Normalize historical agent fixtures inserted after the database was opened.
@@ -1638,6 +1640,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_start_attempt_on_turns::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-chat-fields-on-chats",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with chat fields inside agent records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_chat_fields_on_chats::apply(c.transaction),
     },
 ];
 

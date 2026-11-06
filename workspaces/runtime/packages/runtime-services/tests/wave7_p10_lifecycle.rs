@@ -984,11 +984,15 @@ impl LifecyclePorts for InterruptFixture {
         assert_eq!(stopped["autoWake"], false);
         let saved: String = tx
             .query_row(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id=?1",
+                "SELECT id FROM runtime_agents WHERE id=?1",
                 [stopped["id"].as_str()],
                 |r| r.get(0),
             )
             .map_err(studio_runtime_store::StoreError::from)?;
+        let saved = studio_runtime_store::agent_volatile::merged_record(tx, &saved)
+            .expect("merged agent")
+            .expect("agent row")
+            .to_string();
         assert_eq!(
             studio_json::from_str::<Value>(&saved).expect("saved agent"),
             *stopped
@@ -1471,12 +1475,14 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                     .test_reader()
                     .expect("intent is committed before dispatch");
                 let raw: String = reader
-                    .query_row(
-                        "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='lead'",
-                        [],
-                        |row| row.get(0),
-                    )
+                    .query_row("SELECT id FROM runtime_agents WHERE id='lead'", [], |row| {
+                        row.get(0)
+                    })
                     .expect("stopped agent row");
+                let raw = studio_runtime_store::agent_volatile::merged_record(&reader, &raw)
+                    .expect("merged agent")
+                    .expect("agent row")
+                    .to_string();
                 let agent: Value = studio_json::from_str(&raw).expect("agent record");
                 let interrupt = &agent["startAttempt"]["interrupt"];
                 if request.method == studio_runtime_providers::Method::TurnInterrupt {
@@ -1597,12 +1603,14 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             drop(calls);
             let reader = store.test_reader().expect("settled receipt");
             let raw: String = reader
-                .query_row(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='lead'",
-                    [],
-                    |row| row.get(0),
-                )
+                .query_row("SELECT id FROM runtime_agents WHERE id='lead'", [], |row| {
+                    row.get(0)
+                })
                 .expect("agent row");
+            let raw = studio_runtime_store::agent_volatile::merged_record(&reader, &raw)
+                .expect("merged agent")
+                .expect("agent row")
+                .to_string();
             let agent: Value = studio_json::from_str(&raw).expect("agent record");
             assert_eq!(agent["startAttempt"]["interrupt"]["outcome"], "accepted");
             drop(reader);
@@ -2153,12 +2161,14 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
     drop(calls);
     let reader = store.test_reader().expect("reader");
     let raw: String = reader
-        .query_row(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL) THEN json_set(record,'$.startAttempt',json((SELECT attempt FROM turns WHERE chat=runtime_agents.id AND attempt IS NOT NULL))) ELSE record END FROM runtime_agents WHERE id='lead'",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT id FROM runtime_agents WHERE id='lead'", [], |row| {
+            row.get(0)
+        })
         .expect("agent row");
+    let raw = studio_runtime_store::agent_volatile::merged_record(&reader, &raw)
+        .expect("merged agent")
+        .expect("agent row")
+        .to_string();
     let agent: Value = studio_json::from_str(&raw).expect("agent");
     assert_eq!(agent["startAttempt"]["interrupt"], first);
 }

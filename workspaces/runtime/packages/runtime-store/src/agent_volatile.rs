@@ -48,6 +48,102 @@ pub const AGENT_VOLATILE_FIELDS: [&str; 9] = [
 /// back together with the volatile fields (#630 item 63).
 pub const START_ATTEMPT_FIELD: &str = "startAttempt";
 
+/// Agent fields that the chat row owns (`chats`, written by `domain::project` on every
+/// agent write). The agent record never holds them; readers get them back like the
+/// start attempt (#630 item 63, group 4).
+pub const CHAT_FIELDS: [&str; 4] = [
+    "autoWake",
+    "usageResumeEnabled",
+    "executionMode",
+    "turnEpoch",
+];
+
+type ChatValues = [Option<Value>; 4];
+
+fn chat_values_of_row(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<ChatValues> {
+    Ok([
+        row.get::<_, Option<bool>>(first)?.map(Value::Bool),
+        row.get::<_, Option<bool>>(first + 1)?.map(Value::Bool),
+        row.get::<_, Option<String>>(first + 2)?.map(Value::String),
+        row.get::<_, Option<i64>>(first + 3)?.map(Value::from),
+    ])
+}
+
+/// The chat-owned fields of chat `id`; None when the chat has no row (a record from
+/// before the move, or a reduced test schema).
+fn stored_chat_values(connection: &Connection, id: &str) -> StoreResult<Option<ChatValues>> {
+    match connection.query_row_cached(
+        "SELECT auto_wake,usage_resume_enabled,execution_mode,turn_epoch FROM chats WHERE id=?1",
+        [id],
+        |row| chat_values_of_row(row, 0),
+    ) {
+        Ok(values) => Ok(Some(values)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+            if message.starts_with("no such table: chats") =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// A key that the record still holds (a record written before the move) keeps its value;
+/// every current write leaves these keys out of the record.
+fn merge_chat_fields(fields: &mut Map<String, Value>, values: ChatValues) {
+    for (field, value) in CHAT_FIELDS.iter().zip(values) {
+        if let Some(value) = value
+            && !fields.contains_key(*field)
+        {
+            fields.insert((*field).to_owned(), value);
+        }
+    }
+}
+
+fn merge_typed_chat_fields(
+    id: &str,
+    agent: &mut crate::AgentRecord,
+    values: ChatValues,
+) -> StoreResult<()> {
+    let [auto_wake, usage_resume, mode, epoch] = values;
+    if agent.auto_wake.is_none() {
+        agent.auto_wake = auto_wake.and_then(|value| value.as_bool());
+    }
+    if agent.usage_resume_enabled.is_none() {
+        agent.usage_resume_enabled = usage_resume.and_then(|value| value.as_bool());
+    }
+    if agent.execution_mode.is_none() {
+        agent.execution_mode = mode
+            .map(|mode| studio_json::from_value(mode).map_err(|_| invalid(id)))
+            .transpose()?;
+    }
+    if agent.turn_epoch.is_none() {
+        agent.turn_epoch = epoch.and_then(|value| value.as_i64());
+    }
+    Ok(())
+}
+
+/// SQL for the chat-owned columns of the `runtime_agents a` row, for bulk agent reads:
+/// whether the chat row exists, then the four values in [`CHAT_FIELDS`] order.
+pub(crate) const CHAT_COLUMNS_SQL: &str = "(SELECT 1 FROM chats c WHERE c.id=a.id),\
+    (SELECT c.auto_wake FROM chats c WHERE c.id=a.id),\
+    (SELECT c.usage_resume_enabled FROM chats c WHERE c.id=a.id),\
+    (SELECT c.execution_mode FROM chats c WHERE c.id=a.id),\
+    (SELECT c.turn_epoch FROM chats c WHERE c.id=a.id)";
+
+/// Add the chat-owned fields that columns `index..index+5` of a bulk agent read hold.
+pub(crate) fn merge_chat_columns(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+    id: &str,
+    agent: &mut crate::AgentRecord,
+) -> StoreResult<()> {
+    if row.get::<_, Option<i64>>(index)?.is_some() {
+        merge_typed_chat_fields(id, agent, chat_values_of_row(row, index + 1)?)?;
+    }
+    Ok(())
+}
+
 /// The prepared volatile-field read; None on a reduced test schema without the table.
 fn volatile_select(connection: &Connection) -> StoreResult<Option<rusqlite::CachedStatement<'_>>> {
     match connection.prepare_cached(&SELECT_SQL) {
@@ -351,6 +447,9 @@ pub fn merge(connection: &Connection, id: &str, record: &mut Value) -> StoreResu
         }
     }
     merge_attempt_fields(connection, id, fields)?;
+    if let Some(values) = stored_chat_values(connection, id)? {
+        merge_chat_fields(fields, values);
+    }
     Ok(())
 }
 
@@ -368,7 +467,11 @@ pub(crate) fn merge_agent(
             merge_agent_row(row, id, agent)?;
         }
     }
-    merge_agent_attempt(connection, id, agent)
+    merge_agent_attempt(connection, id, agent)?;
+    if let Some(values) = stored_chat_values(connection, id)? {
+        merge_typed_chat_fields(id, agent, values)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn merge_agent_row(
@@ -474,6 +577,7 @@ pub fn merged_text(connection: &Connection, id: &str, raw: String) -> StoreResul
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::VolatileLoad);
     let attempt = stored_attempt(connection, id)?;
+    let chat = stored_chat_values(connection, id)?;
     let mut statement = volatile_select(connection)?;
     let mut rows = match statement.as_mut() {
         Some(statement) => Some(statement.query([id])?),
@@ -483,7 +587,7 @@ pub fn merged_text(connection: &Connection, id: &str, raw: String) -> StoreResul
         Some(rows) => rows.next()?,
         None => None,
     };
-    if row.is_none() && attempt.is_none() {
+    if row.is_none() && attempt.is_none() && chat.is_none() {
         return Ok(raw);
     }
     #[cfg(any(test, feature = "test-support"))]
@@ -497,6 +601,9 @@ pub fn merged_text(connection: &Connection, id: &str, raw: String) -> StoreResul
     if let Some(attempt) = attempt {
         let value = studio_json::from_str(&attempt).map_err(|_| invalid(id))?;
         fields.insert(START_ATTEMPT_FIELD.to_owned(), value);
+    }
+    if let Some(values) = chat {
+        merge_chat_fields(&mut fields, values);
     }
     #[cfg(any(test, feature = "test-support"))]
     publication_work::record(id, publication_work::Operation::TextRoundTrip);
@@ -552,7 +659,10 @@ impl Serialize for StoredRecord<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(None)?;
         for (key, value) in self.0 {
-            if !is_volatile_field(key) && key != START_ATTEMPT_FIELD {
+            if !is_volatile_field(key)
+                && key != START_ATTEMPT_FIELD
+                && !CHAT_FIELDS.contains(&key.as_str())
+            {
                 map.serialize_entry(key, value)?;
             }
         }

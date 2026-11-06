@@ -1416,6 +1416,12 @@ impl JsonRecord for AgentRecord {
             row_id,
             &mut agent,
         )?;
+        crate::agent_volatile::merge_chat_columns(
+            row,
+            crate::agent_volatile::AGENT_VOLATILE_FIELDS.len() + 4,
+            row_id,
+            &mut agent,
+        )?;
         Ok(agent)
     }
 
@@ -2624,9 +2630,10 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
         let where_clause = where_sql.map_or_else(String::new, |sql| format!(" WHERE {sql}"));
         let sql = if R::TABLE == AgentRecord::TABLE {
             format!(
-                "SELECT {},a.id,a.record,v.id IS NOT NULL,{} FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
+                "SELECT {},a.id,a.record,v.id IS NOT NULL,{},{} FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
                 crate::agent_volatile::columns("v."),
-                crate::agent_volatile::ATTEMPT_COLUMN_SQL
+                crate::agent_volatile::ATTEMPT_COLUMN_SQL,
+                crate::agent_volatile::CHAT_COLUMNS_SQL
             )
         } else {
             format!(
@@ -4604,7 +4611,9 @@ mod tests {
         connection
             .execute_batch(
                 "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-                 CREATE TABLE turns(chat TEXT, attempt TEXT);",
+                 CREATE TABLE turns(chat TEXT, attempt TEXT);
+                 CREATE TABLE chats(id TEXT, auto_wake INTEGER, usage_resume_enabled INTEGER,
+                   execution_mode TEXT, turn_epoch INTEGER);",
             )
             .unwrap();
         connection

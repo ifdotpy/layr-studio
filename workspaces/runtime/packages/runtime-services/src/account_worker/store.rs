@@ -15,8 +15,8 @@ use studio_runtime_schema::shared_values::{
     PROVIDER_THREAD_START_UNKNOWN_ERROR,
 };
 use studio_runtime_store::CachedSql;
+use studio_runtime_store::NotificationDispatchRepository;
 use studio_runtime_store::outbox::{Outbox, OutboxError, OutboxRow, Publication, PublicationClass};
-use studio_runtime_store::{AgentRecord, NotificationDispatchRepository};
 
 pub(super) const PUBLICATION_DRAIN_LIMIT: usize = 64;
 /// Pending publication receipts above which token-rate observations are
@@ -2522,17 +2522,18 @@ fn record_manual_release_closure(
         return Ok(false);
     };
     let mut statement = tx.prepare_cached(
-        "SELECT record FROM runtime_agents WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 ORDER BY rowid LIMIT 2",
+        "SELECT id FROM runtime_agents WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 ORDER BY rowid LIMIT 2",
     )?;
     let rows = statement
         .query_map(params![thread, identity.account], |row| {
             row.get::<_, String>(0)
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let [raw] = rows.as_slice() else {
+    let [id] = rows.as_slice() else {
         return Ok(false);
     };
-    let mut agent: AgentRecord = studio_json::from_str(raw).map_err(|_| invalid(thread))?;
+    let mut agent =
+        AgentRepository::get(tx, &AgentId::from(id.as_str()))?.ok_or_else(|| invalid(thread))?;
     let record = agent.value();
     let release = &record["nativeRelease"];
     if !release["id"]
