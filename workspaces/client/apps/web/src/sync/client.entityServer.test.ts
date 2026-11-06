@@ -144,14 +144,12 @@ afterAll(async () => {
     vi.unstubAllGlobals();
   }
 });
-async function request(path: string, body?: unknown, signal?: AbortSignal) {
+async function request(path: string, body?: unknown) {
   const response = await fetch(`${origin}${path}`, {
     headers,
     method: body === undefined ? "GET" : "POST",
-    ...(signal ? { signal } : {}),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (signal) return response;
   const value = await response.json();
   expect(response.ok, JSON.stringify(value)).toBe(true);
   return value;
@@ -205,165 +203,6 @@ async function* wireFrames(
     await reader.cancel().catch(() => {});
   }
 }
-
-it("includes a live agent after a full page of deleted agents in a cold snapshot", async () => {
-  const query = new URLSearchParams({
-    protocol: String(SYNC_PROTOCOL_VERSION),
-    resources: JSON.stringify([{ kind: "state" }]),
-    tokenRates: "false",
-  });
-  const controller = new AbortController();
-  const response = await request(
-    `/api/sync/stream?${query}`,
-    undefined,
-    controller.signal,
-  );
-  const found = new Set<string>();
-  try {
-    for await (const frame of wireFrames(response)) {
-      if (frame.name === "resources") {
-        const value =
-          frame.value as components["schemas"]["ResourceChangeEvent"];
-        for (const entry of value.resourceVersions ?? [])
-          for (const row of entry.entityChanges?.documents ?? [])
-            if (row.collection === "agentSummary") found.add(row.id);
-        if (value.resourceVersions?.some((entry) => entry.entityChanges)) break;
-      }
-      if (frame.name === "entity-transfer") {
-        const value =
-          frame.value as components["schemas"]["ResourceEntityTransferEvent"];
-        for (const row of JSON.parse(value.data).documents ?? [])
-          if (row.collection === "agentSummary") found.add(row.id);
-        if (value.complete) break;
-      }
-    }
-    expect(found.has("lead")).toBe(true);
-  } finally {
-    controller.abort();
-  }
-});
-
-it("advances fresh pulls past deleted candidates without skipping live agents", async () => {
-  for (const priorityId of [undefined, "lead"]) {
-    let after = 0;
-    let initialHigh = 0;
-    const found = new Set<string>();
-    for (let page = 0; page < 20; page++) {
-      const value = await request("/fixture/fresh", {
-        after,
-        initialHigh,
-        priorityId: after === 0 ? priorityId : undefined,
-      });
-      for (const row of value.documents)
-        if (row.collection === "agentSummary") found.add(row.id);
-      expect(value.checkpoint).toBeGreaterThan(after);
-      after = value.checkpoint;
-      initialHigh = value.initialHigh;
-      if (after === value.maxSeq) break;
-    }
-    expect(found.has("older-0")).toBe(true);
-    expect(found.has("lead")).toBe(true);
-  }
-});
-
-it("bounds a fresh HTTP pull through filtered pages and continues later", async () => {
-  let after = 1;
-  let initialHigh = 0;
-  const found = new Set<string>();
-  for (let page = 0; page < 30; page++) {
-    const value = await request(
-      `/api/sync/pull?fresh=1&limit=100&after=${after}&initialHigh=${initialHigh}`,
-    );
-    expect(value.checkpoint.seq).toBeGreaterThan(after);
-    if (page === 0) {
-      expect(value.documents).toHaveLength(0);
-      expect(value.checkpoint.seq).toBeLessThan(value.maxSeq);
-    }
-    for (const row of value.documents)
-      if (row.collection === "agentSummary") found.add(row.id);
-    after = value.checkpoint.seq;
-    initialHigh = value.initialHigh;
-    if (after === value.maxSeq) break;
-  }
-  expect(found.has("lead")).toBe(true);
-});
-
-it("completes a recovery pull only after server pages with no documents", async () => {
-  vi.stubGlobal("window", {
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    matchMedia: vi.fn(() => ({ matches: false })),
-  });
-  vi.stubGlobal("document", { hidden: false });
-  vi.stubGlobal("navigator", {
-    onLine: true,
-    locks: {
-      request: (_key: string, write: () => Promise<unknown>) => write(),
-    },
-  });
-  mocks.syncGet.mockImplementation((path: string) => request(path));
-  const module = await import("./client");
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
-  const client = module.createSyncClient({
-    api: {
-      syncGet: mocks.syncGet,
-      syncPost: vi.fn(),
-      saved: (_key, fallback) => fallback,
-      save: vi.fn(),
-      setWorkspace: vi.fn(),
-      isApiSchemaMismatch: () => false,
-    },
-    resources: {
-      watchResourceChanges: (resource, callback) => {
-        if (resource.kind === "state") mocks.invalidations.add(callback);
-        return () => {
-          mocks.invalidations.delete(callback);
-        };
-      },
-      watchResourceConnection: () => () => {},
-    },
-    sequences: createEntitySequenceScope(),
-    transcripts: createTranscriptCache(),
-    databaseSuffix: "empty-recovery",
-  });
-  const { db } = await client.syncDatabase();
-  const pages: number[] = [];
-  mocks.syncGet.mockImplementation(
-    async (path: string, options?: { query?: Record<string, string> }) => {
-      const query = { ...options?.query };
-      if (path === "/api/sync/pull") {
-        query.limit = "50";
-        expect(
-          await db.projections.findOne("state:entities:complete").exec(),
-        ).toBeNull();
-      }
-      const value = await request(
-        `${path}${options?.query ? `?${new URLSearchParams(query)}` : ""}`,
-      );
-      if (path === "/api/sync/pull") pages.push(value.documents.length);
-      return value;
-    },
-  );
-  const stop = client.subscribeStateProjection(() => {}, vi.fn());
-  stopProjection = stop;
-  await vi.waitFor(() => expect(mocks.invalidations.size).toBeGreaterThan(0));
-  for (const notify of mocks.invalidations)
-    notify({ epoch: "fixture", revision: 1, reason: "overflow" });
-  await vi.waitFor(
-    async () =>
-      expect(
-        await db.projections.findOne("state:entities:complete").exec(),
-      ).not.toBeNull(),
-    { timeout: 20_000 },
-  );
-  expect(pages).toContain(0);
-  expect(
-    await db.projections.findOne("entity:agentSummary:lead").exec(),
-  ).not.toBeNull();
-  stop();
-  stopProjection = undefined;
-});
 async function* resourceFrames(
   response: Response,
 ): AsyncGenerator<ResourceChangeEvent> {

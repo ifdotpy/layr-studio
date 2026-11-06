@@ -90,8 +90,6 @@ pub(crate) async fn protocol(
 const SYNC_PULL_SCOPE_MAX_CHARS: usize = 299;
 /// Maximum synchronization priority ID length, in Unicode code points.
 const SYNC_PULL_PRIORITY_ID_MAX_CHARS: usize = 4096;
-/// Maximum internal entity pages scanned by one pull request, in pages.
-const MAX_INTERNAL_PAGES_PER_PULL: usize = 4;
 type SyncCursor = studio_runtime_schema::bounded_integer::BoundedInteger<
     0,
     { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
@@ -836,9 +834,8 @@ fn pull_entities(
     let mut seen_sequences = std::collections::HashSet::new();
     let mut checkpoint = after;
     let mut scan_after = after;
-    let mut scanned_pages = 0;
     loop {
-        scanned_pages += 1;
+        let raw_count = page.rows.len();
         let mut reached_limit = false;
         for (index, row) in page.rows.iter().enumerate() {
             // The limit cuts only between change numbers: the rest of a unit that shares
@@ -846,16 +843,7 @@ fn pull_entities(
             if reached_limit && page.rows[index - 1].sequence != row.sequence {
                 break;
             }
-            // The priority summary is sent ahead of sequence order and must
-            // never advance the scan cursor past intervening records.
-            if !(fresh
-                && scan_after == 0
-                && index == 0
-                && priority_id == Some(row.id.as_str())
-                && row.collection == "agentSummary")
-            {
-                checkpoint = row.sequence;
-            }
+            checkpoint = row.sequence;
             // Rows built from one main-table change share its number, so the key is
             // the document and its number, not the number alone.
             if !seen_sequences.insert((row.collection.clone(), row.id.clone(), row.sequence)) {
@@ -873,12 +861,13 @@ fn pull_entities(
         if reached_limit {
             break;
         }
-        let next_after = page.checkpoint;
-        checkpoint = next_after;
-        if next_after >= max_sequence || scanned_pages >= MAX_INTERNAL_PAGES_PER_PULL {
+        if raw_count < page_limit {
+            checkpoint = page.checkpoint;
             break;
         }
+        let next_after = page.rows.last().map_or(checkpoint, |row| row.sequence);
         if next_after <= scan_after {
+            checkpoint = max_sequence;
             break;
         }
         scan_after = next_after;
@@ -898,6 +887,11 @@ fn pull_entities(
                 reset_support,
             )?
         };
+        if page.rows.is_empty() {
+            checkpoint = page.checkpoint;
+            break;
+        }
+        checkpoint = next_after;
     }
     let response = crate::generated::SyncPullResponse {
         checkpoint: crate::generated::SyncCheckpoint { seq: checkpoint },

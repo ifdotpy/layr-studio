@@ -50,22 +50,6 @@ struct Unit {
     rows: Vec<EntityRow>,
 }
 
-/// Advance by examined candidates, including those with no visible documents.
-fn page_units(units: &mut Vec<Unit>, limit: usize, after: i64, through: i64) -> i64 {
-    units.sort_by_key(|unit| unit.seq);
-    let truncated = units.len() > limit;
-    let mut count = limit.min(units.len());
-    while count > 0 && count < units.len() && units[count].seq == units[count - 1].seq {
-        count += 1;
-    }
-    units.truncate(count);
-    if truncated {
-        units.last().map_or(after, |unit| unit.seq)
-    } else {
-        through
-    }
-}
-
 /// Start a scoped read: resolve the reset decision over both sources, then read the
 /// first page. `since` is the client cursor; None or an out-of-range cursor resets.
 pub fn resume(
@@ -206,11 +190,7 @@ pub fn pull_global_fresh(
         studio_runtime_schema::shared_values::SYNC_ENTITY_PAGE_LIMIT,
     );
     let collections = studio_runtime_schema::sync_protocol::global_entity_collections_json();
-    let priority_id = if after == 0 && limit > 1 {
-        priority_id
-    } else {
-        None
-    };
+    let priority_id = if after == 0 { priority_id } else { None };
     let rows = SyncDocumentsRepository::global_rows(
         transaction,
         after,
@@ -269,10 +249,17 @@ pub fn pull_global_fresh(
             limit + 1,
         )?);
     }
+    units.sort_by_key(|unit| unit.seq);
     let room = limit as usize - head.len();
-    let checkpoint = page_units(&mut units, room, after, max_sequence);
+    let truncated = units.len() > room;
+    units.truncate(room);
     let mut rows = head;
     rows.extend(units.into_iter().flat_map(|unit| unit.rows));
+    let checkpoint = if truncated {
+        rows.last().map_or(after, |row| row.sequence)
+    } else {
+        max_sequence
+    };
     Ok(EntityPage {
         rows: dedupe(rows),
         max_sequence,
@@ -394,7 +381,14 @@ pub fn continue_page(
             fetch,
         )?);
     }
-    let checkpoint = page_units(&mut units, limit as usize, after, through);
+    units.sort_by_key(|unit| unit.seq);
+    let truncated = units.len() as i64 > limit;
+    units.truncate(limit as usize);
+    let checkpoint = if truncated {
+        units.last().map_or(after, |unit| unit.seq)
+    } else {
+        through
+    };
     let rows = dedupe(units.into_iter().flat_map(|unit| unit.rows).collect());
     Ok(EntityPage {
         rows,
@@ -506,7 +500,9 @@ fn direct_units(
             } else {
                 direct_docs(connection, source.table, &row_id, seq, wanted, snapshot)?
             };
-            units.push(Unit { seq, rows });
+            if !rows.is_empty() {
+                units.push(Unit { seq, rows });
+            }
         }
     }
     Ok(units)
@@ -643,9 +639,9 @@ fn agent_units(
                 eprintln!("agent {agent_id} views are not streamed: {error}");
                 Ok::<_, StoreError>(Vec::new())
             })?;
-        // Filtered candidates still occupy the SQL page. Keep their sequence
-        // so pagination cannot skip later visible records.
-        units.push(Unit { seq, rows });
+        if !rows.is_empty() {
+            units.push(Unit { seq, rows });
+        }
     }
     Ok(units)
 }
@@ -774,12 +770,11 @@ fn window_units(
                         && owner != agent
                         && !(team && team_member(connection, &owner, agent)?)
                     {
-                        Vec::new()
-                    } else {
-                        vec![upsert(collection, &member, seq, value)?]
+                        continue;
                     }
+                    vec![upsert(collection, &member, seq, value)?]
                 }
-                None if snapshot => Vec::new(),
+                None if snapshot => continue,
                 None => tombstones(&[collection], wanted, &member, seq),
             };
             units.push(Unit { seq, rows });
@@ -883,7 +878,9 @@ fn work_units(
         } else {
             work_docs(transaction, id, *seq, wanted, false)?
         };
-        units.push(Unit { seq: *seq, rows });
+        if !rows.is_empty() {
+            units.push(Unit { seq: *seq, rows });
+        }
     }
     // History rows: one entry per row, keyed `{work}:{index}`.
     for kind in WorkHistoryKind::ALL {
@@ -932,7 +929,9 @@ fn work_units(
                 }
                 _ => Vec::new(),
             };
-            units.push(Unit { seq, rows });
+            if !rows.is_empty() {
+                units.push(Unit { seq, rows });
+            }
         }
     }
     if deletes_after == i64::MAX || !wanted.contains("workDetail") {
@@ -971,7 +970,9 @@ fn work_units(
         for work in works {
             rows.extend(work_docs(transaction, &work, *seq, wanted, true)?);
         }
-        units.push(Unit { seq: *seq, rows });
+        if !rows.is_empty() {
+            units.push(Unit { seq: *seq, rows });
+        }
     }
     let changed_works: Vec<(String, i64)> = transaction
         .prepare(
@@ -995,7 +996,9 @@ fn work_units(
         for dependent in dependents {
             rows.extend(work_docs(transaction, &dependent, seq, wanted, true)?);
         }
-        units.push(Unit { seq, rows });
+        if !rows.is_empty() {
+            units.push(Unit { seq, rows });
+        }
     }
     Ok(units)
 }
