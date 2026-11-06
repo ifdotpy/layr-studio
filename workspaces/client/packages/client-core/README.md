@@ -24,8 +24,3 @@ or establish release readiness.
 
 The core keeps no client state. The server owns drafts, uploads, sync and the
 queue (see the [target architecture](../../../../docs/decisions/2026-10-28-target-client-server-architecture.md)).
-[`store_move.rs`](src/store_move.rs) moves what the removed client store still
-holds (drafts, unsent uploads, recordings) to the server at the first connection
-after an application start. It deletes a local row only after it has read the same
-data back from the server. A failed read-back keeps the row, and the next start
-tries again.
