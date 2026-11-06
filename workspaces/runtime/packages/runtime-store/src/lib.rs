@@ -44,6 +44,7 @@ pub use repositories::multi_server_delivery;
 pub use repositories::process_actions::{
     ProcessActionKind, ProcessActionPhase, ProcessActionRecord,
 };
+pub use repositories::task_item_parity;
 pub use repositories::terminals;
 pub use repositories::{command_watermarks, outbox, remote_outbox, request_results};
 mod schema;

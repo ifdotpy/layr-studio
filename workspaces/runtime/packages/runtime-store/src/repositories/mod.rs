@@ -47,6 +47,7 @@ pub(crate) mod scheduler;
 pub mod startup_recovery;
 pub(crate) mod sync_documents;
 pub mod system_reads;
+pub mod task_item_parity;
 pub(crate) mod tasks;
 pub mod terminals;
 pub(crate) mod transcript;
