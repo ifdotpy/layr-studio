@@ -490,7 +490,31 @@ mod tests {
             .expect("standby socket");
         // The old process exits: its end of the connection closes.
         drop(std::mem::ManuallyDrop::into_inner(handed._stream));
-        let (mut line_out, _) = standby.accept().expect("new server connects");
+        // A failed take never connects; wait with a deadline so the test fails, not hangs.
+        standby.set_nonblocking(true).expect("nonblocking standby");
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let (mut line_out, _) = loop {
+            match standby.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if new_server.is_finished() {
+                        let result = new_server.join().expect("join");
+                        panic!(
+                            "the new server ended without connecting: {:?}",
+                            result.err()
+                        );
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "the new server did not connect in time"
+                    );
+                    #[allow(clippy::disallowed_methods)] // A plain test thread polls a socket.
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("standby accept: {error}"),
+            }
+        };
+        line_out.set_nonblocking(false).expect("blocking line");
         line_out.write_all(b"DRAINED\n").expect("drained");
         let mut taken = new_server.join().expect("join").expect("take");
         assert_eq!(taken.listener.local_addr().expect("address").port(), port);
