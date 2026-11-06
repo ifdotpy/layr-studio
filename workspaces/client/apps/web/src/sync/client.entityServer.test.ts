@@ -252,6 +252,7 @@ it("advances fresh pulls past deleted candidates without skipping live agents", 
       const value = await request("/fixture/fresh", {
         after,
         initialHigh,
+        limit: page < 3 ? 10 : 500,
         priorityId: after === 0 ? priorityId : undefined,
       });
       for (const row of value.documents)
@@ -272,7 +273,7 @@ it("bounds a fresh HTTP pull through filtered pages and continues later", async 
   const found = new Set<string>();
   for (let page = 0; page < 30; page++) {
     const value = await request(
-      `/api/sync/pull?fresh=1&limit=100&after=${after}&initialHigh=${initialHigh}`,
+      `/api/sync/pull?fresh=1&limit=${page === 0 ? 10 : 500}&after=${after}&initialHigh=${initialHigh}`,
     );
     expect(value.checkpoint.seq).toBeGreaterThan(after);
     if (page === 0) {
@@ -301,39 +302,22 @@ it("completes a recovery pull only after server pages with no documents", async 
       request: (_key: string, write: () => Promise<unknown>) => write(),
     },
   });
-  mocks.syncGet.mockImplementation((path: string) => request(path));
   const module = await import("./client");
   const { createEntitySequenceScope } = await import("./entitySequence");
   const { createTranscriptCache } = await import("./transcriptCache");
-  const client = module.createSyncClient({
-    api: {
-      syncGet: mocks.syncGet,
-      syncPost: vi.fn(),
-      saved: (_key, fallback) => fallback,
-      save: vi.fn(),
-      setWorkspace: vi.fn(),
-      isApiSchemaMismatch: () => false,
-    },
-    resources: {
-      watchResourceChanges: (resource, callback) => {
-        if (resource.kind === "state") mocks.invalidations.add(callback);
-        return () => {
-          mocks.invalidations.delete(callback);
-        };
-      },
-      watchResourceConnection: () => () => {},
-    },
-    sequences: createEntitySequenceScope(),
-    transcripts: createTranscriptCache(),
-    databaseSuffix: "empty-recovery",
-  });
-  const { db } = await client.syncDatabase();
+  const registered =
+    Promise.withResolvers<(version?: ResourceVersion) => void>();
+  const completed = Promise.withResolvers<void>();
   const pages: number[] = [];
-  mocks.syncGet.mockImplementation(
+  let db: Awaited<
+    ReturnType<ReturnType<typeof module.createSyncClient>["syncDatabase"]>
+  >["db"];
+  const syncGet = vi.fn();
+  syncGet.mockImplementation(
     async (path: string, options?: { query?: Record<string, string> }) => {
       const query = { ...options?.query };
       if (path === "/api/sync/pull") {
-        query.limit = "50";
+        query.limit = pages.length < 2 ? "10" : "500";
         expect(
           await db.projections.findOne("state:entities:complete").exec(),
         ).toBeNull();
@@ -345,24 +329,51 @@ it("completes a recovery pull only after server pages with no documents", async 
       return value;
     },
   );
-  const stop = client.subscribeStateProjection(() => {}, vi.fn());
-  stopProjection = stop;
-  await vi.waitFor(() => expect(mocks.invalidations.size).toBeGreaterThan(0));
-  for (const notify of mocks.invalidations)
-    notify({ epoch: "fixture", revision: 1, reason: "overflow" });
-  await vi.waitFor(
-    async () =>
-      expect(
-        await db.projections.findOne("state:entities:complete").exec(),
-      ).not.toBeNull(),
-    { timeout: 20_000 },
+  const client = module.createSyncClient({
+    api: {
+      syncGet,
+      syncPost: vi.fn(),
+      saved: (_key, fallback) => fallback,
+      save: vi.fn(),
+      setWorkspace: vi.fn(),
+      isApiSchemaMismatch: () => false,
+    },
+    resources: {
+      watchResourceChanges: (resource, callback) => {
+        if (resource.kind === "state") registered.resolve(callback);
+        return () => {};
+      },
+      watchResourceConnection: () => () => {},
+    },
+    sequences: createEntitySequenceScope(),
+    transcripts: createTranscriptCache(),
+    databaseSuffix: "empty-recovery",
+  });
+  ({ db } = await client.syncDatabase());
+  const stop = client.subscribeStateProjection(
+    (value) => {
+      if (value?.entitiesComplete) completed.resolve();
+    },
+    (error) => {
+      if (error) completed.reject(error);
+    },
   );
-  expect(pages).toContain(0);
-  expect(
-    await db.projections.findOne("entity:agentSummary:lead").exec(),
-  ).not.toBeNull();
-  stop();
-  stopProjection = undefined;
+  try {
+    const notify = await registered.promise;
+    notify({ epoch: "fixture", revision: 1, reason: "overflow" });
+    await completed.promise;
+    expect(pages).toContain(0);
+    expect(
+      await db.projections.findOne("state:entities:complete").exec(),
+    ).not.toBeNull();
+    expect(
+      await db.projections.findOne("entity:agentSummary:lead").exec(),
+    ).not.toBeNull();
+  } finally {
+    stop();
+    client.disposeCache();
+    vi.unstubAllGlobals();
+  }
 });
 async function* resourceFrames(
   response: Response,

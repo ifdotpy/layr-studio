@@ -55,13 +55,14 @@ async fn fresh_entity_page(
 ) -> Result<axum::Json<studio_json::Value>, axum::http::StatusCode> {
     let after = body["after"].as_i64().unwrap_or(0);
     let initial_high = body["initialHigh"].as_i64().unwrap_or(0);
+    let limit = body["limit"].as_i64().unwrap_or(500);
     let priority = body["priorityId"].as_str().map(str::to_owned);
     let page = store
         .read_async("fresh entity fixture", move |tx| {
             studio_runtime_services::entity_scope::pull_global_fresh(
                 tx,
                 after,
-                500,
+                limit,
                 initial_high,
                 priority.as_deref(),
             )
@@ -118,7 +119,7 @@ async fn main() {
             .await
             .expect("entity publisher");
         store.transaction_with(|tx| {
-            for index in 0..501 {
+            for index in 0..81 {
                 tx.execute("INSERT INTO runtime_plans(id,record) VALUES(?1,'{}')", [format!("invalid-{index}")])?;
             }
             for index in 0..=studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
