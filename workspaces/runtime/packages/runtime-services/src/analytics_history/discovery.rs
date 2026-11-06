@@ -493,12 +493,14 @@ mod tests {
                 *hook.borrow_mut() = Some(Box::new(move || {
                     if !moved.exists() {
                         fs::rename(&original, &moved).unwrap();
-                        rustix::fs::mkfifoat(
-                            rustix::fs::CWD,
-                            &original,
-                            rustix::fs::Mode::from_bits_truncate(0o600),
-                        )
-                        .unwrap();
+                        // rustix has no mkfifoat on Apple targets; mkfifo(1) runs on every Unix.
+                        // A short-lived fixture tool, like the FIFOs of the workspace_ready tests.
+                        #[allow(clippy::disallowed_methods)]
+                        let status = std::process::Command::new("mkfifo")
+                            .arg(&original)
+                            .status()
+                            .unwrap();
+                        assert!(status.success());
                     }
                 }))
             });
