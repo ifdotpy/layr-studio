@@ -370,6 +370,8 @@ pub struct AgentRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_assignment: Option<studio_runtime_schema::review::ReviewAssignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<studio_runtime_schema::agent_limits::SubagentConcurrency>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode: Option<studio_runtime_schema::agent_entity_nested::AgentMode>,
@@ -1319,6 +1321,7 @@ impl AgentRecord {
             vm_auth_bootstrap: None,
             native_release: None,
             creation_intent: None,
+            review_assignment: None,
             account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             account_transfer_id: studio_runtime_schema::queue_command::Field::Missing,
             lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,

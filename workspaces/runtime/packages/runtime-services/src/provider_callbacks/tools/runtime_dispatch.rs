@@ -683,10 +683,10 @@ pub(super) async fn dispatch(
             }
         }
         crate::layr_read::TOOL => {
-            if !crate::layr_native::is_native(&actor.record().value()) {
-                return Ok(Some(not_sent(Error::Unavailable("native-layr/read"))));
-            }
-            crate::layr_read::run_native(&store, actor, args, request_id).await
+            let Some(assignment) = actor.record().review_assignment.as_ref() else {
+                return Ok(Some(not_sent(Error::Unavailable("layr/read"))));
+            };
+            crate::layr_read::run_native(&store, actor, assignment, args, request_id).await
         }
         "orchestration_agent_manage" if args["action"] == "maintenance_report" => {
             if execution_move {

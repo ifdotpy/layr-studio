@@ -181,14 +181,6 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/layr_read.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/layr_read/tests.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/limit_reset.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
@@ -2264,10 +2256,6 @@
       "fingerprint": "ae30a1b9effc337d8564d0a1880b51e8791069f2e61fd8f200554d55f13e72ed:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/layr_read.rs",
-      "fingerprint": "d72c615b6dd4784e8434417f275c0804b8ce2d7ffe82a762b0750cd4b8d9e73f:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/managed_host_tools.rs",
       "fingerprint": "cf14cfb5a945a36d1af7301ab53d9f7764e3ea1d1fcf05e687640a1d674630e8:0"
     },
@@ -2340,14 +2328,6 @@
       "fingerprint": "ee1590a7797963dcaddf95099f979ff9c4247c2d327fb53e1bd448cbe18ddc33:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/managed_host_tools.rs",
-      "fingerprint": "09da828f23a45edbf34e703af1fd8f752c745f652fb29a3837db524147a01c28:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/provider_adapter.rs",
-      "fingerprint": "483fdda0743798d29b1404d9ee6cf6c07f3fac8587f8a7d490a5e2611decd8c0:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks.rs",
       "fingerprint": "c0b7f331024a4780df2d3cecb9a783dc9c3b984cab0168f38493efefc4c24260:0"
     },
@@ -2366,10 +2346,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/safety_buffering.rs",
       "fingerprint": "5dac839a508a4f83f7d210dcf218af488d0774c847c2ed31c35508b144159cc8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/thread_prepare.rs",
-      "fingerprint": "818fd96bf784433a27c05c3f241bcef48b13159960409509cc62f6695b2649ed:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/workspace_ready.rs",

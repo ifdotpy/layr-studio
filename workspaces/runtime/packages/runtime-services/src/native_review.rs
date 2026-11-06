@@ -3,68 +3,76 @@
 use crate::native_actions::{NativeError, Result, bounded, checked_agent, decode};
 use rusqlite::Transaction;
 use studio_json::{Value, json};
-use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::creation_intent::EffortSelection;
-use studio_runtime_schema::start_attempt::ReviewTarget as Target;
+use studio_runtime_schema::review::{
+    GitCommit, GitRef, LayrStateId, ReviewAssignment, ReviewTarget,
+};
 use studio_runtime_store::{AgentRecord, AgentRepository, ContextRepairRepository};
 
 const MAX_PROMPT: usize = 32_000;
 const DELIVERY: &str = "The review result wakes you automatically. Finish your turn while waiting.";
 
-/// Preserve the original target (including absent versus null title) after
-/// validating its closed variants. The complete target stays in nativeReview.
+/// Validate and normalize the complete typed review target.
 pub fn target(args: &Value) -> Result<Value> {
+    Ok(json!(typed_target(args)?))
+}
+fn typed_target(args: &Value) -> Result<ReviewTarget> {
     let object = args.as_object().ok_or(NativeError::Invalid("review"))?;
-    if object.keys().any(|k| {
-        !matches!(
-            k.as_str(),
-            "target" | "cwd" | "model" | "effort" | "request_id"
-        )
-    }) {
+    if object
+        .keys()
+        .any(|k| !matches!(k.as_str(), "target" | "request_id"))
+    {
         return Err(NativeError::Invalid("review"));
     }
-    for key in ["model", "effort", "request_id", "cwd"] {
-        if let Some(value) = object.get(key) {
-            let text = value
-                .as_str()
-                .ok_or(NativeError::Invalid("review.options"))?;
-            let limit = if key == "cwd" { 4096 } else { 200 };
-            let invalid_request_id = key == "request_id"
-                && (text.trim() != text || text.chars().any(|character| character <= '\u{1f}'));
-            if text.trim().is_empty()
-                || text.chars().count() > limit
-                || text.contains('\0')
-                || invalid_request_id
-            {
-                return Err(NativeError::Invalid("review.options"));
-            }
+    if let Some(value) = object.get("request_id") {
+        let text = value
+            .as_str()
+            .ok_or(NativeError::Invalid("review.options"))?;
+        if text.trim().is_empty()
+            || text.chars().count() > 200
+            || text.trim() != text
+            || text.chars().any(|character| character <= '\u{1f}')
+        {
+            return Err(NativeError::Invalid("review.options"));
         }
     }
     let raw = args
         .get("target")
         .cloned()
-        .unwrap_or(json!({"type":"uncommittedChanges"}));
-    match decode::<Target>(raw.clone(), "review.target")? {
-        Target::UncommittedChanges => {}
-        Target::BaseBranch { branch } => text(&branch, 1000)?,
-        Target::Commit { sha, title } => {
-            text(&sha, 1000)?;
-            if title.is_some_and(|v| v.chars().count() > 1000 || v.contains('\0')) {
-                return Err(NativeError::Invalid("review.target.title"));
-            }
-        }
-        Target::Custom { instructions } => text(&instructions, MAX_PROMPT)?,
-    }
-    Ok(raw)
-}
-fn text(value: &str, limit: usize) -> Result<()> {
-    if value.trim().is_empty() || value.trim().chars().count() > limit || value.contains('\0') {
-        return Err(NativeError::Invalid("review.target"));
-    }
-    Ok(())
+        .ok_or(NativeError::Invalid("review.target"))?;
+    decode(raw, "review.target")
 }
 pub fn worker_id(key: &str) -> String {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, key.as_bytes()).to_string()
+}
+
+/// Run a bounded, non-interactive Git read without inherited Git overrides.
+pub(crate) fn git_read(
+    cwd: &std::path::Path,
+    args: &[&str],
+    limit: usize,
+) -> Result<Option<String>> {
+    let output = crate::bounded_child::run_without_git_environment(crate::bounded_child::Request {
+        program: std::ffi::OsStr::new("git"),
+        git_directory: Some(cwd.as_os_str()),
+        args,
+        environment: &[
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GIT_OPTIONAL_LOCKS", "0"),
+            ("GIT_NO_LAZY_FETCH", "1"),
+        ],
+        input: None,
+        stdout_limit: limit,
+        stderr_limit: 4096,
+        timeout: std::time::Duration::from_secs(30),
+    })
+    .map_err(|_| NativeError::Invalid("review.git"))?;
+    if output.stdout.truncated {
+        return Ok(None);
+    }
+    Ok(Some(
+        String::from_utf8_lossy(&output.stdout.bytes).into_owned(),
+    ))
 }
 
 /// Model and reasoning fallback for both managed reviewer spawns and native reviews.
@@ -100,11 +108,48 @@ pub(crate) fn execution_settings(
     )
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
+pub enum ResolvedBase {
+    Layr(LayrStateId),
+    Git(GitCommit),
+}
+
+pub fn pin_assignment(
+    assignment: &ReviewAssignment,
+    base: &ResolvedBase,
+) -> Result<ReviewAssignment> {
+    use studio_runtime_schema::review::{LayrBase, WorkspaceMode};
+    let (mode, target) = match (assignment.target(), base) {
+        (ReviewTarget::LayrState { state, .. }, ResolvedBase::Layr(base)) => (
+            WorkspaceMode::LayrNative,
+            ReviewTarget::LayrState {
+                state: state.clone(),
+                base: LayrBase::State {
+                    state: base.clone(),
+                },
+            },
+        ),
+        (ReviewTarget::GitRange { head, .. }, ResolvedBase::Git(base)) => (
+            WorkspaceMode::Worktree,
+            ReviewTarget::GitRange {
+                base: GitRef::try_from(base.to_string())
+                    .map_err(|_| NativeError::Invalid("review.base"))?,
+                head: head.clone(),
+            },
+        ),
+        _ => return Err(NativeError::Invalid("review.base")),
+    };
+    ReviewAssignment::new(mode, target).map_err(|_| NativeError::Invalid("review.base"))
+}
+
 pub struct ReviewPlan {
     actor: Value,
     root: Value,
     key: String,
     target: Value,
+    assignment: ReviewAssignment,
+    resolved_base: Option<ResolvedBase>,
     args: studio_runtime_schema::creation_intent::CreationIntent,
     spec: studio_runtime_schema::creation_intent::CreationIntent,
 }
@@ -141,11 +186,7 @@ impl ReviewPlan {
         if checked.root_id != checked_root.id {
             return Err(NativeError::Changed);
         }
-        if actor
-            .get("provider")
-            .is_some_and(|v| v != ProviderKind::Codex.key())
-            || crate::event_write::truthy(actor.get("nativeReview"))
-        {
+        if crate::event_write::truthy(actor.get("nativeReview")) {
             return Err(NativeError::Invalid("review.actor"));
         }
         if actor["executionMode"] == "vm" || crate::event_write::truthy(actor.get("remoteOrigin")) {
@@ -154,18 +195,18 @@ impl ReviewPlan {
         if key.is_empty() || key.len() > 200 || directory.is_empty() {
             return Err(NativeError::Invalid("review.identity"));
         }
-        let target = target(&args)?;
+        let typed_target = typed_target(&args)?;
+        let target = json!(&typed_target);
+        let assignment = ReviewAssignment::new(
+            checked
+                .workspace_mode
+                .ok_or(NativeError::Invalid("review.workspace"))?,
+            typed_target,
+        )
+        .map_err(|_| NativeError::Invalid("review.workspace"))?;
         use studio_runtime_schema::queue_command::Field;
-        let requested_model = args
-            .get("model")
-            .and_then(Value::as_str)
-            .map_or(Field::Missing, |value| Field::Value(value.to_owned()));
-        let requested_effort = args
-            .get("effort")
-            .and_then(Value::as_str)
-            .map_or(EffortSelection::Inherit, |value| {
-                EffortSelection::Set(value.to_owned())
-            });
+        let requested_model = Field::Missing;
+        let requested_effort = EffortSelection::Inherit;
         let (model, effort, fast_mode) =
             execution_settings(checked, checked_root, &requested_model, &requested_effort);
         let fast_mode = fast_mode
@@ -176,7 +217,7 @@ impl ReviewPlan {
             effort: requested_effort,
             ..Default::default()
         };
-        let prompt = format!("Run a native code review: {target}");
+        let prompt = crate::managed_child_create::reviewer_brief(&assignment);
         let spec = studio_runtime_schema::creation_intent::CreationIntent {
             id: Field::Value(worker_id(&key)),
             name: Some("Review".into()),
@@ -194,9 +235,19 @@ impl ReviewPlan {
             root,
             key,
             target,
+            assignment,
+            resolved_base: None,
             args: requested,
             spec,
         })
+    }
+    pub fn assignment(&self) -> &ReviewAssignment {
+        &self.assignment
+    }
+    pub fn set_prepared_assignment(&mut self, assignment: ReviewAssignment, base: ResolvedBase) {
+        self.spec.prompt = Some(crate::managed_child_create::reviewer_brief(&assignment));
+        self.assignment = assignment;
+        self.resolved_base = Some(base);
     }
     pub fn spec(&self) -> &studio_runtime_schema::creation_intent::CreationIntent {
         &self.spec
@@ -233,7 +284,11 @@ impl ReviewPlan {
             || review["requestId"] != self.key
             || review["actorId"] != self.actor["id"]
             || review["target"] != self.target
-            || child.get("cwd").and_then(Value::as_str) != self.spec.cwd.as_deref()
+            || review
+                .get("sourceCwd")
+                .and_then(Value::as_str)
+                .or_else(|| child.get("cwd").and_then(Value::as_str))
+                != self.spec.cwd.as_deref()
             || !same_args
         {
             return Err(NativeError::Conflict);
@@ -302,6 +357,9 @@ pub fn reserve(
     if let Some(child) = ContextRepairRepository::agent(tx, id)? {
         return plan.existing(&child);
     }
+    if plan.resolved_base.is_none() {
+        return Err(NativeError::Invalid("review.base"));
+    }
     let actor_id = plan.actor["id"]
         .as_str()
         .ok_or(NativeError::Invalid("review.actor.id"))?;
@@ -332,18 +390,38 @@ pub fn reserve(
         return Err(NativeError::Changed);
     }
     child["permissionMode"] =
-        json!(studio_runtime_schema::claude_permissions::PermissionMode::Default);
-    child["worktree"] = json!(false);
+        json!(studio_runtime_schema::claude_permissions::PermissionMode::Plan);
+    child["reviewAssignment"] = json!(plan.assignment);
     let brief = ["id", "name", "status", "model", "effort", "fastMode"]
         .into_iter()
         .map(|k| (k.to_owned(), child.get(k).cloned().unwrap_or(Value::Null)))
         .collect::<studio_json::Map<_, _>>();
     let response = json!({"requestId":plan.key,"agentId":id,"status":"queued","reviewModel":child["model"],
         "reviewEffort":child.get("nativeEffort").unwrap_or(&child["effort"]),"agents":[brief],"delivery":DELIVERY});
-    child["nativeReview"] = json!({"target":plan.target,"requestId":plan.key,"actorId":actor_id,
-        "actionRequestId":studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-        "args":plan.args,"status":"pending","response":response});
-    AgentRepository::put(tx, &AgentRecord::from_value(child)?)?;
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    enum Status {
+        OrdinaryTurn,
+    }
+    child["nativeReview"] = json!({"target":plan.target,"resolvedBase":plan.resolved_base,"sourceCwd":plan.spec.cwd,"requestId":plan.key,"actorId":actor_id,
+        "args":plan.args,"status":Status::OrdinaryTurn,"response":response});
+    let created = child["created"].as_f64().unwrap_or(0.0);
+    let child = AgentRecord::from_value(child)?;
+    AgentRepository::put(tx, &child)?;
+    {
+        let inserted = crate::event_write::enqueue_event(
+            tx,
+            &child,
+            format!("{id}:initial"),
+            "user",
+            plan.spec.prompt.clone().unwrap_or_default(),
+            created,
+        )
+        .map_err(|_| NativeError::Invalid("review.initial"))?;
+        if !inserted {
+            return Err(NativeError::Conflict);
+        }
+    }
     creator.receipt(tx, &plan.key, &response)?;
     Ok(response)
 }

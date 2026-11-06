@@ -20,6 +20,80 @@ fn fixture_parent() -> PathBuf {
         .into_path_buf()
 }
 
+#[tokio::test]
+async fn reviewer_workspace_checks_out_the_assigned_git_head() {
+    let fixture = Fixture::new().await;
+    let head = command(&fixture.repo, &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    std::fs::write(fixture.repo.join("project/file"), "later\n").unwrap();
+    command(&fixture.repo, &["add", "."]);
+    command(
+        &fixture.repo,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-m",
+            "later",
+        ],
+    );
+    use studio_runtime_schema::review::{
+        GitCommit, GitRef, ReviewAssignment, ReviewTarget, WorkspaceMode,
+    };
+    let assignment = ReviewAssignment::new(
+        WorkspaceMode::Worktree,
+        ReviewTarget::GitRange {
+            base: GitRef::try_from("main".to_owned()).unwrap(),
+            head: GitCommit::try_from(head.clone()).unwrap(),
+        },
+    )
+    .unwrap();
+    let saved = assignment.clone();
+    fixture
+        .store
+        .transaction(move |tx| {
+            let mut actor = AgentRepository::get(tx, &"workspace-fixture".into())?.unwrap();
+            actor.review_assignment = Some(saved);
+            actor.role = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+            );
+            actor.worktree = Some(false);
+            AgentRepository::put(tx, &actor)
+        })
+        .await
+        .unwrap();
+    let workspace = crate::reviewer_workspace::prepare(&fixture.store, &fixture.id, &assignment)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(workspace.cwd.join("project/file")).unwrap(),
+        "base\n"
+    );
+    assert_eq!(command(&workspace.cwd, &["rev-parse", "HEAD"]).trim(), head);
+    let saved = AgentRepository::get(
+        &fixture.store.test_reader().unwrap(),
+        &fixture.id.as_str().into(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        crate::reviewer_workspace::read_only_copy(&saved),
+        workspace.cwd.to_str()
+    );
+    assert!(crate::reviewer_workspace::scratch_dir(&saved).is_some());
+    assert_ne!(
+        crate::reviewer_workspace::scratch_dir(&saved),
+        workspace.cwd.to_str()
+    );
+    let replay = crate::reviewer_workspace::prepare(&fixture.store, &fixture.id, &assignment)
+        .await
+        .unwrap();
+    assert_eq!(workspace.cwd, replay.cwd);
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     store: std::sync::Arc<RuntimeStore>,

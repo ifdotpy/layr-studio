@@ -51,14 +51,18 @@ pub struct ProviderLaunch {
 /// Closed, typed provider capabilities that preparation reads instead of
 /// testing for a provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Provider capabilities are independent protocol flags"
+)]
 pub struct Capabilities {
     /// The provider writes a native rollout per thread that Studio can read
     /// and repair; otherwise history is the live transcript only.
     pub native_history: bool,
     /// `dynamicTools` is resent on every resume and turn, not only on thread start.
     pub tools_on_every_turn: bool,
-    /// `orchestration_speak` and `orchestration_review` are offered.
-    pub voice_and_review_tools: bool,
+    /// `orchestration_speak` is offered.
+    pub voice_tools: bool,
     /// Daybreak cyber-access grants apply.
     pub daybreak: bool,
     /// An unready image workspace gets a writable temporary sandbox root
@@ -274,7 +278,7 @@ impl ProviderAdapter for CodexAdapter {
         Capabilities {
             native_history: true,
             tools_on_every_turn: false,
-            voice_and_review_tools: true,
+            voice_tools: true,
             daybreak: true,
             writable_sandbox_roots: true,
             turn_end_closes_steer: true,
@@ -383,7 +387,7 @@ impl ProviderAdapter for ClaudeAdapter {
         Capabilities {
             native_history: false,
             tools_on_every_turn: true,
-            voice_and_review_tools: false,
+            voice_tools: false,
             daybreak: false,
             writable_sandbox_roots: false,
             turn_end_closes_steer: false,

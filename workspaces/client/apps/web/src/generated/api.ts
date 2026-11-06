@@ -13839,6 +13839,8 @@ export interface components {
        */
       wait: "queued" | "slot" | "pause" | "behind";
     };
+    GitCommit: string;
+    GitRef: string;
     /** @enum {string} */
     Grant: "full" | "observe";
     /** @description History stays: a hidden row is not shown in the default list. */
@@ -14026,6 +14028,17 @@ export interface components {
     };
     /** JsonValue */
     JsonValue: JsonValue;
+    LayrBase:
+      | {
+          /** @constant */
+          kind: "mergeBaseWithMain";
+        }
+      | {
+          /** @constant */
+          kind: "state";
+          state: components["schemas"]["LayrStateId"];
+        };
+    LayrStateId: string;
     /** LazyAccountTransferRecordResponse */
     LazyAccountTransferRecordResponse: {
       /**
@@ -19882,6 +19895,20 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** ReviewTarget */
+    ReviewTarget:
+      | {
+          base: components["schemas"]["LayrBase"];
+          /** @constant */
+          kind: "layrState";
+          state: components["schemas"]["LayrStateId"];
+        }
+      | {
+          base: components["schemas"]["GitRef"];
+          head: components["schemas"]["GitCommit"];
+          /** @constant */
+          kind: "gitRange";
+        };
     /** ReviewUncommittedTargetDto */
     ReviewUncommittedTargetDto: {
       /**

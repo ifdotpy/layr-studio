@@ -866,8 +866,7 @@ mod tests {
         .expect("fixture operation succeeds");
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
             .expect("fixture operation succeeds");
-        crate::layr_native::capability::TEST_BINARY
-            .with(|value| *value.borrow_mut() = Some(binary.clone()));
+        let _binary_override = crate::layr_native::override_layr_binary(binary.clone());
         let initial = migrate(&state, &project, true).expect("fixture operation succeeds");
         let id = initial["projectId"]
             .as_str()
@@ -908,6 +907,9 @@ mod tests {
     #[test]
     #[ignore = "requires the real vendored Layr binary on APFS"]
     fn review_migration_state_keeps_empty_directories_and_modes() {
+        let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+            crate::layr_native::test_binary().expect("test binary"),
+        ));
         use std::os::unix::fs::PermissionsExt;
         let fixture = tempfile::tempdir().expect("fixture operation succeeds");
         let project = fixture.path().join("project");
@@ -1067,6 +1069,9 @@ mod tests {
     #[test]
     #[ignore = "requires the real vendored Layr binary on APFS"]
     fn migration_cache_path_can_hold_versioned_files_in_another_line() {
+        let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+            crate::layr_native::test_binary().expect("test binary"),
+        ));
         let fixture = tempfile::tempdir().expect("fixture");
         let project = fixture.path().join("project");
         cache_policy_fixture(&project);
@@ -1263,6 +1268,9 @@ mod tests {
     #[test]
     #[ignore = "requires the real vendored Layr binary on APFS"]
     fn migration_imports_worktrees_that_share_an_internal_project_store() {
+        let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+            crate::layr_native::test_binary().expect("test binary"),
+        ));
         let fixture = tempfile::tempdir().expect("fixture");
         let project = fixture.path().join("project");
         let (first, second) = shared_project_worktrees(&project);

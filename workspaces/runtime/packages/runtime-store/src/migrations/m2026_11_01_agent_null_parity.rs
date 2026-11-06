@@ -14,6 +14,7 @@ const OPTIONAL_FIELDS: &[&str] = &[
     "nativeStatus",
     "isLead",
     "workspaceMode",
+    "reviewAssignment",
     "permissionMode",
     "model",
     "cwd",

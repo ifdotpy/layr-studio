@@ -3930,6 +3930,13 @@ mod tests {
     }
 
     impl crate::managed_child_create::ManagedCreationEnvironment for ManagedFixture {
+        fn account_offers_model(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<bool, crate::managed_child_create::ManagedCreationEnvironmentError> {
+            Ok(true)
+        }
         fn select_worker_account(
             &self,
             request: crate::provider_callbacks::WorkerAccountRequest<'_>,

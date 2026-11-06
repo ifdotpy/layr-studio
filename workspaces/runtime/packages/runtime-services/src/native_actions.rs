@@ -483,7 +483,11 @@ pub fn reserve(
     if review_worker {
         // Python `codex_agent_review.claim` saves the account on the attempt.
         agent["startAttempt"]["accountKey"] = identity["accountKey"].clone();
-        agent["startAttempt"]["reviewTarget"] = agent["nativeReview"]["target"].clone();
+        agent["startAttempt"]["reviewTarget"] = request
+            .context
+            .get("reviewTarget")
+            .cloned()
+            .unwrap_or_else(|| agent["nativeReview"]["target"].clone());
         agent["nativeReview"]["status"] = json!("started");
         agent["nativeReview"]["startedAt"] = json!(now);
     }

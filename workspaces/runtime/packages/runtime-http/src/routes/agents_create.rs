@@ -156,6 +156,22 @@ struct ManagedCreationEnvironment {
 impl studio_runtime_services::provider_callbacks::ManagedCreationEnvironment
     for ManagedCreationEnvironment
 {
+    fn account_offers_model(
+        &self,
+        account_key: &str,
+        model: &str,
+    ) -> Result<bool, studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError>
+    {
+        use studio_runtime_services::provider_callbacks::{
+            ManagedCreationAccountRead, ManagedCreationEnvironmentError as E,
+        };
+        let identity = DriverManagedAccountRead(self.accounts.as_ref())
+            .resolve_identity(account_key, account_key)
+            .map_err(|_| E::Unavailable("account-driver/managed-child-account"))?;
+        self.catalog
+            .contains_model(account_key, &host_account_identity(&identity), model)
+            .map_err(|_| E::Unavailable("provider-session/model-list"))
+    }
     fn wait_for_catalog<'a>(
         &'a self,
         account_key: &'a str,

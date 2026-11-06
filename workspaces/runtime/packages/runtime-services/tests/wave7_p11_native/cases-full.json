@@ -3434,7 +3434,8 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -3457,11 +3458,14 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "uncommittedChanges"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       },
       "key": "review-request",
@@ -3471,7 +3475,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"uncommittedChanges\"}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-review",
         "effort": "medium",
         "fast_mode": false,
@@ -3498,12 +3502,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "uncommittedChanges"
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
           "args": {},
-          "status": "pending",
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -3521,8 +3527,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -3563,9 +3580,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -3586,15 +3604,19 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "uncommittedChanges"
-        },
-        "model": "gpt-other"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -3603,7 +3625,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"uncommittedChanges\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-other",
         "effort": null,
         "fast_mode": false,
@@ -3630,14 +3652,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "uncommittedChanges"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -3655,8 +3679,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -3698,8 +3736,9 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -3721,14 +3760,19 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "uncommittedChanges"
-        },
-        "effort": "low"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -3737,7 +3781,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"uncommittedChanges\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Compare using layr_read diff aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdef.",
         "model": "gpt-review",
         "effort": "low",
         "fast_mode": false,
@@ -3764,14 +3808,17 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "uncommittedChanges"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "state",
+              "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "effort": "low"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -3789,8 +3836,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -3831,9 +3892,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -3854,15 +3916,17 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "uncommittedChanges"
-        },
-        "model": "gpt-6"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -3871,7 +3935,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"uncommittedChanges\"}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-6",
         "effort": "high",
         "fast_mode": false,
@@ -3898,14 +3962,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "uncommittedChanges"
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-6"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -3923,8 +3987,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -3965,9 +4040,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -3988,16 +4064,19 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "uncommittedChanges"
-        },
-        "model": "gpt-other",
-        "effort": "medium"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -4006,7 +4085,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"uncommittedChanges\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-other",
         "effort": "medium",
         "fast_mode": false,
@@ -4033,15 +4112,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "uncommittedChanges"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other",
-            "effort": "medium"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4059,8 +4139,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4103,7 +4197,8 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -4126,12 +4221,17 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "baseBranch",
-          "branch": "main"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
         }
       },
       "key": "review-request",
@@ -4141,7 +4241,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"baseBranch\", \"branch\": \"main\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Compare using layr_read diff aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdef.",
         "model": "gpt-review",
         "effort": "medium",
         "fast_mode": false,
@@ -4168,13 +4268,17 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "baseBranch",
-            "branch": "main"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "state",
+              "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
           "args": {},
-          "status": "pending",
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4192,8 +4296,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4234,9 +4352,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -4257,16 +4376,17 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "baseBranch",
-          "branch": "main"
-        },
-        "model": "gpt-other"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -4275,7 +4395,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"baseBranch\", \"branch\": \"main\"}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-other",
         "effort": null,
         "fast_mode": false,
@@ -4302,15 +4422,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "baseBranch",
-            "branch": "main"
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4328,8 +4447,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4371,8 +4501,9 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -4394,15 +4525,18 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "baseBranch",
-          "branch": "main"
-        },
-        "effort": "low"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -4411,7 +4545,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"baseBranch\", \"branch\": \"main\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-review",
         "effort": "low",
         "fast_mode": false,
@@ -4438,15 +4572,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "baseBranch",
-            "branch": "main"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "effort": "low"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4464,8 +4599,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4506,9 +4655,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -4529,16 +4679,20 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "baseBranch",
-          "branch": "main"
-        },
-        "model": "gpt-6"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -4547,7 +4701,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"baseBranch\", \"branch\": \"main\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Compare using layr_read diff aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdef.",
         "model": "gpt-6",
         "effort": "high",
         "fast_mode": false,
@@ -4574,15 +4728,17 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "baseBranch",
-            "branch": "main"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "state",
+              "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-6"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4600,8 +4756,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4642,9 +4812,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -4665,17 +4836,17 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "baseBranch",
-          "branch": "main"
-        },
-        "model": "gpt-other",
-        "effort": "medium"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -4684,7 +4855,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"baseBranch\", \"branch\": \"main\"}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-other",
         "effort": "medium",
         "fast_mode": false,
@@ -4711,16 +4882,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "baseBranch",
-            "branch": "main"
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other",
-            "effort": "medium"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4738,8 +4907,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4782,7 +4962,8 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -4805,13 +4986,16 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "commit",
-          "sha": "abc",
-          "title": null
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
         }
       },
       "key": "review-request",
@@ -4821,7 +5005,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"commit\", \"sha\": \"abc\", \"title\": null}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-review",
         "effort": "medium",
         "fast_mode": false,
@@ -4848,14 +5032,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
           "args": {},
-          "status": "pending",
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -4873,8 +5059,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -4915,9 +5115,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -4938,17 +5139,20 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "commit",
-          "sha": "abc",
-          "title": null
-        },
-        "model": "gpt-other"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -4957,7 +5161,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"commit\", \"sha\": \"abc\", \"title\": null}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Compare using layr_read diff aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdef.",
         "model": "gpt-other",
         "effort": null,
         "fast_mode": false,
@@ -4984,16 +5188,17 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "state",
+              "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5011,8 +5216,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5054,8 +5273,9 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -5077,16 +5297,16 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "commit",
-          "sha": "abc",
-          "title": null
-        },
-        "effort": "low"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -5095,7 +5315,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"commit\", \"sha\": \"abc\", \"title\": null}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-review",
         "effort": "low",
         "fast_mode": false,
@@ -5122,16 +5342,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "effort": "low"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5149,8 +5367,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5191,9 +5420,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -5214,17 +5444,19 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "commit",
-          "sha": "abc",
-          "title": null
-        },
-        "model": "gpt-6"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -5233,7 +5465,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"commit\", \"sha\": \"abc\", \"title\": null}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-6",
         "effort": "high",
         "fast_mode": false,
@@ -5260,16 +5492,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-6"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5287,8 +5519,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5329,9 +5575,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -5352,18 +5599,20 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "commit",
-          "sha": "abc",
-          "title": null
-        },
-        "model": "gpt-other",
-        "effort": "medium"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -5372,7 +5621,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"commit\", \"sha\": \"abc\", \"title\": null}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Compare using layr_read diff aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdef.",
         "model": "gpt-other",
         "effort": "medium",
         "fast_mode": false,
@@ -5399,17 +5648,17 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "state",
+              "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other",
-            "effort": "medium"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5427,8 +5676,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5471,7 +5734,8 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -5494,12 +5758,14 @@
         "reviewDefaults": {
           "model": "gpt-review",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "custom",
-          "instructions": "Inspect Unicode Ω carefully"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       },
       "key": "review-request",
@@ -5509,7 +5775,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"custom\", \"instructions\": \"Inspect Unicode Ω carefully\"}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-review",
         "effort": "medium",
         "fast_mode": false,
@@ -5536,13 +5802,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
           "args": {},
-          "status": "pending",
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5560,8 +5827,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5602,9 +5880,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -5625,16 +5904,19 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-other",
+          "effort": null
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "custom",
-          "instructions": "Inspect Unicode Ω carefully"
-        },
-        "model": "gpt-other"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -5643,7 +5925,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"custom\", \"instructions\": \"Inspect Unicode Ω carefully\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-other",
         "effort": null,
         "fast_mode": false,
@@ -5670,15 +5952,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5696,8 +5979,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5739,8 +6036,9 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -5762,15 +6060,19 @@
         "concurrency": 32,
         "reviewDefaults": {
           "model": "gpt-review",
-          "effort": "medium"
-        }
+          "effort": "low"
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "custom",
-          "instructions": "Inspect Unicode Ω carefully"
-        },
-        "effort": "low"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -5779,7 +6081,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"custom\", \"instructions\": \"Inspect Unicode Ω carefully\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Compare using layr_read diff aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdef.",
         "model": "gpt-review",
         "effort": "low",
         "fast_mode": false,
@@ -5806,15 +6108,17 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "state",
+              "state": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "effort": "low"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5832,8 +6136,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -5874,9 +6192,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "worktree"
       },
       "root": {
         "id": "lead",
@@ -5897,16 +6216,17 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
-          "effort": "medium"
-        }
+          "model": "gpt-6",
+          "effort": "high"
+        },
+        "workspaceMode": "worktree"
       },
       "args": {
         "target": {
-          "type": "custom",
-          "instructions": "Inspect Unicode Ω carefully"
-        },
-        "model": "gpt-6"
+          "kind": "gitRange",
+          "base": "main",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -5915,7 +6235,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"custom\", \"instructions\": \"Inspect Unicode Ω carefully\"}",
+        "prompt": "\n\n[Studio review] Review Git commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa against main. Inspect the working copy and use git diff main..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.",
         "model": "gpt-6",
         "effort": "high",
         "fast_mode": false,
@@ -5942,15 +6262,14 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
+            "kind": "gitRange",
+            "base": "main",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-6"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -5968,8 +6287,19 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
+          },
+          "resolvedBase": {
+            "kind": "git",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "gitRange",
+          "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -6010,9 +6340,10 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "root": {
         "id": "lead",
@@ -6033,17 +6364,19 @@
         "fastMode": false,
         "concurrency": 32,
         "reviewDefaults": {
-          "model": "gpt-review",
+          "model": "gpt-other",
           "effort": "medium"
-        }
+        },
+        "workspaceMode": "layr-native"
       },
       "args": {
         "target": {
-          "type": "custom",
-          "instructions": "Inspect Unicode Ω carefully"
-        },
-        "model": "gpt-other",
-        "effort": "medium"
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "mergeBaseWithMain"
+          }
+        }
       },
       "key": "review-request",
       "directory": "/fixture/tmp/o-_ghbpjo0/tmp",
@@ -6052,7 +6385,7 @@
         "name": "Review",
         "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
         "role": "reviewer",
-        "prompt": "Run a native code review: {\"type\": \"custom\", \"instructions\": \"Inspect Unicode Ω carefully\"}",
+        "prompt": "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff.",
         "model": "gpt-other",
         "effort": "medium",
         "fast_mode": false,
@@ -6079,16 +6412,16 @@
         "worktree": false,
         "nativeReview": {
           "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
+            "kind": "layrState",
+            "state": "0123456789abcdef0123456789abcdef",
+            "base": {
+              "kind": "mergeBaseWithMain"
+            }
           },
           "requestId": "review-request",
           "actorId": "lead",
-          "args": {
-            "model": "gpt-other",
-            "effort": "medium"
-          },
-          "status": "pending",
+          "args": {},
+          "status": "ordinaryTurn",
           "response": {
             "requestId": "review-request",
             "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
@@ -6106,8 +6439,22 @@
               }
             ],
             "delivery": "The review result wakes you automatically. Finish your turn while waiting."
+          },
+          "resolvedBase": {
+            "kind": "layr",
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "sourceCwd": "/fixture/tmp/o-_ghbpjo0/tmp"
+        },
+        "reviewAssignment": {
+          "kind": "layrState",
+          "state": "0123456789abcdef0123456789abcdef",
+          "base": {
+            "kind": "state",
+            "state": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
-        }
+        },
+        "permissionMode": "plan"
       },
       "result": {
         "requestId": "review-request",
@@ -6126,908 +6473,6 @@
           }
         ],
         "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-      }
-    }
-  ],
-  "reviewTurns": [
-    {
-      "child": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "queued",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": false,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "uncommittedChanges"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "pending",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
-      },
-      "attempt": {
-        "id": "attempt",
-        "epoch": 3,
-        "accountKey": "default",
-        "events": [],
-        "action": "review",
-        "reviewTarget": {
-          "type": "uncommittedChanges"
-        },
-        "submitted": false
-      },
-      "claimed": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "uncommittedChanges"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "uncommittedChanges"
-          },
-          "submitted": false
-        }
-      },
-      "requests": [
-        [
-          "review/start",
-          {
-            "threadId": "review-thread",
-            "target": {
-              "type": "uncommittedChanges"
-            },
-            "delivery": "inline"
-          }
-        ]
-      ],
-      "submitted": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "review-thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "uncommittedChanges"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "uncommittedChanges"
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        }
-      },
-      "accepted": {
-        "attempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "uncommittedChanges"
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        },
-        "result": {
-          "turn": {
-            "id": "review-turn",
-            "items": [],
-            "status": "inProgress"
-          },
-          "reviewThreadId": "review-thread"
-        }
-      }
-    },
-    {
-      "child": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "queued",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": false,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "baseBranch",
-            "branch": "main"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "pending",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
-      },
-      "attempt": {
-        "id": "attempt",
-        "epoch": 3,
-        "accountKey": "default",
-        "events": [],
-        "action": "review",
-        "reviewTarget": {
-          "type": "baseBranch",
-          "branch": "main"
-        },
-        "submitted": false
-      },
-      "claimed": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "baseBranch",
-            "branch": "main"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "baseBranch",
-            "branch": "main"
-          },
-          "submitted": false
-        }
-      },
-      "requests": [
-        [
-          "review/start",
-          {
-            "threadId": "review-thread",
-            "target": {
-              "type": "baseBranch",
-              "branch": "main"
-            },
-            "delivery": "inline"
-          }
-        ]
-      ],
-      "submitted": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "review-thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "baseBranch",
-            "branch": "main"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "baseBranch",
-            "branch": "main"
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        }
-      },
-      "accepted": {
-        "attempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "baseBranch",
-            "branch": "main"
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        },
-        "result": {
-          "turn": {
-            "id": "review-turn",
-            "items": [],
-            "status": "inProgress"
-          },
-          "reviewThreadId": "review-thread"
-        }
-      }
-    },
-    {
-      "child": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "queued",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": false,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "pending",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
-      },
-      "attempt": {
-        "id": "attempt",
-        "epoch": 3,
-        "accountKey": "default",
-        "events": [],
-        "action": "review",
-        "reviewTarget": {
-          "type": "commit",
-          "sha": "abc",
-          "title": null
-        },
-        "submitted": false
-      },
-      "claimed": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
-          },
-          "submitted": false
-        }
-      },
-      "requests": [
-        [
-          "review/start",
-          {
-            "threadId": "review-thread",
-            "target": {
-              "type": "commit",
-              "sha": "abc",
-              "title": null
-            },
-            "delivery": "inline"
-          }
-        ]
-      ],
-      "submitted": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "review-thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        }
-      },
-      "accepted": {
-        "attempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "commit",
-            "sha": "abc",
-            "title": null
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        },
-        "result": {
-          "turn": {
-            "id": "review-turn",
-            "items": [],
-            "status": "inProgress"
-          },
-          "reviewThreadId": "review-thread"
-        }
-      }
-    },
-    {
-      "child": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "queued",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": false,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "pending",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          }
-        }
-      },
-      "attempt": {
-        "id": "attempt",
-        "epoch": 3,
-        "accountKey": "default",
-        "events": [],
-        "action": "review",
-        "reviewTarget": {
-          "type": "custom",
-          "instructions": "Inspect Unicode Ω carefully"
-        },
-        "submitted": false
-      },
-      "claimed": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
-          },
-          "submitted": false
-        }
-      },
-      "requests": [
-        [
-          "review/start",
-          {
-            "threadId": "review-thread",
-            "target": {
-              "type": "custom",
-              "instructions": "Inspect Unicode Ω carefully"
-            },
-            "delivery": "inline"
-          }
-        ]
-      ],
-      "submitted": {
-        "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-        "rootId": "lead",
-        "parentId": "lead",
-        "epoch": 3,
-        "status": "starting",
-        "name": "Review",
-        "cwd": "/fixture/tmp/o-_ghbpjo0/tmp",
-        "isLead": false,
-        "autoWake": true,
-        "inFlight": true,
-        "created": 1.0,
-        "threadId": "review-thread",
-        "accountKey": "default",
-        "model": "gpt-review",
-        "effort": "medium",
-        "fastMode": false,
-        "yoloMode": false,
-        "worktree": false,
-        "nativeReview": {
-          "target": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
-          },
-          "requestId": "review-request",
-          "actorId": "lead",
-          "args": {},
-          "status": "started",
-          "response": {
-            "requestId": "review-request",
-            "agentId": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-            "status": "queued",
-            "reviewModel": "gpt-review",
-            "reviewEffort": "medium",
-            "agents": [
-              {
-                "id": "e8432e21-4944-503a-a71f-7d8e4166eccf",
-                "name": "Review",
-                "status": "queued",
-                "model": "gpt-review",
-                "effort": "medium",
-                "fastMode": false
-              }
-            ],
-            "delivery": "The review result wakes you automatically. Finish your turn while waiting."
-          },
-          "startedAt": 1234567.5
-        },
-        "turnEpoch": 3,
-        "startAttempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        }
-      },
-      "accepted": {
-        "attempt": {
-          "id": "attempt",
-          "epoch": 3,
-          "accountKey": "default",
-          "events": [],
-          "action": "review",
-          "reviewTarget": {
-            "type": "custom",
-            "instructions": "Inspect Unicode Ω carefully"
-          },
-          "submitted": true,
-          "connectionId": "connection",
-          "threadId": "review-thread"
-        },
-        "result": {
-          "turn": {
-            "id": "review-turn",
-            "items": [],
-            "status": "inProgress"
-          },
-          "reviewThreadId": "review-thread"
-        }
       }
     }
   ],

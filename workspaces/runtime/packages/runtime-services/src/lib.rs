@@ -175,6 +175,7 @@ pub mod relocation;
 pub mod remote_access;
 pub mod remote_transport;
 pub mod resource_notify;
+pub mod reviewer_workspace;
 pub(crate) mod room_projection;
 pub mod rules;
 pub mod rules_engine;
