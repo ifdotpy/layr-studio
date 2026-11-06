@@ -15,6 +15,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  PROVIDER_CONTRACT_CHECK_ARGS,
+  PROVIDER_CONTRACT_TARGET_DIR,
+} from "../gate-config.ts";
 
 const root = fileURLToPath(new URL("../../../../..", import.meta.url));
 test(
@@ -26,6 +30,9 @@ test(
       for (const file of [
         "Cargo.toml",
         "Cargo.lock",
+        // The build flags of the checkout: the dependency units then match the ones that
+        // the layr cache keeps warm (the `sweep` entry in Cargo.toml).
+        ".cargo/config.toml",
         "rust-toolchain.toml",
         "package.json",
         "pnpm-lock.yaml",
@@ -59,11 +66,12 @@ test(
         ...process.env,
         // Own target folder: the gate's Rust lane holds the lock of the shared one for
         // minutes, and each blocked check here waited out its whole timeout. It stays in
-        // the checkout's target/ so dependency builds stay warm between runs.
+        // the checkout's target/ so dependency builds stay warm between runs, and the
+        // `sweep` entry in Cargo.toml keeps them warm for a new line.
         CARGO_TARGET_DIR: path.join(
           root,
           "target",
-          "provider-contract-compile",
+          PROVIDER_CONTRACT_TARGET_DIR,
         ),
       };
       const run = (command: string, args: string[]) =>
@@ -74,14 +82,7 @@ test(
           timeout: 300000,
         });
       const check = () =>
-        run("cargo", [
-          "check",
-          "--offline",
-          "-j",
-          "4",
-          "-p",
-          "studio-runtime-schema",
-        ]);
+        run("cargo", [...PROVIDER_CONTRACT_CHECK_ARGS, "-j", "4"]);
       const generate = () => {
         const result = run(process.execPath, [
           "workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts",
