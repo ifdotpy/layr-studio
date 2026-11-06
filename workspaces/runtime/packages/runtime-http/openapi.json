@@ -33722,7 +33722,15 @@
         "additionalProperties": false,
         "properties": {
           "storeRoot": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Root"
           }
         },
         "title": "NativeLayrSettingsRequest",
@@ -33746,6 +33754,10 @@
       "NativeLayrSettingsResponse": {
         "additionalProperties": false,
         "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
           "error": {
             "type": "string"
           },
@@ -33788,7 +33800,8 @@
         },
         "required": [
           "version",
-          "storeRoot"
+          "storeRoot",
+          "configured"
         ],
         "title": "NativeLayrSettingsResponse",
         "type": "object"
@@ -38634,6 +38647,30 @@
             "title": "Id",
             "type": "string"
           },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
+          },
           "locations": {
             "anyOf": [
               {
@@ -39197,6 +39234,30 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
           },
           "locations": {
             "anyOf": [
@@ -39828,6 +39889,30 @@
             "title": "Id",
             "type": "string"
           },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
+          },
           "locations": {
             "anyOf": [
               {
@@ -40199,7 +40284,8 @@
                   "rename_folder",
                   "remove_folder",
                   "set_account_groups",
-                  "set_workspace_policy"
+                  "set_workspace_policy",
+                  "set_layr_store_root"
                 ],
                 "type": "string"
               },
@@ -40263,6 +40349,17 @@
             ],
             "default": null,
             "title": "Folder Id"
+          },
+          "layr_store_root": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
           },
           "name": {
             "anyOf": [

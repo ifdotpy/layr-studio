@@ -14,7 +14,7 @@ fn path(state: &Path) -> PathBuf {
     state.join(NATIVE_LAYR_DIRECTORY).join("settings.json")
 }
 
-fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
+pub fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
     let settings = match fs::read(path(state)) {
         Ok(bytes) => studio_json::from_slice::<Settings>(&bytes)
             .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}")))?,
@@ -64,10 +64,46 @@ pub fn check_project_overlap(root: &Path, project: &Path) -> Result<()> {
     let project = CanonicalPath::missing_tail(project)
         .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the project folder".into()))?
         .into_path_buf();
+    // Compare canonical paths on both sides: /var is a link to /private/var on macOS.
+    let root = CanonicalPath::missing_tail(root)
+        .ok_or_else(|| NativeLayrError::Refused("Cannot resolve the Layr store".into()))?
+        .into_path_buf();
+    let root = root.as_path();
     if root.starts_with(&project) || project.starts_with(root) {
         return Err(NativeLayrError::Refused(
             "The Layr store must be outside the project folder".into(),
         ));
+    }
+    Ok(())
+}
+
+/// Check every registered folder on this server, including logical project locations.
+pub fn check_projects_overlap(
+    root: &Path,
+    projects: &[(String, Value)],
+    local: Option<&str>,
+) -> Result<()> {
+    for (_, project) in projects {
+        let paths = project
+            .get("path")
+            .and_then(Value::as_str)
+            .into_iter()
+            .chain(
+                project
+                    .get("locations")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|location| {
+                        (location.get("serverId").and_then(Value::as_str) == local
+                            && local.is_some())
+                        .then(|| location.get("path").and_then(Value::as_str))
+                        .flatten()
+                    }),
+            );
+        for path in paths.filter(|path| Path::new(path).is_absolute()) {
+            check_project_overlap(root, Path::new(path))?;
+        }
     }
     Ok(())
 }
@@ -286,6 +322,12 @@ mod tests {
         assert!(check_project_overlap(project.path(), &store).is_err());
         let other = tempfile::tempdir().expect("other");
         assert!(check_project_overlap(other.path(), project.path()).is_ok());
+        let projects = vec![(
+            "project:logical".to_owned(),
+            json!({"path":"project:logical", "locations":[{"serverId":"local", "path":project.path()}]}),
+        )];
+        assert!(check_projects_overlap(&store, &projects, Some("local")).is_err());
+        assert!(check_projects_overlap(&store, &projects, Some("remote")).is_ok());
     }
 
     #[test]

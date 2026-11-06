@@ -1,24 +1,20 @@
 import { useEffect, useState } from "react";
-import { errorText, type GetResult } from "../api";
+import { type GetResult } from "../api";
 import {
   useServerApi,
   useServerResources,
 } from "../servers/ServerServicesContext";
-import { Button, Group } from "@mantine/core";
-import DirectoryField from "./DirectoryField";
 import { SettingsRow } from "./ui/primitives";
+import { LayrStoreDirectory } from "./LayrStoreDirectory";
 
 type Configuration = GetResult<"/api/native-layr/settings">;
 
 export function LayrWorktreesSettings({ active }: { active: boolean }) {
   const { post } = useServerApi();
   const resources = useServerResources();
-  const [storeRoot, setStoreRoot] = useState("");
-  const [busy, setBusy] = useState(false);
   const [configuration, setConfiguration] = useState<Configuration | null>(
     null,
   );
-  const [error, setError] = useState("");
   useEffect(() => {
     if (!active) return;
     return resources.watchResourceChanges(
@@ -26,7 +22,6 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
       (version) => {
         if (version?.nativeLayrSettings) {
           setConfiguration(version.nativeLayrSettings);
-          setStoreRoot(version.nativeLayrSettings.storeRoot ?? "");
         }
       },
     );
@@ -45,32 +40,15 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
                   ? "Unavailable"
                   : "Not installed"}
             </SettingsRow>
-            <DirectoryField
-              id="layr-store-root"
+            <LayrStoreDirectory
               label="Default store directory"
-              description="Leave the directory empty to use Studio's default store."
-              value={storeRoot}
-              onChange={setStoreRoot}
+              path={configuration.storeRoot}
+              source={configuration.configured ? "default" : "built-in"}
+              overridden={configuration.configured}
+              save={async (storeRoot) => {
+                await post("/api/native-layr/settings", { storeRoot });
+              }}
             />
-            <Group justify="flex-end">
-              <Button
-                loading={busy}
-                onClick={() => {
-                  setBusy(true);
-                  setError("");
-                  void post("/api/native-layr/settings", {
-                    storeRoot: storeRoot.trim(),
-                  })
-                    .then(
-                      () => {},
-                      (failure) => setError(errorText(failure)),
-                    )
-                    .finally(() => setBusy(false));
-                }}
-              >
-                Save store directory
-              </Button>
-            </Group>
             {configuration.readiness?.status === "notReady" && (
               <p role="status" className="layr-settings-detail">
                 {configuration.readiness.reason}
@@ -83,7 +61,6 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
             )}
           </>
         )}
-        {error && <p role="alert">{error}</p>}
       </section>
     </>
   );

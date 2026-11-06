@@ -854,14 +854,35 @@ async fn create(
         project_directory_default_async().await?
     };
     let state = context.store.state_dir().to_path_buf();
+    let binding = if request.project_binding {
+        Some(
+            resolve_project_binding(
+                context,
+                cwd.clone(),
+                request.intent.project_id.value().cloned(),
+                request.intent.project_server_id.value().cloned(),
+                request.intent.project_folder.value().cloned(),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     let requested_project = cwd.clone();
     let native_workspace = workspace == "layr-native";
-    let requested_store = request.intent.layr_store_root.clone();
-    if requested_store.is_some() && !native_workspace {
-        return Err(OperationError::Invalid(
-            "A store override requires Layr workspace mode",
-        ));
-    }
+    let requested_store = if let Some(binding) = &binding {
+        binding.layr_store_root.clone()
+    } else {
+        let directory = cwd.clone();
+        let local = context.store.local_server_id()?;
+        context
+            .store
+            .read_async("agents-create/project-store", move |db| {
+                project_store_for_cwd(db, &directory, local.as_deref())
+            })
+            .await?
+    };
+    let requested_store = request.intent.layr_store_root.clone().or(requested_store);
     let (native_store, project_path) = studio_runtime_process::blocking_pool::spawn_blocking(
         "agents-create/native-store",
         move || {
@@ -910,20 +931,6 @@ async fn create(
             crate::project_deletion::admission_version(db, &admission_path)
         })
         .await?;
-    let binding = if request.project_binding {
-        Some(
-            resolve_project_binding(
-                context,
-                cwd.clone(),
-                request.intent.project_id.value().cloned(),
-                request.intent.project_server_id.value().cloned(),
-                request.intent.project_folder.value().cloned(),
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
     let account = if draft {
         new_chat_account(
             context,
@@ -2893,6 +2900,7 @@ struct ProjectBinding {
     local_server_id: String,
     project_folder: Option<String>,
     project_version: Option<(i64, bool)>,
+    layr_store_root: Option<String>,
 }
 
 async fn resolve_project_binding(
@@ -3168,6 +3176,54 @@ async fn resolve_review_defaults(
     Ok(defaults)
 }
 
+fn local_project_locations<'a>(
+    project: &'a Value,
+    local: Option<&'a str>,
+) -> impl Iterator<Item = &'a str> {
+    project
+        .get("locations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(move |row| {
+            (local.is_some() && row.get("serverId").and_then(Value::as_str) == local)
+                .then(|| row.get("path").and_then(Value::as_str))
+                .flatten()
+        })
+}
+
+fn project_store_for_cwd(
+    connection: &Connection,
+    cwd: &str,
+    local: Option<&str>,
+) -> Result<Option<String>, StoreError> {
+    Ok(studio_runtime_store::ProjectsRepository::owned(connection)?
+        .into_iter()
+        .filter_map(|(_, project)| {
+            let paths = project
+                .get("path")
+                .and_then(Value::as_str)
+                .into_iter()
+                .chain(local_project_locations(&project, local));
+            let depth = paths
+                .filter(|path| {
+                    std::path::Path::new(path).is_absolute()
+                        && std::path::Path::new(cwd).starts_with(path)
+                })
+                .map(|path| std::path::Path::new(path).components().count())
+                .max()?;
+            Some((
+                depth,
+                project
+                    .get("layrStoreRoot")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            ))
+        })
+        .max_by_key(|(depth, _)| *depth)
+        .and_then(|(_, root)| root))
+}
+
 fn resolve_project_binding_from(
     connection: &Connection,
     cwd: &str,
@@ -3198,15 +3254,7 @@ fn resolve_project_binding_from(
     for (_, project) in projects {
         let direct = project.get("id").and_then(Value::as_str) == Some(project_id)
             && project.get("homeServerId").and_then(Value::as_str) == Some(home_server)
-            && project
-                .get("locations")
-                .and_then(Value::as_array)
-                .is_some_and(|rows| {
-                    rows.iter().any(|row| {
-                        row.get("serverId").and_then(Value::as_str) == Some(local)
-                            && row.get("path").and_then(Value::as_str) == Some(cwd)
-                    })
-                });
+            && local_project_locations(&project, Some(local)).any(|path| path == cwd);
         let alias = project.get("path").and_then(Value::as_str) == Some(cwd)
             && project
                 .get("projectAliases")
@@ -3251,6 +3299,10 @@ fn resolve_project_binding_from(
                 local_server_id: local.to_owned(),
                 project_folder: folder_id,
                 project_version: version,
+                layr_store_root: project
+                    .get("layrStoreRoot")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             });
         }
     }
@@ -4603,6 +4655,7 @@ mod tests {
             "path":"project:example",
             "name":"Example",
             "homeServerId":"local-server",
+            "layrStoreRoot":"/store/project",
             "locations":[{"serverId":"local-server","path":"/work/example"}],
             "folders":[{"id":"folder-a","name":"Nested","parentId":null}]
         });
@@ -4641,6 +4694,23 @@ mod tests {
         )
         .expect("accept folder in selected project");
         assert_eq!(valid.project_folder.as_deref(), Some("folder-a"));
+        assert_eq!(valid.layr_store_root.as_deref(), Some("/store/project"));
+        assert_eq!(
+            project_store_for_cwd(&connection, "/work/example", Some("local-server"))
+                .unwrap()
+                .as_deref(),
+            Some("/store/project")
+        );
+        assert_eq!(
+            project_store_for_cwd(&connection, "/work/example/nested", Some("local-server"))
+                .unwrap()
+                .as_deref(),
+            Some("/store/project")
+        );
+        assert_eq!(
+            project_store_for_cwd(&connection, "/work/example", Some("other-server")).unwrap(),
+            None
+        );
         let remote = resolve_project_binding_from(
             &connection,
             "/work/alias",

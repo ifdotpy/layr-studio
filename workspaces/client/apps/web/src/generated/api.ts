@@ -15549,7 +15549,8 @@ export interface components {
         };
     /** NativeLayrSettingsRequest */
     NativeLayrSettingsRequest: {
-      storeRoot?: string | undefined;
+      /** Store Root */
+      storeRoot?: string | null | undefined;
     };
     /** NativeLayrSettingsResource */
     NativeLayrSettingsResource: {
@@ -15561,6 +15562,8 @@ export interface components {
     };
     /** NativeLayrSettingsResponse */
     NativeLayrSettingsResponse: {
+      /** Configured */
+      configured: boolean;
       error?: string | undefined;
       readiness?: components["schemas"]["NativeLayrCapability"] | undefined;
       storeRoot: string | null;
@@ -17630,6 +17633,10 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
+      /** Layr Store Root */
+      layrStoreRoot?: null | string | undefined;
+      /** Layr Store Root Revision */
+      layrStoreRootRevision?: number | null | undefined;
       /**
        * Locations
        * @default null
@@ -17832,6 +17839,10 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
+      /** Layr Store Root */
+      layrStoreRoot?: null | string | undefined;
+      /** Layr Store Root Revision */
+      layrStoreRootRevision?: number | null | undefined;
       /** Locations */
       locations?:
         | components["schemas"]["ProjectLocationDto"][]
@@ -18050,6 +18061,10 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
+      /** Layr Store Root */
+      layrStoreRoot?: null | string | undefined;
+      /** Layr Store Root Revision */
+      layrStoreRootRevision?: number | null | undefined;
       /**
        * Locations
        * @default null
@@ -18205,6 +18220,7 @@ export interface components {
             | "remove_folder"
             | "set_account_groups"
             | "set_workspace_policy"
+            | "set_layr_store_root"
           )
         | null
         | undefined;
@@ -18228,6 +18244,8 @@ export interface components {
        * @default null
        */
       folder_id?: null | string | undefined;
+      /** Layr Store Root */
+      layr_store_root?: null | string | undefined;
       /**
        * Name
        * @default null
