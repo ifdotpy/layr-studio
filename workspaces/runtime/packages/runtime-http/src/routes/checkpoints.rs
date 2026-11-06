@@ -640,12 +640,11 @@ async fn restore_owned(
                 tx,
                 &final_agent_id,
                 &visible_ids,
-                &final_checkpoint["id"],
+                final_checkpoint["id"]
+                    .as_str()
+                    .ok_or_else(ApiError::internal)?,
             )
-            .map_err(|error| match error {
-                edit_turn::EditTurnError::Store(error) => ApiError::stored(error.into()),
-                edit_turn::EditTurnError::Record(_) => ApiError::internal(),
-            })?;
+            .map_err(|edit_turn::EditTurnError::Store(error)| ApiError::stored(error.into()))?;
             let label = final_checkpoint
                 .get("label")
                 .and_then(Value::as_str)

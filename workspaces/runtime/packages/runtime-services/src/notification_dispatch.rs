@@ -2629,7 +2629,7 @@ mod tests {
                 &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,turn_id TEXT,error TEXT);
                  CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-                 CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL);
+                 CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL,hidden_by TEXT);
                  CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL);
                  CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT NOT NULL,record TEXT NOT NULL);
@@ -4509,11 +4509,11 @@ mod tests {
             .expect("agent retry state sets");
         connection
             .execute(
-                "INSERT INTO runtime_items(id,agent,record,created) VALUES('agent:answer','agent',?1,1.0)",
+                "INSERT INTO runtime_items(id,agent,record,created,hidden_by) VALUES('agent:answer','agent',?1,1.0,'checkpoint')",
                 [json!({
                     "id":"agent:answer","role":"assistant","title":"Assistant","text":"old",
                     "truncated":false,"at":1.0,"streaming":true,"turnId":"turn","phase":null,
-                    "afterRestore":"checkpoint","inputs":[{"id":"old","at":1.0,"kind":"user",
+                    "inputs":[{"id":"old","at":1.0,"kind":"user",
                     "text":"old","truncated":false,"assets":[]}],"assets":["old"],"obsolete":"remove"
                 })
                 .to_string()],
@@ -4530,7 +4530,8 @@ mod tests {
             .expect("replacement item exists");
         assert_eq!(item.record.value()["text"], "replacement");
         assert_eq!(item.record.value()["turnId"], "turn");
-        for field in ["afterRestore", "inputs", "assets", "obsolete"] {
+        assert_eq!(item.hidden_by, None, "a fresh start shows the item again");
+        for field in ["inputs", "assets", "obsolete"] {
             assert!(
                 item.record.value().get(field).is_none(),
                 "old field {field} survived"

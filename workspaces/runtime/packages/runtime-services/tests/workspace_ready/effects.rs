@@ -1252,8 +1252,8 @@ async fn publication_preserves_checkpoint_history_and_native_thread() {
     fixture.store.transaction(move |tx| {
         // Explicit rowids make the parent boundary and excluded item deterministic.
         for (i, item) in items_for_store.as_array().expect("items").iter().enumerate() {
-            tx.execute("INSERT INTO runtime_items(rowid,id,agent,record,created) VALUES(?1,?2,?3,?4,1)",
-                rusqlite::params![i as i64 + 1, item["id"].as_str(), id, item.to_string()])?;
+            tx.execute("INSERT INTO runtime_items(rowid,id,agent,record,created,hidden_by) VALUES(?1,?2,?3,?4,1,?5)",
+                rusqlite::params![i as i64 + 1, item["id"].as_str(), id, item.to_string(), item.get("afterRestore").map(|_| "checkpoint")])?;
         }
         tx.execute("INSERT INTO runtime_checkpoints(id,record) VALUES('parent-checkpoint',?1)", [parent_for_store.to_string()])?;
         Ok(())

@@ -158,9 +158,6 @@
   "additionalProperties": true,
   "description": "Legacy parent text is hydrated from fulltext before response validation.",
   "properties": {
-    "afterRestore": {
-      "type": ["string", "null"]
-    },
     "assets": {
       "items": true,
       "type": ["array", "null"]

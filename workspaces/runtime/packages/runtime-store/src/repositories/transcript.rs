@@ -82,6 +82,8 @@ pub struct TranscriptItem {
     pub id: String,
     pub agent: String,
     pub record: TranscriptItemRecord,
+    /// The rewind marker that hides this item (`runtime_items.hidden_by`); None when shown.
+    pub hidden_by: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -141,7 +143,7 @@ impl TranscriptRepository {
                  JOIN runtime_search_next_meta m ON m.search_rowid=runtime_search_next.rowid \
                  JOIN runtime_items i ON i.id=m.id \
                  WHERE runtime_search_next MATCH ?1 \
-                   AND json_extract(i.record,'$.afterRestore') IS NULL \
+                   AND i.hidden_by IS NULL \
                  ORDER BY rank LIMIT 1000",
             )?;
             let rows = statement.query_map([match_query], |row| {
@@ -171,29 +173,31 @@ impl TranscriptRepository {
                 &TranscriptItemId::from(id),
                 Some(RecordPredicate::PhysicalAgentEquals(agent)),
             )
+            .map_err(map_store_error)?
             .map(|item| {
-                item.map(|item| {
-                    let id = item.id().as_ref().to_owned();
-                    TranscriptItem {
-                        id,
-                        agent: agent.to_owned(),
-                        record: item,
-                    }
+                let id = item.id().as_ref().to_owned();
+                Ok(TranscriptItem {
+                    hidden_by: hidden_by(connection, &id)?,
+                    id,
+                    agent: agent.to_owned(),
+                    record: item,
                 })
             })
-            .map_err(map_store_error)
+            .transpose()
     }
 
     pub fn item_any_agent(
         connection: &Connection,
         id: &str,
     ) -> TranscriptStoreResult<Option<TranscriptItem>> {
-        let agent = connection
-            .query_row_cached("SELECT agent FROM runtime_items WHERE id=?1", [id], |row| {
-                row.get::<_, String>(0)
-            })
+        let row = connection
+            .query_row_cached(
+                "SELECT agent,hidden_by FROM runtime_items WHERE id=?1",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
             .optional()?;
-        let Some(agent) = agent else {
+        let Some((agent, hidden_by)) = row else {
             return Ok(None);
         };
         Table::<TranscriptItemRecord>::new(connection)
@@ -205,6 +209,7 @@ impl TranscriptRepository {
                         id,
                         agent: agent.clone(),
                         record: item,
+                        hidden_by: hidden_by.clone(),
                     }
                 })
             })
@@ -230,26 +235,38 @@ impl TranscriptRepository {
         agent: &str,
         include_restored: bool,
     ) -> TranscriptStoreResult<Vec<TranscriptItem>> {
-        Table::<TranscriptItemRecord>::new(connection)
-            .list_matching(
-                Some(RecordPredicate::PhysicalAgentEquals(agent)),
-                RecordOrder::PhysicalCreatedDescIdDesc,
-            )
-            .map(|records| {
-                records
-                    .into_iter()
-                    .filter(|record| include_restored || visible(record))
-                    .map(|record| {
-                        let id = record.id().as_ref().to_owned();
-                        TranscriptItem {
-                            id,
-                            agent: agent.to_owned(),
-                            record,
-                        }
-                    })
-                    .collect()
+        let predicate = if include_restored {
+            RecordPredicate::PhysicalAgentEquals(agent)
+        } else {
+            RecordPredicate::ShownItemsOfAgent(agent)
+        };
+        let records = Table::<TranscriptItemRecord>::new(connection)
+            .list_matching(Some(predicate), RecordOrder::PhysicalCreatedDescIdDesc)
+            .map_err(map_store_error)?;
+        let mut hidden = std::collections::HashMap::new();
+        if include_restored {
+            let mut statement = connection.prepare_cached(
+                "SELECT id,hidden_by FROM runtime_items WHERE agent=?1 AND hidden_by IS NOT NULL",
+            )?;
+            for row in statement.query_map([agent], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })? {
+                let (id, marker) = row?;
+                hidden.insert(id, marker);
+            }
+        }
+        Ok(records
+            .into_iter()
+            .map(|record| {
+                let id = record.id().as_ref().to_owned();
+                TranscriptItem {
+                    hidden_by: hidden.remove(&id),
+                    id,
+                    agent: agent.to_owned(),
+                    record,
+                }
             })
-            .map_err(map_store_error)
+            .collect())
     }
 
     pub fn event_text(
@@ -470,7 +487,7 @@ impl TranscriptRepository {
         }
         transaction.execute_cached(
             "INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,?2,?3,?4) \
-             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
+             ON CONFLICT(id) DO UPDATE SET record=excluded.record,hidden_by=NULL",
             params![
                 id,
                 agent,
@@ -519,7 +536,7 @@ impl TranscriptRepository {
         identity: &str,
     ) -> TranscriptStoreResult<Option<TranscriptItem>> {
         if let Some(item) = Self::item(connection, agent, identity)?
-            && visible(&item.record)
+            && item.hidden_by.is_none()
         {
             return Ok(Some(item));
         }
@@ -601,8 +618,16 @@ fn invalid_record(table: &'static str, id: &str) -> TranscriptStoreError {
     }
 }
 
-fn visible(record: &TranscriptItemRecord) -> bool {
-    record.after_restore().is_none()
+/// The rewind marker of item `id`; None when the item is shown or absent.
+fn hidden_by(connection: &Connection, id: &str) -> TranscriptStoreResult<Option<String>> {
+    Ok(connection
+        .query_row_cached(
+            "SELECT hidden_by FROM runtime_items WHERE id=?1",
+            [id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 pub(super) fn stored_truthy(value: &Value) -> bool {
@@ -1018,7 +1043,7 @@ mod tests {
     #[test]
     fn transcript_writer_requires_inline_text() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL)").unwrap();
+        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL,hidden_by TEXT)").unwrap();
         let tx = db.transaction().unwrap();
         for record in [
             json!({"id":"agent:x","role":"user"}),
@@ -1036,7 +1061,7 @@ mod tests {
     #[test]
     fn transcript_writer_requires_complete_input_fields() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL)").unwrap();
+        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL,hidden_by TEXT)").unwrap();
         let tx = db.transaction().unwrap();
         for field in ["id", "kind", "text", "truncated", "at", "assets"] {
             let mut input = json!({"id":"i","kind":"user","text":"body","truncated":false,"at":1.0,"assets":[]});
@@ -1058,11 +1083,11 @@ mod tests {
     #[test]
     fn transcript_typed_update_hydrates_legacy_text_and_preserves_opaque_bytes() {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL);").unwrap();
+        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL,hidden_by TEXT); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL);").unwrap();
         let raw =
             r#"{"id":"agent:x","role":"assistant","truncated":true,"provider":{"z":  1,"a":2}}"#;
         db.execute(
-            "INSERT INTO runtime_items VALUES('agent:x','agent',?1,1)",
+            "INSERT INTO runtime_items(id,agent,record,created) VALUES('agent:x','agent',?1,1)",
             [raw],
         )
         .unwrap();
@@ -1096,7 +1121,7 @@ mod tests {
 
         let incomplete = r#"{"id":"agent:y","role":"user","text":"body","inputs":[{"id":"i"}]}"#;
         db.execute(
-            "INSERT INTO runtime_items VALUES('agent:y','agent',?1,1)",
+            "INSERT INTO runtime_items(id,agent,record,created) VALUES('agent:y','agent',?1,1)",
             [incomplete],
         )
         .unwrap();
@@ -1195,7 +1220,7 @@ mod tests {
     #[test]
     fn writers_reject_invalid_inputs_and_checked_reads_enforce_shell() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL)").unwrap();
+        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL,hidden_by TEXT); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL)").unwrap();
         let tx = db.transaction().unwrap();
         let raw = json!({"id":"agent:x","role":"user","text":"body","inputs":[null]});
         assert!(
@@ -1276,7 +1301,7 @@ mod tests {
     #[test]
     fn typed_input_resolution_preserves_visibility_and_physical_owner() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL)").unwrap();
+        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL,hidden_by TEXT); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL)").unwrap();
         let tx = db.transaction().unwrap();
         let visible = json!({"id":"agent:x","role":"user","text":"parent","inputs":[{"id":"m","text":"one","future":true},{"id":null,"text":"two"}],"future":{"v":1}});
         tx.execute(
@@ -1296,9 +1321,11 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        tx.execute("UPDATE runtime_items SET record=json_set(record,'$.afterRestore',json('[]')) WHERE id='agent:x'",[]).unwrap();
-        assert!(TranscriptRepository::resolve_item(&tx, "agent", "agent:x").is_err());
-        tx.execute("UPDATE runtime_items SET record=json_set(record,'$.afterRestore','restored') WHERE id='agent:x'",[]).unwrap();
+        tx.execute(
+            "UPDATE runtime_items SET hidden_by='restored' WHERE id='agent:x'",
+            [],
+        )
+        .unwrap();
         assert!(
             TranscriptRepository::resolve_item(&tx, "agent", "agent:x")
                 .unwrap()
@@ -1331,6 +1358,7 @@ mod tests {
             )
             .expect("fulltext fixture inserts");
         let item = super::TranscriptItem {
+            hidden_by: None,
             id: "agent:long".to_owned(),
             agent: "agent".to_owned(),
             record: studio_json::from_str(
@@ -1396,7 +1424,7 @@ mod tests {
         connection
             .execute_batch(
                 "CREATE TABLE runtime_items(id TEXT PRIMARY KEY, agent TEXT NOT NULL, \
-                 record TEXT NOT NULL, created REAL NOT NULL);
+                 record TEXT NOT NULL, created REAL NOT NULL, hidden_by TEXT);
                  CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY, body TEXT NOT NULL);
                  CREATE TABLE runtime_item_blobs(id TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER NOT NULL);",
             )
@@ -1475,6 +1503,7 @@ mod tests {
             .unwrap();
         assert_eq!(blob.size, text.len() as u64);
         let item = super::TranscriptItem {
+            hidden_by: None,
             id: "agent:long".to_owned(),
             agent: "agent".to_owned(),
             record: studio_json::from_str(&record.to_string()).unwrap(),
@@ -1510,6 +1539,7 @@ mod tests {
                 .is_none()
         );
         let item = super::TranscriptItem {
+            hidden_by: None,
             id: "agent:long".to_owned(),
             agent: "agent".to_owned(),
             record: studio_json::from_str(&long_record(false).to_string()).unwrap(),

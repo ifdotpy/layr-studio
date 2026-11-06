@@ -15,54 +15,39 @@
 use rusqlite::{Connection, params};
 use std::collections::HashSet;
 use std::future::Future;
-use studio_json::Value;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditTurnError {
     #[error("the item store failed: {0}")]
     Store(#[from] rusqlite::Error),
-    #[error("an item record is not JSON")]
-    Record(#[from] studio_json::Error),
 }
 
 /// Hide every item of `agent` that is not in `visible`, and show every hidden item that
-/// is. A hidden item keeps its row and gets `afterRestore = marker`; readers skip it.
+/// is. A hidden item keeps its row and gets `hidden_by = marker`; readers skip it.
 /// Returns the number of items that changed.
 pub fn set_item_visibility(
     connection: &Connection,
     agent: &str,
     visible: &HashSet<String>,
-    marker: &Value,
+    marker: &str,
 ) -> Result<usize, EditTurnError> {
-    let mut statement =
-        connection.prepare("SELECT id,record FROM runtime_items WHERE agent=?1 ORDER BY rowid")?;
+    let mut statement = connection
+        .prepare("SELECT id,hidden_by IS NULL FROM runtime_items WHERE agent=?1 ORDER BY rowid")?;
     let rows = statement
         .query_map([agent], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     let mut changed = 0;
-    for (id, raw) in rows {
-        let mut item: Value = studio_json::from_str(&raw)?;
+    for (id, was_shown) in rows {
         let shown = visible.contains(&id);
-        let was_shown = item
-            .get("afterRestore")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty);
         if shown == was_shown {
             continue;
         }
-        if shown {
-            if let Some(object) = item.as_object_mut() {
-                object.remove("afterRestore");
-            }
-        } else {
-            item["afterRestore"] = marker.clone();
-        }
         connection.execute(
-            "UPDATE runtime_items SET record=?1 WHERE id=?2 AND agent=?3",
-            params![item.to_string(), id, agent],
+            "UPDATE runtime_items SET hidden_by=?1 WHERE id=?2 AND agent=?3",
+            params![(!shown).then_some(marker), id, agent],
         )?;
         changed += 1;
     }
@@ -89,19 +74,19 @@ mod tests {
     use rusqlite::Connection;
     use std::cell::RefCell;
     use std::collections::HashSet;
-    use studio_json::{Value, json};
+    use studio_json::json;
 
     fn items(ids: &[&str]) -> Connection {
         let connection = Connection::open_in_memory().expect("memory database");
         connection
             .execute_batch(
-                "CREATE TABLE runtime_items(id TEXT, agent TEXT, record TEXT, created REAL);",
+                "CREATE TABLE runtime_items(id TEXT, agent TEXT, record TEXT, created REAL, hidden_by TEXT);",
             )
             .expect("table");
         for id in ids {
             connection
                 .execute(
-                    "INSERT INTO runtime_items VALUES(?1,'a',?2,0)",
+                    "INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,'a',?2,0)",
                     rusqlite::params![id, json!({"id": id, "text": id}).to_string()],
                 )
                 .expect("item");
@@ -109,14 +94,14 @@ mod tests {
         connection
     }
 
-    fn records(connection: &Connection) -> Vec<Value> {
+    fn markers(connection: &Connection) -> Vec<Option<String>> {
         let mut statement = connection
-            .prepare("SELECT record FROM runtime_items ORDER BY rowid")
+            .prepare("SELECT hidden_by FROM runtime_items ORDER BY rowid")
             .expect("prepare");
         statement
-            .query_map([], |row| row.get::<_, String>(0))
+            .query_map([], |row| row.get::<_, Option<String>>(0))
             .expect("query")
-            .map(|raw| studio_json::from_str(&raw.expect("row")).expect("json"))
+            .map(|marker| marker.expect("row"))
             .collect()
     }
 
@@ -124,30 +109,33 @@ mod tests {
     fn items_after_the_turn_are_hidden_and_never_deleted() {
         let connection = items(&["u1", "a1", "u2", "a2"]);
         let visible: HashSet<String> = ["u1", "a1"].map(String::from).into();
-        let changed = set_item_visibility(&connection, "a", &visible, &json!("cp1")).expect("hide");
+        let changed = set_item_visibility(&connection, "a", &visible, "cp1").expect("hide");
         assert_eq!(changed, 2);
-        let rows = records(&connection);
-        assert_eq!(rows.len(), 4, "no row is deleted");
-        assert!(rows[0].get("afterRestore").is_none());
-        assert!(rows[1].get("afterRestore").is_none());
-        assert_eq!(rows[2]["afterRestore"], "cp1");
-        assert_eq!(rows[3]["afterRestore"], "cp1");
-        assert_eq!(rows[3]["text"], "a2", "the content stays");
+        let cp1 = Some("cp1".to_owned());
+        assert_eq!(
+            markers(&connection),
+            [None, None, cp1.clone(), cp1],
+            "no row is deleted"
+        );
+        let text: String = connection
+            .query_row(
+                "SELECT json_extract(record,'$.text') FROM runtime_items WHERE id='a2'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("text");
+        assert_eq!(text, "a2", "the content stays");
     }
 
     #[test]
     fn a_later_rewind_shows_hidden_items_again() {
         let connection = items(&["u1", "a1", "u2"]);
         let first: HashSet<String> = ["u1"].map(String::from).into();
-        set_item_visibility(&connection, "a", &first, &json!("cp1")).expect("hide");
+        set_item_visibility(&connection, "a", &first, "cp1").expect("hide");
         let all: HashSet<String> = ["u1", "a1", "u2"].map(String::from).into();
-        let changed = set_item_visibility(&connection, "a", &all, &json!("cp2")).expect("show");
+        let changed = set_item_visibility(&connection, "a", &all, "cp2").expect("show");
         assert_eq!(changed, 2);
-        assert!(
-            records(&connection)
-                .iter()
-                .all(|row| row.get("afterRestore").is_none())
-        );
+        assert!(markers(&connection).iter().all(Option::is_none));
     }
 
     #[test]
@@ -155,13 +143,12 @@ mod tests {
         let connection = items(&["u1"]);
         connection
             .execute(
-                "INSERT INTO runtime_items VALUES('x','b','{\"id\":\"x\"}',9)",
+                "INSERT INTO runtime_items(id,agent,record,created) VALUES('x','b','{\"id\":\"x\"}',9)",
                 [],
             )
             .expect("other agent");
-        set_item_visibility(&connection, "a", &HashSet::new(), &json!("cp1")).expect("hide");
-        let rows = records(&connection);
-        assert!(rows[1].get("afterRestore").is_none());
+        set_item_visibility(&connection, "a", &HashSet::new(), "cp1").expect("hide");
+        assert_eq!(markers(&connection)[1], None);
     }
 
     #[tokio::test]

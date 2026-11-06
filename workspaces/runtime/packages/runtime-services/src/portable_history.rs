@@ -1030,19 +1030,24 @@ fn stored_items(
 ) -> Result<Vec<ArchiveRecord>, PortableHistoryError> {
     let mut records = Vec::new();
     let mut statement = transaction.prepare(
-        "SELECT id, created, record FROM runtime_items WHERE agent=?1 ORDER BY created, id",
+        "SELECT id, created, record, hidden_by FROM runtime_items WHERE agent=?1 ORDER BY created, id",
     )?;
     let rows = statement.query_map([agent_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, f64>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
     for row in rows {
-        let (id, created, encoded) = row?;
-        let item: Value = studio_json::from_str(&encoded)
+        let (id, created, encoded, hidden_by) = row?;
+        let mut item: Value = studio_json::from_str(&encoded)
             .map_err(|_| PortableHistoryError::InvalidArchive("Studio item"))?;
+        // The archive format keeps the rewind marker inside the item as `afterRestore`.
+        if let (Some(marker), Some(object)) = (hidden_by, item.as_object_mut()) {
+            object.insert("afterRestore".into(), Value::String(marker));
+        }
         if !item.is_object() || item.get("id").and_then(Value::as_str) != Some(&id) {
             return Err(PortableHistoryError::InvalidArchive("Studio item identity"));
         }

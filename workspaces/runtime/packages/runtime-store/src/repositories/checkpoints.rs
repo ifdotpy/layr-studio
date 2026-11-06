@@ -495,7 +495,7 @@ impl CheckpointsRepository {
         let boundary = connection
             .query_row(
                 "SELECT rowid FROM runtime_items WHERE agent=?1 \
-                 AND json_extract(record,'$.afterRestore') IS NULL \
+                 AND hidden_by IS NULL \
                  ORDER BY rowid DESC LIMIT 1",
                 [agent_id],
                 |row| row.get::<_, i64>(0),
@@ -503,7 +503,7 @@ impl CheckpointsRepository {
             .optional()?;
         let mut statement = connection.prepare_cached(
             "SELECT id FROM runtime_items WHERE agent=?1 \
-             AND json_extract(record,'$.afterRestore') IS NULL \
+             AND hidden_by IS NULL \
              AND (?2 IS NULL OR rowid>?2) ORDER BY rowid",
         )?;
         let ids = statement

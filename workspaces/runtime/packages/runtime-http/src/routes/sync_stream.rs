@@ -5504,7 +5504,7 @@ mod tests {
                     let payload = if scenario == "payload" { "broken".to_owned() } else {
                         json!({"device":"phone", "session":session, "text": "draft", "updated":1}).to_string()
                     };
-                    SyncDocumentsRepository::put_draft(tx, &format!("{session}"), &payload, false)?;
+                    SyncDocumentsRepository::put_draft(tx, &session.to_string(), &payload, false)?;
                 }
                 Ok(())
             }).await.expect("draft interval");
@@ -5581,7 +5581,7 @@ mod tests {
                     ),
                     ("good", "kept".to_owned()),
                 ] {
-                    let id = format!("{session}");
+                    let id = session.to_string();
                     let payload =
                         json!({"id":id,"device":"phone","session":session,"text":text,"updated":1})
                             .to_string();

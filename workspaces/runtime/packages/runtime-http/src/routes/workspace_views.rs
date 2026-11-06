@@ -195,8 +195,8 @@ fn reported_changes(connection: &Connection, agent: &str) -> Result<Value, ApiEr
         return Ok(empty_reported_changes());
     };
     if item
-        .record
-        .after_restore()
+        .hidden_by
+        .as_deref()
         .is_some_and(|value| !value.is_empty())
     {
         return Ok(empty_reported_changes());
@@ -711,6 +711,7 @@ mod tests {
             store.transaction_with(move |tx| {
                 tx.execute("DELETE FROM runtime_item_fulltext WHERE id='agent:turn/diff/updated'", [])?;
                 tx.execute("INSERT OR REPLACE INTO runtime_items(id,agent,record,created) VALUES('agent:turn/diff/updated','agent',?1,1)", [record.to_string()])?;
+                tx.execute("UPDATE runtime_items SET hidden_by=json_extract(record,'$.afterRestore'),record=json_remove(record,'$.afterRestore') WHERE id='agent:turn/diff/updated' AND json_type(record,'$.afterRestore') IS NOT NULL", [])?;
                 if fulltext {
                     tx.execute("INSERT INTO runtime_item_fulltext(id,body) VALUES('agent:turn/diff/updated',?1)", [r#"{"diff":"full","turnId":"turn"}"#])?;
                 }

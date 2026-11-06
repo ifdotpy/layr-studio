@@ -697,8 +697,8 @@ fn search_item_in(
             .ok_or(TranscriptError::SearchResultUnavailable)?;
         if actor.deleted_at.as_ref().is_some_and(Deletion::is_deleted)
             || row
-                .record
-                .after_restore()
+                .hidden_by
+                .as_deref()
                 .is_some_and(|value| !value.is_empty())
         {
             return Err(TranscriptError::SearchResultUnavailable);
@@ -1266,6 +1266,7 @@ mod tests {
             let record: TranscriptItemRecord = studio_json::from_str(&stored.to_string())
                 .expect("persisted transcript permits absent or null parent text");
             let row = TranscriptItem {
+                hidden_by: None,
                 id: record.id().as_ref().to_owned(),
                 agent: "agent-1".to_owned(),
                 record,
@@ -1298,6 +1299,7 @@ mod tests {
             )
             .expect("persisted transcript permits absent or null optional input fields");
             let row = TranscriptItem {
+                hidden_by: None,
                 id: record.id().as_ref().to_owned(),
                 agent: "agent-1".to_owned(),
                 record,

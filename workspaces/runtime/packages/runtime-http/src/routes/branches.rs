@@ -197,7 +197,7 @@ async fn branch(
             .await?
     };
     let source = snapshot.agent.value();
-    if !selected.record.after_restore_field().is_missing()
+    if selected.hidden_by.is_some()
         || selected
             .record
             .turn_id()
@@ -1041,7 +1041,7 @@ async fn copy_branch_history(
         child.extra.insert("forkedFrom".into(),json!(source)); child.extra.insert("sourceMessage".into(),json!(selected.id));
         child.set_status(studio_runtime_store::AgentStatus::Idle); child.auto_wake = Some(true); child.naming.set_needs_title(Some(false));
         child.quick_create = None; child.quick_create_request = None;
-        let mut stmt=tx.prepare_cached("SELECT id,record,created FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL ORDER BY created,id")?;
+        let mut stmt=tx.prepare_cached("SELECT id,record,created FROM runtime_items WHERE agent=?1 AND hidden_by IS NULL ORDER BY created,id")?;
         let rows=stmt.query_map([source.as_str()],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,f64>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
         drop(stmt);
         let cutoff=match fork_turn {
@@ -1426,6 +1426,7 @@ mod tests {
             assert!(!wire.contains("private"));
             assert!(wire.contains(r#""vendor":{"x":  1}"#));
             let selected = studio_runtime_store::TranscriptItem {
+                hidden_by: None,
                 id: "source:message".into(),
                 agent: "source".into(),
                 record: studio_json::from_str(r#"{"id":"source:message","role":"user","text":"hello","assets":[{"id":"asset"}]}"#)?,
@@ -1466,6 +1467,7 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let selected = studio_runtime_store::TranscriptItem {
+            hidden_by: None,
             id: "source:a".into(),
             agent: "source".into(),
             record: studio_json::from_str(r#"{"id":"source:a","role":"assistant","turnId":"t"}"#)
@@ -1630,6 +1632,7 @@ mod tests {
         let tx = db.transaction().unwrap();
         let record = studio_json::from_str(r#"{"id":"agent:parent","role":"user","text":"parent","inputs":[{"id":"one","kind":"user","text":"first"},{"id":null,"kind":"user","text":"second"}]}"#).unwrap();
         let selected = studio_runtime_store::TranscriptItem {
+            hidden_by: None,
             id: "agent:parent".into(),
             agent: "agent".into(),
             record,
@@ -1727,6 +1730,7 @@ mod tests {
     async fn branch_copy_sets_one_idle_status() {
         let (_root, store) = status_fixture().await;
         let selected = studio_runtime_store::TranscriptItem {
+            hidden_by: None,
             id: "message".into(),
             agent: "source".into(),
             record: studio_json::from_str(r#"{"id":"message","role":"assistant","turnId":"turn"}"#)
@@ -1765,6 +1769,7 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let selected = studio_runtime_store::TranscriptItem {
+            hidden_by: None,
             id: "message".into(),
             agent: "source".into(),
             record: studio_json::from_str(r#"{"id":"message","role":"assistant","turnId":"turn"}"#)
@@ -1798,6 +1803,7 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let selected = studio_runtime_store::TranscriptItem {
+            hidden_by: None,
             id: "source:legacy".into(),
             agent: "source".into(),
             record: studio_json::from_str(

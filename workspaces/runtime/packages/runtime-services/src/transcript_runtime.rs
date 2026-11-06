@@ -128,14 +128,14 @@ fn rows(
     let mut anchor = match before.or(around).or(after) {
         Some(identity) => {
             let direct = connection.query_row(
-                "SELECT created,id FROM runtime_items WHERE id=?1 AND agent=?2 AND json_extract(record,'$.afterRestore') IS NULL",
+                "SELECT created,id FROM runtime_items WHERE id=?1 AND agent=?2 AND hidden_by IS NULL",
                 params![identity, agent], |r| Ok((r.get::<_, f64>(0)?, r.get::<_, String>(1)?)),
             ).optional()?;
             Some(match direct {
                 Some(anchor) => anchor,
                 None => connection.query_row(
                     "SELECT i.created,i.id FROM runtime_items i JOIN json_each(i.record,'$.inputs') input
-                     WHERE i.agent=?1 AND json_extract(i.record,'$.afterRestore') IS NULL
+                     WHERE i.agent=?1 AND i.hidden_by IS NULL
                      AND CASE WHEN json_type(input.value,'$.id')='text'
                          THEN ?1 || ':' || json_extract(input.value,'$.id')
                          ELSE i.id || ':' || input.key END=?2 ORDER BY i.created,i.id LIMIT 1",
@@ -149,7 +149,7 @@ fn rows(
         && limit / 2 > 0
         && let Some((created, id)) = &anchor
     {
-        let newer = connection.query_row("SELECT created,id FROM (SELECT created,id FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL AND (created,id)>(?2,?3) ORDER BY created,id LIMIT ?4) ORDER BY created DESC,id DESC LIMIT 1", params![agent, created, id, limit/2], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let newer = connection.query_row("SELECT created,id FROM (SELECT created,id FROM runtime_items WHERE agent=?1 AND hidden_by IS NULL AND (created,id)>(?2,?3) ORDER BY created,id LIMIT ?4) ORDER BY created DESC,id DESC LIMIT 1", params![agent, created, id, limit/2], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
         if newer.is_some() {
             anchor = newer;
         }
@@ -172,7 +172,7 @@ fn rows(
         String::new()
     };
     let sql = format!(
-        "SELECT id,created,record FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL{filter} ORDER BY {order} LIMIT ?2"
+        "SELECT id,created,record FROM runtime_items WHERE agent=?1 AND hidden_by IS NULL{filter} ORDER BY {order} LIMIT ?2"
     );
     let mut statement = connection.prepare_cached(&sql)?;
     let mut values = vec![rusqlite::types::Value::Text(agent.to_owned()), limit.into()];
@@ -226,8 +226,8 @@ pub(crate) fn project(
         .any(|v| v.as_ref().is_some_and(|v| !v.is_empty()));
     let mut next = None;
     let mut next_after = None;
-    if let Some(row) = rows.first() && connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL AND (created,id)<(?2,?3))",params![agent,row.created,row.id],|r|r.get::<_,bool>(0))? { next=Some(row.id.clone()); }
-    if has_cursor && let Some(row)=rows.last() && connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL AND (created,id)>(?2,?3))",params![agent,row.created,row.id],|r|r.get::<_,bool>(0))? { next_after=Some(row.id.clone()); }
+    if let Some(row) = rows.first() && connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_items WHERE agent=?1 AND hidden_by IS NULL AND (created,id)<(?2,?3))",params![agent,row.created,row.id],|r|r.get::<_,bool>(0))? { next=Some(row.id.clone()); }
+    if has_cursor && let Some(row)=rows.last() && connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_items WHERE agent=?1 AND hidden_by IS NULL AND (created,id)>(?2,?3))",params![agent,row.created,row.id],|r|r.get::<_,bool>(0))? { next_after=Some(row.id.clone()); }
     receipts(connection, agent, &mut items, !has_cursor)?;
     let live = matches!(
         actor["status"].as_str(),
@@ -652,7 +652,7 @@ fn reasoning(
     let Some(last) = rows.last() else {
         return Ok(items);
     };
-    let upper=connection.query_row("SELECT created FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL AND (created,id)>(?2,?3) ORDER BY created,id LIMIT 1",params![actor["id"].as_str(),last.created,last.id],|r|r.get::<_,f64>(0)).optional()?.unwrap_or(now);
+    let upper=connection.query_row("SELECT created FROM runtime_items WHERE agent=?1 AND hidden_by IS NULL AND (created,id)>(?2,?3) ORDER BY created,id LIMIT 1",params![actor["id"].as_str(),last.created,last.id],|r|r.get::<_,f64>(0)).optional()?.unwrap_or(now);
     let mut statement=analytics.prepare_cached("SELECT id,record FROM analytics_items WHERE agent=?1 AND at>=?2 AND at<?3 AND type='reasoning' ORDER BY at,id")?;
     let records = statement
         .query_map(params![actor["id"].as_str(), first.created, upper,], |r| {
@@ -779,7 +779,7 @@ mod delivery_tests {
 
         let db = Connection::open_in_memory().expect("fixture database");
         db.execute_batch(
-            "CREATE TABLE runtime_items(id TEXT,agent TEXT,created REAL,record TEXT);
+            "CREATE TABLE runtime_items(id TEXT,agent TEXT,created REAL,record TEXT,hidden_by TEXT);
              CREATE TABLE reasoning_source(id TEXT,agent TEXT,at REAL,type TEXT,record TEXT);
              CREATE INDEX reasoning_order ON reasoning_source(agent,type,at,id);
              CREATE VIEW analytics_items AS

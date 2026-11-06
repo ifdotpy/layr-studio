@@ -135,13 +135,6 @@ pub struct TranscriptItemRecord {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
     title: Field<String>,
-    #[serde(
-        rename = "afterRestore",
-        default,
-        skip_serializing_if = "Field::is_missing"
-    )]
-    #[schemars(with = "Option<String>")]
-    after_restore: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<bool>")]
     truncated: Field<bool>,
@@ -200,7 +193,6 @@ struct ItemFields {
     inputs: Option<Field<Vec<TranscriptInput>>>,
     at: Option<Field<studio_json::Number>>,
     title: Option<Field<String>>,
-    after_restore: Option<Field<String>>,
     truncated: Option<Field<bool>>,
     streaming: Option<Field<bool>>,
     turn_id: Option<Field<String>>,
@@ -222,7 +214,6 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for ItemFields {
         read_field!(name, map, self, "inputs", inputs);
         read_field!(name, map, self, "at", at);
         read_field!(name, map, self, "title", title);
-        read_field!(name, map, self, "afterRestore", after_restore);
         read_field!(name, map, self, "truncated", truncated);
         read_field!(name, map, self, "streaming", streaming);
         read_field!(name, map, self, "turnId", turn_id);
@@ -243,7 +234,6 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for ItemFields {
             inputs: self.inputs.unwrap_or_default(),
             at: self.at.unwrap_or_default(),
             title: self.title.unwrap_or_default(),
-            after_restore: self.after_restore.unwrap_or_default(),
             truncated: self.truncated.unwrap_or_default(),
             streaming: self.streaming.unwrap_or_default(),
             turn_id: self.turn_id.unwrap_or_default(),
@@ -345,17 +335,8 @@ impl TranscriptItemRecord {
     pub fn title(&self) -> Option<&str> {
         self.title.value().map(String::as_str)
     }
-    pub fn after_restore(&self) -> Option<&str> {
-        self.after_restore.value().map(String::as_str)
-    }
-    pub fn after_restore_field(&self) -> &Field<String> {
-        &self.after_restore
-    }
     pub fn at(&self) -> &Field<studio_json::Number> {
         &self.at
-    }
-    pub fn set_after_restore(&mut self, value: String) {
-        self.after_restore = Field::Value(value);
     }
     pub fn truncated(&self) -> Option<bool> {
         self.truncated.value().copied()

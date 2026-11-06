@@ -2459,6 +2459,8 @@ pub enum RecordQueryShape {
 #[derive(Clone, Copy, Debug)]
 pub enum RecordPredicate<'a> {
     PhysicalAgentEquals(&'a str),
+    /// Transcript items of one agent that no rewind hides (`hidden_by IS NULL`).
+    ShownItemsOfAgent(&'a str),
     PhysicalAgentIn(&'a [String]),
     JsonAgentEquals(&'a str),
     JsonAgentIn(&'a [String]),
@@ -2933,6 +2935,7 @@ fn ensure_query<R: JsonRecord>(
         Some(RecordPredicate::PhysicalAgentEquals(_) | RecordPredicate::PhysicalAgentIn(_)) => {
             R::QUERY_SHAPE == RecordQueryShape::PhysicalAgent
         }
+        Some(RecordPredicate::ShownItemsOfAgent(_)) => R::TABLE == "runtime_items",
         Some(RecordPredicate::JsonAgentEquals(_) | RecordPredicate::JsonAgentIn(_)) => {
             R::QUERY_SHAPE == RecordQueryShape::JsonAgent
         }
@@ -2963,6 +2966,10 @@ fn predicate_sql(predicate: Option<RecordPredicate<'_>>) -> (Option<String>, Vec
         None => (None, Vec::new()),
         Some(RecordPredicate::PhysicalAgentEquals(value)) => (
             Some("agent=?".to_owned()),
+            vec![SqlValue::Text(value.to_owned())],
+        ),
+        Some(RecordPredicate::ShownItemsOfAgent(value)) => (
+            Some("agent=? AND hidden_by IS NULL".to_owned()),
             vec![SqlValue::Text(value.to_owned())],
         ),
         Some(RecordPredicate::JsonAgentEquals(value)) => (
