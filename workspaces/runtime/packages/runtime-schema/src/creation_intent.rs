@@ -5,11 +5,24 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod review_state_tests {
     #[test]
-    fn reviewer_spawn_retains_review_state() {
-        let value = studio_json::json!({"role":"reviewer","review_state":"01a1a137-e462-7190-8be9-3f0f87ff4513"});
-        let intent: super::CreationIntent =
-            studio_json::from_value(value.clone()).expect("review target is accepted");
-        assert_eq!(studio_json::to_value(intent).unwrap(), value);
+    fn legacy_review_state_maps_to_typed_review() {
+        let state = "0123456789abcdef0123456789abcdef";
+        let intent: super::CreationIntent = studio_json::from_str(
+            r#"{"role":"reviewer","review_state":"0123456789abcdef0123456789abcdef"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            intent.review,
+            Some(crate::review::ReviewTarget::LayrState {
+                state: crate::review::LayrStateId::try_from(state.to_owned()).unwrap(),
+                base: crate::review::LayrBase::MergeBaseWithMain,
+            })
+        );
+    }
+    #[test]
+    fn invalid_legacy_review_state_is_refused() {
+        let value = studio_json::json!({"role":"reviewer","review_state":"invalid"});
+        assert!(studio_json::from_value::<super::CreationIntent>(value).is_err());
     }
 }
 
@@ -202,10 +215,11 @@ pub struct CreationIntent {
     pub base_ref: Option<String>,
     #[serde(
         default,
-        deserialize_with = "present",
+        alias = "review_state",
+        deserialize_with = "review_target",
         skip_serializing_if = "Option::is_none"
     )]
-    pub review_state: Option<String>,
+    pub review: Option<crate::review::ReviewTarget>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -232,9 +246,22 @@ pub struct CreationIntent {
     pub workspace: Option<crate::records::WorkspaceMode>,
 }
 
-/// Advertise the reviewer target from the creation intent's field owner.
-pub fn review_state_tool_schema() -> studio_json::Value {
-    studio_json::json!({"type":"string", "description":"Exact native Layr state ID for a reviewer."})
+fn review_target<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<crate::review::ReviewTarget>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input {
+        Target(crate::review::ReviewTarget),
+        Legacy(crate::review::LayrStateId),
+    }
+    Ok(Some(match Input::deserialize(d)? {
+        Input::Target(target) => target,
+        Input::Legacy(state) => crate::review::ReviewTarget::LayrState {
+            state,
+            base: crate::review::LayrBase::MergeBaseWithMain,
+        },
+    }))
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

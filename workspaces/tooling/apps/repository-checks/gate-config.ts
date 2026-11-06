@@ -32,9 +32,17 @@ export const RETEST_REAL_ROOT_ENV = "LAYR_GATE_REAL_ROOT";
 // Tests inherit host tools, but agent session settings must come from their fixtures.
 export function scrubAgentEnvironment<T extends NodeJS.ProcessEnv>(
   environment: T,
+  bin = "",
+  args: string[] = [],
 ): T {
+  const testProcess =
+    bin === "cargo" && (args[0] === "test" || args[0] === "nextest");
   for (const key of Object.keys(environment))
-    if (/^(CLAUDE|STUDIO_|AI_AGENT$)/.test(key)) delete environment[key];
+    if (
+      /^(CLAUDE|STUDIO_|AI_AGENT$)/.test(key) ||
+      (testProcess && /^LAYR_(SOCKET|DIRECT|ROOT)$/.test(key))
+    )
+      delete environment[key];
   return environment;
 }
 

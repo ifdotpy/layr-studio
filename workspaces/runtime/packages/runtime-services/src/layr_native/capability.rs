@@ -59,7 +59,7 @@ pub fn for_store(state: &Path, root: &Path) -> NativeLayrCapability {
 
 pub fn resolve_binary() -> Result<PathBuf, NativeLayrCapability> {
     #[cfg(test)]
-    if let Some(binary) = TEST_BINARY.with(|binary| binary.borrow().clone()) {
+    if let Some(binary) = TEST_BINARY.read().unwrap().clone() {
         return Ok(binary);
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -67,8 +67,33 @@ pub fn resolve_binary() -> Result<PathBuf, NativeLayrCapability> {
 }
 
 #[cfg(test)]
-thread_local! {
-    pub(super) static TEST_BINARY: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+static TEST_BINARY: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+#[cfg(test)]
+static TEST_BINARY_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) struct BinaryOverride {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous: Option<PathBuf>,
+}
+
+#[cfg(test)]
+pub(super) fn override_binary(binary: PathBuf) -> BinaryOverride {
+    let lock = TEST_BINARY_SERIAL
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let previous = TEST_BINARY.write().unwrap().replace(binary);
+    BinaryOverride {
+        _lock: lock,
+        previous,
+    }
+}
+
+#[cfg(test)]
+impl Drop for BinaryOverride {
+    fn drop(&mut self) {
+        *TEST_BINARY.write().unwrap() = self.previous.take();
+    }
 }
 
 fn resolve_binary_in_path(path: &std::ffi::OsStr) -> Result<PathBuf, NativeLayrCapability> {
@@ -155,6 +180,16 @@ fn has_listener(table: &str, socket: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_binary_override_is_visible_on_other_threads() {
+        let binary = std::path::PathBuf::from("/fixture/layr");
+        let _override = super::super::override_layr_binary(binary.clone());
+        let observed = std::thread::spawn(super::resolve_binary)
+            .join()
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed, binary);
+    }
     use super::*;
 
     #[cfg(unix)]

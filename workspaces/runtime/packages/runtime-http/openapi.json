@@ -29628,6 +29628,14 @@
         ],
         "type": "object"
       },
+      "GitCommit": {
+        "pattern": "^[0-9a-f]{40}$",
+        "type": "string"
+      },
+      "GitRef": {
+        "minLength": 1,
+        "type": "string"
+      },
       "Grant": {
         "enum": [
           "full",
@@ -30135,6 +30143,44 @@
           }
         ],
         "title": "JsonValue"
+      },
+      "LayrBase": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "mergeBaseWithMain",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "state",
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/components/schemas/LayrStateId"
+              }
+            },
+            "required": [
+              "kind",
+              "state"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "LayrStateId": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
       },
       "LazyAccountTransferRecordResponse": {
         "additionalProperties": {
@@ -44689,6 +44735,53 @@
         ],
         "title": "ReviewDefaultsRecordResponse",
         "type": "object"
+      },
+      "ReviewTarget": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "$ref": "#/components/schemas/LayrBase"
+              },
+              "kind": {
+                "const": "layrState",
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/components/schemas/LayrStateId"
+              }
+            },
+            "required": [
+              "kind",
+              "state",
+              "base"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "$ref": "#/components/schemas/GitRef"
+              },
+              "head": {
+                "$ref": "#/components/schemas/GitCommit"
+              },
+              "kind": {
+                "const": "gitRange",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "base",
+              "head"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "ReviewTarget"
       },
       "ReviewUncommittedTargetDto": {
         "additionalProperties": false,

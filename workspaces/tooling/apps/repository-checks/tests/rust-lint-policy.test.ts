@@ -13,7 +13,31 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { CARGO_BUILD_JOBS } from "../gate-config.ts";
+import { CARGO_BUILD_JOBS, scrubAgentEnvironment } from "../gate-config.ts";
+
+test("test process environments exclude the agent Layr connection", () => {
+  const source = {
+    LAYR_SOCKET: "/fixture/socket",
+    LAYR_DIRECT: "0",
+    LAYR_ROOT: "/fixture/store",
+    PATH: "/fixture/bin",
+  };
+  for (const args of [["nextest", "run"], ["test"]]) {
+    const env = scrubAgentEnvironment({ ...source }, "cargo", args);
+    for (const key of ["LAYR_SOCKET", "LAYR_DIRECT", "LAYR_ROOT"])
+      assert.equal(Object.hasOwn(env, key), false, key);
+    assert.equal(env.PATH, "/fixture/bin");
+  }
+  for (const [bin, args] of [
+    ["node", ["--test"]],
+    ["pnpm", ["exec", "vitest"]],
+    ["pnpm", ["run", "test:unit"]],
+    ["git", ["ls-files"]],
+    ["layr", ["retest", "run"]],
+    ["cargo", ["build"]],
+  ] as [string, string[]][])
+    assert.deepEqual(scrubAgentEnvironment({ ...source }, bin, args), source);
+});
 
 const rootUrl = new URL("../../../../../", import.meta.url);
 const root = fileURLToPath(rootUrl);

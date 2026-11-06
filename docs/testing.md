@@ -219,6 +219,12 @@ Every agent and developer follows these rules:
    default path.
 7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same commands as the gate: the Rust workspace build (with `--lib`, which builds the libraries that nextest needs) and the clippy of `clippy-ratchet.ts`. Its `env` sets the ratchet's `CLIPPY_CONF_DIR` as a relative path. Then a new line takes warm units for the build, the first nextest run and clippy (checked by `layr-sweep-parity.test.ts`).
 
+Rust test runners do not inherit `LAYR_SOCKET`, `LAYR_DIRECT`, or
+`LAYR_ROOT` from the agent environment. This keeps tests from connecting to the
+agent's live Layr daemon; the agent itself retains its connection. Node and
+Vitest tests and the opt-in retest runner retain these variables; the Git shim
+needs them, and retest can still reach the inherited daemon.
+
 ### Child scheduling and priority-sensitive tests
 
 Studio defaults to lowering owned child process groups to nice 5 on Linux and

@@ -1179,6 +1179,75 @@ fn materialize_safe_integers(schema: &mut Value) {
     }
 }
 
+/// Replace only managed review schema values, preserving catalog ordering.
+fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
+    let mut text = std::fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
+    let mut schema = studio_json::Map::new();
+    schema.insert("properties".into(), studio_json::json!({}));
+    crate::review::apply_tool_contract("orchestration_review", &mut schema)?;
+    let value = studio_json::to_string_pretty(&schema["properties"]["target"])
+        .map_err(|error| error.to_string())?;
+    for (name, field) in [
+        ("orchestration_spawn", "review"),
+        ("orchestration_review", "target"),
+    ] {
+        let start = text
+            .find(&format!("\"name\": \"{name}\""))
+            .ok_or("tool name")?;
+        let end = text[start + 1..]
+            .find("\"name\": \"orchestration_")
+            .map_or(text.len(), |n| start + 1 + n);
+        let marker = format!("\"{field}\":");
+        if let Some(relative) = text[start..end].find(&marker) {
+            let value_start = start + relative + marker.len();
+            let object_start = value_start
+                + text[value_start..]
+                    .find('{')
+                    .ok_or("review schema object")?;
+            let mut depth = 0usize;
+            let mut quoted = false;
+            let mut escape = false;
+            let mut object_end = None;
+            for (offset, byte) in text.as_bytes()[object_start..].iter().copied().enumerate() {
+                if quoted {
+                    if escape {
+                        escape = false;
+                    } else if byte == b'\\' {
+                        escape = true;
+                    } else if byte == b'"' {
+                        quoted = false;
+                    }
+                } else if byte == b'"' {
+                    quoted = true;
+                } else if byte == b'{' {
+                    depth += 1;
+                } else if byte == b'}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        object_end = Some(object_start + offset + 1);
+                        break;
+                    }
+                }
+            }
+            text.replace_range(object_start..object_end.ok_or("review schema end")?, &value);
+        } else if name == "orchestration_spawn" {
+            let insert = start
+                + text[start..end]
+                    .find("\"base_ref\":")
+                    .ok_or("spawn base_ref")?;
+            text.insert_str(insert, &format!("\"review\": {value},\n"));
+        } else {
+            return Err("missing review target".into());
+        }
+    }
+    run_node(
+        root,
+        "node_modules/oxfmt/bin/oxfmt",
+        &format!("--stdin-filepath={path}"),
+        &text,
+    )
+}
+
 /// Render every contract file. `with_api_types` also runs Node for web types.
 pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String> {
     check_backend_kind_parity(root)?;
@@ -1190,6 +1259,24 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .pointer_mut("/components/schemas/AgentCapacity")
         .ok_or("missing AgentCapacity schema")? = agent_limits::capacity_schema();
     crate::workspace_modes::update_openapi(&mut openapi);
+    let review = schemars::schema_for!(crate::review::ReviewTarget).to_value();
+    let review: Value = studio_json::from_str(
+        &studio_json::to_string(&review)
+            .map_err(|error| error.to_string())?
+            .replace("#/$defs/", "#/components/schemas/"),
+    )
+    .map_err(|error| error.to_string())?;
+    if let Some(definitions) = review["$defs"].as_object() {
+        for (name, schema) in definitions {
+            openapi["components"]["schemas"][name] = schema.clone();
+        }
+    }
+    let mut review_root = review;
+    if let Some(object) = review_root.as_object_mut() {
+        object.remove("$defs");
+        object.remove("$schema");
+    }
+    openapi["components"]["schemas"]["ReviewTarget"] = review_root;
     openapi["components"]["schemas"]["NativeLayrCapability"] =
         schemars::schema_for!(crate::native_layr::NativeLayrCapability).to_value();
     openapi["components"]["schemas"]["ChatWorkspaceMode"] =
@@ -1470,6 +1557,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     crate::task_command::apply_tool_contract("orchestration_task", &mut task_tool);
     let scopes = crate::sync_protocol::entity_scopes_from_document(&openapi)?;
     let mut rendered = vec![
+        Rendered {
+            path: ".agents/skills/codex-workspace/references/native-tools.json".into(),
+            text: review_catalog_text(root, ".agents/skills/codex-workspace/references/native-tools.json")?,
+        },
+        Rendered {
+            path: "workspaces/runtime/packages/runtime-services/src/account_worker/preparation-resources.json".into(),
+            text: review_catalog_text(root, "workspaces/runtime/packages/runtime-services/src/account_worker/preparation-resources.json")?,
+        },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/runtime-event-metadata.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/runtime-event-metadata.schema.json", &studio_json::to_string_pretty(&crate::event_metadata::schema()).map_err(|error| error.to_string())?)?,

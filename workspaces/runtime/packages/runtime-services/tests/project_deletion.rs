@@ -59,6 +59,14 @@ struct ChildEnvironment {
 }
 
 impl studio_runtime_services::provider_callbacks::ManagedCreationEnvironment for ChildEnvironment {
+    fn account_offers_model(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<bool, studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError>
+    {
+        Ok(true)
+    }
     fn select_worker_account(
         &self,
         request: studio_runtime_services::provider_callbacks::WorkerAccountRequest<'_>,

@@ -1885,7 +1885,7 @@ export async function execute(
     const baseEnv =
       bin === "cargo"
         ? {
-            ...scrubAgentEnvironment({ ...process.env }),
+            ...scrubAgentEnvironment({ ...process.env }, bin, args),
             CARGO_TARGET_DIR: cargoTarget(root),
             ...(args[0] === "nextest"
               ? {
@@ -1901,7 +1901,7 @@ export async function execute(
                 }
               : {}),
           }
-        : scrubAgentEnvironment({ ...process.env });
+        : scrubAgentEnvironment({ ...process.env }, bin, args);
     const retestEnv: NodeJS.ProcessEnv = isRetest(bin, args)
       ? retestEnvironment()
       : {};

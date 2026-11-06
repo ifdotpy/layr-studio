@@ -81,6 +81,8 @@ impl PreparationResources {
         ))
         .map_err(|_| invalid("legacy tools"))?;
         for tool in data.tools.iter_mut().chain(legacy_tools.iter_mut()) {
+            studio_runtime_schema::review::apply_tool_contract(&tool.name, &mut tool.input_schema)
+                .map_err(|_| invalid("review tool schema"))?;
             studio_runtime_schema::task_results::apply_tool_contract(
                 &tool.name,
                 &mut tool.input_schema,
@@ -108,10 +110,6 @@ impl PreparationResources {
                     "enum": crate::claude_controls::PERMISSION_MODES,
                     "description": "Claude child permission mode. Defaults to the parent's mode. Bypass requires a bypass parent. Reviewers always use plan."
                 }));
-                properties.insert(
-                    "review_state".into(),
-                    studio_runtime_schema::creation_intent::review_state_tool_schema(),
-                );
             }
         }
         let skills_root = root.join(".agents/skills");
@@ -944,16 +942,19 @@ pub(crate) fn actor_tool_definitions(
         }
         return Ok(Value::Array(definitions));
     }
-    if studio_runtime_store::truthy(record.get("nativeReview")) {
-        return Ok(Value::Array(Vec::new()));
-    }
     let definitions = catalog_definitions(resources, record)?;
     let cwd = text(record, "cwd")?.unwrap_or_default();
-    let mut filtered = thread::filter_tool_definitions(
+    let filtered = thread::filter_tool_definitions(
         definitions,
         &thread::CatalogFilter {
             provider: studio_runtime_providers::ProviderKind::of_record(record)
                 .map_err(|_| invalid("agent/provider"))?,
+            role: role(record)?,
+            assignment: optional::<studio_runtime_schema::review::ReviewAssignment>(
+                record,
+                "reviewAssignment",
+            )?
+            .as_ref(),
             is_lead: flag(record, "isLead")?,
             can_delegate: delegation,
             federation_enabled: federation_enabled(tx)?,
@@ -965,13 +966,6 @@ pub(crate) fn actor_tool_definitions(
         },
     )
     .map_err(|_| invalid("tool catalog"))?;
-    if crate::layr_native::is_native(record) && record["role"] == "reviewer" {
-        filtered.push(
-            crate::layr_read::native_tool_definition()
-                .ok_or_else(|| invalid("native layr read tool"))?
-                .clone(),
-        );
-    }
     studio_json::to_value(filtered).map_err(|_| invalid("tool catalog"))
 }
 
@@ -1132,7 +1126,7 @@ fn frozen_params(record: &Value) -> Result<Option<thread::FrozenParams>, WorkerE
     }))
 }
 
-fn native_claude_options(
+pub(super) fn native_claude_options(
     resources: &PreparationResources,
     record: &Value,
     state_root: &Path,
@@ -1142,23 +1136,52 @@ fn native_claude_options(
     if let Some(mode) = record.get("permissionMode").filter(|mode| !mode.is_null()) {
         options.insert("permissionMode".into(), mode.clone());
     }
-    if crate::layr_native::is_native(record) && record["role"] == "reviewer" {
-        let scratch = record["layrScratch"]
-            .as_str()
-            .ok_or_else(|| invalid("native-reviewer/scratch"))?;
-        let captured = resources.native_layr(state_root, record)?;
-        let root = &captured.root;
-        let environment = captured
-            .reviewer
-            .as_ref()
-            .filter(|(stored, _)| stored == scratch)
-            .ok_or_else(|| resources.native_layr_changed("native-layr/scratch-changed"))?;
+    let assigned = record
+        .get("reviewAssignment")
+        .is_some_and(|value| !value.is_null());
+    if record["role"] == "reviewer" && (crate::layr_native::is_native(record) || assigned) {
+        let agent = if assigned {
+            Some(
+                studio_runtime_store::AgentRecord::from_value(record.clone())
+                    .map_err(|_| invalid("reviewer"))?,
+            )
+        } else {
+            None
+        };
+        let scratch = match &agent {
+            Some(agent) => crate::reviewer_workspace::scratch_dir(agent),
+            None => record["layrScratch"].as_str(),
+        }
+        .ok_or_else(|| invalid("native-reviewer/scratch"))?;
+        let mut deny = Vec::new();
+        if assigned {
+            deny.push(
+                crate::reviewer_workspace::read_only_copy(
+                    agent.as_ref().ok_or_else(|| invalid("reviewer"))?,
+                )
+                .ok_or_else(|| invalid("review workspace"))?
+                .to_owned(),
+            );
+        }
+        let environment = if crate::layr_native::is_native(record) {
+            let captured = resources.native_layr(state_root, record)?;
+            deny.push(captured.root.to_string_lossy().into_owned());
+            captured
+                .reviewer
+                .as_ref()
+                .filter(|(stored, _)| stored == scratch)
+                .ok_or_else(|| resources.native_layr_changed("native-layr/scratch-changed"))?
+                .1
+                .clone()
+        } else {
+            crate::layr_native::reviewer_environment(state_root, scratch)
+        };
         options.insert("sandbox".into(),json!({"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false,
-            "filesystem":{"allowWrite":[scratch],"denyWrite":[root]},
+            "filesystem":{"allowWrite":[scratch],"denyWrite":deny},
             "network":{"allowedDomains":[],"strictAllowlist":true,"allowUnixSockets":[],"allowAllUnixSockets":false}}));
         options.insert(
             "nativeReviewerEnvironment".into(),
-            Value::Object(environment.1.clone()),
+            Value::Object(environment),
         );
     }
     Ok(options)
@@ -1223,6 +1246,7 @@ pub(super) fn thread_snapshot(
             epoch: decode(record["epoch"].clone(), "agent/epoch")?,
             thread_id: text(record, "threadId")?,
             cwd: text(record, "cwd")?.ok_or_else(|| invalid("agent/cwd"))?,
+            thread_sandbox: thread::ThreadSandbox::ReadOnly,
             compactions: optional(record, "compactions")?.unwrap_or(0),
             prepare_attempt: text(record, "prepareAttempt")?,
             native_teleport_tool: optional(record, "nativeTeleportTool")?,
@@ -1236,7 +1260,8 @@ pub(super) fn thread_snapshot(
             auto_wake: flag(record, "autoWake")?,
             native_effort_present: record.get("nativeEffort").is_some(),
             deleted: record.get("deletedAt").is_some_and(|v| !v.is_null()),
-            native_review: studio_runtime_store::truthy(record.get("nativeReview")),
+            native_review: record["nativeReview"]["status"] == "pending",
+            review_assignment: optional(record, "reviewAssignment")?,
         },
         account: thread::Account {
             key: text(record, "accountKey")?.unwrap_or_else(|| "default".into()),
@@ -1993,10 +2018,11 @@ mod resource_tests {
                 AgentRepository::put(tx, &AgentRecord::from_value(root).expect("root"))?;
                 let review = json!({"id":"review","rootId":"root","parentId":"root",
                     "role":"reviewer","provider":"codex",
-                    "nativeReview":{"target":{"type":"uncommittedChanges"},"requestId":"q"}});
+                    "reviewAssignment":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                    "nativeReview":{"target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"requestId":"q"}});
                 let tools = actor_tool_definitions(tx, &resources, &review)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-                assert_eq!(tools, json!([]));
+                assert!(tools.as_array().is_some_and(Vec::is_empty));
                 Ok::<_, StoreError>(())
             })
             .await
@@ -2016,6 +2042,9 @@ mod resource_tests {
             "executionMode":"vm","workspaceMode":"layr","layrReady":true,
             "layrProjectId":"legacy","layrLine":"legacy","nativeEffort":null,
             "effort":null,"autoWake":false});
+        if kind == "review" {
+            record["role"] = json!("reviewer");
+        }
         if matches!(kind, "monitor" | "safety") {
             record
                 .as_object_mut()
@@ -2033,7 +2062,7 @@ mod resource_tests {
         let resources = PreparationResources::bundled(String::new(), ModelCatalogService::new())
             .expect("resources");
         let result = match kind {
-            "native" => super::super::pipeline::prepare_native_thread(
+            "native" | "review" => super::super::pipeline::prepare_native_thread(
                 Arc::clone(&store),
                 &resources,
                 "worker",
@@ -2047,15 +2076,6 @@ mod resource_tests {
                 &resources,
                 "worker",
                 "transfer",
-                "restore",
-                1,
-            )
-            .await
-            .map(|_| ()),
-            "review" => super::super::pipeline::prepare_review_thread(
-                Arc::clone(&store),
-                &resources,
-                "worker",
                 "restore",
                 1,
             )

@@ -27,13 +27,13 @@ Use the assigned environment. Do not install over the user's layr binary or impo
 | ----------- | ---------------------------------------------------------------------------------------------------- |
 | Lead        | Main in the host store. The lead owns main.                                                          |
 | Implementer | Its own `agent-<sha256(agent ID)>` line, with warm caches from main.                                 |
-| Reviewer    | Main stays read-only. The private `layrScratch` folder permits writes. No worker line or turn saves. |
+| Reviewer    | A read-only line at the assigned state. No turn saves.                                               |
 
 A native Layr reviewer cannot select `shared` as its workspace.
 
 Read `layrReady: true` before you edit. For a lead or implementer, `cwd` names the assigned line folder.
 The `layrProjectId`, `layrLine`, and `layrStateId` fields identify its project, line, and base state.
-A reviewer's `cwd` is its private `layrScratch` folder. Its `layrReadCwd` points to main for trusted reads.
+A reviewer's `cwd` is its read-only line at the assigned state.
 New imports use the canonical original host folder for the project ID.
 An existing project can retain its own name after Studio verifies its Git origin and shared history.
 The operator can select the store with `native-layr configure --store-root`.
@@ -77,9 +77,8 @@ After review or explicit discard, an operator can run `layr ref delete <archiveR
 
 ## Reviewer checks
 
-Use `layr_read` for history and exact-state checks.
-Codex permits writes in the private scratch folder. Main stays read-only.
-Claude uses the same scratch working directory. Its sandbox denies store writes and Unix sockets.
+Use `layr_read` for history and exact-state checks. The reviewer line is read-only.
+Claude's sandbox denies store writes and Unix sockets.
 Direct shell commands can need store writes that the reviewer's sandbox refuses.
 The try path uses a runtime sandbox wrapper inside the temporary state copy.
 It uses `sandbox-exec` on macOS and Bubblewrap on Linux.
