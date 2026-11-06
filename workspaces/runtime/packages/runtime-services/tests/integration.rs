@@ -150,5 +150,3 @@ fn rule_snapshot(
 }
 
 pub(crate) use callback_fixtures::normalize_agent_nulls;
-
-extern crate studio_test_deps;

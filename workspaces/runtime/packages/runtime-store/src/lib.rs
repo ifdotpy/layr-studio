@@ -1,6 +1,3 @@
-#[cfg(test)]
-extern crate studio_test_deps;
-
 pub mod account_registry;
 pub mod agent_columns;
 pub mod agent_volatile;
@@ -4125,6 +4122,8 @@ mod commit_notification_tests {
     #[tokio::test]
     async fn ambiguous_typed_outbox_commit_has_no_local_only_hint() {
         use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+        #[derive(serde::Serialize)]
+        struct EmptyObject {}
         let directory = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
         let hints = Arc::new(Mutex::new(Vec::new()));
@@ -4150,7 +4149,7 @@ mod commit_notification_tests {
                         generation: None,
                         ordinal: None,
                         next_at: None,
-                        payload: studio_test_deps::EmptyObject {},
+                        payload: EmptyObject {},
                         created: 1,
                     },
                 )?;

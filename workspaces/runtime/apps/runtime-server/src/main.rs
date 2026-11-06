@@ -1,6 +1,3 @@
-#[cfg(test)]
-extern crate studio_test_deps;
-
 #[cfg(unix)]
 use studio_runtime_server::account_registry;
 #[cfg(unix)]
@@ -2079,6 +2076,10 @@ mod targeted_scheduler_wake_tests {
     use studio_runtime_store::RuntimeStore;
     use tokio::sync::Notify;
 
+    /// Empty object payload of the typed outbox fixtures.
+    #[derive(serde::Serialize)]
+    struct EmptyObject {}
+
     #[tokio::test]
     #[ignore]
     async fn outbox_wake_measurement() {
@@ -2121,7 +2122,7 @@ mod targeted_scheduler_wake_tests {
                             generation: None,
                             ordinal: None,
                             next_at: None,
-                            payload: studio_test_deps::EmptyObject {},
+                            payload: EmptyObject {},
                             created: 1,
                         },
                     )?;
@@ -2181,7 +2182,7 @@ mod targeted_scheduler_wake_tests {
                             generation: None,
                             ordinal: None,
                             next_at: None,
-                            payload: studio_test_deps::EmptyObject {},
+                            payload: EmptyObject {},
                             created: 1,
                         },
                     )?;
@@ -2225,7 +2226,7 @@ mod targeted_scheduler_wake_tests {
                             owner_kind: OwnerKind::Account, owner_id: "account".into(), request_id: None,
                             signature: "sig".into(), status: OutboxStatus::Pending, account: None,
                             stream_id: None, generation: None, ordinal: None, next_at: None,
-                            payload: studio_test_deps::EmptyObject {}, created: 1,
+                            payload: EmptyObject {}, created: 1,
                         })?;
                     }
                 }
@@ -2236,7 +2237,7 @@ mod targeted_scheduler_wake_tests {
                     tx.execute("DELETE FROM runtime_outbox WHERE id='raw-0'", [])?;
                 }
                 if scenario == 3 || scenario == 4 || scenario == 7 {
-                    RemoteOutbox::put(tx, if scenario == 3 { RemoteEffect::ServerRequest } else { RemoteEffect::FederationMessage }, "peer", &format!("remote-{scenario}"), "sig", OutboxStatus::Pending, Some(1), studio_test_deps::EmptyObject {}, 1)?;
+                    RemoteOutbox::put(tx, if scenario == 3 { RemoteEffect::ServerRequest } else { RemoteEffect::FederationMessage }, "peer", &format!("remote-{scenario}"), "sig", OutboxStatus::Pending, Some(1), EmptyObject {}, 1)?;
                 }
                 Ok(())
             }).await.unwrap();
@@ -2270,7 +2271,7 @@ mod targeted_scheduler_wake_tests {
                         generation: None,
                         ordinal: None,
                         next_at: None,
-                        payload: studio_test_deps::EmptyObject {},
+                        payload: EmptyObject {},
                         created: 1,
                     },
                 )?;
@@ -2317,7 +2318,7 @@ mod targeted_scheduler_wake_tests {
                         generation: None,
                         ordinal: None,
                         next_at: None,
-                        payload: studio_test_deps::EmptyObject {},
+                        payload: EmptyObject {},
                         created: 1,
                     },
                 )?;
