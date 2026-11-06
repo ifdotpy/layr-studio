@@ -334,7 +334,8 @@ switch is on.
 - Owner of the switch name: `RETEST_ENV` in
   `workspaces/tooling/apps/repository-checks/gate-config.ts`.
 - Safety: no Studio Rust test reads `LAYR_ROOT` from the gate or starts `layr` from
-  `PATH`. The tests that mention `LAYR_ROOT` use fake scripts. Still, with the switch on, the facade gives the step an empty
+  `PATH`. The tests that mention `LAYR_ROOT` build an environment for a guest or
+  use fake scripts. Still, with the switch on, the facade gives the step an empty
   temporary `LAYR_ROOT`. A shim first on `PATH` runs the real `layr` with the real
   store only for calls that layr-retest itself makes (no
   `LAYR_RETEST_PROFILE_DIR` is set for those), and a test never gets it.

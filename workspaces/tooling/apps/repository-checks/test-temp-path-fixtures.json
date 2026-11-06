@@ -113,6 +113,9 @@
   "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs": [
     "cwd: \"/tmp/project\".into(),"
   ],
+  "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/snapshot.rs": [
+    "/// (macOS `/var` and `/tmp`). The pure receipt reducer compares text, so"
+  ],
   "workspaces/runtime/packages/runtime-services/src/account_worker/tests.rs": [
     "\"/var/tmp\".into(),"
   ],

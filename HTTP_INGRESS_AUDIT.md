@@ -68,6 +68,7 @@ Generated from OpenAPI and route registrations on the combined query branch. `re
 | `POST /api/leads`                           | body  | `generated::CreateLeadRequest`                                        | unverified          | unverified              | no                     | agents_create.rs                            |
 | `GET /api/limits`                           | query | `LimitsQuery`                                                         | yes                 | review                  | yes                    | catalog.rs                                  |
 | `POST /api/limits/reset`                    | body  | `studio_runtime_schema::limit_reset_request::ResetRequest`            | yes                 | review                  | yes                    | usage.rs → limit_reset_request.rs           |
+| `POST /api/linux-vm/settings`               | body  | `generated::LinuxVMSettings`                                          | unverified          | unverified              | no                     | linux_vm_settings.rs                        |
 | `POST /api/mac-sync/config`                 | body  | `generated::MacSyncConfigRequest`                                     | unverified          | unverified              | no                     | mac_sync.rs                                 |
 | `POST /api/mac-sync/resolve`                | body  | `generated::MacSyncResolveRequest`                                    | unverified          | unverified              | no                     | mac_sync.rs                                 |
 | `POST /api/mcp/reconnect`                   | body  | `crate::generated::McpReconnectRequest`                               | unverified          | unverified              | no                     | mcp_reconnect.rs                            |
@@ -132,6 +133,11 @@ Generated from OpenAPI and route registrations on the combined query branch. `re
 | `GET /api/transcript/page`                  | query | `TranscriptPageQuery`                                                 | yes                 | review                  | yes                    | transcript.rs                               |
 | `GET /api/transcript/search`                | query | `TranscriptSearchQuery`                                               | yes                 | bounded / review nested | yes                    | transcript.rs                               |
 | `POST /api/usage-resume`                    | body  | `crate::generated::UsageResumeRequest`                                | unverified          | unverified              | no                     | usage.rs                                    |
+| `POST /api/vault/aws-login`                 | body  | `crate::generated::VaultLoginRequest`                                 | unverified          | unverified              | no                     | host_secrets.rs                             |
+| `POST /api/vault/pull`                      | body  | `crate::generated::VaultPullRequest`                                  | unverified          | unverified              | no                     | host_secrets.rs                             |
+| `POST /api/vault/setup`                     | body  | `crate::generated::VaultSetupRequest`                                 | unverified          | unverified              | no                     | host_secrets.rs                             |
+| `POST /api/vault/setup/facts`               | body  | `crate::generated::VaultSetupFactsRequest`                            | unverified          | unverified              | no                     | host_secrets.rs                             |
+| `POST /api/vault/unlock`                    | body  | `crate::generated::VaultUnlockRequest`                                | unverified          | unverified              | no                     | host_secrets.rs                             |
 | `POST /api/voice/end`                       | body  | `crate::generated::VoiceEndRequest`                                   | unverified          | unverified              | no                     | voice.rs                                    |
 | `POST /api/voice/records`                   | body  | `crate::generated::VoiceRecordsRequest`                               | unverified          | unverified              | no                     | voice.rs                                    |
 | `POST /api/voice/start`                     | body  | `crate::generated::VoiceStartRequest`                                 | unverified          | unverified              | no                     | voice.rs                                    |
@@ -159,8 +165,9 @@ Generated from OpenAPI and route registrations on the combined query branch. `re
 - `commands.rs`: 1 route parts
 - `desktop.rs`: 1 route parts
 - `federation.rs`: 5 route parts
-- `host_secrets.rs`: 3 route parts
+- `host_secrets.rs`: 8 route parts
 - `insights.rs`: 2 route parts
+- `linux_vm_settings.rs`: 1 route parts
 - `mac_sync.rs`: 2 route parts
 - `mcp_reconnect.rs`: 1 route parts
 - `messages.rs`: 2 route parts
@@ -194,6 +201,6 @@ Generated from OpenAPI and route registrations on the combined query branch. `re
 
 Counts reflect conservative audit flags, not confirmed defects. Keep each file with one worker; inspect all flagged parts in that file. Generated and external owners need manual confirmation.
 
-- Group 1 (51 flagged parts): `account_login.rs`, `branches.rs`, `browser.rs`, `catalog_agent.rs`, `claude_controls.rs`, `federation.rs`, `insights.rs`, `messages.rs`, `models.rs`, `panels.rs`, `process_controls.rs`, `questions_write.rs`, `studio_errors.rs`, `terminals.rs`, `transcript.rs`, `work_items.rs`, `work_write.rs`, `workspace_files.rs`.
-- Group 2 (46 flagged parts): `account_transfer.rs`, `agent_management.rs`, `catalog.rs`, `checkpoints.rs`, `claude_login.rs`, `host_secrets.rs`, `mac_sync.rs`, `mcp_reconnect.rs`, `monitor_runtime.rs`, `monitors.rs`, `projects.rs`, `questions_reads.rs`, `recovery.rs`, `system_reads.rs`, `tool_requests.rs`, `usage.rs`, `voice.rs`, `web_push.rs`, `workspace_views.rs`.
+- Group 1 (52 flagged parts): `account_login.rs`, `branches.rs`, `browser.rs`, `catalog_agent.rs`, `claude_controls.rs`, `federation.rs`, `insights.rs`, `linux_vm_settings.rs`, `messages.rs`, `models.rs`, `panels.rs`, `process_controls.rs`, `questions_write.rs`, `studio_errors.rs`, `terminals.rs`, `transcript.rs`, `work_items.rs`, `work_write.rs`, `workspace_files.rs`.
+- Group 2 (51 flagged parts): `account_transfer.rs`, `agent_management.rs`, `catalog.rs`, `checkpoints.rs`, `claude_login.rs`, `host_secrets.rs`, `mac_sync.rs`, `mcp_reconnect.rs`, `monitor_runtime.rs`, `monitors.rs`, `projects.rs`, `questions_reads.rs`, `recovery.rs`, `system_reads.rs`, `tool_requests.rs`, `usage.rs`, `voice.rs`, `web_push.rs`, `workspace_views.rs`.
 - Separate ownership: `desktop.rs`, `rules.rs`, `multi_server.rs`, `sync_documents.rs`, `sync_stream.rs` (vc-http; coordinate incoming signed dispatch); `agents_create.rs` (vi-agent-record); `commands.rs` (vg-ingress-projects).

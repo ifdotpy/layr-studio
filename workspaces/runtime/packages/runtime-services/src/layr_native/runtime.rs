@@ -2304,9 +2304,7 @@ mod progress_tests {
         }
     }
     #[test]
-    fn vendored_git_import_progress_is_typed_at_the_boundary() {
-        let source = include_str!("../../../../apps/layr/src/gitbridge.rs");
-        assert!(source.contains("layr: imported {imported} commits of {refname}"));
+    fn git_import_progress_is_typed_at_the_boundary() {
         let progress =
             super::parse_import_progress(b"layr: imported 50 commits of local/main").unwrap();
         assert_eq!(

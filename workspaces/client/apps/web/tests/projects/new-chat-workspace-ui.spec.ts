@@ -23,7 +23,6 @@ async function setup(
   label = "Local",
   signed = false,
   provider = "codex",
-  _hasStudioVm = true,
   nativeReady = true,
 ) {
   const creations: PostBody<"/api/leads">[] = [];
@@ -494,21 +493,12 @@ for (const system of ["Darwin", "Linux"]) {
   test(`${system} defaults to native Layr and offers worktree`, async ({
     page,
   }) => {
-    const { server, creations } = await setup(
-      system,
-      "Local",
-      false,
-      "codex",
-      false,
-    );
+    const { server, creations } = await setup(system);
     try {
       const dialog = await openNewChat(page, server);
       await expect(
         dialog.getByRole("radio", { name: "Layr", exact: true }),
       ).toBeChecked();
-      await expect(
-        dialog.getByRole("radio", { name: "Layr VM", exact: true }),
-      ).toHaveCount(0);
       await expect(dialog.getByText("WT", { exact: true })).toBeVisible();
       await dialog
         .getByRole("button", { name: "Start chat", exact: true })
@@ -529,7 +519,6 @@ test("Linux without native Layr defaults to WT and explains the unavailable opti
     "Local",
     false,
     "codex",
-    false,
     false,
   );
   try {

@@ -22,8 +22,6 @@ members = [
     "workspaces/runtime/packages/runtime-schema",
     "workspaces/runtime/packages/runtime-store",
 ]
-# The vendored layr source is maintained separately from this workspace.
-exclude = ["workspaces/runtime/apps/layr"]
 
 [workspace.package]
 version = "0.1.0"

@@ -376,7 +376,7 @@ mod receipt_tests {
     }
 
     #[test]
-    #[ignore = "requires the vendored Layr host binary and APFS or btrfs"]
+    #[ignore = "requires the installed Layr host binary and APFS or btrfs"]
     fn real_host_import_worker_merge_archive_and_warm_caches() {
         let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
             crate::layr_native::test_binary().expect("test binary"),
@@ -1124,7 +1124,7 @@ esac
     }
 
     #[test]
-    #[ignore = "requires the vendored Layr on APFS or root on btrfs"]
+    #[ignore = "requires the installed Layr on APFS or root on btrfs"]
     fn native_layr_unchanged_turn_save_and_previously_failed_save_can_finish() {
         let (state, _source, _lead, worker, _binary_override) = fixture();
         let expected = run(
@@ -1156,7 +1156,7 @@ esac
     }
 
     #[test]
-    #[ignore = "requires the vendored Layr on APFS or root on btrfs"]
+    #[ignore = "requires the installed Layr on APFS or root on btrfs"]
     fn native_layr_archive_pins_an_unmerged_automatic_state_without_expiry() {
         let (state, _source, lead, worker, _binary_override) = fixture();
         fs::write(

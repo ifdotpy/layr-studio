@@ -327,6 +327,11 @@ fn refusal(
     if python_truthy(agent.get("deletedAt")) {
         return Ok(Some("The chat was deleted".into()));
     }
+    if studio_runtime_store::AgentRecord::from_value(agent.clone())
+        .is_ok_and(|record| crate::workspace_ready::legacy_vm_record(&record))
+    {
+        return Ok(Some("This workspace is no longer available".into()));
+    }
     if let Some(project) = agent
         .get("layrProjectId")
         .filter(|value| python_truthy(Some(value)))

@@ -741,4 +741,3 @@ async fn the_host_bridge_refuses_a_legacy_vm_chat() {
             .any(|call| call.0 == "browser.close")
     );
 }
-
