@@ -342,7 +342,16 @@ pub async fn manage(
     let actor = actor.to_owned();
     store.transaction_with(move |tx| -> Result<AccessSnapshot, MultiServerError> {
         match &body {
-            ManagementRequest::Settings { auto_pair, .. } => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto_pair.value().copied().unwrap_or(false))])?; audit_write(tx,"local",&actor,"settings")?; }
+            ManagementRequest::Settings { auto_pair, auto_update, .. } => {
+                // A request changes only the settings that it names.
+                if let Some(value) = auto_pair.value() {
+                    tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1", [i64::from(*value)])?;
+                }
+                if let Some(value) = auto_update.value() {
+                    tx.execute("INSERT INTO runtime_peer_update_settings(id,auto_update) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET auto_update=excluded.auto_update", [i64::from(*value)])?;
+                }
+                audit_write(tx,"local",&actor,"settings")?;
+            }
             ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(studio_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![studio_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
             ManagementRequest::Alias { server_id, request_id, alias } => {
                 let server = server_id.as_str();
@@ -993,6 +1002,55 @@ mod tests {
         assert_eq!(
             null_label.invitation.label,
             identity["label"].as_str().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn settings_change_only_the_fields_they_name() {
+        let root = tempfile::tempdir().expect("isolated multi-server state");
+        let store = Arc::new(
+            RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("runtime store opens"),
+        );
+        let identity = Credentials::default()
+            .identity(Arc::clone(&store), Some("https://local.example.ts.net"))
+            .await
+            .expect("fixture identity is created");
+        let off = manage(
+            &store,
+            &identity,
+            &json!({"action":"settings","autoUpdate":false,"requestId":"one"}),
+            "local",
+        )
+        .await
+        .expect("auto update off");
+        assert!(!off.settings.auto_update);
+        assert!(
+            off.settings.auto_pair,
+            "a request without autoPair keeps it"
+        );
+        let on = manage(
+            &store,
+            &identity,
+            &json!({"action":"settings","autoUpdate":true,"requestId":"two"}),
+            "local",
+        )
+        .await
+        .expect("auto update on");
+        assert!(on.settings.auto_update);
+        let pair = manage(
+            &store,
+            &identity,
+            &json!({"action":"settings","autoPair":false,"requestId":"three"}),
+            "local",
+        )
+        .await
+        .expect("auto pair off");
+        assert!(!pair.settings.auto_pair);
+        assert!(
+            pair.settings.auto_update,
+            "a request without autoUpdate keeps it"
         );
     }
 
