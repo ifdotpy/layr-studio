@@ -144,6 +144,7 @@ pub mod orchestration_wire;
 pub mod orchestration_worker;
 pub mod organization_effects;
 pub mod outbox_resolve;
+pub mod own_link;
 pub mod panels;
 pub mod payload_blobs;
 pub mod payload_store;

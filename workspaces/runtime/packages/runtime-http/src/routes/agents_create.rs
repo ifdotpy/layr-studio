@@ -1,6 +1,6 @@
 //! Typed HTTP boundary for persisted agent operations.
 
-use super::extractors::ApiJson;
+use super::extractors::{ApiJson, Caller};
 use super::manifest::{OperationStatus, RouteGroup, post};
 use crate::{error::ApiError, generated, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
@@ -1020,8 +1020,34 @@ async fn create_lead_with_model(
 }
 async fn create_agent(
     State(state): State<HttpState>,
+    Caller(principal): Caller,
     ApiJson(body): ApiJson<generated::CreateAgentRequest>,
 ) -> Result<Json<generated::AgentResponse>, ApiError> {
+    // A peer spawns only for its own home-side link (design 2026-10-28, Permissions).
+    if let studio_runtime_services::principal::Principal::Peer { server } = &principal {
+        let parent = body.parent.clone().flatten();
+        let owned = match (parent, state.store.clone()) {
+            (Some(parent), Some(store)) => {
+                let server = server.clone();
+                store
+                    .read_async("runtime-http/routes/agents_create", move |tx| {
+                        Ok::<bool, studio_runtime_store::StoreError>(
+                            studio_runtime_services::own_link::peer_owns_link(tx, &server, &parent)
+                                .unwrap_or(false),
+                        )
+                    })
+                    .await
+                    .map_err(|_| ApiError::internal())?
+            }
+            _ => false,
+        };
+        if !owned {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "This peer may spawn only for its own link",
+            ));
+        }
+    }
     if state.store.is_none() && state.account_driver.is_none() {
         if body.parent.as_ref().is_none_or(Option::is_none)
             && body.cwd.as_deref().is_none_or(str::is_empty)
