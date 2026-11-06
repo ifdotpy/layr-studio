@@ -188,6 +188,10 @@ impl DiscoveryRound {
         cancel: &AtomicBool,
         profile_entries: &mut usize,
     ) -> Result<Option<Vec<PathBuf>>, HistoryError> {
+        #[cfg(unix)]
+        if self.request_entries_remaining.is_some() {
+            return self.scan_confined(profile, cancel, profile_entries);
+        }
         // Only diagnostic discovery opts into path rejection. The importer's
         // default resolver retains its existing discovery behavior.
         let anchor = if self.request_entries_remaining.is_some() {
@@ -296,12 +300,296 @@ impl DiscoveryRound {
         }
         Ok(Some(paths))
     }
+
+    #[cfg(unix)]
+    fn scan_confined(
+        &mut self,
+        profile: &Path,
+        cancel: &AtomicBool,
+        profile_entries: &mut usize,
+    ) -> Result<Option<Vec<PathBuf>>, HistoryError> {
+        use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, fstat, open, openat, statat};
+        use std::os::unix::ffi::OsStrExt;
+
+        let root_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+        let root = open(profile, root_flags, Mode::empty())
+            .map_err(|e| HistoryError::io(super::PROFILE_DIRECTORY)(e.into()))?;
+        let root_stat =
+            fstat(&root).map_err(|e| HistoryError::io(super::PROFILE_DIRECTORY)(e.into()))?;
+        let same = |a: &rustix::fs::Stat, b: &rustix::fs::Stat| {
+            a.st_dev == b.st_dev && a.st_ino == b.st_ino
+        };
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let reopen = |relative: &Path| -> std::io::Result<std::os::fd::OwnedFd> {
+            let current = open(profile, root_flags, Mode::empty())?;
+            if !same(&root_stat, &fstat(&current)?) {
+                return Err(std::io::Error::other("Native root changed identity"));
+            }
+            let mut current = rustix::io::dup(&root)?;
+            for component in relative.components() {
+                let std::path::Component::Normal(name) = component else {
+                    return Err(std::io::Error::other("Invalid native path"));
+                };
+                current = openat(&current, name, flags, Mode::empty())?;
+            }
+            Ok(current)
+        };
+        let mut directories = vec![
+            PathBuf::from("sessions"),
+            PathBuf::from("archived_sessions"),
+        ];
+        let mut paths = Vec::new();
+        self.visit(profile_entries)?;
+        while let Some(relative) = directories.pop() {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(HistoryError::Cancelled);
+            }
+            self.visit(profile_entries)?;
+            let directory = match reopen(&relative) {
+                Ok(fd) => fd,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => {
+                    self.request_rejections.push(DiscoveryRejection {
+                        path: profile.join(&relative),
+                        reason: "Native path traverses a symlink below its configured root",
+                    });
+                    continue;
+                }
+            };
+            let dir_stat = fstat(&directory)
+                .map_err(|e| HistoryError::io(super::ROLLOUT_DIRECTORY)(e.into()))?;
+            let read = match Dir::read_from(&directory) {
+                Ok(read) => read,
+                Err(_) => {
+                    self.request_rejections.push(DiscoveryRejection {
+                        path: profile.join(&relative),
+                        reason: "Native directory could not be read",
+                    });
+                    continue;
+                }
+            };
+            for entry in read {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => {
+                        self.visit(profile_entries)?;
+                        self.request_rejections.push(DiscoveryRejection {
+                            path: profile.join(&relative),
+                            reason: "Native directory entry could not be read",
+                        });
+                        continue;
+                    }
+                };
+                let name = entry.file_name();
+                if matches!(name.to_bytes(), b"." | b"..") {
+                    continue;
+                }
+                self.visit(profile_entries)?;
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(HistoryError::Cancelled);
+                }
+                #[cfg(test)]
+                DISCOVERY_ENTRY_HOOK.with(|hook| {
+                    if let Some(hook) = hook.borrow_mut().as_mut() {
+                        hook();
+                    }
+                });
+                let path = profile
+                    .join(&relative)
+                    .join(std::ffi::OsStr::from_bytes(name.to_bytes()));
+                let parent = reopen(&relative);
+                let valid_parent = parent
+                    .as_ref()
+                    .ok()
+                    .and_then(|fd| fstat(fd).ok())
+                    .is_some_and(|stat| same(&dir_stat, &stat));
+                if !valid_parent {
+                    self.request_rejections.push(DiscoveryRejection {
+                        path,
+                        reason: "Native path is outside its configured root",
+                    });
+                    continue;
+                }
+                let parent = parent.expect("validated parent");
+                let candidate = name.to_bytes().starts_with(b"rollout-")
+                    && name.to_bytes().ends_with(b".jsonl");
+                let before = statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW)
+                    .map(|stat| FileType::from_raw_mode(stat.st_mode));
+                match before {
+                    Ok(FileType::Directory | FileType::RegularFile) => {}
+                    Ok(FileType::Symlink) => {
+                        self.request_rejections.push(DiscoveryRejection {
+                            path,
+                            reason: "Native path traverses a symlink below its configured root",
+                        });
+                        continue;
+                    }
+                    Ok(_) if !candidate => continue,
+                    Ok(_) => {
+                        self.request_rejections.push(DiscoveryRejection {
+                            path,
+                            reason: "Native rollout candidate is not a regular file",
+                        });
+                        continue;
+                    }
+                    Err(_) => {
+                        self.request_rejections.push(DiscoveryRejection {
+                            path,
+                            reason: "Native entry kind could not be read",
+                        });
+                        continue;
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                let entry_flags = OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+                #[cfg(not(target_os = "linux"))]
+                let entry_flags =
+                    OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+                let opened = openat(&parent, name, entry_flags, Mode::empty());
+                let kind = opened
+                    .and_then(|fd| fstat(&fd))
+                    .map(|stat| FileType::from_raw_mode(stat.st_mode));
+                match kind {
+                    Ok(FileType::Directory) => directories
+                        .push(relative.join(std::ffi::OsStr::from_bytes(name.to_bytes()))),
+                    Ok(FileType::RegularFile) if candidate => paths.push(path),
+                    Ok(FileType::Symlink) => self.request_rejections.push(DiscoveryRejection {
+                        path,
+                        reason: "Native path traverses a symlink below its configured root",
+                    }),
+                    Ok(_) => {}
+                    Err(_) => self.request_rejections.push(DiscoveryRejection {
+                        path,
+                        reason: "Native path traverses a symlink below its configured root",
+                    }),
+                }
+            }
+        }
+        Ok(Some(paths))
+    }
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    static DISCOVERY_ENTRY_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> = std::cell::RefCell::new(None);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
+
+    #[cfg(unix)]
+    #[test]
+    fn diagnostic_discovery_rejects_fifo_root_without_blocking() {
+        const CHILD: &str = "STUDIO_DISCOVERY_FIFO_WITNESS";
+        if let Some(parent) = std::env::var_os(CHILD) {
+            let profile = PathBuf::from(parent).join("profile");
+            let moved = profile.with_extension("moved");
+            fs::create_dir_all(profile.join("sessions")).unwrap();
+            fs::write(profile.join("sessions/rollout-target.jsonl"), b"{}").unwrap();
+            let original = profile.clone();
+            DISCOVERY_ENTRY_HOOK.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || {
+                    if !moved.exists() {
+                        fs::rename(&original, &moved).unwrap();
+                        assert!(
+                            std::process::Command::new("mkfifo")
+                                .arg(&original)
+                                .status()
+                                .unwrap()
+                                .success()
+                        );
+                    }
+                }))
+            });
+            let result = DiscoveryRound::default().resolve_with_entry_budget(
+                &profile,
+                "target",
+                &AtomicBool::new(false),
+                100,
+            );
+            DISCOVERY_ENTRY_HOOK.with(|hook| *hook.borrow_mut() = None);
+            assert!(matches!(result.path, Ok(RolloutPath::Missing)));
+            assert!(!result.rejections.is_empty());
+            return;
+        }
+        let parent = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "analytics_history::discovery::tests::diagnostic_discovery_rejects_fifo_root_without_blocking"])
+            .env(CHILD, parent.path()).spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("discovery blocked after its root became a FIFO");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diagnostic_discovery_rejects_root_redirection_during_scan() {
+        use std::os::unix::fs::symlink;
+        let parent = tempfile::tempdir().unwrap();
+        let profile = parent.path().join("profile");
+        let moved = parent.path().join("moved");
+        let outside = parent.path().join("outside");
+        fs::create_dir_all(profile.join("sessions")).unwrap();
+        fs::create_dir_all(outside.join("sessions")).unwrap();
+        fs::write(profile.join("sessions/rollout-target.jsonl"), b"{}").unwrap();
+        fs::write(outside.join("sessions/rollout-target.jsonl"), b"{}").unwrap();
+        let original = profile.clone();
+        DISCOVERY_ENTRY_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                if !moved.exists() {
+                    fs::rename(&original, &moved).unwrap();
+                    symlink(&outside, &original).unwrap();
+                }
+            }))
+        });
+        let result = DiscoveryRound::default().resolve_with_entry_budget(
+            &profile,
+            "target",
+            &AtomicBool::new(false),
+            100,
+        );
+        DISCOVERY_ENTRY_HOOK.with(|hook| *hook.borrow_mut() = None);
+        assert!(matches!(result.path, Ok(RolloutPath::Missing)));
+        assert!(!result.rejections.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diagnostic_discovery_canonicalizations_do_not_scale_with_entries() {
+        use studio_runtime_store::path_identity::take_canonicalize_calls;
+        let root = tempfile::tempdir().expect("profile");
+        let sessions = root.path().join("sessions");
+        fs::create_dir(&sessions).expect("sessions");
+        for index in 0..40 {
+            fs::write(sessions.join(format!("rollout-{index}.jsonl")), b"{}").unwrap();
+        }
+        take_canonicalize_calls();
+        let result = DiscoveryRound::default().resolve_with_entry_budget(
+            root.path(),
+            "missing",
+            &AtomicBool::new(false),
+            1000,
+        );
+        let calls = take_canonicalize_calls();
+        assert!(matches!(result.path, Ok(RolloutPath::Missing)));
+        eprintln!("discovery issued {calls} canonicalizations for 40 entries");
+        assert!(
+            calls < 5,
+            "discovery issued {calls} canonicalizations for 40 entries"
+        );
+    }
 
     #[test]
     fn profile_invalidation_forces_one_full_discovery_scan() {
