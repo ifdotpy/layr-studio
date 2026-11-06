@@ -17,7 +17,7 @@ const ref = { kind: "state" };
 const sse = (name: string, value: unknown) =>
   `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
 
-test("remote cache resumes a delta, corruption snapshots, and local policy writes nothing", async ({
+test("remote cache resumes a delta, shows saved state offline, corruption snapshots, and local policy writes nothing", async ({
   browser,
 }) => {
   let remote = true;
@@ -36,7 +36,7 @@ test("remote cache resumes a delta, corruption snapshots, and local policy write
             if (url.pathname === "/cache-witness") {
               response.setHeader("Content-Type", "text/html");
               response.end(
-                '<output></output><script type="module" src="/tests/cache/subscription-cache.fixture.ts"></script>',
+                '<output></output><data></data><script type="module" src="/tests/cache/subscription-cache.fixture.ts"></script>',
               );
               return;
             }
@@ -147,6 +147,18 @@ test("remote cache resumes a delta, corruption snapshots, and local policy write
     expect(received.at(-1)?.since).toMatchObject([
       { resource: ref, since: { workspaceId, seq: 1 } },
     ]);
+    // With no network, a returning app shows its saved state at once.
+    const offline = await context.newPage();
+    await offline.addInitScript(() =>
+      Object.defineProperty(navigator, "onLine", { get: () => false }),
+    );
+    await offline.route("**/api/**", (route) => route.abort());
+    await offline.goto(`${url}?saved=1`);
+    await expect(offline.locator("data")).toHaveText(
+      /"name":"(?:snapshot|delta)"/,
+      { timeout: 5_000 },
+    );
+    await offline.close();
     await page.evaluate(() => window.cacheWitness.corrupt());
     await page.reload();
     await expect(page.locator("output")).toHaveText("1");

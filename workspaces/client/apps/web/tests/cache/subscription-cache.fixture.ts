@@ -17,7 +17,12 @@ const client = createSyncClient({
     syncPost: async () => {
       throw new Error("unexpected request");
     },
-    saved: (_key, fallback) => fallback,
+    // `?saved=1` starts like a returning app that knows its workspace.
+    saved: <T>(key: string, fallback: T) =>
+      key === "codex-sync-workspace" &&
+      new URLSearchParams(location.search).has("saved")
+        ? (workspaceId as T)
+        : fallback,
     save: () => {},
     setWorkspace: () => {},
     isApiSchemaMismatch: () => false,
@@ -61,6 +66,14 @@ transport.watchResourceChanges(ref, (version) => {
     requestAnimationFrame(() => void client.cacheSubscription(ref)),
   );
 });
+// A returning app reads the state projection, as the application does.
+if (new URLSearchParams(location.search).has("saved"))
+  client.subscribeStateProjection(
+    (payload) => {
+      document.querySelector("data")!.textContent = JSON.stringify(payload);
+    },
+    () => {},
+  );
 const key = JSON.stringify([workspaceId, subscriptionKey(ref)]);
 declare global {
   interface Window {
