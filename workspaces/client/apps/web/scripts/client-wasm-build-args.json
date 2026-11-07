@@ -1,0 +1,9 @@
+[
+  "build",
+  "-p",
+  "studio-client-wasm",
+  "--release",
+  "--target",
+  "wasm32-unknown-unknown",
+  "--locked"
+]

@@ -1148,6 +1148,9 @@ test("WASM preparation locates only the pinned CLI and builds before binding", (
   mkdirSync(path.dirname(path.join(root, script)), { recursive: true });
   mkdirSync(path.dirname(path.join(root, manifest)), { recursive: true });
   writeFileSync(path.join(root, script), readFileSync(script));
+  // The script reads its cargo arguments from the file beside it.
+  const buildArgs = "workspaces/client/apps/web/scripts/client-wasm-build-args.json";
+  writeFileSync(path.join(root, buildArgs), readFileSync(buildArgs));
   writeFileSync(path.join(root, manifest), readFileSync(manifest));
   executable(
     path.join(bin, "cargo"),

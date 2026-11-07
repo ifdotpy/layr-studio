@@ -85,6 +85,17 @@ test("a worker-env job count other than the owner fails the parity check", () =>
 
 // The sweep list of the gate: its Rust workspace build, its clippy and the provider contract
 // compile witness in its own target folder.
+// The cargo arguments of the web client's release WASM build (build-client-wasm.ts reads the same file).
+const CLIENT_WASM_BUILD_ARGS: string[] = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../../client/apps/web/scripts/client-wasm-build-args.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
 const GATE_SWEEP = [
   [...RUST_WORKSPACE_BUILD_ARGS],
   [...RUST_CLIPPY_ARGS],
@@ -92,6 +103,7 @@ const GATE_SWEEP = [
     target_dir: PROVIDER_CONTRACT_TARGET_DIR,
     args: [...PROVIDER_CONTRACT_CHECK_ARGS],
   },
+  [...CLIENT_WASM_BUILD_ARGS],
 ];
 
 // Undefined when the list holds exactly the gate's sweep commands; otherwise the difference.
@@ -103,7 +115,7 @@ export function sweepMismatch(sweep: unknown): string | undefined {
   return undefined;
 }
 
-test("the sweep list in Cargo.toml is the gate's Rust workspace build, clippy and contract check", () => {
+test("the sweep list in Cargo.toml is the gate's Rust workspace build, clippy, contract check and WASM build", () => {
   assert.equal(sweepMismatch(sweepInManifest()), undefined);
 });
 
