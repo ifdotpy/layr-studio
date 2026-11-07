@@ -16,18 +16,12 @@ struct DefaultPublisher;
 
 impl EntityPublisher for DefaultPublisher {
     fn publish(&self, transaction: &Transaction<'_>, pending: &PendingEntities) -> StoreResult<()> {
-        let mut changes = crate::sync_policy::EntityChanges {
+        let changes = crate::sync_policy::EntityChanges {
             agents: pending.agents.clone(),
             team_roots: pending.team_roots.clone(),
             work: pending.work.clone(),
             ..Default::default()
         };
-        changes
-            .agents
-            .extend(crate::agent_operational::affected_owners(
-                transaction,
-                pending,
-            )?);
         let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
         for id in &pending.terminals {
             crate::terminal_driver::publish_terminal(transaction, id)?;
@@ -42,6 +36,17 @@ impl EntityPublisher for DefaultPublisher {
             &|_, _, _, _| true,
         )?;
         crate::sync_policy::publish_summary_changes(transaction, pending)?;
+        // Dependent facts invalidate read-time views only. Publishing an agent's
+        // liveness or process windows here would change unrelated source policy.
+        for id in crate::agent_operational::affected_owners(transaction, pending)? {
+            if !pending.agents.contains(&id) {
+                studio_runtime_store::durable_seq::mark(
+                    transaction,
+                    studio_runtime_store::durable_seq::AGENT_VIEW_MARK,
+                    &id,
+                )?;
+            }
+        }
         if !pending.studio_errors.is_empty() {
             crate::studio_errors::publish_changes(transaction, &pending.studio_errors)?;
         }

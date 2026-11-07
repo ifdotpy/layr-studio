@@ -27,6 +27,7 @@ pub(crate) mod agent_management_maintenance;
 pub mod agent_management_recovery;
 pub mod agent_management_store;
 pub mod agent_move;
+mod agent_operational;
 pub(crate) mod agent_progress;
 pub mod agents_create;
 pub mod analytics;
@@ -168,7 +169,6 @@ pub use radio_runtime::{
     Interrupt, InterruptOutcome, InterruptReceipt, InterruptTransport, NativeAcceptanceReceipt,
     RadioCreation, handoff_interrupt,
 };
-mod agent_operational;
 pub mod recovery;
 pub mod recovery_absence;
 pub mod recovery_history;
