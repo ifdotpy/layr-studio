@@ -1,11 +1,10 @@
 import { AgentSource, AgentStatus } from "./generated/api";
-import { snapshotFixture as snapshot } from "./snapshotFixture";
 import type { Agent } from "./types";
 // A turn that failed because the disk was full shows a held agent, not a failure.
 import assert from "node:assert/strict";
 import { it } from "vitest";
 import { DISK_FULL_WAIT_LABEL, diskFullHold } from "./capacityRetry.ts";
-import { chatIndicators } from "./components/chat-status/chatStatusModel.ts";
+import { formatOperationalStatus } from "./status/operationalStatus.ts";
 import { isDiskFullError, nativeErrorView } from "./nativeErrors.ts";
 
 const INCIDENT =
@@ -78,7 +77,7 @@ it("presents a disk-full hold as waiting, not failed", () => {
   const agent = held();
 
   assert.equal(diskFullHold(agent), agent.capacityRetry);
-  assert.deepEqual(chatIndicators(snapshot([agent])).get("lead"), {
+  assert.deepEqual(formatOperationalStatus({ reason: "disk_space" }), {
     kind: "paused",
     label: DISK_FULL_WAIT_LABEL,
   });
@@ -86,7 +85,7 @@ it("presents a disk-full hold as waiting, not failed", () => {
     capacityRetry: { ...held().capacityRetry!, cause: "serverOverloaded" },
   });
   assert.equal(diskFullHold(other), null);
-  assert.deepEqual(chatIndicators(snapshot([other])).get("lead"), {
+  assert.deepEqual(formatOperationalStatus({ reason: "failed" }), {
     kind: "error",
     label: "Failed",
   });

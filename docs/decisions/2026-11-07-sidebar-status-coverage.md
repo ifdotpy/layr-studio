@@ -39,3 +39,7 @@ exact pending-read proof retirement. It also supplies contradictory raw status
 facts to verify that both sidebar and conversation trust the reason code.
 `src/components/sidebar/viewModel.test.ts` covers lazy search, tail-independent
 order/grouping, observed membership, compact visibility and raw model identity.
+
+The migration audit compares assertion syntax against the source state above:
+all 106 independent assertions remain. The urgency assertion adds the explicit
+loading variant. The separate 1,024-roster precedence witness moves to Rust.
