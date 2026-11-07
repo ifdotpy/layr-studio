@@ -1,4 +1,8 @@
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import {
+  withSidebarCollections,
+  agentEntities,
+} from "./sidebarSourceFixture.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import {
@@ -21,67 +25,68 @@ import {
 } from "./sidebarServices";
 
 function fixture() {
-  const source = (id: string): SidebarSource => ({
-    id,
-    online: true,
-    sidebar: {
-      stateDir: "/same/state",
-      projects: [
-        {
-          id: id === "local" ? "project-id" : "remote-id",
-          path: `/${id}`,
-          name: id,
-          homeServerId: id === "local" ? "home-backend" : "remote",
-          ...(id === "remote"
-            ? {
-                projectAliases: [
-                  {
-                    serverId: "home-backend",
-                    projectId: "project-id",
-                    name: "Home",
-                  },
-                ],
-              }
-            : {}),
-          folders: [{ id: "folder", name: id }],
-          organizationRevision: id === "local" ? 3 : 9,
-          peerTeamsRevision: id === "local" ? 5 : 8,
+  const source = (id: string): SidebarSource =>
+    withSidebarCollections({
+      id,
+      online: true,
+      sidebar: {
+        stateDir: "/same/state",
+        projects: [
+          {
+            id: id === "local" ? "project-id" : "remote-id",
+            path: `/${id}`,
+            name: id,
+            homeServerId: id === "local" ? "home-backend" : "remote",
+            ...(id === "remote"
+              ? {
+                  projectAliases: [
+                    {
+                      serverId: "home-backend",
+                      projectId: "project-id",
+                      name: "Home",
+                    },
+                  ],
+                }
+              : {}),
+            folders: [{ id: "folder", name: id }],
+            organizationRevision: id === "local" ? 3 : 9,
+            peerTeamsRevision: id === "local" ? 5 : 8,
+          },
+        ],
+        entities: agentEntities([
+          agentSummaryFixture("same", {
+            name: id,
+            projectPath: `/${id}`,
+            projectFolder: "folder",
+          }),
+          agentSummaryFixture("second", {
+            name: id,
+            projectPath: `/${id}`,
+          }),
+        ]),
+        rooms: [],
+        peerTeams: [
+          {
+            id: "team",
+            name: id,
+            projectPath: `/${id}`,
+            members: ["same", "second"],
+          },
+        ],
+        peerTeamsVersion: 1,
+        projectOrganizationVersion: 1,
+        sidebarOrder: {
+          revision: 2,
+          groups: {
+            projects: [`/${id}`],
+            [itemGroup(`/${id}`)]: ["same", "second", "unknown"],
+          },
         },
-      ],
-      rows: [
-        sidebarRowFixture("same", {
-          name: id,
-          projectPath: `/${id}`,
-          projectFolder: "folder",
-        }),
-        sidebarRowFixture("second", {
-          name: id,
-          projectPath: `/${id}`,
-        }),
-      ],
-      rooms: [],
-      peerTeams: [
-        {
-          id: "team",
-          name: id,
-          projectPath: `/${id}`,
-          members: ["same", "second"],
-        },
-      ],
-      peerTeamsVersion: 1,
-      projectOrganizationVersion: 1,
-      sidebarOrder: {
-        revision: 2,
-        groups: {
-          projects: [`/${id}`],
-          [itemGroup(`/${id}`)]: ["same", "second", "unknown"],
-        },
+        savedOrder: {},
+        compact: {},
+        collapsed: {},
       },
-      savedOrder: {},
-      compact: {},
-      collapsed: {},
-    },
-  });
+    });
   const sources = [source("local"), source("remote")];
   return { sources, model: mergeSidebar(sources, 10, true) };
 }

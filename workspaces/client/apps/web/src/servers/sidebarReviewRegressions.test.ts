@@ -1,4 +1,9 @@
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import {
+  withSidebarCollections,
+  agentEntities,
+  sourceAgents,
+} from "./sidebarSourceFixture.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { expect, it, vi } from "vitest";
@@ -19,16 +24,18 @@ import {
 
 function source(id: string, count = 1, directories = false): SidebarSource {
   const path = "/" + id;
-  return {
+  return withSidebarCollections({
     id,
     online: true,
     sidebar: {
       stateDir: "/same/state",
-      rows: Array.from({ length: count }, (_, i) =>
-        sidebarRowFixture("chat-" + i, {
-          projectPath: directories ? path + "/" + i : path,
-          name: "Chat " + i,
-        }),
+      entities: agentEntities(
+        Array.from({ length: count }, (_, i) =>
+          agentSummaryFixture("chat-" + i, {
+            projectPath: directories ? path + "/" + i : path,
+            name: "Chat " + i,
+          }),
+        ),
       ),
       projects: [{ id: "p-" + id, path, name: id, folders: [] }],
       rooms: [],
@@ -48,7 +55,7 @@ function source(id: string, count = 1, directories = false): SidebarSource {
       projectOrganizationVersion: 1,
       peerTeamsVersion: 1,
     },
-  };
+  });
 }
 function preferences(a: SidebarSource, b?: SidebarSource) {
   const sources = b ? [a, b] : [a];
@@ -122,9 +129,9 @@ it.each([false, true])(
   (registered) => {
     const a = source("local", 3, true);
     if (registered)
-      a.sidebar.projects = a.sidebar.rows.map((chat) => ({
-        id: chat.projectPath,
-        path: chat.projectPath,
+      a.sidebar.projects = sourceAgents(a).map((chat) => ({
+        id: required(chat.projectPath),
+        path: required(chat.projectPath),
         folders: [],
       }));
     const select = createMergedSidebarSelector();
@@ -140,9 +147,9 @@ it.runIf(process.env.CODEX_SIDEBAR_BENCHMARK === "1").each([false, true])(
   (registered) => {
     const a = source("local", 6000, true);
     if (registered)
-      a.sidebar.projects = a.sidebar.rows.map((chat) => ({
-        id: chat.projectPath,
-        path: chat.projectPath,
+      a.sidebar.projects = sourceAgents(a).map((chat) => ({
+        id: required(chat.projectPath),
+        path: required(chat.projectPath),
         folders: [],
       }));
     const select = createMergedSidebarSelector();

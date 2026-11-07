@@ -4,22 +4,24 @@ import type { components } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { toJS } from "mobx";
 
-export type SidebarEntity = Extract<
-  components["schemas"]["SyncEntityPayload"],
-  {
-    collection:
-      | "agentSummary"
-      | "project"
-      | "peerTeam"
-      | "workspace"
-      | "agentTail";
-  }
+export type SidebarEntity = DeepReadonly<
+  Extract<
+    components["schemas"]["SyncEntityPayload"],
+    {
+      collection:
+        | "agentSummary"
+        | "project"
+        | "peerTeam"
+        | "workspace"
+        | "agentTail";
+    }
+  >
 >;
 
 /** Preserve native collection identities at the frame serialization boundary. */
 export function sidebarEntities(
   collections: StateCollections,
-): DeepReadonly<SidebarEntity[]> {
+): readonly SidebarEntity[] {
   return [
     ...[...collections.agents].map(([id, value]) => ({
       collection: "agentSummary" as const,
@@ -54,7 +56,7 @@ import type { PreferenceFields } from "../sync/uiPreferenceMerge";
 
 export type ServerSidebarSnapshot = {
   stateDir: string;
-  entities: DeepReadonly<SidebarEntity[]>;
+  entities: readonly SidebarEntity[];
   projects: Project[];
   rooms: Room[];
   peerTeams: PeerTeam[];
@@ -104,7 +106,7 @@ export function sidebarVisualFields(
 /** Preserve sidebar fields and source identities without transcripts or session state. */
 export function sidebarSnapshot(
   data: Snapshot,
-  entities: DeepReadonly<SidebarEntity[]> = [],
+  entities: readonly SidebarEntity[] = [],
 ): ServerSidebarSnapshot {
   const runtime = data.runtime;
   return {

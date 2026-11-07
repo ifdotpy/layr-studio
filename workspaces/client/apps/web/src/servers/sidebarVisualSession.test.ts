@@ -1,3 +1,4 @@
+import { withSidebarCollections } from "./sidebarSourceFixture.ts";
 import assert from "node:assert/strict";
 import { expect, it, vi } from "vitest";
 import {
@@ -11,12 +12,12 @@ import { createSidebarVisualSession } from "./sidebarVisualSession";
 const scope = "/same/state";
 function source(id: string): SidebarSource {
   const path = `/${id}`;
-  return {
+  return withSidebarCollections({
     id,
     online: id !== "remote",
     sidebar: {
       stateDir: scope,
-      rows: [],
+      entities: [],
       projects: [
         {
           id: path,
@@ -34,7 +35,7 @@ function source(id: string): SidebarSource {
       compact: { [path]: true },
       collapsed: { [JSON.stringify([path, "folder", "folder"])]: true },
     },
-  };
+  });
 }
 function setup() {
   const sources = [source("local"), source("remote")];

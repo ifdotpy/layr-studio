@@ -1,5 +1,5 @@
-import { ChatOperationalKind } from "../generated/api.ts";
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+import { navigationFromSummaries } from "./sidebarSourceFixture.ts";
 import { AgentSource } from "../generated/api";
 import assert from "node:assert/strict";
 import { describe, expect, it, vi } from "vitest";
@@ -56,8 +56,8 @@ describe("project locations", () => {
       },
     ]);
     const groups = logicalProjects({
-      local: navigationSnapshot(data, null, "", [
-        sidebarRowFixture("lead", { projectPath: "/lead-only" }),
+      local: navigationFromSummaries(data, [
+        agentSummaryFixture("lead", { projectPath: "/lead-only" }),
       ]),
     });
     expect(groups).toHaveLength(1);
@@ -121,15 +121,11 @@ describe("project locations", () => {
           {
             kind: "chat",
             id: "same",
-            name: "Local chat",
             path: "/Projects/chrompile",
-            archived: false,
-            projectId: null,
-            projectServerId: null,
-            provider: "codex",
-            indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
-            compactPinned: false,
-            activityAt: 1,
+            agent: agentSummaryFixture("same", {
+              name: "Local chat",
+              projectPath: "/Projects/chrompile",
+            }),
           },
         ],
       ),
@@ -149,15 +145,13 @@ describe("project locations", () => {
           {
             kind: "chat",
             id: "same",
-            name: "Remote chat",
             path: "/Projects/attar",
-            projectId: project.id,
-            projectServerId: "mac-id",
-            archived: false,
-            provider: "codex",
-            indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
-            compactPinned: false,
-            activityAt: 1,
+            agent: agentSummaryFixture("same", {
+              name: "Remote chat",
+              projectPath: "/Projects/attar",
+              projectId: project.id,
+              projectServerId: "mac-id",
+            }),
           },
         ],
       ),
@@ -357,28 +351,20 @@ it("only registered logical projects expose a native deletion target", () => {
         {
           kind: "chat",
           id: "inferred",
-          name: "Inferred",
           path: "/inferred",
-          archived: false,
-          projectId: null,
-          projectServerId: null,
-          provider: "codex",
-          indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
-          compactPinned: false,
-          activityAt: 1,
+          agent: agentSummaryFixture("inferred", {
+            name: "Inferred",
+            projectPath: "/inferred",
+          }),
         },
         {
           kind: "chat",
           id: "other",
-          name: "Other",
           path: "",
-          archived: false,
-          projectId: null,
-          projectServerId: null,
-          provider: "codex",
-          indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
-          compactPinned: false,
-          activityAt: 1,
+          agent: agentSummaryFixture("other", {
+            name: "Other",
+            projectPath: "",
+          }),
         },
       ],
     ),

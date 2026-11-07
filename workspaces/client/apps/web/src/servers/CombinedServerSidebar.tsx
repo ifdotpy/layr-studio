@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { randomUUID } from "../uuid";
 import { useMemo, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
@@ -11,7 +12,7 @@ import { createMergedSidebarServices, sidebarOwner } from "./sidebarServices";
 import type { ServerCommand, ServerNavigation } from "./navigation";
 import { createSidebarVisualSession } from "./sidebarVisualSession";
 
-export default function CombinedServerSidebar({
+export default observer(function CombinedServerSidebar({
   model,
   backends,
   online,
@@ -270,4 +271,4 @@ export default function CombinedServerSidebar({
       }}
     />
   );
-}
+});

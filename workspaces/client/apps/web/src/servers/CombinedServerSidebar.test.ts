@@ -6,7 +6,12 @@ import CombinedServerSidebar from "./CombinedServerSidebar.tsx";
 import type { ServerCommand } from "./navigation.ts";
 import { createMergedSidebarSelector, mergeSidebar } from "./mergedSidebar.ts";
 import { sidebarSnapshot } from "./sidebarSnapshot.ts";
-import { sidebarRowFixture } from "./sidebarRowFixture.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+import {
+  agentEntities,
+  withSidebarCollections,
+} from "./sidebarSourceFixture.ts";
+import { createSidebarSourceStore } from "./mergedSidebar.ts";
 import { snapshotFixture } from "../snapshotFixture.ts";
 import { navigationSnapshot } from "./navigation.ts";
 import { localSidebarBackend } from "../components/sidebar/services.tsx";
@@ -28,19 +33,23 @@ it("routes overlapping row ids and the completed-result CAS target to their owni
     revision: 7,
   };
   const rows = [
-    sidebarRowFixture("same", { markRead: target, markUnread: "allowed" }),
+    agentSummaryFixture("same", { markRead: target, markUnread: "allowed" }),
   ];
   const model = mergeSidebar(
-    ["local", "remote"].map((id) => ({
-      id,
-      online: true,
-      sidebar: sidebarSnapshot(snapshotFixture([]), rows),
-    })),
+    ["local", "remote"].map((id) =>
+      withSidebarCollections({
+        id,
+        online: true,
+        sidebar: sidebarSnapshot(snapshotFixture([]), agentEntities(rows)),
+      }),
+    ),
   );
   const send = vi.fn(),
     executeCommand = vi.fn(async () => {});
   const props = renderCombined(model, executeCommand, send);
-  expect(props.rows).toBe(model.rows);
+  expect(props.rows?.map((row) => row.agent)).toEqual(
+    model.rows.map((row) => row.agent),
+  );
   expect(props.data.threads).toEqual([]);
   const id = model.chatKey("remote", "same");
   props.open(id);
@@ -104,13 +113,22 @@ it("freezes a queued read CAS target while its generated row mirror advances", a
   const source = {
     id: "remote",
     online: true,
-    sidebar: sidebarSnapshot(snapshotFixture([]), [
-      sidebarRowFixture("same", { markRead: initial, markUnread: "allowed" }),
-    ]),
+    sidebar: sidebarSnapshot(
+      snapshotFixture([]),
+      agentEntities([
+        agentSummaryFixture("same", {
+          markRead: initial,
+          markUnread: "allowed",
+        }),
+      ]),
+    ),
   };
+  const store = createSidebarSourceStore();
+  store.update("remote", source.sidebar);
+  const sources = () => store.sources(["remote"], new Set(["remote"]));
   const select = createMergedSidebarSelector();
-  const model = select([source]);
-  const target = required(required(model.rows[0]).markRead);
+  const model = select(sources());
+  const target = required(required(model.rows[0]).agent.markRead);
   let release = () => {};
   const ready = new Promise<void>((resolve) => {
     release = resolve;
@@ -124,24 +142,23 @@ it("freezes a queued read CAS target while its generated row mirror advances", a
     return dispatch;
   });
   props.markUnread(model.chatKey("remote", "same"), target);
-  select([
-    {
-      ...source,
-      sidebar: {
-        ...source.sidebar,
-        rows: [
-          sidebarRowFixture("same", {
-            markRead: {
-              threadId: "native",
-              turnId: "newer-turn",
-              read: false,
-              revision: 8,
-            },
-          }),
-        ],
-      },
-    },
-  ]);
+  store.update(
+    "remote",
+    sidebarSnapshot(
+      snapshotFixture([]),
+      agentEntities([
+        agentSummaryFixture("same", {
+          markRead: {
+            threadId: "native",
+            turnId: "newer-turn",
+            read: false,
+            revision: 8,
+          },
+        }),
+      ]),
+    ),
+  );
+  select(sources());
   expect(target.turnId).toBe("newer-turn");
   expect(delivered).toEqual([]);
   release();

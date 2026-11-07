@@ -70,3 +70,57 @@ it("status and tail updates leave combined routing and group membership untouche
     stop();
   }
 });
+
+it("rebinds computed project keys when retained routing metadata changes", () => {
+  const store = createSidebarSourceStore();
+  const agent = agentSummaryFixture("same", {
+    projectPath: "/local",
+    projectId: "p",
+    projectServerId: "local-backend",
+  });
+  const project = {
+    id: "p",
+    path: "/local",
+    name: "Project",
+    homeServerId: "local-backend",
+  };
+  const snapshot = (aliased: boolean) =>
+    sidebarSnapshot(
+      snapshotFixture([], {
+        projects: [
+          {
+            ...project,
+            ...(aliased
+              ? {
+                  projectAliases: [
+                    {
+                      serverId: "remote-backend",
+                      projectId: "remote-p",
+                      name: "Remote",
+                    },
+                  ],
+                }
+              : {}),
+          },
+        ],
+      }),
+      [{ collection: "agentSummary", id: agent.id, value: agent }],
+    );
+  store.update("local", snapshot(false));
+  const select = createMergedSidebarSelector(),
+    sources = () => store.sources(["local"], new Set(["local"]));
+  const model = select(sources());
+  const keys: string[] = [];
+  const stop = autorun(() => {
+    keys.push(model.rows[0]?.projectPath || "");
+  });
+  try {
+    store.update("local", snapshot(true));
+    const changed = select(sources());
+    expect(keys.at(-1)).toBe(changed.projectKey("local", "/local"));
+    expect(keys.at(-1)).not.toBe(keys[0]);
+    expect(changed.rows[0]?.agent.id).toBe("same");
+  } finally {
+    stop();
+  }
+});

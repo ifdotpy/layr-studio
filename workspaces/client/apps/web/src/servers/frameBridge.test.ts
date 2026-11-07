@@ -1,7 +1,5 @@
-import { ChatOperationalKind } from "../generated/api.ts";
-import { observable, observableRef, runInAction } from "mobx";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import { createStateMirror } from "../generated/observableResources.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { AgentSource } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
@@ -11,7 +9,7 @@ import type { ServerNavigation, ServerAccount } from "./navigation";
 import { createScreenChannel, type ScreenChannel } from "./screenChannel";
 
 const hooks = vi.hoisted(() => ({
-  list: { rows: [] as readonly SidebarChatRow[] },
+  mirror: null as ReturnType<typeof createStateMirror> | null,
   effects: [] as (() => void | (() => void))[],
   screen: null as ScreenChannel | null,
 }));
@@ -21,7 +19,9 @@ vi.mock("./ScreenContext", async (original) => ({
 }));
 vi.mock("./ServerServicesContext", () => ({
   useServerStore: () => ({
-    sidebar: () => ({ current: { status: "live", data: hooks.list } }),
+    state: () => ({
+      current: { status: "live", data: required(hooks.mirror).current },
+    }),
   }),
   useServerApi: () => ({ get: vi.fn(), saved: api.saved }),
   useServerResources: () => ({ watchResourceConnection: () => stopConnection }),
@@ -35,6 +35,7 @@ vi.mock("react", async (importOriginal) => ({
     () => {},
   ],
   useContext: () => null,
+  useMemo: (create: () => unknown) => create(),
 }));
 vi.mock("./environment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./environment")>()),
@@ -78,17 +79,17 @@ let records: Map<string, string>;
 let cleanup: (() => void)[];
 beforeEach(() => {
   preferenceMemory.clear();
-  hooks.list = observable({
-    rows: [
-      sidebarRowFixture("lead", {
+  hooks.mirror = createStateMirror();
+  hooks.mirror.apply([
+    {
+      collection: "agentSummary",
+      id: "lead",
+      value: agentSummaryFixture("lead", {
         name: "Real chat",
-        indicator: {
-          kind: ChatOperationalKind["unread"],
-          label: "Unread result",
-        },
+        operationalStatus: { reason: "unread_result" },
       }),
-    ],
-  });
+    },
+  ]);
   hooks.effects = [];
   hooks.screen = null;
   cleanup = [];
@@ -216,9 +217,16 @@ it("publishes a real scoped snapshot and republishes after a saved preference ed
   const [initial, origin] = required(navigationMessages()[0]);
   expect(origin).toBe("https://parent.example");
   expect(initial.serverId).toBe("remote");
-  expect(initial.navigation.sidebar?.rows[0]?.name).toBe("Real chat");
+  expect(
+    initial.navigation.sidebar?.entities.find(
+      (entity) => entity.collection === "agentSummary",
+    )?.value.name,
+  ).toBe("Real chat");
   expect(initial.navigation.sidebar?.compact).toEqual({});
-  expect(initial.navigation.sidebar?.rows[0]?.indicator.kind).toBe("unread");
+  expect(initial.navigation.chats[0]).toMatchObject({
+    kind: "chat",
+    agent: { operationalStatus: { reason: "unread_result" } },
+  });
   expect(JSON.stringify(initial.navigation.sidebar)).not.toContain(
     "session-token",
   );
@@ -463,7 +471,7 @@ it("forwards typed operational diagnostics and only documented validation detail
 });
 
 it.each(["parent", "screen"])(
-  "publishes an observable row update without a Snapshot render through %s",
+  "publishes native state facts without a Snapshot render through %s",
   (mode) => {
     const publish = vi.fn();
     if (mode === "screen")
@@ -475,46 +483,61 @@ it.each(["parent", "screen"])(
         : surface.parent.postMessage.mock.calls;
     const messages = () =>
       calls.filter(([message]) => message.kind === "studio-server-navigation");
+    const mirror = required(hooks.mirror);
     expect(messages()).toHaveLength(1);
-    runInAction(() => {
-      hooks.list.rows = [
-        sidebarRowFixture("lead", {
+    mirror.apply([
+      {
+        collection: "agentSummary",
+        id: "lead",
+        value: agentSummaryFixture("lead", {
           name: "Updated from stream",
-          indicator: {
-            kind: ChatOperationalKind["answer"],
-            label: "Server precedence",
-          },
+          operationalStatus: { reason: "needs_input", wait: null },
         }),
-      ];
-    });
+      },
+    ]);
     expect(messages()).toHaveLength(2);
-    expect(messages().at(-1)?.[0].navigation.sidebar.rows[0].name).toBe(
-      "Updated from stream",
-    );
-    expect(
-      messages().at(-1)?.[0].navigation.sidebar.rows[0].indicator.kind,
-    ).toBe("answer");
+    expect(messages().at(-1)?.[0].navigation.chats[0]).toMatchObject({
+      kind: "chat",
+      agent: {
+        name: "Updated from stream",
+        operationalStatus: { reason: "needs_input" },
+      },
+    });
     cleanup.forEach((stop) => stop());
     cleanup = [];
-    runInAction(() => {
-      hooks.list.rows = [];
-    });
+    mirror.apply([]);
     expect(messages()).toHaveLength(2);
   },
 );
-
-it("tracks row-only fields inside the generated facade's reference array", () => {
-  const row = observable({ ...sidebarRowFixture("lead") });
-  hooks.list = observable({ rows: [row] }, { rows: observableRef });
+it("captures row-only facts and independent tails as plain native entities", () => {
+  const mirror = required(hooks.mirror);
   mount();
   const initial = required(navigationMessages()[0])[0];
-  runInAction(() => {
-    row.projectFolderRevision = 7;
-  });
+  mirror.apply([
+    {
+      collection: "agentSummary",
+      id: "lead",
+      value: agentSummaryFixture("lead", { projectFolderRevision: 7 }),
+    },
+    {
+      collection: "agentTail",
+      id: "lead",
+      value: { id: "lead", tail: "Latest tail" },
+    },
+  ]);
   expect(navigationMessages()).toHaveLength(2);
-  expect(initial.navigation.sidebar?.rows[0]?.projectFolderRevision).toBe(0);
   expect(
-    navigationMessages().at(-1)?.[0].navigation.sidebar?.rows[0]
-      ?.projectFolderRevision,
-  ).toBe(7);
+    initial.navigation.sidebar?.entities.find(
+      (entity) => entity.collection === "agentSummary",
+    )?.value.projectFolderRevision,
+  ).toBe(0);
+  expect(navigationMessages().at(-1)?.[0].navigation.sidebar?.entities).toEqual(
+    expect.arrayContaining([
+      {
+        collection: "agentTail",
+        id: "lead",
+        value: { id: "lead", tail: "Latest tail" },
+      },
+    ]),
+  );
 });

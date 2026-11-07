@@ -1,5 +1,6 @@
 import { snapshotFixture } from "../snapshotFixture";
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+import { navigationFromSummaries } from "./sidebarSourceFixture.ts";
 import { expect, it } from "vitest";
 import {
   navigationSnapshot,
@@ -105,9 +106,9 @@ it("uses the server-visible rows instead of stale move records", () => {
     { id: "moved", movedTo: { server: "target", agentId: "moved", move: "m" } },
   ]);
   expect(navigationSnapshot(data, null, "", []).chats).toEqual([]);
-  const row = sidebarRowFixture("moved", { projectPath: "/source/project" });
+  const row = agentSummaryFixture("moved", { projectPath: "/source/project" });
   data.entityWorkspaceId = "workspace-target";
-  const target = navigationSnapshot(data, null, "", [row]);
+  const target = navigationFromSummaries(data, [row]);
   expect(target.workspaceId).toBe("workspace-target");
   expect(target.chats[0]?.path).toBe("/source/project");
   expect(target.chats.map((row) => row.id)).toEqual(["moved"]);

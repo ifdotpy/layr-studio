@@ -1,62 +1,34 @@
-import { sidebarRowFixture } from "./sidebarRowFixture";
 import { expect, it } from "vitest";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+import { sidebarFactsFixture } from "./sidebarSourceFixture.ts";
+import { required } from "../components/componentTestFixtures.ts";
 import {
   compactVisibleChats,
   keepCompactChat,
   shouldShowOldChatsControl,
 } from "./ProjectChatRows";
-
-it("uses server compact eligibility and the shared activity window", () => {
-  const old = {
-    ...sidebarRowFixture("old"),
-    kind: "chat" as const,
-    id: "old",
-    name: "Old",
-    activityAt: 1,
-    compactPinned: false,
-  };
+function chat(id: string, updated = 1, pinned = false) {
+  const source = sidebarFactsFixture([
+    agentSummaryFixture(id, { updated, pinned }),
+  ]);
+  return { kind: "chat" as const, id, row: required(source.view.rows[0]) };
+}
+it("uses shared view compact policy and the activity window", () => {
   const now = 200000;
-  expect(keepCompactChat(old, now)).toBe(false);
-  expect(keepCompactChat({ ...old, compactPinned: true }, now)).toBe(true);
-  expect(keepCompactChat({ ...old, activityAt: now - 86399 }, now)).toBe(true);
-  expect(keepCompactChat({ ...old, activityAt: now - 86400 }, now)).toBe(false);
+  expect(keepCompactChat(chat("old"), now)).toBe(false);
+  expect(keepCompactChat(chat("pin", 1, true), now)).toBe(true);
+  expect(keepCompactChat(chat("recent", now - 86399), now)).toBe(true);
+  expect(keepCompactChat(chat("boundary", now - 86400), now)).toBe(false);
 });
-
-it("applies the old-chat threshold to all chats in a project", () => {
-  const now = Date.now() / 1000;
-  const recent = {
-    ...sidebarRowFixture("recent"),
-    kind: "chat" as const,
-    id: "recent",
-    name: "Recent",
-    compactPinned: false,
-    activityAt: now,
-  };
-  const recentTwo = {
-    ...sidebarRowFixture("recent-two"),
-    kind: "chat" as const,
-    id: "recent-two",
-    name: "Recent two",
-    compactPinned: false,
-    activityAt: now,
-  };
-  const old = {
-    ...sidebarRowFixture("old"),
-    kind: "chat" as const,
-    id: "old",
-    name: "Old",
-    compactPinned: false,
-    activityAt: 1,
-  };
-  const twoChats = [recent, old];
-  expect(shouldShowOldChatsControl(twoChats.length, 3)).toBe(false);
-  expect(compactVisibleChats(twoChats, true, 3)).toEqual(twoChats);
-
-  const threeChats = [recent, recentTwo, old];
-  expect(shouldShowOldChatsControl(threeChats.length, 3)).toBe(true);
-  const visibleAtThree = compactVisibleChats(threeChats, true, 3);
-  expect(visibleAtThree).toEqual([recent, recentTwo]);
-  expect(threeChats.length - visibleAtThree.length).toBe(1);
-  expect(compactVisibleChats(threeChats, true, 4)).toEqual(threeChats);
-  expect(compactVisibleChats(threeChats, false, 3)).toEqual(threeChats);
+it("applies old-chat threshold to the entire project", () => {
+  const now = Date.now() / 1000,
+    recent = chat("recent", now),
+    recentTwo = chat("recent-two", now),
+    old = chat("old");
+  const two = [recent, old],
+    three = [recent, recentTwo, old];
+  expect(shouldShowOldChatsControl(two.length, 3)).toBe(false);
+  expect(compactVisibleChats(two, true, 3)).toEqual(two);
+  expect(compactVisibleChats(three, true, 3)).toEqual([recent, recentTwo]);
+  expect(compactVisibleChats(three, false, 3)).toEqual(three);
 });

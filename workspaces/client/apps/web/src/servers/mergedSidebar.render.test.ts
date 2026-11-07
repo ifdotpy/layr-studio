@@ -1,4 +1,3 @@
-import { ChatOperationalKind } from "../generated/api.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from "react";
 import { createRoot } from "react-dom/client";
@@ -7,9 +6,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import SidebarRow from "../components/SidebarRow.tsx";
 import {
   createMergedSidebarSelector,
-  type SidebarSource,
+  createSidebarSourceStore,
 } from "./mergedSidebar.ts";
-import { sidebarRowFixture } from "./sidebarRowFixture.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+import { agentEntities } from "./sidebarSourceFixture.ts";
 import { sidebarSnapshot } from "./sidebarSnapshot.ts";
 import { snapshotFixture } from "../snapshotFixture.ts";
 
@@ -48,18 +48,19 @@ const actions = {
 const bindings = {};
 
 it("a combined source update renders only its changed row with overlapping chat ids", async () => {
-  const source = (id: string): SidebarSource => ({
-    id,
-    online: true,
-    sidebar: sidebarSnapshot(snapshotFixture([]), [
-      sidebarRowFixture("same"),
-      sidebarRowFixture("other"),
-    ]),
-  });
-  const local = source("local"),
-    remote = source("remote");
+  const agents = [agentSummaryFixture("same"), agentSummaryFixture("other")];
+  const store = createSidebarSourceStore();
+  const snapshot = (tail = "") =>
+    sidebarSnapshot(snapshotFixture([]), [
+      ...agentEntities(agents),
+      { collection: "agentTail", id: "same", value: { id: "same", tail } },
+    ]);
+  store.update("local", snapshot());
+  store.update("remote", snapshot());
+  const sources = () =>
+    store.sources(["local", "remote"], new Set(["local", "remote"]));
   const select = createMergedSidebarSelector();
-  const first = select([local, remote]);
+  const first = select(sources());
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -99,40 +100,34 @@ it("a combined source update renders only its changed row with overlapping chat 
     await act(async () => render(first));
     renders.clear();
     await act(async () => {
-      select([
-        local,
-        {
-          ...remote,
-          sidebar: {
-            ...remote.sidebar,
-            rows: remote.sidebar.rows.map((row) => ({ ...row })),
-          },
-        },
-      ]);
+      store.update("remote", snapshot("changed search tail"));
+      select(sources());
     });
     expect([...renders.values()]).toEqual([]);
     await act(async () => {
-      select([
-        local,
-        {
-          ...remote,
-          sidebar: {
-            ...remote.sidebar,
-            rows: remote.sidebar.rows.map((row) =>
-              row.id === "same"
+      store.update("remote", snapshot("changed search tail"));
+      select(sources());
+    });
+    expect([...renders.values()]).toEqual([]);
+    await act(async () => {
+      store.update(
+        "remote",
+        sidebarSnapshot(
+          snapshotFixture([]),
+          agentEntities(
+            agents.map((agent) =>
+              agent.id === "same"
                 ? {
-                    ...row,
+                    ...agent,
                     name: "Changed remotely",
-                    indicator: {
-                      kind: ChatOperationalKind["answer"],
-                      label: "Needs an answer",
-                    },
+                    operationalStatus: { reason: "needs_input", wait: null },
                   }
-                : { ...row },
+                : agent,
             ),
-          },
-        },
-      ]);
+          ),
+        ),
+      );
+      select(sources());
     });
     expect([...renders.keys()]).toEqual([first.chatKey("remote", "same")]);
     expect(renders.get(first.chatKey("remote", "same"))).toBe(1);

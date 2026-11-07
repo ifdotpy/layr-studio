@@ -1,4 +1,6 @@
-import { sidebarRowFixture } from "../servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
+import { createStateMirror } from "../generated/observableResources.ts";
+import { createSidebarViewModel } from "./sidebar/viewModel.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -160,20 +162,46 @@ function Fixture() {
     },
   });
   const logical = location.search.includes("logical");
-  const rows = data.threads.map((chat) =>
-    sidebarRowFixture(chat.id, {
+  const mirror = createStateMirror();
+  const entities = data.threads.map((chat) => ({
+    collection: "agentSummary" as const,
+    id: chat.id,
+    value: agentSummaryFixture(chat.id, {
       name: chat.name || "Chat",
       projectPath: chat.projectPath || chat.cwd || "",
     }),
+  }));
+  mirror.apply([
+    ...entities,
+    ...data.runtime.projects.map((value) => ({
+      collection: "project" as const,
+      id: value.id,
+      value,
+    })),
+  ]);
+  const collections = mirror.current;
+  const views = createSidebarViewModel(
+    () => collections,
+    () => ({ query: "", archived: false, opened: "lead", rank: () => 0 }),
   );
   return React.createElement(
     React.Fragment,
     null,
     logical
       ? React.createElement(ProjectGroupsSidebar, {
+          collections,
           navigation: {
             owner: {
-              ...navigationSnapshot(data, "lead", "", rows),
+              ...navigationSnapshot(
+                data,
+                "lead",
+                "",
+                views.rows,
+                [],
+                undefined,
+                new Set(),
+                entities,
+              ),
               projects: data.runtime.projects.map((project) => ({
                 ...project,
                 ...(location.search.includes("legacy") ? { id: "" } : {}),
@@ -201,7 +229,7 @@ function Fixture() {
           services,
           data,
           opened: "lead",
-          rows,
+          collections,
           markingRead: new Set<string>(),
           creating: false,
           mobile: true,

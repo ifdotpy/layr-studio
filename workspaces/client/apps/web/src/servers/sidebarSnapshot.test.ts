@@ -1,11 +1,11 @@
-import { ChatOperationalKind } from "../generated/api.ts";
 import { StudioErrorLevel } from "../generated/api";
 import { StudioErrorEffectCertainty } from "../generated/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "../types";
 import { preferenceMemory } from "./storage";
 import { navigationSnapshot } from "./navigation";
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+import { agentEntities, sidebarFactsFixture } from "./sidebarSourceFixture.ts";
 import { sidebarSnapshot } from "./sidebarSnapshot";
 
 function snapshot(): Snapshot {
@@ -46,27 +46,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("server sidebar projection", () => {
-  it("forwards server rows unchanged, with their indicator and CAS proof", () => {
+  it("forwards native summary facts unchanged without stage1 presentation rows", () => {
     const data = snapshot();
     data.threads = [{ id: "lead", name: "Stale Agent title", inFlight: true }];
-    const rows = [
-      sidebarRowFixture("lead", {
-        indicator: {
-          kind: ChatOperationalKind["answer"],
-          label: "Server decides precedence",
-        },
+    const entities = agentEntities([
+      agentSummaryFixture("lead", {
         markRead: {
           threadId: "native",
           turnId: "turn",
           read: true,
           revision: 5,
         },
-        copyProgress: { phase: "staging", done: 2, total: 4, unit: "files" },
       }),
-    ];
-    const projected = sidebarSnapshot(data, rows);
-    expect(projected.rows).toBe(rows);
-    expect(projected.rows[0]).toBe(rows[0]);
+    ]);
+    const projected = sidebarSnapshot(data, entities);
+    expect(projected.entities).toBe(entities);
+    expect(projected).not.toHaveProperty("rows");
     expect(projected).not.toHaveProperty("threads");
     expect(projected).not.toHaveProperty("indicators");
     expect(projected).not.toHaveProperty("unread");
@@ -195,18 +190,29 @@ describe("server sidebar projection", () => {
     expect(sidebarSnapshot(data).studioErrors).toBe(data.runtime.studioErrors);
   });
 
-  it("publishes navigation from rows only after data is available", () => {
-    const data = snapshot();
-    const rows = [sidebarRowFixture("lead", { inFlight: true })];
-    const navigation = navigationSnapshot(data, "lead", "", rows);
-    expect(navigation.sidebar).toEqual(sidebarSnapshot(data, rows));
+  it("publishes navigation from raw summary facts after state is available", () => {
+    const data = snapshot(),
+      source = sidebarFactsFixture([
+        agentSummaryFixture("lead", { inFlight: true }),
+      ]);
+    const navigation = navigationSnapshot(
+      data,
+      "lead",
+      "",
+      source.view.rows,
+      [],
+      undefined,
+      new Set(),
+      source.sidebar.entities,
+    );
+    expect(navigation.sidebar).toEqual(
+      sidebarSnapshot(data, source.sidebar.entities),
+    );
     expect(navigation.busy).toBe(true);
     expect(navigation.chats[0]).toMatchObject({
       kind: "chat",
-      indicator: rows[0]?.indicator,
+      agent: { id: "lead", inFlight: true },
     });
-    expect(navigationSnapshot(null, null, "", rows)).not.toHaveProperty(
-      "sidebar",
-    );
+    expect(navigationSnapshot(null, null, "")).not.toHaveProperty("sidebar");
   });
 });

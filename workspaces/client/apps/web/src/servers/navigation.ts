@@ -15,7 +15,6 @@ import type {
   SidebarAgent,
   SidebarChatView,
 } from "../components/sidebar/viewModel.ts";
-import type { DeepReadonly } from "../deepReadonly.ts";
 import { toJS } from "mobx";
 import {
   sidebarSnapshot,
@@ -153,7 +152,7 @@ export function navigationSnapshot(
   alerts: DesktopAlert[] = [],
   readSaved: typeof saved = saved,
   unread: ReadonlySet<string> = new Set(),
-  entities: DeepReadonly<SidebarEntity[]> = [],
+  entities: readonly SidebarEntity[] = [],
 ): ServerNavigation {
   const projects = new Map<string, ServerNavigation["projects"][number]>();
   for (const project of data?.runtime?.projects || []) {

@@ -1,5 +1,10 @@
-import { ChatOperationalKind } from "../generated/api.ts";
-import { sidebarRowFixture } from "./sidebarRowFixture";
+import {
+  withSidebarCollections,
+  agentEntities,
+  sourceAgents,
+  replaceSourceAgents,
+} from "./sidebarSourceFixture.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { StudioErrorLevel } from "../generated/api";
 import { StudioErrorEffectCertainty } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
@@ -30,26 +35,23 @@ import {
 const path = "/same/project";
 const scope = "/same/state";
 const treeKey = (id: string) => JSON.stringify([path, "folder", id]);
-const agent = sidebarRowFixture;
+const agent = agentSummaryFixture;
 function source(
   id: string,
   projects: Project[] = [{ id: path, path, name: id, folders: [] }],
 ): SidebarSource {
-  return {
+  return withSidebarCollections({
     id,
     online: true,
     sidebar: {
       stateDir: scope,
       projects,
-      rows: [
+      entities: agentEntities([
         agent("same", {
           pinned: true,
-          indicator: {
-            kind: ChatOperationalKind["answer"],
-            label: "Needs an answer",
-          },
+          operationalStatus: { reason: "needs_input", wait: null },
         }),
-      ],
+      ]),
       rooms: [
         {
           id: "room",
@@ -87,7 +89,7 @@ function source(
       compact: { [path]: false },
       collapsed: {},
     },
-  };
+  });
 }
 function backend(value: SidebarSource) {
   const values = new Map<string, string>();
@@ -156,12 +158,12 @@ describe("complete multi-server sidebar projection", () => {
     const local = source("local");
     const remote = source("remote");
     for (const value of [local, remote]) {
-      value.sidebar.rows = [
+      replaceSourceAgents(value, [
         agent("lead", {
           projectPath: path,
           projectFolder: "notes",
         }),
-      ];
+      ]);
       value.sidebar.projects[0]!.folders = [{ id: "notes", name: "Notes" }];
     }
     const model = mergeSidebar([local, remote]);
@@ -245,8 +247,8 @@ describe("complete multi-server sidebar projection", () => {
     ];
     const model = mergeSidebar([local]);
     const original = backend(local);
-    expect(model.rows).toEqual(local.sidebar.rows);
-    expect(model.rows[0]).toBe(local.sidebar.rows[0]);
+    expect(model.rows.map((row) => row.agent)).toEqual(sourceAgents(local));
+    expect(model.rows[0]?.agent).toBe(sourceAgents(local)[0]);
     expect(model.data.runtime.projects[0]).toBe(local.sidebar.projects[0]);
     expect(model.data.runtime.rooms[0]).toBe(local.sidebar.rooms[0]);
     expect(model.data.runtime.sidebarOrder).toBe(local.sidebar.sidebarOrder);
@@ -260,7 +262,9 @@ describe("complete multi-server sidebar projection", () => {
 
   it("creates inferred project groups only from server-provided rows", () => {
     const local = source("local");
-    local.sidebar.rows = [agent("visible", { projectPath: "/elsewhere/lead" })];
+    replaceSourceAgents(local, [
+      agent("visible", { projectPath: "/elsewhere/lead" }),
+    ]);
     const model = mergeSidebar([local, source("remote")]);
     expect(
       model.data.runtime.projects.map((project) => project.path),
@@ -275,10 +279,10 @@ describe("complete multi-server sidebar projection", () => {
     for (const value of [a, b]) {
       assert.ok(value.sidebar.projects[0] != null);
       value.sidebar.projects[0].folders = [{ id: "folder", name: "Notes" }];
-      assert.ok(value.sidebar.rows[0] != null);
-      value.sidebar.rows = [
-        { ...value.sidebar.rows[0], projectFolder: "folder" },
-      ];
+      assert.ok(sourceAgents(value)[0] != null);
+      replaceSourceAgents(value, [
+        { ...required(sourceAgents(value)[0]), projectFolder: "folder" },
+      ]);
       value.sidebar.peerTeams = [
         { id: "team", name: value.id, projectPath: path, members: ["same"] },
       ];
@@ -304,7 +308,7 @@ describe("complete multi-server sidebar projection", () => {
         id: "same",
         path,
       });
-      expect(lead.indicator).toBe(value.sidebar.rows[0]?.indicator);
+      expect(lead.indicator.kind).toBe("answer");
     }
     expect(() => mergeSidebar([a, a])).toThrow("Duplicate sidebar source");
   });
@@ -351,14 +355,14 @@ describe("complete multi-server sidebar projection", () => {
         ],
       },
     ]);
-    remote.sidebar.rows = [
+    replaceSourceAgents(remote, [
       agent("same", {
         projectPath: "/remote/path",
         projectId: "project:shared",
         projectServerId: "home-id",
         projectFolder: "nested",
       }),
-    ];
+    ]);
     remote.sidebar.peerTeams = [
       {
         id: "team",
@@ -398,11 +402,10 @@ describe("complete multi-server sidebar projection", () => {
 
   it("retains server ordering, archive, search text, indicator and read CAS proof", () => {
     const local = source("local");
-    local.sidebar.rows = [
+    replaceSourceAgents(local, [
       agent("z", {
-        sortKey: "a",
         archived: true,
-        searchText: "server search",
+        name: "server search",
         markRead: {
           threadId: "native",
           turnId: "turn",
@@ -410,16 +413,18 @@ describe("complete multi-server sidebar projection", () => {
           read: true,
         },
       }),
-      agent("a", { sortKey: "b" }),
-    ];
+      agent("a"),
+    ]);
     const model = mergeSidebar([local, source("remote")]);
     expect(model.rows.slice(0, 2).map((row) => row.id)).toEqual([
       model.chatKey("local", "z"),
       model.chatKey("local", "a"),
     ]);
-    expect(model.rows[0]?.markRead).toBe(local.sidebar.rows[0]?.markRead);
-    expect(model.rows[0]?.searchText).toBe("server search");
-    expect(model.rows[0]?.archived).toBe(true);
+    expect(model.rows[0]?.agent.markRead).toBe(
+      sourceAgents(local)[0]?.markRead,
+    );
+    expect(model.rows[0]?.searchText).toContain("server search");
+    expect(model.rows[0]?.agent.archived).toBe(true);
   });
 
   it("retains offline rows on summary updates and shares unchanged projected rows", () => {
@@ -448,7 +453,7 @@ describe("complete multi-server sidebar projection", () => {
       },
       sources[1],
     ]);
-    expect(next.rows[0]).toBe(before.rows[0]);
+    expect(next.rows[0]?.agent).toBe(before.rows[0]?.agent);
     // A snapshot for another reason keeps the order revision, so a waiting move stays.
     expect(next.data.runtime.sidebarOrder).toBe(
       before.data.runtime.sidebarOrder,
@@ -878,17 +883,16 @@ describe("original saved sidebar state", () => {
   });
 });
 
-it("preserves source order when server sort keys overlap", () => {
+it("preserves source order without remapping native facts", () => {
   const local = source("local"),
     remote = source("remote");
-  local.sidebar.rows = [agent("a", { sortKey: "same" })];
-  remote.sidebar.rows = [agent("a", { sortKey: "same" })];
+  replaceSourceAgents(local, [agent("a")]);
+  replaceSourceAgents(remote, [agent("a")]);
   const select = createMergedSidebarSelector();
   const model = select([local, remote]);
   expect(model.rows.map((row) => row.id)).toEqual([
     model.chatKey("local", "a"),
     model.chatKey("remote", "a"),
   ]);
-  expect(model.rows[0]?.sortKey).toBe("0000000000\u0000same");
-  expect(model.rows[1]?.sortKey).toBe("0000000001\u0000same");
+  expect(model.rows.map((row) => row.agent.id)).toEqual(["a", "a"]);
 });

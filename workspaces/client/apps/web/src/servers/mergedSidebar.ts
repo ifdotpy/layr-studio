@@ -4,7 +4,7 @@ import {
   createStateMirror,
   type StateCollections,
 } from "../generated/observableResources.ts";
-import { observable } from "mobx";
+import { observable, runInAction } from "mobx";
 import {
   createSidebarViewModel,
   type SidebarAgent,
@@ -785,7 +785,7 @@ export function createMergedSidebarSelector(combined = true) {
       next.data.runtime.projects !== previous.data.runtime.projects ||
       next.data.runtime.peerTeams !== previous.data.runtime.peerTeams
     )
-      routing.set(next);
+      runInAction(() => routing.set(next));
     for (const id of views.keys())
       if (!next.sourceById.has(id)) views.delete(id);
     previous = next;
