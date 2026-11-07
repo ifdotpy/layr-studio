@@ -2653,31 +2653,6 @@ class AgentSummaryEntityDtoModel {
     return this;
   }
 }
-function reconcileAgentSummaryEntityDto(
-  data: AgentSummaryEntityDtoModel[],
-  dto: readonly AgentSummaryEntityDtoDto[],
-): AgentSummaryEntityDtoModel[] {
-  const ids = new Set<string>();
-  for (const item of dto) {
-    if (ids.has(item.id))
-      throw new Error("Duplicate identity in AgentSummaryEntityDto");
-    ids.add(item.id);
-  }
-  const previous = new Map(data.map((item) => [item.id, item]));
-  const next: AgentSummaryEntityDtoModel[] = [];
-  for (const item of dto) {
-    const existing = previous.get(item.id);
-    const row =
-      existing === undefined
-        ? new AgentSummaryEntityDtoModel(item)
-        : existing.apply(item);
-    next.push(row);
-  }
-  return data.length === next.length &&
-    data.every((item, index) => item === next[index])
-    ? data
-    : next;
-}
 type AgentTailDto = DeepReadonly<components["schemas"]["AgentTail"]>;
 class AgentTailModel {
   id: AgentTailDto["id"];
@@ -2702,28 +2677,6 @@ class AgentTailModel {
     }
     return this;
   }
-}
-function reconcileAgentTail(
-  data: AgentTailModel[],
-  dto: readonly AgentTailDto[],
-): AgentTailModel[] {
-  const ids = new Set<string>();
-  for (const item of dto) {
-    if (ids.has(item.id)) throw new Error("Duplicate identity in AgentTail");
-    ids.add(item.id);
-  }
-  const previous = new Map(data.map((item) => [item.id, item]));
-  const next: AgentTailModel[] = [];
-  for (const item of dto) {
-    const existing = previous.get(item.id);
-    const row =
-      existing === undefined ? new AgentTailModel(item) : existing.apply(item);
-    next.push(row);
-  }
-  return data.length === next.length &&
-    data.every((item, index) => item === next[index])
-    ? data
-    : next;
 }
 type AgentWaitReasonsDto = DeepReadonly<
   components["schemas"]["AgentWaitReasons"]
@@ -3225,31 +3178,6 @@ class PeerTeamEntityDtoModel {
     }
     return this;
   }
-}
-function reconcilePeerTeamEntityDto(
-  data: PeerTeamEntityDtoModel[],
-  dto: readonly PeerTeamEntityDtoDto[],
-): PeerTeamEntityDtoModel[] {
-  const ids = new Set<string>();
-  for (const item of dto) {
-    if (ids.has(item.id))
-      throw new Error("Duplicate identity in PeerTeamEntityDto");
-    ids.add(item.id);
-  }
-  const previous = new Map(data.map((item) => [item.id, item]));
-  const next: PeerTeamEntityDtoModel[] = [];
-  for (const item of dto) {
-    const existing = previous.get(item.id);
-    const row =
-      existing === undefined
-        ? new PeerTeamEntityDtoModel(item)
-        : existing.apply(item);
-    next.push(row);
-  }
-  return data.length === next.length &&
-    data.every((item, index) => item === next[index])
-    ? data
-    : next;
 }
 type PeerTeamEntityDto_peerLeadsItemDto = NonNullable<
   PeerTeamEntityDtoDto["peerLeads"]
@@ -3953,31 +3881,6 @@ class ProjectEntityDtoModel {
     }
     return this;
   }
-}
-function reconcileProjectEntityDto(
-  data: ProjectEntityDtoModel[],
-  dto: readonly ProjectEntityDtoDto[],
-): ProjectEntityDtoModel[] {
-  const ids = new Set<string>();
-  for (const item of dto) {
-    if (ids.has(item.id))
-      throw new Error("Duplicate identity in ProjectEntityDto");
-    ids.add(item.id);
-  }
-  const previous = new Map(data.map((item) => [item.id, item]));
-  const next: ProjectEntityDtoModel[] = [];
-  for (const item of dto) {
-    const existing = previous.get(item.id);
-    const row =
-      existing === undefined
-        ? new ProjectEntityDtoModel(item)
-        : existing.apply(item);
-    next.push(row);
-  }
-  return data.length === next.length &&
-    data.every((item, index) => item === next[index])
-    ? data
-    : next;
 }
 type ProjectLocationDtoDto = DeepReadonly<
   components["schemas"]["ProjectLocationDto"]
