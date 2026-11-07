@@ -92,7 +92,7 @@ async function organization(sidebar: Locator) {
           id: chat.dataset.chat || null,
           name: chat.querySelector("strong")!.textContent,
           pinned: !!chat.querySelector(".chat-pin"),
-          alias: chat.querySelector(".chat-server-line")!.textContent,
+          alias: chat.querySelector(".fleet-server-badge")?.textContent ?? null,
           folder:
             chat.closest<HTMLElement>("[data-folder-id]")?.dataset.folderId ||
             null,
