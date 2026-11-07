@@ -2293,6 +2293,7 @@ mod tests {
             .pragma_query_value(None, "schema_version", |row| row.get(0))
             .expect("schema version");
         m2026_10_31_retired_start_indexes::apply(&tx).expect("index migration");
+        m2026_11_01_chat_busy_deleted_index::apply(&tx).expect("busy index migration");
         crate::StartupRecoveryRepository::prepare_agent_indexes(&tx).expect("startup indexes");
         let after: i64 = tx
             .pragma_query_value(None, "schema_version", |row| row.get(0))
