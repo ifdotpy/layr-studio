@@ -7,9 +7,11 @@ import { createSidebarViewModel } from "./viewModel.ts";
 it("keeps grouping and order independent of tails while search observes them only when open", () => {
   const mirror = createStateMirror();
   const agent = agentSummaryFixture("a");
+  const other = agentSummaryFixture("b");
   const publish = (tail: string) =>
     mirror.apply([
       { collection: "agentSummary", id: agent.id, value: agent },
+      { collection: "agentSummary", id: other.id, value: other },
       { collection: "agentTail", id: agent.id, value: { id: agent.id, tail } },
     ]);
   publish("first");
@@ -31,7 +33,10 @@ it("keeps grouping and order independent of tails while search observes them onl
     search(model.searchResults.map((row) => row.id)),
   );
   const original = model.groups;
+  const comparisonsBeforeTail = rank.mock.calls.length;
+  expect(comparisonsBeforeTail).toBeGreaterThan(0);
   publish("needle");
+  expect(rank).toHaveBeenCalledTimes(comparisonsBeforeTail);
   expect(model.groups).toBe(original);
   expect(groups).toHaveBeenCalledTimes(1);
   expect(search).toHaveBeenCalledTimes(1);
@@ -40,10 +45,11 @@ it("keeps grouping and order independent of tails while search observes them onl
   });
   expect(search).toHaveBeenLastCalledWith(["a"]);
   const groupsAfterOpeningSearch = groups.mock.calls.length;
+  const comparisonsAfterOpeningSearch = rank.mock.calls.length;
   publish("other");
   expect(search).toHaveBeenLastCalledWith([]);
   expect(groups).toHaveBeenCalledTimes(groupsAfterOpeningSearch);
-  expect(rank).not.toHaveBeenCalled(); // One row needs no comparison.
+  expect(rank).toHaveBeenCalledTimes(comparisonsAfterOpeningSearch);
   stopSearch();
   stopGroups();
 });
@@ -97,7 +103,9 @@ it("owns compact recency, team membership, and summary visibility in the shared 
     }),
     agentSummaryFixture("team", { updated: 1 }),
     agentSummaryFixture("worker", { isLead: false }),
-    agentSummaryFixture("moved", { movedTo: "remote" }),
+    agentSummaryFixture("moved", {
+      movedTo: { server: "remote", move: "move-1" },
+    }),
   ];
   mirror.apply([
     ...summaries.map((value) => ({
