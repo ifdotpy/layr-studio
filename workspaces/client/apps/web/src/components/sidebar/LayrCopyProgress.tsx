@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import type { SidebarChatRow } from "../../generated/observableResources.ts";
 import type { components } from "../../generated/api";
 
 type Progress = Extract<
@@ -21,7 +23,11 @@ const labels: Record<Progress["phase"], string> = {
   failed: "Copy failed",
 };
 
-export default function LayrCopyProgress({ progress }: { progress: Progress }) {
+export default observer(function LayrCopyProgress(
+  props: { progress: Progress } | { row: Pick<SidebarChatRow, "copyProgress"> },
+) {
+  const progress = "row" in props ? props.row.copyProgress : props.progress;
+  if (!progress) return null;
   const label = labels[progress.phase];
   const percent =
     progress.total == null
@@ -38,4 +44,4 @@ export default function LayrCopyProgress({ progress }: { progress: Progress }) {
       <progress aria-label={label} max={100} value={percent} />
     </span>
   );
-}
+});
