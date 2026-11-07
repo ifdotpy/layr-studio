@@ -543,7 +543,12 @@ pub(super) async fn written(
 }
 
 // These selectors visit current callback tasks, never completed reply history.
-const TASKS: &str = "FROM runtime_tool_requests WHERE kind=?1 AND status IN (?2,?3,?4) AND json_extract(record,'$.payload.accepted.account')=?5 AND json_extract(record,'$.payload.accepted.actor') IS NULL";
+// CallbackObligation serializes no `identity`. The `agent` generated column
+// owned by runtime-store/schema.rs::receipt_owner_columns reads
+// payload.identity.context.agent for callbacks, so these obligations have NULL
+// agent even after accepted.actor is bound. Use the status/agent index before
+// parsing payloads; ordinary callback response owners have an identity instead.
+const TASKS: &str = "FROM runtime_tool_requests WHERE kind=?1 AND status IN (?2,?3,?4) AND agent IS NULL AND json_extract(record,'$.payload.accepted.account')=?5 AND json_extract(record,'$.payload.accepted.actor') IS NULL";
 const UNSENT: &str = " AND (json_extract(record,'$.payload.accepted.generation')<?6 OR (status!=?4 AND (json_type(record,'$.payload.submitted')='null' OR json_extract(record,'$.payload.recovery_attempted')=0)))";
 pub(super) fn any_unsent(
     db: &Connection,
@@ -586,7 +591,8 @@ pub(super) async fn unsent(
         }).collect()
     }).await
 }
-const DEMAND: &str = "FROM runtime_tool_requests WHERE kind=?1 AND status=?2 AND json_type(record,'$.payload.submitted')='object' AND json_extract(record,'$.payload.recovery_attempted')=0 AND json_extract(record,'$.payload.accepted.actor') IS NULL";
+// Same CallbackObligation/generated-agent invariant as TASKS above.
+const DEMAND: &str = "FROM runtime_tool_requests WHERE kind=?1 AND status=?2 AND agent IS NULL AND json_type(record,'$.payload.submitted')='object' AND json_extract(record,'$.payload.recovery_attempted')=0 AND json_extract(record,'$.payload.accepted.actor') IS NULL";
 pub(super) fn reply_accounts(
     db: &Connection,
     after: &str,
@@ -615,6 +621,90 @@ mod tests {
     use studio_json::{Value, json};
     use studio_runtime_process::{EventCursor, Generation};
     use studio_runtime_providers::{Method, RequestFrame, RequestId};
+
+    thread_local! {
+        static SELECTOR_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    }
+
+    #[tokio::test]
+    async fn callback_recovery_selectors_skip_unrelated_callback_owners() {
+        let directory = tempfile::tempdir().expect("state");
+        let store = RuntimeStore::open(Some(directory.path()))
+            .await
+            .expect("store");
+        store.transaction_with(|tx| {
+            accept(tx, "account", "account", &request(1, json!({})))?;
+            let obligation = task(tx, &operation("account", 7, 1))?.expect("obligation");
+            let agent_is_null: bool = tx.query_row(
+                "SELECT agent IS NULL FROM runtime_tool_requests WHERE id=?1",
+                [&obligation.id], |row| row.get(0),
+            )?;
+            assert!(agent_is_null, "CallbackObligation must not project an identity.context.agent");
+            for n in 0..1000 {
+                tool_requests::put_callback(tx, &CallbackTask {
+                    id: format!("owner-{n}"),
+                    origin_key: format!("other-origin-{n}"),
+                    status: [ToolRequestStatus::Queued, ToolRequestStatus::Running, ToolRequestStatus::Unknown][n % 3],
+                    updated: 1,
+                    payload: json!({"identity":{"context":{"agent":format!("agent-{n}")}},"body":"x".repeat(2048)}),
+                }).map_err(tool_error)?;
+            }
+            Ok::<_, WorkerError>(())
+        }).await.expect("production writers");
+        let recovered = unsent(&store, "account", 7, 10)
+            .await
+            .expect("recover queued obligation");
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].operation(), operation("account", 7, 1));
+        let (unsent_steps, demand_steps) = store
+            .read_async("callback-selector-cost", |db| {
+                db.trace_v2(
+                    rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+                    Some(|event| {
+                        if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                            SELECTOR_STEPS.with(|steps| {
+                                steps.set(
+                                    steps.get()
+                                        + statement.get_status(rusqlite::StatementStatus::VmStep),
+                                )
+                            });
+                        }
+                    }),
+                );
+                SELECTOR_STEPS.with(|steps| steps.set(0));
+                assert!(!any_unsent(db, "missing", 7)?);
+                let unsent_steps = SELECTOR_STEPS.with(std::cell::Cell::get);
+                SELECTOR_STEPS.with(|steps| steps.set(0));
+                assert!(!has_reply_demand(db, "missing")?);
+                let demand_steps = SELECTOR_STEPS.with(std::cell::Cell::get);
+                db.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+                Ok::<_, WorkerError>((unsent_steps, demand_steps))
+            })
+            .await
+            .expect("selector costs");
+        eprintln!("callback selectors: unsent={unsent_steps} demand={demand_steps} VM steps");
+        assert!(
+            unsent_steps < 500,
+            "unrelated owners must not be visited: {unsent_steps}"
+        );
+        assert!(
+            demand_steps < 500,
+            "unrelated owners must not be visited: {demand_steps}"
+        );
+        store
+            .transaction_with(|tx| {
+                let mut obligation = task(tx, &operation("account", 7, 1))?.expect("obligation");
+                obligation.status = ToolRequestStatus::Running;
+                obligation.payload.submitted =
+                    Some(SavedReply::for_test(7, "response".into(), "digest".into()));
+                put(tx, &obligation)?;
+                assert!(has_reply_demand(tx, "account")?);
+                assert_eq!(reply_accounts(tx, "", 10)?, vec!["account".to_owned()]);
+                Ok::<_, WorkerError>(())
+            })
+            .await
+            .expect("reply demand retains obligation");
+    }
 
     fn request(cursor: u64, params: Value) -> JournalEntry {
         JournalEntry {
