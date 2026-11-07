@@ -348,6 +348,20 @@ The guard does not check every `GIT_*` destination, including `GIT_INDEX_FILE`.
 Git can run configured helpers, including `diff.external` and filesystem monitors.
 These helpers can write files or run other commands.
 
+## Search tools in native lines
+
+When the installed Layr serves tree tools (`layr tool --help` succeeds), the
+managed bin folder also holds links named `rg` and `find` to the Layr binary. Agents' `rg` and
+`find` calls in a native line are then answered from Layr's in-memory index of the line, with
+the real tools' output; anything Layr cannot answer the same way runs the real tool (Layr
+`docs/layrfs.md`). With an older Layr the links are removed. Preparing a line starts its index
+build (`layr fs warm`), so the first searches of an agent are already served.
+
+Set `LAYR_FS_OFF=1` in the server's environment to remove the links and always use the real
+tools. `layr fs status` lists the indexed lines and the memory they use.
+
+The `tool_index` module owns this behavior.
+
 ## Reviewers
 
 A native reviewer uses its private scratch folder as its working directory.
