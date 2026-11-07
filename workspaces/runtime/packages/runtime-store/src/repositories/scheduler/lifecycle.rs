@@ -748,7 +748,7 @@ impl SchedulerRepository {
         generation: u64,
         thread_id: &str,
         turn_id: Option<&str>,
-    ) -> StoreResult<(bool, Option<(TurnAttemptIdentity, bool)>)> {
+    ) -> StoreResult<(bool, Option<ThreadAttempt>)> {
         Self::find_scoped_attempt(
             connection,
             None,
@@ -777,7 +777,7 @@ impl SchedulerRepository {
             turn_id,
         )?
         .1
-        .map(|(identity, _)| identity))
+        .map(|attempt| attempt.identity))
     }
 
     fn find_scoped_attempt(
@@ -787,7 +787,7 @@ impl SchedulerRepository {
         generation: u64,
         thread_id: &str,
         turn_id: Option<&str>,
-    ) -> StoreResult<(bool, Option<(TurnAttemptIdentity, bool)>)> {
+    ) -> StoreResult<(bool, Option<ThreadAttempt>)> {
         let mut statement = connection.prepare_cached(
             "SELECT id,record FROM runtime_agents \
              WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 AND (?3 IS NULL OR id=?3) ORDER BY rowid LIMIT 2",
@@ -844,14 +844,15 @@ impl SchedulerRepository {
             .is_some();
         Ok((
             true,
-            Some((
-                TurnAttemptIdentity {
+            Some(ThreadAttempt {
+                identity: TurnAttemptIdentity {
                     agent_id: agent.id.0.clone(),
                     epoch,
                     attempt_id: attempt_id.to_owned(),
                 },
                 bound,
-            )),
+                agent,
+            }),
         ))
     }
 

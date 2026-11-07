@@ -1550,6 +1550,8 @@ impl AgentRecord {
 
     /// Consume the typed record while moving its fields into a JSON object.
     pub fn into_value(mut self) -> Value {
+        #[cfg(any(test, feature = "test-support"))]
+        crate::agent_volatile::publication_work::full_projection();
         let extra = std::mem::take(&mut self.extra);
         let mut value = crate::projection_value(&self);
         value

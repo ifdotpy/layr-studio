@@ -488,11 +488,11 @@ fn claimed_native_action_is_correlated_by_the_scheduler_before_handoff() {
     )
     .expect("scheduler lookup");
     assert!(correlated.0, "known native action thread");
-    let Some((identity, source_bound)) = correlated.1 else {
+    let Some(attempt) = correlated.1 else {
         panic!("submitted native action must be discoverable by the scheduler");
     };
-    assert_eq!(identity.agent_id, "lead");
-    assert!(!source_bound);
+    assert_eq!(attempt.identity.agent_id, "lead");
+    assert!(!attempt.bound);
 
     let attempt = actor(&db)["startAttempt"].clone();
     assert_eq!(attempt["connectionGeneration"], ticket().generation);

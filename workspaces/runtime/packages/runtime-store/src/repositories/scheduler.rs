@@ -145,6 +145,15 @@ pub struct TurnAttemptIdentity {
     pub attempt_id: String,
 }
 
+/// Correlation and the checked actor read in the same transaction. Callers may
+/// reuse the actor until a subsequent write changes it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadAttempt {
+    pub identity: TurnAttemptIdentity,
+    pub bound: bool,
+    pub agent: AgentRecord,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SchedulerRepository;
 

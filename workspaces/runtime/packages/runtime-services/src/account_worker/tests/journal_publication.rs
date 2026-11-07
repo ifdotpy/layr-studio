@@ -9,6 +9,38 @@ const AGENTS: [(&str, &str); 2] = [("agent", "thread"), ("second", "second-threa
 const FIRST_CURSOR: u64 = 1;
 const LONG_ANSWER_CHARS: usize = crate::sync_views::AGENT_SYNC_LAST_ANSWER_CHARS + 1;
 
+#[tokio::test]
+async fn journal_dispatch_reuses_the_correlated_agent_without_full_projections() {
+    const NOTIFICATIONS: usize = 8;
+    for method in [
+        "item/agentMessage/delta",
+        "item/commandExecution/outputDelta",
+        "item/reasoning/textDelta",
+        "item/reasoning/summaryTextDelta",
+    ] {
+        let (_directory, store) = running_store().await;
+        let entries = (1..=NOTIFICATIONS as u64)
+            .map(|cursor| {
+                entry(
+                    cursor,
+                    json!({"method":method,"params":{"threadId":"thread","turnId":"turn",
+                "itemId":"answer","delta":"x"}}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let work = store
+            .transaction_with(move |tx| store::test_journal_dispatch_work(tx, &entries))
+            .await
+            .expect("journal dispatch");
+        eprintln!(
+            "{method}: {} full decodes, {} full projections for {NOTIFICATIONS} notifications",
+            work.0, work.1
+        );
+        // One correlation read and the test-only stored-row equivalence read per delta.
+        assert_eq!(work, (2 * NOTIFICATIONS, 0), "{method}");
+    }
+}
+
 async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>) {
     let (directory, store) = running_store().await;
     store

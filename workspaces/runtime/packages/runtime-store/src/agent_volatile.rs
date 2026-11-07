@@ -808,6 +808,7 @@ pub mod publication_work {
         active: bool,
         calls: BTreeMap<String, Calls>,
         full_decodes: usize,
+        full_projections: usize,
     }
     thread_local! {
         static STATE: RefCell<State> = RefCell::new(State::default());
@@ -817,6 +818,7 @@ pub mod publication_work {
         STATE.with_borrow_mut(|state| {
             state.active = true;
             state.full_decodes = 0;
+            state.full_projections = 0;
         });
         Scope
     }
@@ -837,6 +839,16 @@ pub mod publication_work {
     }
     pub fn take_full_decodes() -> usize {
         STATE.with_borrow_mut(|state| std::mem::take(&mut state.full_decodes))
+    }
+    pub fn full_projection() {
+        STATE.with_borrow_mut(|state| {
+            if state.active {
+                state.full_projections += 1;
+            }
+        });
+    }
+    pub fn take_full_projections() -> usize {
+        STATE.with_borrow_mut(|state| std::mem::take(&mut state.full_projections))
     }
     pub fn record(id: &str, operation: Operation) {
         STATE.with_borrow_mut(|state| {

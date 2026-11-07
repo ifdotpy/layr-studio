@@ -166,7 +166,7 @@ pub use repositories::rules_tick;
 pub use repositories::scheduler::{
     AccountWakePage, AcknowledgedSteer, BACKEND_RESTARTED_TURN_ERROR, ClaimedEvents, ClaimedSteer,
     NATIVE_ACTION_ATTEMPT_KINDS, PROVIDER_DISCONNECTED_TURN_ERROR, START_RETURN_LIMIT,
-    STEER_UNCONFIRMED_ERROR, SchedulerRepository, TurnAttemptIdentity,
+    STEER_UNCONFIRMED_ERROR, SchedulerRepository, ThreadAttempt, TurnAttemptIdentity,
     VM_PROVIDER_DISCONNECTED_TURN_ERROR, WakeCandidate, WorkspaceMode,
 };
 pub use repositories::startup_recovery::{self, StartupRecoveryRepository};

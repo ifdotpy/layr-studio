@@ -5,8 +5,9 @@ use super::*;
 use crate::continuation_runtime::CapacityStartOutcome;
 use crate::diagnostics::measure_runtime_stage as stage;
 use crate::notification_dispatch::{
-    NotificationAgent, NotificationEffects, NotificationPublicationBatch, PreparedSubmission,
-    ProviderDeliveryIdentity, dispatch_notification_with_effects, flush_notification_streams,
+    CheckedNotificationDispatch, NotificationAgent, NotificationEffects,
+    NotificationPublicationBatch, PreparedSubmission, ProviderDeliveryIdentity,
+    dispatch_checked_notification, flush_notification_streams,
 };
 use rusqlite::{OptionalExtension, params};
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
@@ -2724,7 +2725,7 @@ fn journal_one(
                 turn,
             )?;
             let attempt = match attempt {
-                Some(attempt) => Some(attempt),
+                Some(attempt) => Some((attempt.identity, attempt.bound, Some(attempt.agent))),
                 None if method == "turn/completed" => {
                     crate::context_repair::source_terminal_attempt(
                         tx,
@@ -2736,7 +2737,7 @@ fn journal_one(
                         scope: "runtime_context_terminal_receipts".into(),
                         id: thread.to_owned(),
                     })?
-                    .map(|identity| (identity, true))
+                    .map(|identity| (identity, true, None))
                 }
                 // A turn the provider started on its own binds the idle agent.
                 None if method == "turn/started" => match turn {
@@ -2748,12 +2749,12 @@ fn journal_one(
                         turn,
                         None,
                     )?
-                    .map(|identity| (identity, true)),
+                    .map(|identity| (identity, true, None)),
                     None => None,
                 },
                 None => None,
             };
-            if let Some((identity, bound)) = attempt {
+            if let Some((identity, bound, agent)) = attempt {
                 *policy.subject = Some(identity.agent_id.clone());
                 let resolution = if method == "turn/completed" && !bound && policy.park_unbound {
                     Some(resolve_unbound_completion(tx, &identity, turn)?)
@@ -2947,9 +2948,14 @@ fn journal_one(
                         }
                     }
                     _ => {
-                        let dispatched = dispatch_notification_with_effects(
+                        let dispatched = dispatch_checked_notification(
                             tx,
-                            &identity.agent_id,
+                            CheckedNotificationDispatch {
+                                agent_id: &identity.agent_id,
+                                agent,
+                                effects:
+                                    &crate::notification_runtime_effects::RuntimeNotificationEffects,
+                            },
                             publication,
                             streams,
                             &ProviderDeliveryIdentity {
@@ -2961,7 +2967,6 @@ fn journal_one(
                             },
                             frame,
                             now(),
-                            &crate::notification_runtime_effects::RuntimeNotificationEffects,
                         )?;
                         publications.push(dispatched.post_commit);
                         let staged = dispatched.stream_update.unwrap_or(next);
@@ -3000,6 +3005,43 @@ fn journal_one(
     super::callback_record::accept(tx, account, journal_scope, entry)?;
     save_journal(tx, identity, entry, digest, true)?;
     Ok(Some((next, effect)))
+}
+
+/// Count the real journal dispatch work without the outer batch's publication validation.
+#[cfg(test)]
+pub(super) fn test_journal_dispatch_work(
+    tx: &rusqlite::Transaction<'_>,
+    entries: &[JournalEntry],
+) -> Result<(usize, usize), WorkerError> {
+    use studio_runtime_store::agent_volatile::publication_work;
+    let _scope = publication_work::scope();
+    let mut streams = NotificationStreamBuffer::default();
+    let mut outbox = PublicationOutbox::default();
+    for entry in entries {
+        if let Some((next, _)) = journal_one(
+            tx,
+            JournalIdentity {
+                account: "default",
+                journal_scope: "default",
+            },
+            &crate::notification_dispatch::PublicationContext::default(),
+            &streams,
+            entry,
+            &Value::Null,
+            None,
+            &mut outbox,
+            JournalPolicy {
+                park_unbound: false,
+                subject: &mut None,
+            },
+        )? {
+            streams = next;
+        }
+    }
+    Ok((
+        publication_work::take_full_decodes(),
+        publication_work::take_full_projections(),
+    ))
 }
 pub(super) async fn save_recovery(
     store: &RuntimeStore,

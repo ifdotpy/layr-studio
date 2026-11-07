@@ -1,6 +1,45 @@
 use super::*;
 use studio_json::json;
 
+#[test]
+fn typed_legacy_workspace_refusal_matches_the_serialized_fields() {
+    use studio_runtime_schema::queue_command::Field;
+    use studio_runtime_schema::records::WorkspaceMode;
+    use studio_runtime_store::{AgentExecutionMode, AgentRecord};
+    for execution in [
+        None,
+        Some(AgentExecutionMode::Host),
+        Some(AgentExecutionMode::Vm),
+    ] {
+        for workspace in [
+            None,
+            Some(WorkspaceMode::Layr),
+            Some(WorkspaceMode::LayrNative),
+            Some(WorkspaceMode::Shared),
+        ] {
+            for ready in [None, Some(false), Some(true)] {
+                for line in [Field::Missing, Field::Null, Field::Value(String::new())] {
+                    let mut agent = AgentRecord::test_defaults();
+                    agent.execution_mode = execution;
+                    agent.workspace_mode = workspace;
+                    agent.layr_ready = ready;
+                    agent.layr_line = line;
+                    let value = agent.value();
+                    assert_eq!(
+                        legacy_vm_record(&agent),
+                        vm_workspace_unsupported(
+                            value["executionMode"].as_str(),
+                            value["workspaceMode"].as_str(),
+                            value["layrReady"].as_bool() == Some(true),
+                            value["layrLine"].as_str().is_some()
+                        )
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn stored_path<T: serde::de::DeserializeOwned>(path: &str) -> T {
     studio_json::from_value(json!(path)).expect("stored path fixture")
 }

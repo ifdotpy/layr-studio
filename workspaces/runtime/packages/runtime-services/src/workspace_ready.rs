@@ -140,13 +140,12 @@ pub(crate) fn vm_workspace_unsupported(
 
 /// Whether a persisted agent belongs to a retired VM workspace.
 pub fn legacy_vm_record(record: &studio_runtime_store::AgentRecord) -> bool {
-    let value = record.value();
-    vm_workspace_unsupported(
-        value["executionMode"].as_str(),
-        value["workspaceMode"].as_str(),
-        record.layr_ready == Some(true),
-        value["layrLine"].as_str().is_some(),
-    )
+    use studio_runtime_schema::records::WorkspaceMode;
+    record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+        || (record.workspace_mode != Some(WorkspaceMode::LayrNative)
+            && (record.workspace_mode == Some(WorkspaceMode::Layr)
+                || record.layr_ready == Some(true)
+                || record.layr_line.value().is_some()))
 }
 
 pub fn unsupported(actor: &WorkspaceActor) -> Option<WorkspaceRefusal> {

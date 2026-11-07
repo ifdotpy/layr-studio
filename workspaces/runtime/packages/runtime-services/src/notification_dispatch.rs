@@ -370,6 +370,42 @@ pub fn dispatch_notification_with_effects(
     observed_at: f64,
     effects: &dyn NotificationEffects,
 ) -> Result<NotificationDispatchResult, NotificationDispatchError> {
+    dispatch_checked_notification(
+        transaction,
+        CheckedNotificationDispatch {
+            agent_id,
+            agent: None,
+            effects,
+        },
+        publication,
+        streams,
+        identity,
+        notification,
+        observed_at,
+    )
+}
+
+/// The journal may hand off its correlation read before any actor write.
+pub(crate) struct CheckedNotificationDispatch<'a> {
+    pub agent_id: &'a str,
+    pub agent: Option<AgentRecord>,
+    pub effects: &'a dyn NotificationEffects,
+}
+
+pub(crate) fn dispatch_checked_notification(
+    transaction: &Transaction<'_>,
+    input: CheckedNotificationDispatch<'_>,
+    publication: &PublicationContext,
+    streams: &NotificationStreamBuffer,
+    identity: &ProviderDeliveryIdentity,
+    notification: &Frame,
+    observed_at: f64,
+) -> Result<NotificationDispatchResult, NotificationDispatchError> {
+    let CheckedNotificationDispatch {
+        agent_id,
+        mut agent,
+        effects,
+    } = input;
     let mut next_streams = streams.clone();
     let (kind, params) = notification_parts(notification)?;
     let mut before = None;
@@ -421,8 +457,10 @@ pub fn dispatch_notification_with_effects(
                 );
             }
             if kind == "provider/generationStarted" {
-                let Some(agent) =
-                    NotificationDispatchRepository::agent_record(transaction, agent_id)?
+                let Some(agent) = agent.take().map_or_else(
+                    || NotificationDispatchRepository::agent_record(transaction, agent_id),
+                    |agent| Ok(Some(agent)),
+                )?
                 else {
                     // Python applies generationStarted to the account/thread rate
                     // table and returns when no active rate entry exists. A
@@ -456,7 +494,12 @@ pub fn dispatch_notification_with_effects(
                     DispatchOutcome::Written,
                 );
             }
-            let mut agent = NotificationDispatchRepository::agent_record(transaction, agent_id)?
+            let mut agent = agent
+                .take()
+                .map_or_else(
+                    || NotificationDispatchRepository::agent_record(transaction, agent_id),
+                    |agent| Ok(Some(agent)),
+                )?
                 .ok_or_else(|| stored("runtime_agents", agent_id))?;
             publication.validate_actor(&agent, agent_id)?;
             if agent.deleted_at.is_some() {
@@ -584,6 +627,7 @@ pub fn dispatch_notification_with_effects(
                         }
                     }
                 };
+                after_known = AfterAgent::Unchanged;
                 return save_outcome(transaction, delivery, &content_signature, outcome);
             }
             if kind == "item/completed" && params["item"]["type"] != "agentMessage" {
@@ -645,7 +689,7 @@ pub fn dispatch_notification_with_effects(
                             params.get("delta").and_then(Value::as_str),
                         ) {
                             (Some(item_id), Some(delta)) if !item_id.is_empty() => {
-                                if write_text_notification(
+                                let written = write_text_notification(
                                     transaction,
                                     &mut agent,
                                     &mut next_streams,
@@ -661,7 +705,9 @@ pub fn dispatch_notification_with_effects(
                                         observed_at,
                                         update: TextUpdate::Delta(delta),
                                     },
-                                )? {
+                                )?;
+                                agent_changed = matches!(written, TextWriteOutcome::Stored);
+                                if !matches!(written, TextWriteOutcome::Closed) {
                                     DispatchOutcome::Written
                                 } else {
                                     DispatchOutcome::Ignored {
@@ -721,7 +767,8 @@ pub fn dispatch_notification_with_effects(
                                     observed_at,
                                     update,
                                 },
-                            )? {
+                            )? != TextWriteOutcome::Closed
+                            {
                                 if kind == "item/completed" && has_questions(item.get("questions"))
                                 {
                                     questions::completed(transaction, &agent, params, observed_at)?;
@@ -769,13 +816,15 @@ pub fn dispatch_notification_with_effects(
             if kind == "item/agentMessage/delta"
                 || matches!(outcome, DispatchOutcome::Ignored { .. })
             {
-                after_known = if before.as_ref() == Some(&agent) {
+                // Buffered text deltas cannot change the actor. Only compare
+                // the full record when a flush actually touched it.
+                let unchanged = (kind == "item/agentMessage/delta" && !agent_changed)
+                    || before.as_ref() == Some(&agent);
+                after_known = if unchanged {
                     AfterAgent::Unchanged
                 } else {
-                    {
-                        persist_agent(transaction, agent_id, &mut agent)?;
-                        AfterAgent::Stored(Box::new(agent))
-                    }
+                    persist_agent(transaction, agent_id, &mut agent)?;
+                    AfterAgent::Stored(Box::new(agent))
                 };
                 return save_outcome(transaction, delivery, &content_signature, outcome);
             }
@@ -1323,12 +1372,19 @@ fn validate_agent_write_fields(
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TextWriteOutcome {
+    Buffered,
+    Stored,
+    Closed,
+}
+
 fn write_text_notification(
     transaction: &Transaction<'_>,
     agent: &mut AgentRecord,
     streams: &mut NotificationStreamBuffer,
     input: TextWriteInput<'_>,
-) -> Result<bool, NotificationDispatchError> {
+) -> Result<TextWriteOutcome, NotificationDispatchError> {
     let TextWriteInput {
         agent_id,
         account,
@@ -1368,7 +1424,7 @@ fn write_text_notification(
             0
         };
         return match streams.enqueue_delta(key.clone(), delta, params, stored_chars) {
-            EnqueueResult::Buffered => Ok(true),
+            EnqueueResult::Buffered => Ok(TextWriteOutcome::Buffered),
             EnqueueResult::FlushRequired => {
                 flush_text_stream(
                     transaction,
@@ -1379,9 +1435,9 @@ fn write_text_notification(
                     observed_at,
                     Some(delta),
                 )?;
-                Ok(true)
+                Ok(TextWriteOutcome::Stored)
             }
-            EnqueueResult::Closed => Ok(false),
+            EnqueueResult::Closed => Ok(TextWriteOutcome::Closed),
         };
     }
     if matches!(update, TextUpdate::Started(..)) && streams.awaits_base(&key) {
@@ -1465,7 +1521,7 @@ fn write_text_notification(
             ..Default::default()
         });
     }
-    Ok(true)
+    Ok(TextWriteOutcome::Stored)
 }
 
 /// Flush this agent's streams from the shared connection buffer. Other agents'
