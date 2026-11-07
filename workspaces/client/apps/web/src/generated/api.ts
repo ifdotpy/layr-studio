@@ -11989,6 +11989,14 @@ export interface components {
       | "importing_project"
       | "completed"
       | "failed";
+    CopyProgress: {
+      /** Format: uint64 */
+      done: number;
+      phase: components["schemas"]["CopyPhase"];
+      /** Format: uint64 */
+      total?: number | null | undefined;
+      unit: components["schemas"]["CopyUnit"];
+    };
     /** @enum {string} */
     CopyUnit: "files" | "bytes" | "commits";
     /** CostBreakdown */
@@ -21471,7 +21479,7 @@ export interface components {
       model: string;
     };
     SidebarChatList: {
-      /** @description Visible managed lead chats; row order uses the sidebar source order. */
+      /** @description Visible managed lead chats, ordered by the opaque sort key. */
       rows: components["schemas"]["SidebarChatRow"][];
     };
     SidebarChatRow: {
@@ -21489,53 +21497,43 @@ export interface components {
       /** @description Non-time compact visibility reasons; recent activity is checked at render. */
       compactPinned: boolean;
       /** @description Current epoch workspace copy progress; counts use the progress owner unit. */
-      copyProgress: {
-        /** Format: uint64 */
-        done: number;
-        phase: components["schemas"]["CopyPhase"];
-        /** Format: uint64 */
-        total?: number | null | undefined;
-        unit: components["schemas"]["CopyUnit"];
-      };
+      copyProgress: components["schemas"]["CopyProgress"] | null;
       /** @description Canonical saved sidebar ordering group key. */
       groupKey: string;
       /** @description Stable chat identity, without units. */
       id: string;
       /** @description Operational indicator, independent of the unread receipt. */
       indicator: components["schemas"]["ChatOperationalStatus"];
+      /** @description Whether the existing agent owner has an in-flight turn. */
+      inFlight: boolean;
       /** @description Existing completed-result read CAS proof; null means no completed result. */
-      markRead: {
-        read: boolean;
-        revision: number;
-        threadId: string;
-        turnId: string;
-      };
+      markRead: components["schemas"]["ReadStateDto"] | null;
       /** @description Eligibility of an explicit mark-unread action. */
       markUnread: components["schemas"]["MarkUnreadEligibility"];
       /** @description Provider model identifier; null means not selected. */
-      model: string;
+      model: string | null;
       /** @description Display name, in Unicode text. */
       name: string;
       /**
        * Format: uint32
        * @description Zero-based saved position; null is unranked and sorts last.
        */
-      orderRank: number;
+      orderRank: number | null;
       /** @description Whether the chat is pinned. */
       pinned: boolean;
       /** @description Project folder identity; null means the project root. */
-      projectFolder: string;
+      projectFolder: string | null;
       /**
        * Format: uint32
        * @description Project organization revision, in monotonic changes.
        */
       projectFolderRevision: number;
       /** @description Existing project identity for binding across server path aliases. */
-      projectId: string;
+      projectId: string | null;
       /** @description Owning project path, in filesystem path text. */
       projectPath: string;
       /** @description Existing project owner server identity for binding across server path aliases. */
-      projectServerId: string;
+      projectServerId: string | null;
       /** @description Provider identity, owned by provider_kind. */
       provider: components["schemas"]["ProviderKind"];
       /** @description Lower-case searchable display text, in Unicode text. */
@@ -21543,7 +21541,7 @@ export interface components {
       /** @description Opaque lexicographic authoritative ordering key, computed by studio-read-models. */
       sortKey: string;
       /** @description Peer team identity; null means no team. */
-      teamId: string;
+      teamId: string | null;
       /** @description Whether the existing stall owner reports waiting for lead action. */
       waitingForLead: boolean;
     };

@@ -24922,6 +24922,38 @@
         ],
         "type": "string"
       },
+      "CopyProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "done": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/CopyPhase"
+          },
+          "total": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "unit": {
+            "$ref": "#/components/schemas/CopyUnit"
+          }
+        },
+        "required": [
+          "phase",
+          "done",
+          "unit"
+        ],
+        "type": "object"
+      },
       "CopyUnit": {
         "enum": [
           "files",
@@ -48803,7 +48835,7 @@
         "additionalProperties": false,
         "properties": {
           "rows": {
-            "description": "Visible managed lead chats; row order uses the sidebar source order.",
+            "description": "Visible managed lead chats, ordered by the opaque sort key.",
             "items": {
               "$ref": "#/components/schemas/SidebarChatRow"
             },
@@ -48840,37 +48872,15 @@
             "type": "boolean"
           },
           "copyProgress": {
-            "additionalProperties": false,
-            "description": "Current epoch workspace copy progress; counts use the progress owner unit.",
-            "properties": {
-              "done": {
-                "format": "uint64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CopyProgress"
               },
-              "phase": {
-                "$ref": "#/components/schemas/CopyPhase"
-              },
-              "total": {
-                "format": "uint64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "unit": {
-                "$ref": "#/components/schemas/CopyUnit"
+              {
+                "type": "null"
               }
-            },
-            "required": [
-              "phase",
-              "done",
-              "unit"
             ],
-            "type": "object"
+            "description": "Current epoch workspace copy progress; counts use the progress owner unit."
           },
           "groupKey": {
             "description": "Canonical saved sidebar ordering group key.",
@@ -48880,36 +48890,24 @@
             "description": "Stable chat identity, without units.",
             "type": "string"
           },
+          "inFlight": {
+            "description": "Whether the existing agent owner has an in-flight turn.",
+            "type": "boolean"
+          },
           "indicator": {
             "$ref": "#/components/schemas/ChatOperationalStatus",
             "description": "Operational indicator, independent of the unread receipt."
           },
           "markRead": {
-            "additionalProperties": false,
-            "description": "Existing completed-result read CAS proof; null means no completed result.",
-            "properties": {
-              "read": {
-                "type": "boolean"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadStateDto"
               },
-              "revision": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "threadId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
+              {
+                "type": "null"
               }
-            },
-            "required": [
-              "threadId",
-              "turnId",
-              "read",
-              "revision"
             ],
-            "type": "object"
+            "description": "Existing completed-result read CAS proof; null means no completed result."
           },
           "markUnread": {
             "$ref": "#/components/schemas/MarkUnreadEligibility",
@@ -48917,7 +48915,10 @@
           },
           "model": {
             "description": "Provider model identifier; null means not selected.",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "name": {
             "description": "Display name, in Unicode text.",
@@ -48927,7 +48928,10 @@
             "description": "Zero-based saved position; null is unranked and sorts last.",
             "format": "uint32",
             "minimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "pinned": {
             "description": "Whether the chat is pinned.",
@@ -48935,7 +48939,10 @@
           },
           "projectFolder": {
             "description": "Project folder identity; null means the project root.",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "projectFolderRevision": {
             "description": "Project organization revision, in monotonic changes.",
@@ -48945,7 +48952,10 @@
           },
           "projectId": {
             "description": "Existing project identity for binding across server path aliases.",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "projectPath": {
             "description": "Owning project path, in filesystem path text.",
@@ -48953,7 +48963,10 @@
           },
           "projectServerId": {
             "description": "Existing project owner server identity for binding across server path aliases.",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "provider": {
             "$ref": "#/components/schemas/ProviderKind",
@@ -48969,7 +48982,10 @@
           },
           "teamId": {
             "description": "Peer team identity; null means no team.",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "waitingForLead": {
             "description": "Whether the existing stall owner reports waiting for lead action.",
@@ -48991,6 +49007,7 @@
           "activityAt",
           "pinned",
           "archived",
+          "inFlight",
           "provider",
           "model",
           "indicator",

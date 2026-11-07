@@ -3,6 +3,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn nullable_schema<T: JsonSchema>(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    Option::<T>::json_schema(generator)
+}
+
 fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> { Option::<T>::deserialize(d) }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -16,27 +20,27 @@ pub struct SidebarChatRow {
     pub project_path: String,
     /// Existing project identity for binding across server path aliases.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<String>")]
     pub project_id: Option<String>,
     /// Existing project owner server identity for binding across server path aliases.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<String>")]
     pub project_server_id: Option<String>,
     /// Project folder identity; null means the project root.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<String>")]
     pub project_folder: Option<String>,
     /// Project organization revision, in monotonic changes.
     pub project_folder_revision: u32,
     /// Peer team identity; null means no team.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<String>")]
     pub team_id: Option<String>,
     /// Canonical saved sidebar ordering group key.
     pub group_key: String,
     /// Zero-based saved position; null is unranked and sorts last.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<u32>")]
     pub order_rank: Option<u32>,
     /// Opaque lexicographic authoritative ordering key, computed by studio-read-models.
     pub sort_key: String,
@@ -46,17 +50,19 @@ pub struct SidebarChatRow {
     pub pinned: bool,
     /// Whether the chat is archived.
     pub archived: bool,
+    /// Whether the existing agent owner has an in-flight turn.
+    pub in_flight: bool,
     /// Provider identity, owned by provider_kind.
     pub provider: crate::ProviderKind,
     /// Provider model identifier; null means not selected.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<String>")]
     pub model: Option<String>,
     /// Operational indicator, independent of the unread receipt.
     pub indicator: crate::chat_operational_status::ChatOperationalStatus,
     /// Existing completed-result read CAS proof; null means no completed result.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<crate::agent_entity_nested_extra::ReadStateDto>")]
     pub mark_read: Option<crate::agent_entity_nested_extra::ReadStateDto>,
     /// Eligibility of an explicit mark-unread action.
     pub mark_unread: MarkUnreadEligibility,
@@ -70,7 +76,7 @@ pub struct SidebarChatRow {
     pub search_text: String,
     /// Current epoch workspace copy progress; counts use the progress owner unit.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required)]
+    #[schemars(required, schema_with = "nullable_schema::<crate::layr_progress::CopyProgress>")]
     pub copy_progress: Option<crate::layr_progress::CopyProgress>,
     /// Whether the existing stall owner reports waiting for lead action.
     pub waiting_for_lead: bool,
@@ -79,7 +85,7 @@ pub struct SidebarChatRow {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SidebarChatList {
-    /// Visible managed lead chats; row order uses the sidebar source order.
+    /// Visible managed lead chats, ordered by the opaque sort key.
     pub rows: Vec<SidebarChatRow>,
 }
 
@@ -103,12 +109,27 @@ mod tests {
         let value = json!({
             "id":"chat","name":"Chat","projectPath":"/project","projectId":null,"projectServerId":null,"projectFolder":null,
             "projectFolderRevision":0,"teamId":null,"groupKey":"group","orderRank":null,
-            "sortKey":"sort","activityAt":1.5,"pinned":false,"archived":false,
+            "sortKey":"sort","activityAt":1.5,"pinned":false,"archived":false,"inFlight":false,
             "provider":"codex","model":null,"indicator":{"kind":"none","label":"Ready"},
             "markRead":null,"markUnread":"no_completed_result","canChangeProject":true,
             "canArchive":true,"compactPinned":true,"searchText":"chat","copyProgress":null,
             "waitingForLead":false
         });
+        let mut document = studio_json::json!({"components":{"schemas":{}}});
+        // Use the same owner renderer as committed OpenAPI generation.
+        let mut generator = schemars::generate::SchemaSettings::draft2020_12()
+            .for_serialize().with(|s| s.definitions_path = "/components/schemas".into()).into_generator();
+        generator.subschema_for::<SidebarChatRow>();
+        for (name, schema) in generator.take_definitions(true) { document["components"]["schemas"][name] = schema; }
+        let schema = &document["components"]["schemas"]["SidebarChatRow"];
+        let properties = schema["properties"].as_object().expect("properties");
+        let required = schema["required"].as_array().expect("required");
+        assert_eq!(properties.len(), required.len(), "all row fields required");
+        for key in properties.keys() { assert!(required.contains(&json!(key)), "{key}"); }
+        let mut validation = document.clone();
+        validation["$ref"] = json!("#/components/schemas/SidebarChatRow");
+        let validator = jsonschema::validator_for(&validation).expect("schema compiles");
+        assert!(validator.is_valid(&value), "canonical null fixture must validate: {:?}", validator.iter_errors(&value).collect::<Vec<_>>());
         let row: SidebarChatRow = studio_json::from_value(value.clone()).expect("canonical row");
         assert_eq!(studio_json::to_value(row).expect("row serialization"), value);
         for field in ["projectFolder", "teamId", "orderRank", "model", "copyProgress", "markRead"] {
