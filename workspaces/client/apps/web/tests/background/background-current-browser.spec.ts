@@ -2,9 +2,12 @@ import type { components } from "../../src/generated/api.ts";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { approval } from "../../src/approvalFixtures.ts";
 import { required } from "../teams/helpers.ts";
-import { execFileSync } from "node:child_process";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
-import { createServer } from "vite";
+import {
+  captureActivity,
+  builtActivityFixture,
+  builtActivityHtml,
+} from "./builtActivityFixture";
 import type {} from "./background-current-browser.fixture.tsx";
 // Current activity lifecycle through the real component. HTTP calls use fixtures.
 import { mkdtemp, rm } from "node:fs/promises";
@@ -44,36 +47,11 @@ test("Background Current Browser", async ({
   const root = fileURLToPath(new URL("../../../../../../", import.meta.url));
   const temporary = await mkdtemp(join(tmpdir(), "studio-current-background-"));
 
-  const server = await createServer({
-    configFile: false,
-    root: join(root, "workspaces/client/apps/web"),
-    cacheDir: join(temporary, "vite"),
-    plugins: [
-      {
-        name: "current-background-fixture",
-        load(id) {
-          if (
-            process.env.BASELINE_SYNC_WAIT === "1" &&
-            id ===
-              join(
-                root,
-                "workspaces/client/apps/web/src/components/shell/BackgroundTasks.tsx",
-              )
-          )
-            return execFileSync(
-              "git",
-              [
-                "show",
-                "HEAD:workspaces/client/apps/web/src/components/shell/BackgroundTasks.tsx",
-              ],
-              { cwd: root, encoding: "utf8" },
-            );
-          return undefined;
-        },
-      },
-    ],
-    server: { host: "127.0.0.1", port: 0, hmr: false },
-  });
+  const server = await builtActivityFixture(
+    join(root, "workspaces/client/apps/web"),
+    temporary,
+    "background-current-browser.fixture.tsx",
+  );
   await server.listen();
   try {
     const page = testPage;
@@ -84,7 +62,7 @@ test("Background Current Browser", async ({
     await page.route("**/fixture", (route) =>
       route.fulfill({
         contentType: "text/html",
-        body: '<!doctype html><div id="root"></div><script type="module">import "/tests/background/background-current-browser.fixture.tsx";</script>',
+        body: builtActivityHtml,
       }),
     );
     let holdAnswer = false,
@@ -502,6 +480,9 @@ test("Background Current Browser", async ({
       });
       await page.locator('[data-task-detail="child"]').waitFor();
       await page.getByRole("region", { name: "Command controls" }).waitFor();
+      await expect(
+        page.locator('[data-task-detail="child"] .task-owner'),
+      ).toHaveText("Worker");
       assert.equal(
         await page.evaluate(
           () => document.documentElement.scrollWidth > innerWidth,
@@ -509,9 +490,7 @@ test("Background Current Browser", async ({
         false,
         "No page overflow at " + width,
       );
-      await page.screenshot({
-        path: testInfo.outputPath("studio-current-activity-" + width + ".png"),
-      });
+      await captureActivity(page, testInfo, "studio-current-activity-" + width);
       listing.activities = listing.activities.filter(
         (entry) => entry.value.id !== "child",
       );

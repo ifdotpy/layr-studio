@@ -1,5 +1,7 @@
 import { backgroundDisplay } from "./background.ts";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -8,7 +10,8 @@ import "../../src/appearance.css";
 import TerminalDock from "../../src/components/TerminalDock.tsx";
 import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
 import DraftVersions from "../../src/components/DraftVersions.tsx";
-import type { Agent, BackgroundTask } from "../../src/types.ts";
+import type { components } from "../../src/generated/api";
+import type { Agent } from "../../src/types.ts";
 import { fixtureSnapshot } from "./snapshot.ts";
 
 declare global {
@@ -17,20 +20,22 @@ declare global {
   }
 }
 
-const task = (id: string, created: number, agent = "lead"): BackgroundTask => ({
-  id,
-  created,
-  agent,
-  display: backgroundDisplay("command", id),
-  kind: "command",
-  name: "commandExecution",
-  command: id,
-  status: "running",
-  tail: id,
-});
+const task = (id: string, created: number, agent = "lead") =>
+  ({
+    id,
+    created,
+    agent,
+    display: backgroundDisplay("command", id),
+    kind: "command",
+    name: "commandExecution",
+    command: id,
+    status: "running",
+    tail: id,
+    turnId: "turn",
+  }) satisfies components["schemas"]["TaskProjection"];
 function Fixture() {
   const [scope, setScope] = useState("lead");
-  const [tasks, setTasks] = useState<BackgroundTask[]>([]);
+  const [tasks, setTasks] = useState<ReturnType<typeof task>[]>([]);
   const [text, setText] = useState("Current");
   const [opened, setOpened] = useState(false);
   const agent = {
@@ -44,6 +49,23 @@ function Fixture() {
     [agent, { ...agent, id: "other", rootId: "other" }],
     tasks,
   );
+  useEffect(() => {
+    defaultSubscriptions.publish(
+      { kind: "state" },
+      data.threads.map((owner) => ({
+        collection: "agentSummary",
+        id: owner.id,
+        value: agentSummaryFixture(owner.id, { name: owner.name ?? owner.id }),
+      })),
+    );
+    defaultSubscriptions.publish(
+      { kind: "processes", agentId: scope },
+      {
+        processes: [],
+        activities: tasks.map((value) => ({ source: "task" as const, value })),
+      },
+    );
+  }, [scope, tasks]);
   window.support = {
     initial: () => setTasks([task("first", 10)]),
     newer: () => setTasks([task("new", 20), task("first", 10)]),
@@ -58,7 +80,6 @@ function Fixture() {
       <BackgroundTasks
         opened={opened}
         close={() => setOpened(false)}
-        data={data}
         leadId={scope}
         openAgent={() => {}}
         refresh={async () => {}}

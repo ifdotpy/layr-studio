@@ -1,3 +1,5 @@
+import { captureActivity } from "./builtActivityFixture";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { required } from "../teams/helpers.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -168,6 +170,24 @@ test("Background controls", async ({ context }, testInfo) => {
     runtime: {
       ...fixtureSnapshot([agent]).runtime,
       agents: [agent],
+      get agentSummaries(): components["schemas"]["AgentSummaryEntityDto"][] {
+        return this.agents.map((row) => ({
+          ...agentSummaryFixture(row.id, {
+            name: row.name ?? row.id,
+            rootId: row.rootId ?? row.id,
+            epoch: row.epoch ?? 0,
+            accountKey: row.accountKey ?? "default",
+            status: row.status ?? "idle",
+            isLead: row.isLead ?? false,
+            parentId: row.parentId ?? null,
+            model: row.model ?? null,
+            inFlight: row.inFlight ?? false,
+          }),
+          startAttempt: row.startAttempt,
+          error: row.error,
+          role: row.role,
+        }));
+      },
       rooms: [],
       complaints: [],
       monitors: [monitor],
@@ -667,9 +687,13 @@ test("Background controls", async ({ context }, testInfo) => {
     assert.equal(required(writes.at(-1)).path, "/api/processes/action");
     assert.equal(required(writes.at(-1)).body.action, "stop_selected");
     assert.equal(required(writes.at(-1)).body.process!.key, "native-key");
-    await page.screenshot({
-      path: testInfo.outputPath("native-command-controls.png"),
-    });
+    await expect(
+      drawer.getByRole("button", { name: "Check stop result", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      drawer.getByRole("button", { name: "Stop owned processes", exact: true }),
+    ).toBeEnabled();
+    await captureActivity(page, testInfo, "native-command-controls");
     assert.equal(
       writes.some(
         (w) => w.path === "/api/monitor/input" && w.body.id === "9042",

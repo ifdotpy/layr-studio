@@ -1,3 +1,11 @@
+import {
+  ProcessSourceKind,
+  BackgroundTaskKind,
+  BackgroundTaskKindLabel,
+  BackgroundTaskIndicator,
+  BackgroundTaskLabel,
+  ProcessStdinState,
+} from "../../generated/api";
 import { TaskStatus as GeneratedApiTaskStatus } from "../../generated/api.ts";
 import { webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -8,10 +16,14 @@ import { createMutationJournal } from "../../servers/mutationIdentity";
 import { monitorInputStoreFixture } from "../../servers/monitorInputStore.fixture";
 import type { Agent } from "../../types";
 
+vi.mock("mobx-react-lite", () => ({
+  observer: (component: unknown) => component,
+}));
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[],
   cursor: 0,
   api: undefined as ServerApi | undefined,
+  actions: {} as Record<string, unknown>,
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
   useServerApi: () => hooks.api,
@@ -33,7 +45,10 @@ vi.mock("react", async (original) => ({
     ];
   },
 }));
-import { ProcessInput } from "./BackgroundTasks";
+vi.mock("./backgroundTaskActions", () => ({
+  useBackgroundTaskActions: () => hooks.actions,
+}));
+import { ProcessInput } from "./ProcessInput";
 
 function memoryStorage(): Storage {
   const rows = new Map<string, string>();
@@ -128,34 +143,52 @@ function fixture() {
       beginActivity: () => () => {},
     });
   hooks.api = open();
-  const task = {
+  const task: import("../backgroundTaskModel").DisplayProcessTask = {
     id: "monitor-one",
     agent: "owner",
     created: 1,
     status: GeneratedApiTaskStatus.running,
-    interactive: true,
+    key: "monitor-key",
+    generation: "generation",
+    accountKey: "target",
+    epoch: 3,
+    name: "Command",
+    source: ProcessSourceKind.monitor,
+    bytes: 0,
+    cancelRequested: false,
+    outputTruncated: false,
+    outputPatterns: [],
+    tail: "",
     display: {
-      kind: "monitor",
-      kindLabel: "monitor",
+      kind: BackgroundTaskKind.monitor,
+      kindLabel: BackgroundTaskKindLabel.monitor,
       title: "Command",
       active: true,
-      indicator: "working",
-      label: "running",
+      indicator: BackgroundTaskIndicator.working,
+      label: BackgroundTaskLabel.running,
       inBackgroundList: true,
       actions: ["stop", "input", "resize", "readOutput"],
-      stdinState: "open",
+      stdinState: ProcessStdinState.open,
     },
   } as const;
   const owner = { id: "owner", accountKey: "target", epoch: 3 } as Agent;
   const actions: Promise<boolean>[] = [];
   const render = () => {
     hooks.cursor = 0;
-    return ProcessInput({
-      task,
-      owner,
+    hooks.actions = {
+      api: hooks.api,
+      owner: () => owner,
       pending: false,
-      receiptOnly,
-      act: (path, body) => {
+      checkInputReceipt: () =>
+        hooks.api!.checkMonitorInputReceipt(task.id, {
+          agent: owner.id,
+          accountKey: owner.accountKey || "default",
+          epoch: owner.epoch!,
+        }),
+      act: (
+        path: import("../../api").ApiPostPath,
+        body: import("../../api").PostInput<import("../../api").ApiPostPath>,
+      ) => {
         const action = hooks.api!.post(path, body).then(
           () => true,
           () => false,
@@ -163,7 +196,12 @@ function fixture() {
         actions.push(action);
         return action;
       },
-    });
+    };
+    return ProcessInput({
+      task: receiptOnly
+        ? { ...task, display: { ...task.display, actions: ["readOutput"] } }
+        : task,
+    }) as ReactElement;
   };
   const send = async () => {
     const submit = find(render(), (node) => node.type === "form")?.props

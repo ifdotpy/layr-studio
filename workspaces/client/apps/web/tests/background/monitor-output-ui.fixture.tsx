@@ -1,4 +1,4 @@
-import { fixtureSnapshot } from "../fixtures/snapshot.ts";
+import { refreshProjection } from "../../src/sync/client";
 declare global {
   interface Window {
     notices: string[];
@@ -11,9 +11,8 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
 import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
-const data = fixtureSnapshot([
-  { id: "lead", rootId: "lead", name: "Lead", epoch: 2, accountKey: "default" },
-]);
+// The isolated subtree uses the same singleton bootstrap as App.
+await refreshProjection();
 createRoot(document.getElementById("root")!).render(
   React.createElement(
     MantineProvider,
@@ -21,7 +20,6 @@ createRoot(document.getElementById("root")!).render(
     React.createElement(BackgroundTasks, {
       opened: true,
       close: () => {},
-      data,
       leadId: "lead",
       initialFocus: { id: "monitor", leadId: "lead", requestId: "focus" },
       openAgent: () => {},

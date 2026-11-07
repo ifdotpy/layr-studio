@@ -2978,7 +2978,6 @@ export default function App({ active = true }: { active?: boolean }) {
                 (source || chatActionsButton.current)?.focus();
               })
             }
-            data={chatData!}
             leadId={lead?.id}
             openAgent={open}
             refresh={refresh}

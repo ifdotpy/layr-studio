@@ -1,3 +1,6 @@
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import type { components } from "../../src/generated/api";
 import { approval } from "../../src/approvalFixtures.ts";
 import { desktopFixture } from "../files/desktop.fixture.ts";
 import type { JsonInput } from "../../src/types.ts";
@@ -99,36 +102,50 @@ window.renderCase = async (which, value) => {
       refresh,
       notify: noop,
     });
-  if (which === "background")
+  if (which === "background") {
+    const task: components["schemas"]["TaskProjection"] = {
+      id: "tool",
+      agent: "lead",
+      kind: "command",
+      name: "commandExecution",
+      command: "fixture command",
+      status: "running",
+      created: 1,
+      turnId: "turn",
+      display: {
+        kind: "command",
+        kindLabel: "command",
+        title: "fixture command",
+        active: true,
+        indicator: "working",
+        label: "running",
+        inBackgroundList: true,
+        actions: ["readOutput"],
+      },
+      // @ts-expect-error error deliberately contains a structured legacy diagnostic.
+      error: value,
+      stdinError: value,
+    };
+    defaultSubscriptions.publish({ kind: "state" }, [
+      {
+        collection: "agentSummary",
+        id: "lead",
+        value: agentSummaryFixture("lead"),
+      },
+    ]);
+    defaultSubscriptions.publish(
+      { kind: "processes", agentId: "lead" },
+      { processes: [], activities: [{ source: "task", value: task }] },
+    );
     component = React.createElement(BackgroundTasks, {
       opened: true,
       close: noop,
-      data: {
-        ...snapshot,
-        runtime: {
-          ...snapshot.runtime,
-          tasks: [
-            {
-              id: "tool",
-              agent: "lead",
-              kind: "command",
-              name: "commandExecution",
-              command: "fixture command",
-              status: "running",
-              created: 1,
-              // @ts-expect-error error deliberately contains a structured legacy diagnostic.
-              error: value,
-              // @ts-expect-error stdinError deliberately contains a structured legacy diagnostic.
-              stdinError: value,
-            },
-          ],
-        },
-      },
       leadId: "lead",
       openAgent: noop,
       refresh,
       notify: noop,
     });
+  }
   if (which === "capacity")
     component = React.createElement(CapacityRetry, {
       agentId: "lead",

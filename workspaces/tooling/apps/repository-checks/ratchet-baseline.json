@@ -3113,10 +3113,6 @@
       "fingerprint": "157c0e43f1fbfe454daf186c9832b6e0d72691505182671193be4af37d079fd2:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/shell/BackgroundTasks.tsx",
-      "fingerprint": "25eb064b5da850b90f51e8e4eec57d15a83381121d4c000c9d8b9f0f98d53026:0"
-    },
-    {
       "file": "workspaces/client/apps/web/tests/agents/agent-phase-browser.fixture.tsx",
       "fingerprint": "ef8faf965d18f1b26f79b093501df67122872504c3bbd84994619adfb7a00cc0:0"
     },

@@ -1,58 +1,32 @@
 import { randomUUID } from "../../uuid";
-import { sessionOutboxRequests } from "../../browserPersistence";
 import { Button, Text, Textarea, TextInput } from "@mantine/core";
+import { observer } from "mobx-react-lite";
+import { useBackgroundTaskActions } from "./backgroundTaskActions";
 import { useState } from "react";
-import { ApiError, errorText, type PostBody } from "../../api";
-import {
-  useServerApi,
-  useServerServices,
-} from "../../servers/ServerServicesContext";
 import type { DisplayProcessTask } from "../backgroundTaskModel";
 
-type Restart = PostBody<"/api/monitor/restart">;
 export function restartPatterns(text: string): string[] {
   return text.split("\n").filter((line) => line.length > 0);
 }
 
-export default function MonitorRestart({
+const MonitorRestart = observer(function MonitorRestart({
   task,
-  notify,
-  refresh,
 }: {
-  task: Pick<
-    DisplayProcessTask,
-    "id" | "agent" | "command" | "cancelRequested"
-  > & { outputPatterns?: readonly string[] | undefined } & Partial<
-      Pick<DisplayProcessTask, "epoch" | "accountKey">
-    >;
-  notify: (message: string) => void;
-  refresh: () => Promise<void>;
+  task: DisplayProcessTask;
 }) {
-  const { post } = useServerApi();
-  const services = useServerServices();
-  const outbox = sessionOutboxRequests();
-  const suffix = `${services?.owner.id || "local"}:${task.id}`;
-  const [receipt, setReceipt] = useState<Restart | null>(() => {
-    try {
-      const saved: Restart | null = JSON.parse(
-        outbox.get("monitorRestart", suffix) || "null",
-      );
-      return saved;
-    } catch {
-      return null;
-    }
-  });
+  const actions = useBackgroundTaskActions();
+  const [receipt, setReceipt] = useState(() => actions.restartReceipt(task.id));
   const [opened, setOpened] = useState(!!receipt);
   const { outputPatterns, epoch, accountKey } = task;
-  const [patterns, setPatterns] = useState((outputPatterns || []).join("\n"));
+  const [patterns, setPatterns] = useState(outputPatterns.join("\n"));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const values = restartPatterns(patterns);
   const unchanged =
-    patterns === (outputPatterns || []).join("\n") ||
-    JSON.stringify(values) === JSON.stringify(outputPatterns || []);
+    patterns === outputPatterns.join("\n") ||
+    JSON.stringify(values) === JSON.stringify(outputPatterns);
   const submit = async () => {
-    if (pending || epoch == null) return;
+    if (pending) return;
     const body = receipt || {
       id: task.id,
       agent: task.agent,
@@ -61,48 +35,23 @@ export default function MonitorRestart({
       requestId: randomUUID(),
       outputPatterns: values,
     };
-    // Retain the exact confirmed request across a lost reply or drawer close.
-    outbox.set("monitorRestart", suffix, JSON.stringify(body));
     setReceipt(body);
     setPending(true);
     setError("");
-    try {
-      await post("/api/monitor/restart", body);
-      outbox.remove("monitorRestart", suffix);
+    const result = await actions.restart(body);
+    if (result.status === "applied") {
       setReceipt(null);
       setOpened(false);
-      notify(
-        "Restart queued. The new command waits for the previous command to exit.",
-      );
-      void refresh().catch((failure) => notify(errorText(failure)));
-    } catch (failure) {
-      if (
-        failure instanceof ApiError &&
-        failure.status >= 400 &&
-        failure.status < 500
-      ) {
-        outbox.remove("monitorRestart", suffix);
-        setReceipt(null);
-        setError(errorText(failure));
-      } else {
-        setError(
-          "The restart result is unknown. Check the same request before another restart.",
-        );
-      }
-    } finally {
-      setPending(false);
+    } else {
+      if (result.status === "rejected") setReceipt(null);
+      setError(result.error);
     }
+    setPending(false);
   };
   if (!opened && task.cancelRequested) return null;
   if (!opened)
     return (
-      <Button
-        size="xs"
-        variant="light"
-        mt="xs"
-        disabled={epoch == null}
-        onClick={() => setOpened(true)}
-      >
+      <Button size="xs" variant="light" mt="xs" onClick={() => setOpened(true)}>
         Restart with narrower patterns
       </Button>
     );
@@ -149,4 +98,5 @@ export default function MonitorRestart({
       </div>
     </div>
   );
-}
+});
+export default MonitorRestart;

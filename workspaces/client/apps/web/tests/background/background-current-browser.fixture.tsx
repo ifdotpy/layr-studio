@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 import type { components } from "../../src/generated/api.ts";
 import type { Snapshot } from "../../src/types.ts";
 type Focus = React.ComponentProps<typeof BackgroundTasks>["initialFocus"];
@@ -33,6 +34,24 @@ const services = createServerServices({
 await services.ready();
 const root = createRoot(document.getElementById("root")!);
 window.renderFixture = (data, listing, leadId = "lead", initialFocus) => {
+  services.resources.publish({ kind: "state" }, [
+    ...data.threads.map((agent) => ({
+      collection: "agentSummary" as const,
+      id: agent.id,
+      value: agentSummaryFixture(agent.id, {
+        name: agent.name ?? agent.id,
+        rootId: agent.rootId ?? agent.id,
+        epoch: agent.epoch ?? 0,
+        accountKey: agent.accountKey ?? "default",
+        inFlight: agent.inFlight ?? false,
+      }),
+    })),
+    ...data.runtime.requests.map((value) => ({
+      collection: "request" as const,
+      id: value.id,
+      value,
+    })),
+  ]);
   services.resources.publish({ kind: "processes", agentId: leadId }, listing);
   root.render(
     React.createElement(
@@ -43,7 +62,6 @@ window.renderFixture = (data, listing, leadId = "lead", initialFocus) => {
         children: React.createElement(BackgroundTasks, {
           opened: true,
           close: () => {},
-          data,
           leadId,
           initialFocus,
           openAgent: () => {},

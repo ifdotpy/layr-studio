@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { fixturePostBody } from "../teams/helpers.ts";
 import type { GetResult, PostBody } from "../../src/apiTypes.ts";
@@ -5,7 +6,11 @@ import type {} from "./monitor-output-ui.fixture.tsx";
 // Hidden browser fixture for the real activity drawer. Native processes use HTTP fixtures.
 import { test, expect, handleEntitySyncFixtureRequest } from "../playwright.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
-import { createServer } from "vite";
+import {
+  captureActivity,
+  builtActivityFixture,
+  builtActivityHtml,
+} from "./builtActivityFixture";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,17 +23,11 @@ for (const width of [320, 1200]) {
     const root = fileURLToPath(new URL("../../", import.meta.url));
     const temporary = await mkdtemp(join(tmpdir(), "studio-monitor-output-"));
 
-    const server = await createServer({
-      configFile: false,
+    const server = await builtActivityFixture(
       root,
-      cacheDir: join(temporary, "vite"),
-      plugins: [
-        {
-          name: "monitor-output-fixture",
-        },
-      ],
-      server: { host: "127.0.0.1", port: 0, hmr: false },
-    });
+      temporary,
+      "monitor-output-ui.fixture.tsx",
+    );
     await server.listen();
     const calls: { path: string; body: PostBody<"/api/monitor/restart"> }[] =
       [];
@@ -80,15 +79,27 @@ for (const width of [320, 1200]) {
     };
     const syncFixture = {
       workspaceId: "1234567890abcdef1234567890abcdef",
-      snapshot: fixtureSnapshot([
-        {
-          id: "lead",
-          rootId: "lead",
-          name: "Lead",
-          epoch: 2,
-          accountKey: "default",
+      snapshot: {
+        ...fixtureSnapshot([
+          {
+            id: "lead",
+            rootId: "lead",
+            name: "Lead",
+            epoch: 2,
+            accountKey: "default",
+          },
+        ]),
+        runtime: {
+          ...fixtureSnapshot([]).runtime,
+          agentSummaries: [
+            agentSummaryFixture("lead", {
+              name: "Lead",
+              epoch: 2,
+              accountKey: "default",
+            }),
+          ],
         },
-      ]),
+      },
       versionedResources: true,
       processSnapshot: () => ({
         processes: [monitor, background],
@@ -114,7 +125,7 @@ for (const width of [320, 1200]) {
     await page.route("**/fixture", (route) =>
       route.fulfill({
         contentType: "text/html",
-        body: '<!doctype html><div id="root"></div><script type="module">import "/tests/background/monitor-output-ui.fixture.tsx";</script>',
+        body: builtActivityHtml,
       }),
     );
     await page.route("**/api/**", async (route) => {
@@ -190,10 +201,11 @@ for (const width of [320, 1200]) {
           "The command is still running. Its exit will still wake the agent.",
         ),
       ).toBeVisible();
-      await page.screenshot({
-        path: testInfo.outputPath(`monitor-paused-${width}.png`),
-        fullPage: true,
-      });
+      await expect(page.locator(".task-owner")).toHaveText("Lead");
+      await expect(
+        page.getByRole("button", { name: "Stop owned processes", exact: true }),
+      ).toBeEnabled();
+      await captureActivity(page, testInfo, `monitor-paused-${width}`);
       await page
         .getByRole("button", {
           name: "Restart with narrower patterns",
@@ -221,10 +233,10 @@ for (const width of [320, 1200]) {
       await page
         .getByLabel("Output patterns, one per line")
         .fill("build complete");
-      await page.screenshot({
-        path: testInfo.outputPath(`monitor-confirm-${width}.png`),
-        fullPage: true,
-      });
+      await expect(
+        page.getByRole("button", { name: "Confirm restart", exact: true }),
+      ).toBeEnabled();
+      await captureActivity(page, testInfo, `monitor-confirm-${width}`);
       await page.getByRole("button", { name: "Confirm restart" }).click();
       await expect(
         page.getByText(
@@ -260,10 +272,7 @@ for (const width of [320, 1200]) {
           "The output file exceeds the preview limit. Only its first part appears below.",
         ),
       ).toBeVisible();
-      await page.screenshot({
-        path: testInfo.outputPath(`claude-output-${width}.png`),
-        fullPage: true,
-      });
+      await captureActivity(page, testInfo, `claude-output-${width}`);
       outputDenied = true;
       await page
         .getByRole("button", { name: "View output", exact: true })

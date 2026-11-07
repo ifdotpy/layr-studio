@@ -6,9 +6,11 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { text } from "node:stream/consumers";
 import ts from "typescript";
 
@@ -35,7 +37,7 @@ const input: {
       production: true,
     }
   : JSON.parse(await text(process.stdin));
-const directory = mkdtempSync(join(web, ".observable-codegen-"));
+const directory = mkdtempSync(join(tmpdir(), "observable-codegen-"));
 function write(path: string, source: string) {
   const destination = join(directory, path);
   mkdirSync(resolve(destination, ".."), { recursive: true });
@@ -61,6 +63,11 @@ function declarations(path: string, names: readonly string[]) {
     .join("\n");
 }
 try {
+  symlinkSync(
+    join(web, "node_modules"),
+    join(directory, "node_modules"),
+    "dir",
+  );
   write("package.json", '{"type":"module"}');
   // Count generated splice calls even when the reconciler uses temporary plain arrays.
   write(
