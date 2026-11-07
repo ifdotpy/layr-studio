@@ -2037,7 +2037,10 @@ pub async fn conversation(
                         }
                         .into());
                     }
-                    Ok(value)
+                    // The reply is the agent response, as for every other
+                    // update: the stored record also holds fields that the
+                    // response refuses, and the change is already committed.
+                    Ok(sync_projection(connection, &value)?)
                 },
             )
             .await?;

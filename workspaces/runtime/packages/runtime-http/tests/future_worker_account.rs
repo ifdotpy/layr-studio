@@ -339,3 +339,48 @@ async fn failed_fresh_metadata_cannot_change_future_defaults_or_existing_workers
         fixture.catalog.shutdown().await.expect("catalog shutdown");
     }
 }
+
+#[tokio::test]
+async fn a_subagent_parallelism_change_answers_with_the_agent_it_saved() {
+    let fixture = Fixture::new(false).await;
+    // A lead created by Studio stores fields that the agent response does not
+    // carry; the reply must be the response projection, not the stored record.
+    let mut stored = actor(&fixture.store, LEAD);
+    stored["capacity"] = json!({"kind":"automatic","max":64});
+    stored["turnEpoch"] = json!(0);
+    stored["workspaceInGit"] = json!(false);
+    fixture
+        .store
+        .transaction(move |tx| {
+            AgentRepository::put(tx, &AgentRecord::from_value(stored)?)?;
+            Ok::<_, StoreError>(())
+        })
+        .await
+        .expect("stored lead capacity");
+    let before = actor(&fixture.store, LEAD);
+    let revision = before["agentModeRevision"].as_i64().unwrap_or(0);
+    let (status, saved) = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        call(
+            &fixture.app,
+            "POST",
+            "/api/conversation",
+            Some(json!({
+                "id": LEAD,
+                "expected_account_key": LEAD_ACCOUNT,
+                "subagent_concurrency": 0,
+                "expected_mode_revision": revision,
+                "request_id": studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+            })),
+        ),
+    )
+    .await
+    .expect("the parallelism change answers");
+    // The change commits before the reply; a reply that cannot be built would
+    // report a failure for a saved change.
+    assert_eq!(actor(&fixture.store, LEAD)["concurrency"], 0);
+    assert_eq!(status, 200, "a saved parallelism change answers: {saved}");
+    assert_eq!(saved["id"], LEAD);
+    assert_eq!(saved["concurrency"], 0);
+    fixture.catalog.shutdown().await.expect("catalog shutdown");
+}
