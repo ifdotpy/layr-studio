@@ -766,9 +766,9 @@ where
         let mut fork_at = None::<chrono::DateTime<chrono::FixedOffset>>;
         for line in BufReader::new(file).lines() {
             check_codex_scan(started, cancelled)?;
-            let Ok(row) =
-                crate::analytics_rollout::RolloutRow::parse(&line.map_err(|_| UsageError::Scan)?)
-            else {
+            let Ok(Some(row)) = crate::analytics_rollout::RolloutRow::parse_for_cost(
+                &line.map_err(|_| UsageError::Scan)?,
+            ) else {
                 continue;
             };
             let kind = row.kind;
@@ -1587,6 +1587,70 @@ mod tests {
             super::acquire_codex_scan_lock_for(Duration::ZERO, None),
             Err(super::UsageError::ScannerBusy)
         ));
+    }
+
+    #[cfg(feature = "perf-reporting")]
+    #[test]
+    fn codex_cost_scan_skips_unused_value_decodes() {
+        // Keep one-time schema initialization outside the measured scan.
+        crate::analytics_rollout::RolloutContext::from_record(json!({"threadId":""}))
+            .expect("initialize rollout schema");
+        let root = tempfile::tempdir().expect("fixture directory");
+        std::fs::create_dir(root.path().join("sessions")).expect("fixture sessions");
+        let rows = ["response_item", "compacted", "event_msg", "unknown"]
+            .map(|kind| json!({"type":kind,"payload":{"body":"ignored"}}).to_string());
+        std::fs::write(root.path().join("sessions/ignored.jsonl"), rows.join("\n"))
+            .expect("fixture rows");
+        let label = "test/codex-cost-skipped-rows";
+        let report = studio_json::perf_reporting::with_job(label.to_owned(), || {
+            super::scan_codex_sessions_with_catalog(
+                root.path(),
+                chrono::Utc::now().timestamp() as f64,
+                &AtomicBool::new(false),
+                || None,
+            )
+        })
+        .expect("cost scan");
+        assert!(report["last30DaysTokens"].is_null());
+        let key = format!("{label} | {}", std::any::type_name::<Value>());
+        let decodes = studio_json::perf_reporting::decode_snapshot();
+        assert_eq!(decodes.get(&key).map_or(0, |entry| entry.count), 0);
+    }
+
+    #[test]
+    fn codex_session_fixture_cost_filter_preserves_row_semantics() {
+        use crate::analytics_rollout::{RolloutKind, RolloutRow};
+        for raw in [
+            r#"{"type":"session_meta","payload":{"id":"session"}}"#,
+            r#"{"type":"turn_context","payload":{"model":"model"}}"#,
+            r#"{"type":"token_usage_record","payload":{"response_id":"response"}}"#,
+            r#"{"type":"response_item","payload":{"body":"ignored"}}"#,
+            r#"{"type":"compacted"}"#,
+            r#"{"type":"event_msg"}"#,
+            r#"{"type":7}"#,
+            r#"{"type":null}"#,
+            r#"{}"#,
+            r#"{"type":"other","type":"turn_context"}"#,
+            r#"{"type":"turn_context","type":7}"#,
+            r#"{"type":"turn_context","type":"response_item"}"#,
+            r#"{"type":"turn_\u0063ontext"}"#,
+        ] {
+            let original = RolloutRow::parse(raw).expect("valid row");
+            let filtered = RolloutRow::parse_for_cost(raw).expect("valid head");
+            if matches!(
+                original.kind,
+                RolloutKind::SessionMeta | RolloutKind::TurnContext | RolloutKind::TokenUsageRecord
+            ) {
+                let filtered = filtered.expect("consumed row");
+                assert_eq!(filtered.kind, original.kind);
+                assert_eq!(filtered.value, original.value);
+            } else {
+                assert!(filtered.is_none(), "{raw}");
+            }
+        }
+        for raw in ["{", r#"{"type":"response_item","payload":[}"#] {
+            assert!(RolloutRow::parse_for_cost(raw).is_err());
+        }
     }
 
     #[test]

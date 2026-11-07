@@ -26,6 +26,22 @@ pub(crate) struct RolloutRow {
 }
 
 impl RolloutRow {
+    /// Cost reports consume only original usage and its session/model context.
+    /// Borrow bodies until the kind is known, preserving last-key-wins semantics.
+    pub(crate) fn parse_for_cost(raw: &str) -> studio_json::Result<Option<Self>> {
+        let head: std::collections::BTreeMap<String, studio_json::RawJson<'_>> =
+            studio_json::from_str(raw)?;
+        let kind = head
+            .get("type")
+            .and_then(|kind| studio_json::from_str::<String>(kind.as_str()).ok());
+        match kind.as_deref() {
+            Some("session_meta" | "turn_context" | "token_usage_record") => {
+                Self::parse(raw).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn parse(raw: &str) -> studio_json::Result<Self> {
         let value: Value = studio_json::from_str(raw)?;
         let kind = match value.get("type").and_then(Value::as_str) {
