@@ -324,11 +324,15 @@ test("the owner adapter preserves saved organization in standalone and classic s
       { id: "nested", name: "Nested", parentId: "parent" },
     ]);
     expect(published!.peerTeams.map((team) => team.id)).toEqual(["team"]);
-    expect(published!.rows.find((chat) => chat.id === "overlap")!.pinned).toBe(
-      true,
-    );
     expect(
-      published!.rows.find((chat) => chat.id === "archived-chat")!.archived,
+      published!.entities
+        .filter((entity) => entity.collection === "agentSummary")
+        .find((entity) => entity.id === "overlap")!.value.pinned,
+    ).toBe(true);
+    expect(
+      published!.entities
+        .filter((entity) => entity.collection === "agentSummary")
+        .find((entity) => entity.id === "archived-chat")!.value.archived,
     ).toBe(true);
     expect(published).not.toHaveProperty("token");
     await classic.screenshot({

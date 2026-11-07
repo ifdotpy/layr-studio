@@ -5,10 +5,9 @@ import { snapshotFixture } from "../../src/snapshotFixture.ts";
 import { createStateMirror } from "../../src/generated/observableResources.ts";
 import type { AgentSummaryEntityDto } from "../../src/generated/api.ts";
 import {
-  createSidebarRow,
-  localSidebarIdentity,
-} from "../../src/components/sidebar/viewModel.ts";
-import type { SidebarSource } from "../../src/servers/mergedSidebar.ts";
+  agentEntities,
+  withSidebarCollections,
+} from "../../src/servers/sidebarSourceFixture.ts";
 declare global {
   interface Window {
     prepared: string;
@@ -123,17 +122,12 @@ groupMirror.apply([
     value,
   })),
 ]);
-const source: SidebarSource = {
+const source = withSidebarCollections({
   id: "local",
   online: true,
   sidebar: {
     stateDir: groupData.stateDir,
-    rows: groupRows.map((agent) =>
-      createSidebarRow(agent, {
-        collections: groupMirror.current,
-        ...localSidebarIdentity,
-      }),
-    ),
+    entities: agentEntities(groupRows),
     projects: groupData.runtime.projects,
     rooms: groupData.runtime.rooms,
     peerTeams: [],
@@ -144,7 +138,7 @@ const source: SidebarSource = {
     peerTeamsVersion: 1,
     projectOrganizationVersion: 1,
   },
-};
+});
 const model = mergeSidebar([source], 0, true);
 const backends = new Map([["local", localSidebarBackend]]);
 const online = () => true;

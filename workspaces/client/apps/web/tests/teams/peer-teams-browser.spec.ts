@@ -5,7 +5,7 @@ type PeerRequest =
   | components["schemas"]["PeerTeamMoveRequest"]
   | components["schemas"]["PeerTeamDeleteRequest"]
   | components["schemas"]["PeerTeamSaveRequest"];
-import type {} from "./peer-teams-browser.fixture.tsx";
+import type { PeerSidebarEntities } from "./peer-teams-browser.fixture.tsx";
 import { fixturePostBody } from "./helpers.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import { apiSchemaHeaders, test } from "../playwright.ts";
@@ -55,7 +55,7 @@ test("Peer teams browser", async ({
       () => [{ ...row.a }, { ...row.b }, row.c, row.x];
     const sidebarPayload = (
       agents: components["schemas"]["AgentSummaryEntityDto"][],
-    ): components["schemas"]["SyncEntityPayload"][] => [
+    ): PeerSidebarEntities => [
       ...agents.map((value) => ({
         collection: "agentSummary" as const,
         id: value.id,

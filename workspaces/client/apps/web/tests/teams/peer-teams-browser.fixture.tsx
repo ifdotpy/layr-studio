@@ -4,15 +4,17 @@ import { createStateMirror } from "../../src/generated/observableResources.ts";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent, Snapshot } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
+export type PeerSidebarEntities = Extract<
+  components["schemas"]["SyncEntityPayload"],
+  { collection: "agentSummary" | "project" | "peerTeam" }
+>[];
 declare global {
   interface Window {
     setFixture: React.Dispatch<React.SetStateAction<Snapshot>>;
     // Renamed from fixture: performance/scroll-restart.fixture.tsx declares scroll fixture controls.
     peerTeamsData: Snapshot;
     failRefresh: boolean;
-    receivePeerSidebar: (
-      dto: components["schemas"]["SyncEntityPayload"][],
-    ) => void;
+    receivePeerSidebar: (dto: PeerSidebarEntities) => void;
   }
 }
 
