@@ -2514,6 +2514,97 @@ async fn sidebar_source_facts_invalidate_rows_through_the_writer_journal() {
     )
     .expect("JSON");
     assert_eq!(payload["value"]["orderRank"], 0);
+    store
+        .transaction(|tx| {
+            let mut record = AgentRepository::get(tx, &studio_runtime_store::AgentId::from(CHAT))?
+                .expect("chat")
+                .value();
+            record["projectFolder"] = json!("f");
+            AgentRepository::put(tx, &AgentRecord::from_value(record)?)
+        })
+        .await
+        .expect("folder move");
+    before = store
+        .test_read_transaction(|tx| studio_runtime_store::durable_seq::high(tx))
+        .expect("cursor");
+    store
+        .transaction(|tx| {
+            studio_runtime_store::ProjectsRepository::patch_project(
+                tx,
+                "project",
+                &json!({"folders":[{"id":"f","name":"Renamed folder"}]}),
+            )
+        })
+        .await
+        .expect("folder rename");
+    let page = store
+        .test_read_transaction(|tx| {
+            crate::entity_scope::resume(
+                tx,
+                Some(before),
+                Some("[\"sidebarChatRow\"]"),
+                None,
+                None,
+                false,
+                100,
+            )
+        })
+        .expect("folder delta");
+    let payload: Value = studio_json::from_str(
+        page.rows
+            .iter()
+            .find(|r| r.id == CHAT)
+            .expect("folder invalidates chat")
+            .payload
+            .as_deref()
+            .expect("payload"),
+    )
+    .expect("JSON");
+    assert!(
+        payload["value"]["searchText"]
+            .as_str()
+            .expect("text")
+            .contains("renamed folder")
+    );
+    before = page.max_sequence;
+    store
+        .transaction(|tx| {
+            let mut peer =
+                AgentRepository::get(tx, &studio_runtime_store::AgentId::from("sidebar-peer"))?
+                    .expect("peer")
+                    .value();
+            peer["deletedAt"] = json!(9);
+            AgentRepository::put(tx, &AgentRecord::from_value(peer)?)
+        })
+        .await
+        .expect("team peer deletion");
+    let page = store
+        .test_read_transaction(|tx| {
+            crate::entity_scope::resume(
+                tx,
+                Some(before),
+                Some("[\"sidebarChatRow\"]"),
+                None,
+                None,
+                false,
+                100,
+            )
+        })
+        .expect("team retirement delta");
+    let payload: Value = studio_json::from_str(
+        page.rows
+            .iter()
+            .find(|r| r.id == CHAT)
+            .expect("team retirement invalidates surviving chat")
+            .payload
+            .as_deref()
+            .expect("payload"),
+    )
+    .expect("JSON");
+    assert!(
+        payload["value"]["teamId"].is_null(),
+        "canonical team retirement clears the surviving row group"
+    );
 }
 
 #[tokio::test]

@@ -20,3 +20,8 @@ completion boundary. The existing writer journal coalesces changed encoded tails
 into at most one durable mark per lead per commit. Equal replay and worker-only
 tails create no sidebar mark. Search can lag live streamed text until that
 existing flush/completion commit and SSE delivery; the pilot adds no timer.
+
+Held malformed agents retain independently validated provider, name, and working
+folder path in the existing safe-view owner. A malformed provider cannot satisfy
+the row's required `ProviderKind`; that row is omitted, and its existing Studio
+error incident remains the diagnostic surface.

@@ -176,6 +176,24 @@ mod tests {
             value["entityChanges"]["documents"][0]["value"]["name"],
             "Sidebar"
         );
+        let row = &value["entityChanges"]["documents"][0]["value"];
+        assert_eq!(row.as_object().expect("full row").len(), 26);
+        for nullable in [
+            "projectFolder",
+            "projectId",
+            "projectServerId",
+            "teamId",
+            "orderRank",
+            "model",
+            "markRead",
+            "copyProgress",
+        ] {
+            assert_eq!(
+                row.get(nullable),
+                Some(&studio_json::Value::Null),
+                "{nullable} stays explicit null through typed SSE serialization"
+            );
+        }
         let replay = super::super::subscriptions::initial_snapshot(
             state.clone(),
             resource.clone(),

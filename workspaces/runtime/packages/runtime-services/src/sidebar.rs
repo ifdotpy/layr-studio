@@ -21,7 +21,9 @@ fn facts(
     let Some(mut detail) = documents.detail else {
         return Ok(None);
     };
-    if let (Some(detail), Some(studio_json::Value::Object(summary))) = (detail.as_object_mut(), documents.summary) {
+    if let (Some(detail), Some(studio_json::Value::Object(summary))) =
+        (detail.as_object_mut(), documents.summary)
+    {
         for (key, value) in summary {
             detail.entry(key).or_insert(value);
         }
@@ -83,7 +85,8 @@ pub(crate) fn row(
             studio_runtime_store::approvals::open_for_agent(connection, &AgentId(member_id.clone()))
                 .map_err(|_| StoreError::RecordContract("sidebar approval read failed"))?
         {
-            if !matches!(approval.state, ApprovalState::Pending)
+            if approval.hidden.is_some()
+                || !matches!(approval.state, ApprovalState::Pending)
                 || approval
                     .epoch
                     .is_some_and(|epoch| i64::try_from(epoch).ok() != Some(member.epoch))
@@ -105,10 +108,12 @@ pub(crate) fn row(
                 command: display.kind == BackgroundTaskKind::Command,
                 monitor: false,
                 background: !member.in_flight
-                    || member
-                        .turn_id
-                        .as_deref()
-                        .is_some_and(|turn| turn != task.turn_id()),
+                    || (!task.turn_id().is_empty()
+                        && member
+                            .turn_id
+                            .as_deref()
+                            .filter(|turn| !turn.is_empty())
+                            .is_some_and(|turn| turn != task.turn_id())),
             });
         }
         let mut statement = connection.prepare_cached("SELECT record FROM runtime_monitors WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('starting','running','approval')")?;

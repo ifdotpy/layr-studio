@@ -310,11 +310,14 @@ pub(crate) fn pending(
             ids.insert((*source, *row_id), id);
         }
     }
-    let mut pending = PendingEntities::default();
-    pending.sidebar_structure_changed = ids.iter().any(|((source, _), id)| {
-        matches!(source, Source::Project | Source::SidebarOrder)
-            || (id.is_none() && matches!(source, Source::Task | Source::Monitor | Source::Request))
-    });
+    let mut pending = PendingEntities {
+        sidebar_structure_changed: ids.iter().any(|((source, _), id)| {
+            matches!(source, Source::Project | Source::SidebarOrder)
+                || (id.is_none()
+                    && matches!(source, Source::Task | Source::Monitor | Source::Request))
+        }),
+        ..Default::default()
+    };
     for ((source, _), id) in &ids {
         if *source == Source::Agent {
             if let Some(id) = id {

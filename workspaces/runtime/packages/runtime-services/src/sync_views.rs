@@ -594,6 +594,17 @@ pub(crate) fn invalid_agent_view(id: &str, record: &Value, diagnostic: &str) -> 
     if let Some(is_lead) = record.get("isLead").filter(|value| value.is_boolean()) {
         view["isLead"] = is_lead.clone();
     }
+    if let Some(provider) = record.get("provider")
+        && let Ok(provider) =
+            studio_json::from_value::<studio_runtime_schema::ProviderKind>(provider.clone())
+    {
+        view["provider"] = studio_json::to_value(provider).expect("provider serializes");
+    }
+    for field in ["name", "cwd"] {
+        if let Some(value) = record.get(field).filter(|value| value.is_string()) {
+            view[field] = value.clone();
+        }
+    }
     view
 }
 
@@ -1484,7 +1495,16 @@ mod projection_plan_tests {
     #[test]
     fn invalid_agent_view_preserves_valid_root_and_lead_identity() {
         let record = json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":"child","rootId":"lead","epoch":4,"isLead":true});
+        let mut record = record;
+        record["name"] = json!("Held chat");
+        record["cwd"] = json!("/held");
         let view = invalid_agent_view("child", &record, "invalid field /prompt");
+        assert_eq!(
+            view["provider"], "codex",
+            "held sidebar rows retain a checked provider"
+        );
+        assert_eq!(view["name"], "Held chat");
+        assert_eq!(view["cwd"], "/held");
         assert_eq!(view["rootId"], "lead");
         assert_eq!(view["isLead"], true);
         assert_eq!(view["status"], "failed");
@@ -1493,6 +1513,17 @@ mod projection_plan_tests {
         let fallback = invalid_agent_view("child", &malformed_root, "invalid field /rootId");
         assert_eq!(fallback["rootId"], "child");
         assert_eq!(fallback["isLead"], false);
+        let unrepresentable = invalid_agent_view(
+            "child",
+            &json!({"provider":"future","name":{},"cwd":7}),
+            "invalid provider",
+        );
+        for field in ["provider", "name", "cwd"] {
+            assert!(
+                unrepresentable.get(field).is_none(),
+                "malformed {field} is never invented"
+            );
+        }
     }
 
     #[test]
