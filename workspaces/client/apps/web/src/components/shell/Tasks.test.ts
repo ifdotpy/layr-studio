@@ -12,15 +12,37 @@ const { subscriptions, get, post } = vi.hoisted(() => ({
 vi.mock("../../servers/ServerServicesContext", () => ({
   useServerApi: () => ({ get, post }),
   useServerStorage: () => ({}),
+  useServerStore: () => ({
+    work: (id: string) => slot("work", id),
+    agentDetail: (id: string) => slot("agentDetail", id),
+  }),
 }));
-vi.mock("../../sync/subscriptions", () => ({
-  useSubscription: (ref: unknown) =>
-    subscriptions.get(JSON.stringify(ref)) ?? {
-      data: undefined,
-      status: "loading",
-      error: null,
+import {
+  createWorkMirror,
+  createAgentDetailMirror,
+  type WorkSubscriptionData,
+  type AgentDetailEntityDto,
+} from "../../generated/observableResources.ts";
+function slot(kind: string, agentId: string) {
+  const value = subscriptions.get(JSON.stringify({ kind, agentId })) as
+    | { data?: unknown; status: string; error: Error | null }
+    | undefined;
+  if (!value?.data)
+    return {
+      current: value?.error
+        ? { status: "error", error: value.error }
+        : { status: "loading" },
+    };
+  return {
+    current: {
+      status: "live",
+      data:
+        kind === "work"
+          ? createWorkMirror(value.data as WorkSubscriptionData).current
+          : createAgentDetailMirror(value.data as AgentDetailEntityDto).current,
     },
-}));
+  };
+}
 import Tasks from "./Tasks";
 import {
   createTaskAssignmentSelector,

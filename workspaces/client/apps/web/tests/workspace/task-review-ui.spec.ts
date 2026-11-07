@@ -5,7 +5,7 @@ import { fixturePostBody } from "../teams/helpers.ts";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { test, expect } from "../playwright.ts";
-import { createFixtureViteServer as createServer } from "../playwright.ts";
+import { build, preview } from "vite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,24 +16,23 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
 }, testInfo) => {
   const root = resolve(import.meta.dirname, "../..");
   const cacheDir = await mkdtemp(join(tmpdir(), "task-review-ui-"));
-  const server = await createServer({
+  const entry = join(root, "check.html");
+  const outDir = join(cacheDir, "dist");
+  await build({
     configFile: false,
     root,
-    cacheDir,
-    server: { host: "127.0.0.1", port: 0, watch: null, hmr: false },
+    build: { outDir, emptyOutDir: true, rollupOptions: { input: entry } },
     plugins: [
       {
         name: "task-review-fixture",
         enforce: "pre",
-        configureServer(server) {
-          server.middlewares.use("/check", (_req, res) => {
-            res.setHeader("Content-Type", "text/html");
-            res.end(
-              '<meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module" src="/tests/workspace/task-review-fixture.tsx"></script>',
-            );
-          });
+        load(id) {
+          if (id === entry)
+            return '<meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module" src="/tests/workspace/task-review-fixture.tsx"></script>';
+          return undefined;
         },
         resolveId(id) {
+          if (id === entry) return entry;
           if (id.endsWith("/servers/ServerServicesContext"))
             return fileURLToPath(
               new URL("./task-review-api.ts", import.meta.url),
@@ -46,6 +45,12 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
         },
       },
     ],
+  });
+  const server = await preview({
+    configFile: false,
+    root,
+    build: { outDir },
+    preview: { host: "127.0.0.1", port: 0 },
   });
   const gate = { command: "pnpm test", timeout_ms: 600000 };
   const schema = {
@@ -176,7 +181,6 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   try {
-    await server.listen();
     await page.addInitScript((json) => {
       const value: TaskReviewFrames = JSON.parse(json);
       window.taskReviewFrames = value;
@@ -272,7 +276,7 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
     await page.setViewportSize({ width: 320, height: 800 });
     const origin = server.resolvedUrls?.local[0];
     assert.ok(origin);
-    await page.goto(origin + "check");
+    await page.goto(origin + "check.html");
     await page.getByRole("button", { name: /Review the release/ }).click();
     const detail = page.getByRole("article", { name: "Task detail" });
     await expect(detail).toContainText("Gate status: failed");
@@ -412,7 +416,9 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
     expect(errors).toEqual([]);
     expect(reads).toEqual([]);
   } finally {
-    await server.close();
+    await new Promise<void>((resolve, reject) =>
+      server.httpServer.close((error) => (error ? reject(error) : resolve())),
+    );
     await rm(cacheDir, { recursive: true, force: true });
   }
 });

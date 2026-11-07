@@ -1,17 +1,11 @@
-import { WorkStatus as GeneratedApiWorkStatus } from "../generated/api.ts";
 import type {
   ResourceRef,
   ResourceData,
 } from "../sync/subscriptions/contracts";
 import type { ComponentHookCell } from "./componentTestFixtures";
-import {
-  type EffectCallback,
-  type PropsWithChildren,
-  type ComponentProps,
-} from "react";
+import { type EffectCallback, type ComponentProps } from "react";
 import { componentSnapshot } from "./componentTestFixtures";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ReactElement, ReactNode } from "react";
 const h = vi.hoisted(() => ({
   cursor: 0,
   cells: [] as ComponentHookCell[],
@@ -106,7 +100,6 @@ vi.mock("../servers/ServerServicesContext", () => ({
   useServerResources: () => ({ watchResourceConnection: h.watchConnection }),
   useServerTranscripts: () => ({ peekTranscript: () => undefined }),
 }));
-import Tasks from "./shell/Tasks";
 import { UserMessage } from "./shell/messages/UserMessages";
 import { useMessages } from "../hooks";
 const snapshot = () => componentSnapshot([{ id: "lead", epoch: 1 }]);
@@ -129,57 +122,6 @@ afterEach(() => {
   h.refs = [];
   h.errors.clear();
   vi.unstubAllGlobals();
-});
-function elements(
-  node: ReactNode,
-): ReactElement<PropsWithChildren<Record<string, unknown>>>[] {
-  if (Array.isArray(node)) return node.flatMap(elements);
-  if (node && typeof node === "object" && "props" in node) {
-    const element = node as ReactElement<
-      PropsWithChildren<Record<string, unknown>>
-    >;
-    return [element, ...elements(element.props.children)];
-  }
-  return [];
-}
-it("work changes consume the stream without GET /api/work", () => {
-  h.nullRefs = 100;
-  h.data.set("agentDetail", {
-    id: "lead",
-    taskDefaultGate: null,
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "agentDetail" }>>);
-  const task = {
-    id: "work",
-    rootId: "lead",
-    title: "Before",
-    created: 1,
-    updated: 1,
-    version: 1,
-    status: GeneratedApiWorkStatus.running,
-    policy: {
-      blockedBy: [],
-      displayStatus: GeneratedApiWorkStatus.running,
-      acceptAvailable: false,
-      gateOverrideRequired: false,
-    },
-  } as ResourceData<Extract<ResourceRef, { kind: "work" }>>["items"][number];
-  h.data.set("work", {
-    rootId: "lead",
-    items: [task],
-    tasks: [],
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "work" }>>);
-  const titles = () =>
-    elements(render(() => Tasks({ agentId: "lead" })))
-      .filter((node) => node.type === "strong")
-      .map((node) => node.props.children);
-  expect(titles()).toContain("Before");
-  h.data.set("work", {
-    rootId: "lead",
-    items: [{ ...task, title: "After" } as typeof task],
-    tasks: [],
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "work" }>>);
-  expect(titles()).toContain("After");
-  expect(h.get).not.toHaveBeenCalled();
 });
 it("complaint version changes consume streamed detail without GET /api/complaint", () => {
   h.nullRefs = 100;

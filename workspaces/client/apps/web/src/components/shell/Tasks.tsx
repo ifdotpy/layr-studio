@@ -7,80 +7,76 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useRef, useState } from "react";
-import { errorText, type PostBody } from "../../api";
+import { observer, Observer } from "mobx-react-lite";
+import {
+  agentId as workAgentId,
+  type WorkSubscriptionData,
+} from "../../generated/observableResources.ts";
+import { resourceData } from "../../store/runtime.ts";
+import { createArea } from "../area.ts";
+import { ApiError, errorText, type PostBody } from "../../api";
 import {
   useServerApi,
   useServerStorage,
+  useServerStore,
 } from "../../servers/ServerServicesContext";
-import { createMutationJournal } from "../../servers/mutationIdentity";
-import { useSubscription } from "../../sync/subscriptions";
+import {
+  serverMutationResponseIsUncertain,
+  createMutationJournal,
+} from "../../servers/mutationIdentity";
 import {
   gateFields,
   parseGate,
   parseResultSchema,
   prettyJson,
-  requiresGateOverride,
-  taskStatus,
   type Gate,
-  type ReviewTask,
 } from "./taskReviewModel";
 import "./Tasks.css";
 
 type WorkBody = PostBody<"/api/work">;
-type Write = (body: WorkBody) => Promise<boolean>;
+type Task = WorkSubscriptionData["items"][number];
+const [TaskProvider, useTasks] =
+  createArea<ReturnType<typeof useTaskActions>>("Tasks");
 
-function JsonView({ value, label }: { value: unknown; label: string }) {
-  return (
+const JsonView = observer(
+  ({ value, label }: { value: unknown; label: string }) => (
     <pre aria-label={label} className="task-review-json">
       {prettyJson(value)}
     </pre>
-  );
-}
+  ),
+);
 
 function GateEditor({
-  command,
-  timeout,
-  onCommand,
-  onTimeout,
+  value,
+  onChange,
 }: {
-  command: string;
-  timeout: string;
-  onCommand: (value: string) => void;
-  onTimeout: (value: string) => void;
+  value: ReturnType<typeof gateFields>;
+  onChange: (value: ReturnType<typeof gateFields>) => void;
 }) {
   return (
     <>
       <Textarea
         label="Gate command"
         description="Leave empty to disable the gate."
-        value={command}
-        onChange={(e) => onCommand(e.currentTarget.value)}
+        value={value.command}
+        onChange={(e) => onChange({ ...value, command: e.currentTarget.value })}
         autosize
         minRows={2}
       />
       <TextInput
         label="Gate timeout (milliseconds)"
         inputMode="numeric"
-        disabled={!command.trim()}
-        value={timeout}
-        onChange={(e) => onTimeout(e.currentTarget.value)}
+        disabled={!value.command.trim()}
+        value={value.timeout}
+        onChange={(e) => onChange({ ...value, timeout: e.currentTarget.value })}
       />
     </>
   );
 }
 
-function DefaultGate({
-  gate,
-  write,
-  busy,
-}: {
-  gate: Gate;
-  write: Write;
-  busy: boolean;
-}) {
-  const initial = gateFields(gate);
-  const [command, setCommand] = useState(initial.command);
-  const [timeout, setTimeout] = useState(initial.timeout);
+const DefaultGate = observer(({ gate }: { gate: Gate }) => {
+  const { write, busy } = useTasks();
+  const [gateInput, setGateInput] = useState(() => gateFields(gate));
   const [error, setError] = useState("");
   return (
     <details className="task-review-card">
@@ -98,7 +94,7 @@ function DefaultGate({
           try {
             await write({
               action: "set_default_gate",
-              gate: parseGate(command, timeout),
+              gate: parseGate(gateInput.command, gateInput.timeout),
             });
           } catch (failure) {
             setError(errorText(failure));
@@ -106,33 +102,17 @@ function DefaultGate({
         }}
       >
         <fieldset disabled={busy}>
-          <GateEditor
-            command={command}
-            timeout={timeout}
-            onCommand={setCommand}
-            onTimeout={setTimeout}
-          />
+          <GateEditor value={gateInput} onChange={setGateInput} />
           {error && <p role="alert">{error}</p>}
           <Button type="submit">Save team default gate</Button>
         </fieldset>
       </form>
     </details>
   );
-}
+});
 
-function TaskEditor({
-  task,
-  tasks,
-  write,
-  busy,
-  onClose,
-}: {
-  task?: ReviewTask | undefined;
-  tasks: readonly ReviewTask[];
-  write: Write;
-  busy: boolean;
-  onClose: () => void;
-}) {
+const TaskEditor = observer(({ task }: { task?: Task | undefined }) => {
+  const { work, write, busy, setEditing: onClose } = useTasks();
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
   const [owner, setOwner] = useState(task?.owner || "");
@@ -142,10 +122,8 @@ function TaskEditor({
   const [status, setStatus] = useState<"ready" | "blocked" | "">(
     task ? "" : "ready",
   );
-  const initial = gateFields(task?.gate);
   const [mode, setMode] = useState(task ? "custom" : "inherit");
-  const [command, setCommand] = useState(initial.command);
-  const [timeout, setTimeout] = useState(initial.timeout);
+  const [gateInput, setGateInput] = useState(() => gateFields(task?.gate));
   const [schema, setSchema] = useState(
     task?.resultSchema === undefined ? "" : prettyJson(task.resultSchema),
   );
@@ -175,7 +153,9 @@ function TaskEditor({
             owner: owner.trim() || null,
             dependencies,
             ...(status ? { status } : {}),
-            ...(mode === "custom" ? { gate: parseGate(command, timeout) } : {}),
+            ...(mode === "custom"
+              ? { gate: parseGate(gateInput.command, gateInput.timeout) }
+              : {}),
             ...(resultSchema === undefined
               ? {}
               : { result_schema: resultSchema }),
@@ -188,7 +168,7 @@ function TaskEditor({
                 ...fields,
               }
             : { action: "create", ...fields };
-          if (await write(body)) onClose();
+          if ((await write(body)) === true) onClose(null);
         } catch (failure) {
           setError(errorText(failure));
         }
@@ -238,12 +218,16 @@ function TaskEditor({
               )
             }
           >
-            {tasks
-              .filter((candidate) => candidate.id !== task?.id)
+            {resourceData(work.current)
+              ?.items.filter((candidate) => candidate !== task)
               .map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.title} ({taskStatus(candidate)})
-                </option>
+                <Observer key={candidate.id}>
+                  {() => (
+                    <option value={candidate.id}>
+                      {candidate.title} ({candidate.policy.displayStatus})
+                    </option>
+                  )}
+                </Observer>
               ))}
           </select>
         </label>
@@ -259,12 +243,7 @@ function TaskEditor({
           />
         )}
         {mode === "custom" && (
-          <GateEditor
-            command={command}
-            timeout={timeout}
-            onCommand={setCommand}
-            onTimeout={setTimeout}
-          />
+          <GateEditor value={gateInput} onChange={setGateInput} />
         )}
         <Textarea
           label="Result schema (JSON)"
@@ -280,41 +259,29 @@ function TaskEditor({
           <Button type="submit" disabled={!title.trim() || !!schemaError}>
             Save task
           </Button>
-          <Button variant="default" onClick={onClose}>
+          <Button variant="default" onClick={() => onClose(null)}>
             Cancel edit
           </Button>
         </div>
       </fieldset>
     </form>
   );
-}
+});
 
-function TaskDetail({
-  task,
-  write,
-  busy,
-  onEdit,
-}: {
-  task: ReviewTask;
-  write: Write;
-  busy: boolean;
-  onEdit: () => void;
-}) {
-  const { apiDownload } = useServerApi();
+const TaskDetail = observer(function TaskDetail({ task }: { task: Task }) {
+  const { write, busy, setEditing } = useTasks();
   const [reason, setReason] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
-  const [logError, setLogError] = useState("");
-  const latest = task.results?.at(-1);
-  const gate = latest?.gate;
-  const override = requiresGateOverride(task);
-  const refusal = task.submissionRefusal;
-  const decide = (action: "accept" | "reject") => {
+  const override = task.policy.gateOverrideRequired;
+  const pendingDecision = useRef<WorkBody | null>(null);
+  const decide = async (action: "accept" | "reject") => {
     if (
-      !reason.trim() ||
-      (action === "accept" && override && !overrideReason.trim())
+      !pendingDecision.current &&
+      (!reason.trim() ||
+        (action === "accept" && override && !overrideReason.trim()))
     )
       return;
-    return write({
+    const payload = (pendingDecision.current ??= {
       action,
       task_id: task.id,
       version: task.version,
@@ -323,47 +290,152 @@ function TaskDetail({
         ? { override_reason: overrideReason.trim() }
         : {}),
     });
+    if ((await write(payload)) !== false) pendingDecision.current = null;
   };
   return (
     <article className="task-review-card" aria-label="Task detail">
-      <div className="task-review-actions">
-        <h3>{task.title}</h3>
-        <Badge>{taskStatus(task)}</Badge>
-        <Button
-          variant="default"
-          disabled={
-            busy ||
-            task.status === GeneratedApiWorkStatus.review ||
-            task.status === GeneratedApiWorkStatus.accepted
-          }
-          onClick={onEdit}
-        >
-          Update task
-        </Button>
-      </div>
+      <Observer>
+        {() => (
+          <>
+            <div className="task-review-actions">
+              <h3>{task.title}</h3>
+              <Badge>{task.policy.displayStatus}</Badge>
+              <Button
+                variant="default"
+                disabled={
+                  busy ||
+                  task.status === GeneratedApiWorkStatus.review ||
+                  task.status === GeneratedApiWorkStatus.accepted
+                }
+                onClick={() => setEditing("update")}
+              >
+                Update task
+              </Button>
+            </div>
+            {task.status === GeneratedApiWorkStatus.review && (
+              <p>Reject the result before you edit this task.</p>
+            )}
+            {task.status === GeneratedApiWorkStatus.accepted && (
+              <p>Create a follow-up task to change accepted work.</p>
+            )}
+          </>
+        )}
+      </Observer>
+      <Observer>
+        {() => (
+          <>
+            <p className="task-review-description">
+              {task.description || "No description."}
+            </p>
+            <dl>
+              <dt>Task ID</dt>
+              <dd>{task.id}</dd>
+              <dt>Owner</dt>
+              <dd>{task.owner || "Unassigned"}</dd>
+              <dt>Dependencies</dt>
+              <dd>{task.dependencies?.join(", ") || "None"}</dd>
+              <dt>Blocked by</dt>
+              <dd>{task.policy.blockedBy.join(", ") || "None"}</dd>
+              <dt>Version</dt>
+              <dd>{task.version}</dd>
+              <dt>Revision</dt>
+              <dd>{task.results?.at(-1)?.revision || "No result."}</dd>
+            </dl>
+          </>
+        )}
+      </Observer>
+      <TaskGate task={task} />
+      <TaskEvidence task={task} />
       {task.status === GeneratedApiWorkStatus.review && (
-        <p>Reject the result before you edit this task.</p>
+        <fieldset disabled={busy}>
+          <legend>Review decision</legend>
+          <Textarea
+            label="Decision reason"
+            required
+            value={reason}
+            onChange={(e) => setReason(e.currentTarget.value)}
+          />
+          {override && (
+            <>
+              <p>
+                The gate has not passed for this configuration. Acceptance
+                requires an override reason.
+              </p>
+              <Textarea
+                label="Gate override reason"
+                required
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.currentTarget.value)}
+              />
+            </>
+          )}
+          <div className="task-review-actions">
+            <Button
+              disabled={
+                pendingDecision.current?.action === "reject" ||
+                (!pendingDecision.current &&
+                  (!reason.trim() || (override && !overrideReason.trim()))) ||
+                (!pendingDecision.current && !task.policy.acceptAvailable)
+              }
+              onClick={() => void decide("accept")}
+            >
+              {override ? "Accept with override" : "Accept task"}
+            </Button>
+            <Button
+              color="red"
+              variant="outline"
+              disabled={
+                pendingDecision.current?.action === "accept" ||
+                (!pendingDecision.current && !reason.trim())
+              }
+              onClick={() => void decide("reject")}
+            >
+              Reject task
+            </Button>
+          </div>
+          {!task.policy.acceptAvailable && (
+            <p>Acceptance is unavailable until a result is ready for review.</p>
+          )}
+        </fieldset>
       )}
-      {task.status === GeneratedApiWorkStatus.accepted && (
-        <p>Create a follow-up task to change accepted work.</p>
-      )}
-      <p className="task-review-description">
-        {task.description || "No description."}
-      </p>
-      <dl>
-        <dt>Task ID</dt>
-        <dd>{task.id}</dd>
-        <dt>Owner</dt>
-        <dd>{task.owner || "Unassigned"}</dd>
-        <dt>Dependencies</dt>
-        <dd>{task.dependencies?.join(", ") || "None"}</dd>
-        <dt>Blocked by</dt>
-        <dd>{task.policy.blockedBy.join(", ") || "None"}</dd>
-        <dt>Version</dt>
-        <dd>{task.version}</dd>
-        <dt>Revision</dt>
-        <dd>{latest?.revision || "No result."}</dd>
-      </dl>
+      <Observer>
+        {() => (
+          <>
+            <details>
+              <summary>Result history ({task.results?.length || 0})</summary>
+              {task.results?.map((result) => (
+                <section key={result.id}>
+                  <h4>
+                    {result.revision} by {result.agent}
+                  </h4>
+                  <JsonView label={`Result ${result.id}`} value={result} />
+                </section>
+              ))}
+            </details>
+            <details>
+              <summary>
+                Decision history ({task.decisions?.length || 0})
+              </summary>
+              {task.decisions?.map((decision, index) => (
+                <JsonView
+                  key={index}
+                  label={`Decision ${index + 1}`}
+                  value={decision}
+                />
+              ))}
+            </details>
+          </>
+        )}
+      </Observer>
+    </article>
+  );
+});
+const TaskGate = observer(function TaskGate({ task }: { task: Task }) {
+  const { apiDownload } = useTasks();
+  const [logError, setLogError] = useState("");
+  const gate = task.results?.at(-1)?.gate;
+  return (
+    <>
       <h4>Acceptance gate</h4>
       {task.gate ? (
         <JsonView label="Task gate configuration" value={task.gate} />
@@ -416,6 +488,14 @@ function TaskDetail({
           {logError && <p role="alert">{logError}</p>}
         </>
       )}
+    </>
+  );
+});
+const TaskEvidence = observer(({ task }: { task: Task }) => {
+  const latest = task.results?.at(-1);
+  const refusal = task.submissionRefusal;
+  return (
+    <>
       <h4>Result schema</h4>
       {task.resultSchema === undefined ? (
         <p>No result schema.</p>
@@ -455,104 +535,44 @@ function TaskDetail({
       ) : (
         <p>No result submitted.</p>
       )}
-      {task.status === GeneratedApiWorkStatus.review && (
-        <fieldset disabled={busy}>
-          <legend>Review decision</legend>
-          <Textarea
-            label="Decision reason"
-            required
-            value={reason}
-            onChange={(e) => setReason(e.currentTarget.value)}
-          />
-          {override && (
-            <>
-              <p>
-                The gate has not passed for this configuration. Acceptance
-                requires an override reason.
-              </p>
-              <Textarea
-                label="Gate override reason"
-                required
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.currentTarget.value)}
-              />
-            </>
-          )}
-          <div className="task-review-actions">
-            <Button
-              disabled={
-                !reason.trim() ||
-                (override && !overrideReason.trim()) ||
-                !task.policy.acceptAvailable
-              }
-              onClick={() => void decide("accept")}
-            >
-              {override ? "Accept with override" : "Accept task"}
-            </Button>
-            <Button
-              color="red"
-              variant="outline"
-              disabled={!reason.trim()}
-              onClick={() => void decide("reject")}
-            >
-              Reject task
-            </Button>
-          </div>
-          {!task.policy.acceptAvailable && (
-            <p>Acceptance is unavailable until a result is ready for review.</p>
-          )}
-        </fieldset>
-      )}
-      <details>
-        <summary>Result history ({task.results?.length || 0})</summary>
-        {task.results?.map((result) => (
-          <section key={result.id}>
-            <h4>
-              {result.revision} by {result.agent}
-            </h4>
-            <JsonView label={`Result ${result.id}`} value={result} />
-          </section>
-        ))}
-      </details>
-      <details>
-        <summary>Decision history ({task.decisions?.length || 0})</summary>
-        {task.decisions?.map((decision, index) => (
-          <JsonView
-            key={index}
-            label={`Decision ${index + 1}`}
-            value={decision}
-          />
-        ))}
-      </details>
-    </article>
+    </>
   );
-}
-
-export default function Tasks({
-  agentId,
-  rootId = agentId,
-}: {
-  agentId: string;
-  rootId?: string;
-}) {
-  const { post } = useServerApi();
+});
+const TaskRow = observer(function TaskRow({ task }: { task: Task }) {
+  const { selected, status, owner, busy, setSelected, setEditing, setError } =
+    useTasks();
+  if (
+    (status && task.policy.displayStatus !== status) ||
+    (owner && (task.owner || "unassigned") !== owner)
+  )
+    return null;
+  return (
+    <li>
+      <button
+        disabled={busy}
+        aria-pressed={selected === task}
+        onClick={() => {
+          setSelected(task);
+          setEditing(null);
+          setError("");
+        }}
+      >
+        <strong>{task.title}</strong>
+        <span>
+          {task.policy.displayStatus} · {task.owner || "Unassigned"}
+        </span>
+        <span>Dependencies: {task.dependencies?.join(", ") || "None"}</span>
+      </button>
+    </li>
+  );
+});
+function useTaskActions(rootId: string) {
+  const { post, apiDownload } = useServerApi();
   const storage = useServerStorage();
-  const assignments = useSubscription({ kind: "work", agentId: rootId });
-  const root = useSubscription({ kind: "agentDetail", agentId: rootId });
-  const current = assignments.data;
-  const resource = {
-    data:
-      current === undefined || !root.data
-        ? null
-        : {
-            ...current,
-            rootId,
-            taskDefaultGate: root.data.taskDefaultGate ?? null,
-          },
-    error: assignments.error?.message || root.error?.message || "",
-    loading: assignments.data === undefined || !root.data,
-  };
-  const [selectedId, setSelectedId] = useState("");
+  const store = useServerStore();
+  const work = store.work(workAgentId(rootId)),
+    root = store.agentDetail(workAgentId(rootId));
+  const [selected, setSelected] = useState<Task>();
   const [status, setStatus] = useState("");
   const [owner, setOwner] = useState("");
   const [editing, setEditing] = useState<"create" | "update" | null>(null);
@@ -560,136 +580,183 @@ export default function Tasks({
   const busyRef = useRef(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const tasks = resource.data?.items ?? [];
-  const selected = tasks.find((task) => task.id === selectedId);
-  const visibleTasks = tasks.filter(
-    (task) =>
-      (!status || taskStatus(task) === status) &&
-      (!owner || (task.owner || "unassigned") === owner),
-  );
-  const write: Write = async (body) => {
-    if (busyRef.current || !resource.data?.rootId) return false;
+  const write = async (body: WorkBody) => {
+    if (
+      busyRef.current ||
+      !resourceData(work.current) ||
+      !resourceData(root.current)
+    )
+      return false;
     busyRef.current = true;
     setBusy(true);
     setError("");
     setNotice("");
+    let finish: (() => void) | undefined;
     try {
-      const payload = { ...body, agent: resource.data.rootId };
+      const payload = { ...body, agent: rootId };
       const identity = await createMutationJournal("task-review", storage)(
         "/api/work",
         payload,
       );
+      finish = identity!.finish;
       await post("/api/work", { ...payload, id: identity!.requestId });
       identity!.finish();
       setNotice("The task action completed.");
       return true;
     } catch (failure) {
       setError(errorText(failure));
+      if (
+        failure instanceof ApiError &&
+        failure.status >= 400 &&
+        failure.status < 500 &&
+        !serverMutationResponseIsUncertain(failure.status, failure.response)
+      ) {
+        finish?.();
+        return "rejected" as const;
+      }
       return false;
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
   };
+  return {
+    work,
+    root,
+    selected,
+    setSelected,
+    status,
+    setStatus,
+    owner,
+    setOwner,
+    editing,
+    setEditing,
+    busy,
+    error,
+    setError,
+    notice,
+    write,
+    apiDownload,
+  };
+}
+export default function Tasks({
+  agentId,
+  rootId = agentId,
+}: {
+  agentId: string;
+  rootId?: string;
+}) {
+  const area = useTaskActions(rootId);
   return (
-    <section className="task-review" aria-label="Tasks">
-      <div className="task-review-actions">
-        <Button
-          disabled={busy || !resource.data?.rootId}
-          onClick={() => {
-            setEditing("create");
-            setError("");
+    <TaskProvider value={area}>
+      <section className="task-review" aria-label="Tasks">
+        <Observer>
+          {() => {
+            const workState = area.work.current,
+              rootState = area.root.current;
+            const ready =
+              !!resourceData(workState) && !!resourceData(rootState);
+            const failure =
+              ("error" in workState && workState.error?.message) ||
+              ("error" in rootState && rootState.error?.message) ||
+              area.error;
+            const gate = resourceData(rootState)?.taskDefaultGate ?? null;
+            return (
+              <>
+                <div className="task-review-actions">
+                  <Button
+                    disabled={area.busy || !ready}
+                    onClick={() => {
+                      area.setEditing("create");
+                      area.setError("");
+                    }}
+                  >
+                    Create task
+                  </Button>
+                </div>
+                {failure && <p role="alert">{failure}</p>}
+                {area.notice && <p role="status">{area.notice}</p>}
+                {!ready && <p>Load tasks...</p>}
+                {ready && <DefaultGate key={prettyJson(gate)} gate={gate} />}
+              </>
+            );
           }}
-        >
-          Create task
-        </Button>
-      </div>
-      {(resource.error || error) && (
-        <p role="alert">{resource.error || error}</p>
-      )}
-      {notice && <p role="status">{notice}</p>}
-      {resource.loading && <p>Load tasks...</p>}
-      {resource.data && (
-        <DefaultGate
-          key={prettyJson(resource.data.taskDefaultGate)}
-          gate={resource.data.taskDefaultGate}
-          write={write}
-          busy={busy}
-        />
-      )}
-      <div className="task-review-filters">
-        <NativeSelect
-          label="Filter by status"
-          value={status}
-          onChange={(e) => setStatus(e.currentTarget.value)}
-          data={[
-            { value: "", label: "All statuses" },
-            ...Object.values(GeneratedApiWorkStatus).map((value) => ({
-              value,
-              label: value,
-            })),
-          ]}
-        />
-        <NativeSelect
-          label="Filter by owner"
-          value={owner}
-          onChange={(e) => setOwner(e.currentTarget.value)}
-          data={[
-            { value: "", label: "All owners" },
-            { value: "unassigned", label: "Unassigned" },
-            ...Array.from(
-              new Set(
-                tasks.flatMap((task) => (task.owner ? [task.owner] : [])),
-              ),
-            ).map((value) => ({ value, label: value })),
-          ]}
-        />
-      </div>
-      <ul className="task-review-list">
-        {visibleTasks.map((task) => (
-          <li key={task.id}>
-            <button
-              disabled={busy}
-              aria-pressed={selectedId === task.id}
-              onClick={() => {
-                setSelectedId(task.id);
-                setEditing(null);
-                setError("");
-              }}
-            >
-              <strong>{task.title}</strong>
-              <span>
-                {taskStatus(task)} · {task.owner || "Unassigned"}
-              </span>
-              <span>
-                Dependencies: {task.dependencies?.join(", ") || "None"}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {resource.data && visibleTasks.length === 0 && (
-        <p>{tasks.length ? "No tasks match these filters." : "No tasks."}</p>
-      )}
-      {editing && (editing === "create" || selected) && (
-        <TaskEditor
-          key={editing === "create" ? "create" : selected!.id}
-          task={editing === "update" ? selected : undefined}
-          tasks={tasks}
-          write={write}
-          busy={busy}
-          onClose={() => setEditing(null)}
-        />
-      )}
-      {selected && !editing && (
-        <TaskDetail
-          key={`${selected.id}:${selected.version}`}
-          task={selected}
-          write={write}
-          busy={busy}
-          onEdit={() => setEditing("update")}
-        />
-      )}
-    </section>
+        </Observer>
+        <div className="task-review-filters">
+          <NativeSelect
+            label="Filter by status"
+            value={area.status}
+            onChange={(e) => area.setStatus(e.currentTarget.value)}
+          >
+            <option value="">All statuses</option>
+            {Object.values(GeneratedApiWorkStatus).map((value) => (
+              <option key={value}>{value}</option>
+            ))}
+          </NativeSelect>
+          <Observer>
+            {() => (
+              <NativeSelect
+                label="Filter by owner"
+                value={area.owner}
+                onChange={(e) => area.setOwner(e.currentTarget.value)}
+              >
+                <option value="">All owners</option>
+                <option value="unassigned">Unassigned</option>
+                {Array.from(
+                  new Set(
+                    resourceData(area.work.current)?.items.flatMap((task) =>
+                      task.owner ? [task.owner] : [],
+                    ) || [],
+                  ),
+                ).map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </NativeSelect>
+            )}
+          </Observer>
+        </div>
+        <Observer>
+          {() => {
+            const tasks = resourceData(area.work.current)?.items;
+            const visible = tasks?.some(
+              (task) =>
+                (!area.status || task.policy.displayStatus === area.status) &&
+                (!area.owner || (task.owner || "unassigned") === area.owner),
+            );
+            return (
+              <>
+                <ul className="task-review-list">
+                  {tasks?.map((task) => (
+                    <TaskRow key={task.id} task={task} />
+                  ))}
+                </ul>
+                {tasks && !visible && (
+                  <p>
+                    {tasks.length
+                      ? "No tasks match these filters."
+                      : "No tasks."}
+                  </p>
+                )}
+              </>
+            );
+          }}
+        </Observer>
+        <Observer>
+          {() => {
+            const task = resourceData(area.work.current)?.items.find(
+              (item) => item === area.selected,
+            );
+            if (area.editing === "create") return <TaskEditor key="create" />;
+            return task ? (
+              area.editing ? (
+                <TaskEditor key={task.id} task={task} />
+              ) : (
+                <TaskDetail key={task.id} task={task} />
+              )
+            ) : null;
+          }}
+        </Observer>
+      </section>
+    </TaskProvider>
   );
 }

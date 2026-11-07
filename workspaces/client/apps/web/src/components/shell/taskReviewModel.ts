@@ -5,8 +5,6 @@ import {
   MAX_RESULT_SCHEMA_BYTES,
 } from "../../generated/taskReview";
 
-import type { ReviewTask } from "../../sync/subscriptions/workData";
-export type { ReviewTask } from "../../sync/subscriptions/workData";
 export type TaskConfiguration = Extract<
   PostBody<"/api/work">,
   { action: "create" | "update" }
@@ -63,7 +61,3 @@ export function parseResultSchema(
     throw new Error("The result schema must be a JSON object or boolean.");
   return value as TaskConfiguration["result_schema"];
 }
-
-export const requiresGateOverride = (task: ReviewTask) =>
-  task.policy.gateOverrideRequired;
-export const taskStatus = (task: ReviewTask) => task.policy.displayStatus;
