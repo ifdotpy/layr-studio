@@ -3,18 +3,25 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+<<<<<<< head
 /// Entity collection identity of full sidebar rows; excluded from the state scope.
 pub const COLLECTION: &str = "sidebarChatRow";
 
+=======
+>>>>>>> main
 fn nullable_schema<T: JsonSchema>(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     Option::<T>::json_schema(generator)
 }
 
+<<<<<<< head
 fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
 ) -> Result<Option<T>, D::Error> {
     Option::<T>::deserialize(d)
 }
+=======
+fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> { Option::<T>::deserialize(d) }
+>>>>>>> main
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -69,10 +76,14 @@ pub struct SidebarChatRow {
     pub indicator: crate::chat_operational_status::ChatOperationalStatus,
     /// Existing completed-result read CAS proof; null means no completed result.
     #[serde(deserialize_with = "nullable")]
+<<<<<<< head
     #[schemars(
         required,
         schema_with = "nullable_schema::<crate::agent_entity_nested_extra::ReadStateDto>"
     )]
+=======
+    #[schemars(required, schema_with = "nullable_schema::<crate::agent_entity_nested_extra::ReadStateDto>")]
+>>>>>>> main
     pub mark_read: Option<crate::agent_entity_nested_extra::ReadStateDto>,
     /// Eligibility of an explicit mark-unread action.
     pub mark_unread: MarkUnreadEligibility,
@@ -86,10 +97,14 @@ pub struct SidebarChatRow {
     pub search_text: String,
     /// Current epoch workspace copy progress; counts use the progress owner unit.
     #[serde(deserialize_with = "nullable")]
+<<<<<<< head
     #[schemars(
         required,
         schema_with = "nullable_schema::<crate::layr_progress::CopyProgress>"
     )]
+=======
+    #[schemars(required, schema_with = "nullable_schema::<crate::layr_progress::CopyProgress>")]
+>>>>>>> main
     pub copy_progress: Option<crate::layr_progress::CopyProgress>,
     /// Whether the existing stall owner reports waiting for lead action.
     pub waiting_for_lead: bool,
@@ -131,6 +146,7 @@ mod tests {
         let mut document = studio_json::json!({"components":{"schemas":{}}});
         // Use the same owner renderer as committed OpenAPI generation.
         let mut generator = schemars::generate::SchemaSettings::draft2020_12()
+<<<<<<< head
             .for_serialize()
             .with(|s| s.definitions_path = "/components/schemas".into())
             .into_generator();
@@ -138,10 +154,16 @@ mod tests {
         for (name, schema) in generator.take_definitions(true) {
             document["components"]["schemas"][name] = schema;
         }
+=======
+            .for_serialize().with(|s| s.definitions_path = "/components/schemas".into()).into_generator();
+        generator.subschema_for::<SidebarChatRow>();
+        for (name, schema) in generator.take_definitions(true) { document["components"]["schemas"][name] = schema; }
+>>>>>>> main
         let schema = &document["components"]["schemas"]["SidebarChatRow"];
         let properties = schema["properties"].as_object().expect("properties");
         let required = schema["required"].as_array().expect("required");
         assert_eq!(properties.len(), required.len(), "all row fields required");
+<<<<<<< head
         for key in properties.keys() {
             assert!(required.contains(&json!(key)), "{key}");
         }
@@ -153,6 +175,13 @@ mod tests {
             "canonical null fixture must validate: {:?}",
             validator.iter_errors(&value).collect::<Vec<_>>()
         );
+=======
+        for key in properties.keys() { assert!(required.contains(&json!(key)), "{key}"); }
+        let mut validation = document.clone();
+        validation["$ref"] = json!("#/components/schemas/SidebarChatRow");
+        let validator = jsonschema::validator_for(&validation).expect("schema compiles");
+        assert!(validator.is_valid(&value), "canonical null fixture must validate: {:?}", validator.iter_errors(&value).collect::<Vec<_>>());
+>>>>>>> main
         let row: SidebarChatRow = studio_json::from_value(value.clone()).expect("canonical row");
         assert_eq!(
             studio_json::to_value(row).expect("row serialization"),
