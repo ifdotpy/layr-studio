@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 import { AgentStatus } from "../../generated/api";
 import { approval, question } from "../../approvalFixtures";
 import { required } from "../componentTestFixtures.ts";
@@ -66,12 +67,15 @@ it("orders actionable indicators before work and keeps completed results collaps
     { id: "paused", status: AgentStatus.paused },
   ];
   const indicators = new Map<string, ChatIndicator>([
-    ["work", { kind: "working", label: "Working" }],
-    ["answer", { kind: "answer", label: "Needs your answer" }],
-    ["failed", { kind: "error", label: "Failed" }],
-    ["unread", { kind: "unread", label: "Unread result" }],
-    ["read", { kind: "none", label: "Read" }],
-    ["paused", { kind: "paused", label: "Stopped" }],
+    ["work", { kind: ChatOperationalKind["working"], label: "Working" }],
+    [
+      "answer",
+      { kind: ChatOperationalKind["answer"], label: "Needs your answer" },
+    ],
+    ["failed", { kind: ChatOperationalKind["error"], label: "Failed" }],
+    ["unread", { kind: ChatOperationalKind["unread"], label: "Unread result" }],
+    ["read", { kind: ChatOperationalKind["none"], label: "Read" }],
+    ["paused", { kind: ChatOperationalKind["paused"], label: "Stopped" }],
   ]);
   const { groups, completed } = teamDispatchGroups(rows, indicators);
   assert.deepEqual(
@@ -125,11 +129,11 @@ it("filters the same canonical lanes counted by the summary, including queued wo
     { id: "done", status: AgentStatus.completed },
   ];
   const indicators = new Map<string, ChatIndicator>([
-    ["queued", { kind: "working", label: "Queued" }],
-    ["running", { kind: "working", label: "Working" }],
-    ["error", { kind: "error", label: "Failed" }],
-    ["paused", { kind: "paused", label: "Stopped" }],
-    ["done", { kind: "unread", label: "New result" }],
+    ["queued", { kind: ChatOperationalKind["working"], label: "Queued" }],
+    ["running", { kind: ChatOperationalKind["working"], label: "Working" }],
+    ["error", { kind: ChatOperationalKind["error"], label: "Failed" }],
+    ["paused", { kind: ChatOperationalKind["paused"], label: "Stopped" }],
+    ["done", { kind: ChatOperationalKind["unread"], label: "New result" }],
   ]);
   const ids = (filter: string) =>
     filterTeamWorkers(rows, indicators, filter).map((a) => a.id);

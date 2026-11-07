@@ -1,3 +1,7 @@
+import {
+  ChatOperationalKind,
+  MarkUnreadEligibility,
+} from "../../generated/api.ts";
 // @vitest-environment happy-dom
 import {
   act,
@@ -100,7 +104,12 @@ it.each([false, true])(
     const parentBefore = parentRenders;
     for (const [expected, patch] of [
       [["title"], { name: "Renamed" }],
-      [["indicator"], { indicator: { kind: "working", label: "Working" } }],
+      [
+        ["indicator"],
+        {
+          indicator: { kind: ChatOperationalKind["working"], label: "Working" },
+        },
+      ],
       [
         ["progress"],
         {
@@ -109,7 +118,7 @@ it.each([false, true])(
       ],
       [["title", "pin"], { pinned: true }],
       [["archive"], { archived: true, canArchive: false }],
-      [["unread"], { markUnread: "unsupported" }],
+      [["unread"], { markUnread: MarkUnreadEligibility["unsupported"] }],
     ] satisfies readonly (readonly [
       readonly string[],
       Partial<SidebarChatRow>,
@@ -185,7 +194,10 @@ it("removing pendingRead restores an unchanged target through the real row", asy
   await act(async () => {
     f.publish([
       sidebarRowFixture("a", {
-        indicator: { kind: "unread", label: "Unread result" },
+        indicator: {
+          kind: ChatOperationalKind["unread"],
+          label: "Unread result",
+        },
         markRead: target,
       }),
     ]);

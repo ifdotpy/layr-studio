@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../generated/api.ts";
 import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useMantineColorScheme } from "@mantine/core";
@@ -22,12 +23,12 @@ const titles = [
   "Ready for the next assignment",
 ];
 const indicators: SidebarChatRow["indicator"][] = [
-  { kind: "answer", label: "Needs your answer" },
-  { kind: "error", label: "Failed" },
-  { kind: "working", label: "Working" },
-  { kind: "none", label: "Ready" },
-  { kind: "none", label: "Paused" },
-  { kind: "none", label: "Ready" },
+  { kind: ChatOperationalKind["answer"], label: "Needs your answer" },
+  { kind: ChatOperationalKind["error"], label: "Failed" },
+  { kind: ChatOperationalKind["working"], label: "Working" },
+  { kind: ChatOperationalKind["none"], label: "Ready" },
+  { kind: ChatOperationalKind["none"], label: "Paused" },
+  { kind: ChatOperationalKind["none"], label: "Ready" },
 ];
 const rows = projects.flatMap((project, projectIndex) =>
   titles.map((name, index) =>

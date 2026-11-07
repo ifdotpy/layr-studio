@@ -75,13 +75,13 @@ import {
 } from "../servers/serverAliases";
 import { serverViewId } from "../servers/environment";
 import { ChatServerLine } from "../servers/ProjectChatRows";
-import {
-  countProjectChats,
-  itemGroup,
-} from "./sidebar/catalog";
+import { countProjectChats, itemGroup } from "./sidebar/catalog";
 export { isVisibleSidebarAgent } from "./sidebar/catalog";
 import { sidebarRows } from "./sidebar/rows.ts";
-import { SidebarAttention, SidebarProjectStates } from "./sidebar/RowStatus.tsx";
+import {
+  SidebarAttention,
+  SidebarProjectStates,
+} from "./sidebar/RowStatus.tsx";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
 import { DEFAULT_HIDE_OLD_CHATS_THRESHOLD } from "../studioPreferences";
 
@@ -123,9 +123,15 @@ export type SidebarProps = {
   refresh?: () => Promise<void>;
   notify?: (message: string) => void;
   offlineServers?: ReadonlySet<string>;
-  markUnread: (id: string, target: NonNullable<SidebarChatRow["markRead"]>) => void;
+  markUnread: (
+    id: string,
+    target: NonNullable<SidebarChatRow["markRead"]>,
+  ) => void;
   markingRead: Set<string>;
-  pendingReadTargets?: ReadonlyMap<string, NonNullable<SidebarChatRow["markRead"]>>;
+  pendingReadTargets?: ReadonlyMap<
+    string,
+    NonNullable<SidebarChatRow["markRead"]>
+  >;
   hideOldChatsThreshold?: number;
 };
 type NavigableProject = Project & { path: string; name: string };
@@ -154,11 +160,17 @@ export default function Sidebar(p: SidebarProps) {
   );
 }
 
-const SidebarContents = observer(function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
+const SidebarContents = observer(function SidebarContents(
+  p: SidebarProps & { services: SidebarServices },
+) {
   const services = p.services;
   const store = useServerStore();
   const resource = p.rows === undefined ? store.sidebar().current : undefined;
-  const rows = p.rows ?? (resource?.status === "live" || resource?.status === "stale" ? resource.data.rows : []);
+  const rows =
+    p.rows ??
+    (resource?.status === "live" || resource?.status === "stale"
+      ? resource.data.rows
+      : []);
   const lastOpened = useRef(p.opened);
   if (p.opened) lastOpened.current = p.opened;
   const canEdit = (target: SidebarTarget) =>
@@ -260,7 +272,11 @@ const SidebarContents = observer(function SidebarContents(p: SidebarProps & { se
   );
   const [organizing, setOrganizing] = useState<string | null>(null);
   const organizationLock = useRef(false);
-  type Conversion = { source: SidebarChatRow; target: SidebarChatRow; project: NavigableProject };
+  type Conversion = {
+    source: SidebarChatRow;
+    target: SidebarChatRow;
+    project: NavigableProject;
+  };
   const [conversion, setConversion] = useState<Conversion | null>(null);
   const closeConversion = () => {
     try {
@@ -599,9 +615,17 @@ const SidebarContents = observer(function SidebarContents(p: SidebarProps & { se
     );
   const orderedAgents = catalog.ordered;
   const filtered = (() => {
-    const archived = orderedAgents.filter((row) => (overrides[row.id]?.archived ?? row.archived) === archive);
+    const archived = orderedAgents.filter(
+      (row) => (overrides[row.id]?.archived ?? row.archived) === archive,
+    );
     const needle = query.toLowerCase();
-    const matching = needle ? archived.filter((row) => `${row.searchText} ${services.chatPath?.(row.id) || ""}`.toLowerCase().includes(needle)) : archived;
+    const matching = needle
+      ? archived.filter((row) =>
+          `${row.searchText} ${services.chatPath?.(row.id) || ""}`
+            .toLowerCase()
+            .includes(needle),
+        )
+      : archived;
     // Keep the selected team member visible under a search, as before.
     const selected = catalog.byId.get(p.opened || "");
     if (
@@ -841,7 +865,9 @@ const SidebarContents = observer(function SidebarContents(p: SidebarProps & { se
           setRenameInPriority(priority);
           setRenaming(row.id);
         },
-        unread: () => { if (row.markRead) p.markUnread(row.id, row.markRead); },
+        unread: () => {
+          if (row.markRead) p.markUnread(row.id, { ...row.markRead });
+        },
         move: () => {
           if (!requireProjectSupport()) return;
           const project = groupMap.get(row.projectPath || "")!;
@@ -1341,7 +1367,10 @@ const SidebarContents = observer(function SidebarContents(p: SidebarProps & { se
                   <span className="project-tree-name" title={group.name}>
                     {group.name}
                   </span>
-                  <SidebarProjectStates rows={byProject.get(group.path) || []} archived={archive} />
+                  <SidebarProjectStates
+                    rows={byProject.get(group.path) || []}
+                    archived={archive}
+                  />
                 </UnstyledButton>
                 {!archive &&
                   (!compact || !!group.path) &&

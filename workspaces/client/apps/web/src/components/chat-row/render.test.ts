@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Profiler, StrictMode } from "react";
 import { MantineProvider } from "@mantine/core";
@@ -71,7 +72,12 @@ it.each([false, true])(
     const parentBefore = parentRenders;
     const conversationBefore = conversationRenders;
     for (const [field, patch] of [
-      ["indicator", { indicator: { kind: "working", label: "Working" } }],
+      [
+        "indicator",
+        {
+          indicator: { kind: ChatOperationalKind["working"], label: "Working" },
+        },
+      ],
       ["title", { name: "Changed title" }],
       [
         "progress",
@@ -123,7 +129,7 @@ it("retires the optimistic unread overlay when the generated CAS target changes"
   );
   await act(async () => vi.advanceTimersByTimeAsync(100));
   const row = sidebarRowFixture("a", {
-    indicator: { kind: "unread", label: "Unread result" },
+    indicator: { kind: ChatOperationalKind["unread"], label: "Unread result" },
     markRead: target,
   });
   await act(async () => {
@@ -167,7 +173,7 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
     pinned: true,
     markRead: target,
     markUnread: "allowed",
-    indicator: { kind: "working", label: "Working" },
+    indicator: { kind: ChatOperationalKind["working"], label: "Working" },
   });
   const render = async (open: () => void) =>
     act(async () =>

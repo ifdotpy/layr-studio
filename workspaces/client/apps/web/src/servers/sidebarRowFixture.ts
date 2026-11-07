@@ -1,3 +1,8 @@
+import {
+  ChatOperationalKind,
+  MarkUnreadEligibility,
+  ProviderKind,
+} from "../generated/api.ts";
 import type { SidebarChatRow } from "../generated/observableResources.ts";
 
 export function sidebarRowFixture(
@@ -19,11 +24,11 @@ export function sidebarRowFixture(
     activityAt: 1,
     pinned: false,
     archived: false,
-    provider: "codex",
+    provider: ProviderKind["codex"],
     model: null,
-    indicator: { kind: "none", label: "Ready" },
+    indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
     markRead: null,
-    markUnread: "no_completed_result",
+    markUnread: MarkUnreadEligibility["no_completed_result"],
     canChangeProject: true,
     canArchive: true,
     compactPinned: false,

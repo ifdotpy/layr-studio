@@ -113,7 +113,11 @@ export function useChatReadState(
     },
     [key, metadataVersion],
   );
-  const write = async (proof: ChatReadProof, read: boolean, target?: ChatReadState) => {
+  const write = async (
+    proof: ChatReadProof,
+    read: boolean,
+    target?: ChatReadState,
+  ) => {
     const current = scope.current;
     const valid = () => mounted.current && scope.current === current;
     const pending = current.requests.get(proof.id);
@@ -127,12 +131,13 @@ export function useChatReadState(
       (value) => value.id === proof.id,
     );
     const result = agent && completed(agent);
-    if (!target && (
-      !agent ||
-      agent.readStateSupported !== true ||
-      !result ||
-      !sameResult(result, proof)
-    ))
+    if (
+      !target &&
+      (!agent ||
+        agent.readStateSupported !== true ||
+        !result ||
+        !sameResult(result, proof))
+    )
       return;
     if (
       read &&
@@ -158,12 +163,13 @@ export function useChatReadState(
     ]);
     if (read && current.attempted.has(attempt)) return;
     if (read) current.attempted.add(attempt);
-    if (read) current.pendingReadTargets.set(proof.id, {
-      threadId: proof.threadId,
-      turnId: proof.turnId,
-      revision: saved?.revision || 0,
-      read: false,
-    });
+    if (read)
+      current.pendingReadTargets.set(proof.id, {
+        threadId: proof.threadId,
+        turnId: proof.turnId,
+        revision: saved?.revision || 0,
+        read: false,
+      });
     const request = (async () => {
       try {
         const body = {
@@ -275,10 +281,19 @@ export function useChatReadState(
       scope.current.suppressed.add(agent.id);
     await writeCurrent.current(proof, false);
   }, []);
-  const markSidebarUnread = useCallback(async (id: string, target: ChatReadState) => {
-    if (latest.current.opened === id) scope.current.suppressed.add(id);
-    await writeCurrent.current({id, threadId: target.threadId, turnId: target.turnId}, false, target);
-  }, []);
+  const markSidebarUnread = useCallback(
+    async (id: string, target: ChatReadState) => {
+      // Generated nested models update in place; a queued CAS keeps the click's proof.
+      const captured = { ...target };
+      if (latest.current.opened === id) scope.current.suppressed.add(id);
+      await writeCurrent.current(
+        { id, threadId: captured.threadId, turnId: captured.turnId },
+        false,
+        captured,
+      );
+    },
+    [],
+  );
   const observeRead = useCallback((proof: ChatReadProof) => {
     if (selected.current !== proof.id) return;
     selected.current = null;

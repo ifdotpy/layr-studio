@@ -1,17 +1,15 @@
-import { AgentSource, AgentStatus } from "../../generated/api";
+import {
+  AgentSource,
+  AgentStatus,
+  ChatOperationalKind,
+} from "../../generated/api";
 import { isDeferred, isPending, needsAnswer } from "../../approvals";
 import type { Agent, Snapshot } from "../../types";
 import type { components } from "../../generated/api";
 import { isCommandTask } from "../backgroundTaskModel";
 import { DISK_FULL_WAIT_LABEL, diskFullHold } from "../../capacityRetry";
 
-export type ChatIndicatorKind =
-  | "working"
-  | "unread"
-  | "answer"
-  | "error"
-  | "paused"
-  | "none";
+export type ChatIndicatorKind = components["schemas"]["ChatOperationalKind"];
 /** Operator urgency, most urgent first. Owns ordering for the fleet board and the team panel. */
 export const CHAT_INDICATOR_URGENCY: readonly ChatIndicatorKind[] = [
   "answer",
@@ -21,10 +19,7 @@ export const CHAT_INDICATOR_URGENCY: readonly ChatIndicatorKind[] = [
   "paused",
   "none",
 ];
-export interface ChatIndicator {
-  kind: ChatIndicatorKind;
-  label: string;
-}
+export type ChatIndicator = components["schemas"]["ChatOperationalStatus"];
 export type ReadState = components["schemas"]["ReadStateDto"];
 
 export interface ChatActivity {
@@ -351,18 +346,20 @@ export function chatIndicators(
           if (wait.live) label = wait.label;
         }
         indicator = {
-          kind: "answer",
+          kind: ChatOperationalKind.answer,
           label,
         };
       } else if (waiting && agent.hasBackgroundWork) {
         indicator = {
-          kind: "working",
+          kind: ChatOperationalKind.working,
           label: "Waiting for background command",
         };
       } else if (waiting) {
         const wait = getWait();
         indicator = {
-          kind: wait.live ? "working" : "none",
+          kind: wait.live
+            ? ChatOperationalKind.working
+            : ChatOperationalKind.none,
           label: wait.label || endedWaitLabel,
         };
       } else if (active.has(agent.id)) {
@@ -372,35 +369,41 @@ export function chatIndicators(
           if (wait.live) label = wait.label;
         }
         indicator = {
-          kind: "working",
+          kind: ChatOperationalKind.working,
           label,
         };
       } else if (agent.status === AgentStatus.failed)
         // A turn that failed because the disk was full waits for free space.
         indicator = diskFullHold(agent)
-          ? { kind: "paused", label: DISK_FULL_WAIT_LABEL }
-          : { kind: "error", label: "Failed" };
+          ? { kind: ChatOperationalKind.paused, label: DISK_FULL_WAIT_LABEL }
+          : { kind: ChatOperationalKind.error, label: "Failed" };
       else if (
         ["paused", "interrupted"].includes(agent.status || "") ||
         (agent.autoWake === false && !agent.empty)
       )
         indicator = {
-          kind: "paused",
+          kind: ChatOperationalKind.paused,
           label:
             agent.status === AgentStatus.interrupted
               ? "Interrupted"
               : "Stopped",
         };
       else if (deferred.has(agent.id) && agent.status === AgentStatus.approval)
-        indicator = { kind: "paused", label: "Question deferred" };
+        indicator = {
+          kind: ChatOperationalKind.paused,
+          label: "Question deferred",
+        };
       else if (
         agent.status === AgentStatus.completed &&
         unreadResult(agent, readStateFor(agent) ?? null)
       )
-        indicator = { kind: "unread", label: "Unread result" };
+        indicator = {
+          kind: ChatOperationalKind.unread,
+          label: "Unread result",
+        };
       else
         indicator = {
-          kind: "none",
+          kind: ChatOperationalKind.none,
           label: agent.status === AgentStatus.completed ? "Read" : "Ready",
         };
       return [agent.id, indicator];

@@ -73,6 +73,8 @@ records the generated store boundary.
    state such as selection, drafts and expansion.
 6. Keep each component file single-purpose. Split a component when it reads
    unrelated observables, and witness field isolation with render probes.
+7. Capture server proofs by value before asynchronous work: `{ ...target }` keeps
+   the clicked CAS target stable while generated models continue updating.
 
 ## Component workbench
 

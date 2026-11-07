@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../../generated/api.ts";
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
@@ -16,11 +17,14 @@ import { sidebarRowFixture } from "../../servers/sidebarRowFixture.ts";
 const chat = (id: string, cwd = "/work/api") =>
   ({ id, cwd, name: `Chat ${id}` }) as Agent;
 const indicators = new Map<string, ChatIndicator>([
-  ["working", { kind: "working", label: "Working" }],
-  ["answer", { kind: "answer", label: "Needs your answer" }],
-  ["error", { kind: "error", label: "Failed" }],
-  ["unread", { kind: "unread", label: "Unread result" }],
-  ["paused", { kind: "paused", label: "Stopped" }],
+  ["working", { kind: ChatOperationalKind["working"], label: "Working" }],
+  [
+    "answer",
+    { kind: ChatOperationalKind["answer"], label: "Needs your answer" },
+  ],
+  ["error", { kind: ChatOperationalKind["error"], label: "Failed" }],
+  ["unread", { kind: ChatOperationalKind["unread"], label: "Unread result" }],
+  ["paused", { kind: ChatOperationalKind["paused"], label: "Stopped" }],
 ]);
 
 describe("fleet presentation", () => {
@@ -92,7 +96,10 @@ function renderRow(overrides: Partial<Parameters<typeof SidebarRow>[0]> = {}) {
         row: sidebarRowFixture("answer", {
           name: "Chat answer",
           pinned: true,
-          indicator: {kind:"answer",label:"Needs your answer"},
+          indicator: {
+            kind: ChatOperationalKind["answer"],
+            label: "Needs your answer",
+          },
         }),
         selected: true,
         serverAlias: "MAC",
@@ -146,7 +153,7 @@ describe("real fleet strip", () => {
   });
   it("preserves the stall attention cue", () => {
     const html = renderRow({
-      row: sidebarRowFixture("stalled", {waitingForLead:true}),
+      row: sidebarRowFixture("stalled", { waitingForLead: true }),
     });
     expect(html).toContain('role="status"');
     expect(html).toContain("Waiting for lead");

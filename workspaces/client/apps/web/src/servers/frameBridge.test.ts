@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../generated/api.ts";
 import { observable, observableRef, runInAction } from "mobx";
 import type { SidebarChatRow } from "../generated/observableResources.ts";
 import { sidebarRowFixture } from "./sidebarRowFixture";
@@ -81,7 +82,10 @@ beforeEach(() => {
     rows: [
       sidebarRowFixture("lead", {
         name: "Real chat",
-        indicator: { kind: "unread", label: "Unread result" },
+        indicator: {
+          kind: ChatOperationalKind["unread"],
+          label: "Unread result",
+        },
       }),
     ],
   });
@@ -476,7 +480,10 @@ it.each(["parent", "screen"])(
       hooks.list.rows = [
         sidebarRowFixture("lead", {
           name: "Updated from stream",
-          indicator: { kind: "answer", label: "Server precedence" },
+          indicator: {
+            kind: ChatOperationalKind["answer"],
+            label: "Server precedence",
+          },
         }),
       ];
     });

@@ -44,6 +44,7 @@ import {
   useServerSidebarServices,
 } from "./servers/ServerServicesContext";
 import { useServerFileDialogs } from "./servers/ServerServicesContext";
+import { receiveSidebarRead } from "./servers/receiveSidebarRead.ts";
 import { onDesktopNavigate } from "./native/notifications";
 import { writePreferenceEdit } from "./sync/uiPreferenceStore";
 import { createUiPreferenceBridge } from "./sync/uiPreferenceBridge";
@@ -2020,7 +2021,7 @@ export default function App({ active = true }: { active?: boolean }) {
       else if (command.action === "refresh") return refresh(false);
       else if (command.action === "prepare-chat") prepareChat(command.id);
       else if (command.action === "mark-unread") {
-        return readState.markSidebarUnread(command.id, command.target);
+        return receiveSidebarRead(command, readState.markSidebarUnread);
       } else if (command.action === "remove-chat")
         remove(command.id, command.room);
       else if (command.action === "change-project") {
@@ -2065,7 +2066,9 @@ export default function App({ active = true }: { active?: boolean }) {
       return undefined;
     },
     new Set(
-      agents.filter((agent) => unreadResult(agent, readState.readStateFor(agent))).map((agent) => agent.id),
+      agents
+        .filter((agent) => unreadResult(agent, readState.readStateFor(agent)))
+        .map((agent) => agent.id),
     ),
     publicAccounts,
     creating,
@@ -2433,14 +2436,19 @@ export default function App({ active = true }: { active?: boolean }) {
           remoteProjects={
             isServerView ? undefined : data.runtime.remoteProjects
           }
-          changeProject={(id) => { const agent = catalog.byId.get(id); if (agent) folders(agent); }}
+          changeProject={(id) => {
+            const agent = catalog.byId.get(id);
+            if (agent) folders(agent);
+          }}
           projectFolders={(path) => openProjectFolders(path)}
           deleteProject={projectDeletion.open}
           projectAccount={openSidebarProjectAccount}
           creating={creating}
           refresh={refresh}
           notify={notify}
-          markUnread={(id, target) => void readState.markSidebarUnread(id, target)}
+          markUnread={(id, target) =>
+            void readState.markSidebarUnread(id, target)
+          }
           markingRead={readState.marking}
           pendingReadTargets={readState.pendingReadTargets}
           hideOldChatsThreshold={studioPreferences.hideOldChatsThreshold}

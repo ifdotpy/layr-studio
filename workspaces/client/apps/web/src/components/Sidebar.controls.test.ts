@@ -83,7 +83,13 @@ it("shows an upgraded chat at the project root without changing its old line fol
       createElement(Sidebar, {
         data,
         opened: "",
-        rows: [sidebarRowFixture("lead", {name:"Upgraded chat",projectPath:"/source",projectFolder:"old-folder"})],
+        rows: [
+          sidebarRowFixture("lead", {
+            name: "Upgraded chat",
+            projectPath: "/source",
+            projectFolder: "old-folder",
+          }),
+        ],
         markingRead: new Set<string>(),
         creating: false,
         mobile: false,

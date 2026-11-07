@@ -97,3 +97,14 @@ MST or mobx-keystone would add another model system. Subscription hooks would
 preserve per-component wiring, while a new subscription coordinator would
 duplicate the existing lifecycle. A generic resource graph, tree framework and
 deadline scheduler add no necessary behavior to this pilot.
+
+## Pilot line-count exception
+
+The owner accepted the pilot's handwritten line-count miss without expanding
+scope or compressing formatting. At the integrated hierarchy checkpoint,
+production handwritten TypeScript added 1,431 lines and removed 1,011 (net +420):
+store +223; shared row leaves +600; Sidebar -72; SidebarRow -195; servers -2;
+App -9; other -125. Tests, generated output and Rust are counted separately in
+the final evidence. Later review corrections may change these measured counts.
+The next stage moves conversation status to server read models and removes the
+remaining shared `chatStatusModel` and App selectors when their last callers move.

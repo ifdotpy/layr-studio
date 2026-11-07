@@ -2,7 +2,10 @@ import type { SidebarChatRow } from "../../generated/observableResources.ts";
 import type { PeerTeam } from "../../types.ts";
 
 /** Index the server's ordered rows without reconstructing visibility or order. */
-export function sidebarRows(rows: readonly SidebarChatRow[], teams: PeerTeam[]) {
+export function sidebarRows(
+  rows: readonly SidebarChatRow[],
+  teams: PeerTeam[],
+) {
   const byId = new Map(rows.map((row) => [row.id, row]));
   const teamsById = new Map(teams.map((team) => [team.id, team]));
   const byTeam = new Map<string, PeerTeam>();

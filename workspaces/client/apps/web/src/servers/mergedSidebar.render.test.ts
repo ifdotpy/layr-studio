@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../generated/api.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from "react";
 import { createRoot } from "react-dom/client";
@@ -122,7 +123,10 @@ it("a combined source update renders only its changed row with overlapping chat 
                 ? {
                     ...row,
                     name: "Changed remotely",
-                    indicator: { kind: "answer", label: "Needs an answer" },
+                    indicator: {
+                      kind: ChatOperationalKind["answer"],
+                      label: "Needs an answer",
+                    },
                   }
                 : { ...row },
             ),

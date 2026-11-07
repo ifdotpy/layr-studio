@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../generated/api.ts";
 import { sidebarRowFixture } from "./sidebarRowFixture";
 import { AgentSource } from "../generated/api";
 import assert from "node:assert/strict";
@@ -126,7 +127,7 @@ describe("project locations", () => {
             projectId: null,
             projectServerId: null,
             provider: "codex",
-            indicator: { kind: "none", label: "Ready" },
+            indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
             compactPinned: false,
             activityAt: 1,
           },
@@ -154,7 +155,7 @@ describe("project locations", () => {
             projectServerId: "mac-id",
             archived: false,
             provider: "codex",
-            indicator: { kind: "none", label: "Ready" },
+            indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
             compactPinned: false,
             activityAt: 1,
           },
@@ -362,7 +363,7 @@ it("only registered logical projects expose a native deletion target", () => {
           projectId: null,
           projectServerId: null,
           provider: "codex",
-          indicator: { kind: "none", label: "Ready" },
+          indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
           compactPinned: false,
           activityAt: 1,
         },
@@ -375,7 +376,7 @@ it("only registered logical projects expose a native deletion target", () => {
           projectId: null,
           projectServerId: null,
           provider: "codex",
-          indicator: { kind: "none", label: "Ready" },
+          indicator: { kind: ChatOperationalKind["none"], label: "Ready" },
           compactPinned: false,
           activityAt: 1,
         },

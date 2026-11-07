@@ -19,7 +19,9 @@ type Selection = {
 };
 const selectors: Required<Pick<ResourceDataSelectors<Selection>, ScopeKind>> = {
   sidebar: (_ref, { entities }) => ({
-    rows: entities.filter((row) => row.collection === "sidebarChatRow").map((row) => row.value),
+    rows: entities
+      .filter((row) => row.collection === "sidebarChatRow")
+      .map((row) => row.value),
   }),
   work: (ref, { entities, selectWork }) => selectWork(entities, ref.agentId),
   agentDetail: (_ref, { entities }) =>

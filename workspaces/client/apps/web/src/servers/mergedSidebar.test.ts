@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../generated/api.ts";
 import { sidebarRowFixture } from "./sidebarRowFixture";
 import { StudioErrorLevel } from "../generated/api";
 import { StudioErrorEffectCertainty } from "../generated/api";
@@ -43,7 +44,10 @@ function source(
       rows: [
         agent("same", {
           pinned: true,
-          indicator: { kind: "answer", label: "Needs an answer" },
+          indicator: {
+            kind: ChatOperationalKind["answer"],
+            label: "Needs an answer",
+          },
         }),
       ],
       rooms: [

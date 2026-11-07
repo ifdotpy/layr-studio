@@ -7,5 +7,7 @@ export function keepCompactSidebarChat(
   row: Pick<SidebarChatRow, "compactPinned" | "activityAt">,
   now = Date.now() / 1000,
 ) {
-  return row.compactPinned || now - row.activityAt < COMPACT_RECENT_WINDOW_SECONDS;
+  return (
+    row.compactPinned || now - row.activityAt < COMPACT_RECENT_WINDOW_SECONDS
+  );
 }

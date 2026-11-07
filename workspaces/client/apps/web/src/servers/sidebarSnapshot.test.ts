@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../generated/api.ts";
 import { StudioErrorLevel } from "../generated/api";
 import { StudioErrorEffectCertainty } from "../generated/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,7 +51,10 @@ describe("server sidebar projection", () => {
     data.threads = [{ id: "lead", name: "Stale Agent title", inFlight: true }];
     const rows = [
       sidebarRowFixture("lead", {
-        indicator: { kind: "answer", label: "Server decides precedence" },
+        indicator: {
+          kind: ChatOperationalKind["answer"],
+          label: "Server decides precedence",
+        },
         markRead: {
           threadId: "native",
           turnId: "turn",

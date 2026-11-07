@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 import { AgentStatus } from "../../generated/api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -42,8 +43,8 @@ function renderTeam(deferred = false, workerFilter = "all") {
         answerIds: new Set<string>(),
         deferredIds: new Set(deferred ? ["approval"] : []),
         indicators: new Map<string, ChatIndicator>([
-          ["approval", { kind: "none", label: "Ready" }],
-          ["finished", { kind: "none", label: "Read" }],
+          ["approval", { kind: ChatOperationalKind["none"], label: "Ready" }],
+          ["finished", { kind: ChatOperationalKind["none"], label: "Read" }],
         ]),
         workerQuery: "",
         setWorkerQuery: noop,

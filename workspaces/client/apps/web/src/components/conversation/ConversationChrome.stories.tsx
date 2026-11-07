@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -27,12 +28,12 @@ import type { ChatIndicator } from "../chat-status/chatStatusModel";
 import "./empty-chat-settings.css";
 
 const indicators: ChatIndicator[] = [
-  { kind: "answer", label: "Needs your answer" },
-  { kind: "error", label: "Failed" },
-  { kind: "working", label: "Working" },
-  { kind: "unread", label: "Unread result" },
-  { kind: "paused", label: "Stopped" },
-  { kind: "none", label: "Ready" },
+  { kind: ChatOperationalKind["answer"], label: "Needs your answer" },
+  { kind: ChatOperationalKind["error"], label: "Failed" },
+  { kind: ChatOperationalKind["working"], label: "Working" },
+  { kind: ChatOperationalKind["unread"], label: "Unread result" },
+  { kind: ChatOperationalKind["paused"], label: "Stopped" },
+  { kind: ChatOperationalKind["none"], label: "Ready" },
 ];
 const titles = [
   "Обновление обработчика запросов и восстановление сессии после потери соединения",

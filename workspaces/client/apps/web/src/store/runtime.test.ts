@@ -17,10 +17,12 @@ class SettingsModel {
 function fixture() {
   const callbacks = new Map<string, (version?: ResourceVersion) => void>();
   const removed = vi.fn();
-  const added = vi.fn((resource: ResourceRef, accept: (v?: ResourceVersion) => void) => {
-    callbacks.set(subscriptionKey(resource), accept);
-    return removed;
-  });
+  const added = vi.fn(
+    (resource: ResourceRef, accept: (v?: ResourceVersion) => void) => {
+      callbacks.set(subscriptionKey(resource), accept);
+      return removed;
+    },
+  );
   const subscriptions = createSubscriptions({
     watchResourceChanges: added,
     watchResourceConnection: (accept) => {
@@ -39,7 +41,11 @@ function fixture() {
   });
   let revision = 0;
   return {
-    slot, runtime, subscriptions, added, removed,
+    slot,
+    runtime,
+    subscriptions,
+    added,
+    removed,
     publish(storeRoot: string) {
       callbacks.get(subscriptionKey(ref))?.({
         epoch: "epoch",
@@ -63,7 +69,11 @@ describe("observable resource runtime over the subscription owner", () => {
     const seen: string[] = [];
     const stop = autorun(() => {
       const value = f.slot.current;
-      seen.push(value.status === "live" || value.status === "stale" ? value.data.storeRoot || "" : value.status);
+      seen.push(
+        value.status === "live" || value.status === "stale"
+          ? value.data.storeRoot || ""
+          : value.status,
+      );
     });
     await vi.advanceTimersByTimeAsync(100);
     f.publish("one");
@@ -77,7 +87,7 @@ describe("observable resource runtime over the subscription owner", () => {
     expect(seen).toEqual(["loading", "one", "two"]);
     stop();
     f.runtime.dispose();
-    expect(f.slot.current).toEqual({status: "loading"});
+    expect(f.slot.current).toEqual({ status: "loading" });
     f.subscriptions.dispose();
   });
 
@@ -102,18 +112,54 @@ describe("observable resource runtime over the subscription owner", () => {
   });
 
   it("scopes identical resource keys to their own server", async () => {
-    const a = fixture(), b = fixture();
+    const a = fixture(),
+      b = fixture();
     const stopA = autorun(() => a.slot.current);
     const stopB = autorun(() => b.slot.current);
     await vi.advanceTimersByTimeAsync(100);
     a.publish("server-a");
     b.publish("server-b");
     await vi.advanceTimersByTimeAsync(0);
-    expect(a.slot.current).toMatchObject({status: "live", data: {storeRoot: "server-a"}});
-    expect(b.slot.current).toMatchObject({status: "live", data: {storeRoot: "server-b"}});
-    stopA(); stopB();
-    a.runtime.dispose(); b.runtime.dispose();
-    a.subscriptions.dispose(); b.subscriptions.dispose();
+    expect(a.slot.current).toMatchObject({
+      status: "live",
+      data: { storeRoot: "server-a" },
+    });
+    expect(b.slot.current).toMatchObject({
+      status: "live",
+      data: { storeRoot: "server-b" },
+    });
+    stopA();
+    stopB();
+    a.runtime.dispose();
+    b.runtime.dispose();
+    a.subscriptions.dispose();
+    b.subscriptions.dispose();
+  });
+
+  it("reuses A through A to B to A navigation inside the existing grace", async () => {
+    const f = fixture();
+    const other = { kind: "desktop" } as const;
+    const b = f.runtime.slot({
+      key: subscriptionKey(other),
+      ref: other,
+      create: () => ({}),
+      apply: () => {},
+    });
+    const aFirst = autorun(() => f.slot.current);
+    await vi.advanceTimersByTimeAsync(100);
+    aFirst();
+    const stopB = autorun(() => b.current);
+    await vi.advanceTimersByTimeAsync(100);
+    stopB();
+    const aAgain = autorun(() => f.slot.current);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.added).toHaveBeenCalledTimes(2);
+    expect(f.removed).not.toHaveBeenCalled();
+    aAgain();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(f.removed).toHaveBeenCalledTimes(2);
+    f.runtime.dispose();
+    f.subscriptions.dispose();
   });
 
   it("retains data as stale with error detail and clears it at owner disposal", async () => {
@@ -124,10 +170,14 @@ describe("observable resource runtime over the subscription owner", () => {
     await vi.advanceTimersByTimeAsync(0);
     f.subscriptions.fail(ref, new Error("Disconnected"));
     await vi.advanceTimersByTimeAsync(0);
-    expect(f.slot.current).toMatchObject({status: "stale", data: {storeRoot: "saved"}, error: {message: "Disconnected"}});
+    expect(f.slot.current).toMatchObject({
+      status: "stale",
+      data: { storeRoot: "saved" },
+      error: { message: "Disconnected" },
+    });
     stop();
     f.subscriptions.dispose();
-    expect(f.slot.current).toEqual({status: "loading"});
+    expect(f.slot.current).toEqual({ status: "loading" });
     f.runtime.dispose();
   });
 });

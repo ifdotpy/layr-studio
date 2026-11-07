@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 import { AgentStatus } from "../../generated/api";
 import { RetainedWorktree } from "./RetainedWorktrees";
 import { providerLabel } from "../../generated/providerKind.ts";
@@ -201,9 +202,9 @@ const WorkerCardView = memo(function WorkerCardView({
     : ["waiting_on_monitor"].includes(agent.status ?? "")
       ? commandWaitLabel(agent)
       : (startWaitLabel(agent) ??
-        (indicator?.kind === "answer" ||
+        (indicator?.kind === ChatOperationalKind["answer"] ||
         ["waiting", "parked"].includes(agent.status ?? "") ||
-        (indicator?.kind === "working" && !agent.inFlight)
+        (indicator?.kind === ChatOperationalKind["working"] && !agent.inFlight)
           ? indicator?.label || statusLabel(agent.status)
           : awaitingAnswer
             ? "Needs your answer"

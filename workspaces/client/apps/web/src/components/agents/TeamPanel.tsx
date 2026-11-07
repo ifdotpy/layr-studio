@@ -1,3 +1,4 @@
+import { ChatOperationalKind } from "../../generated/api.ts";
 import { TeamRetainedWorktrees } from "./RetainedWorktrees";
 import { ActionIcon, Button, TextInput } from "@mantine/core";
 import { ArrowLeft, Search, X } from "lucide-react";
@@ -85,10 +86,10 @@ export default function TeamPanel({
   for (const agent of workers) {
     if (
       workerState(agent, answerIds, deferredIds) === "answer" &&
-      teamIndicators.get(agent.id)?.kind !== "answer"
+      teamIndicators.get(agent.id)?.kind !== ChatOperationalKind["answer"]
     )
       teamIndicators.set(agent.id, {
-        kind: "answer",
+        kind: ChatOperationalKind["answer"],
         label: "Needs your answer",
       });
   }

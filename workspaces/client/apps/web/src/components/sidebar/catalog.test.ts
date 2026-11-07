@@ -1,13 +1,8 @@
-import {
-  AgentSource as GeneratedApiAgentSource,
-} from "../../generated/api.ts";
+import { AgentSource as GeneratedApiAgentSource } from "../../generated/api.ts";
 import { required } from "../componentTestFixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../../types";
-import {
-  createAppCatalogSelector,
-  mostRecentActivity,
-} from "./catalog";
+import { createAppCatalogSelector, mostRecentActivity } from "./catalog";
 
 const agent = (id: string, fields: Partial<Agent> = {}): Agent => ({
   id,
