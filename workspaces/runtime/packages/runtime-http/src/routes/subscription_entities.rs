@@ -165,6 +165,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_project_binding_survives_overlapping_project_ids_in_server_frames() {
+        let directory = tempfile::tempdir().expect("isolated server");
+        let store = Arc::new(
+            RuntimeStore::open(Some(directory.path()))
+                .await
+                .expect("store"),
+        );
+        store
+            .set_local_server_id(Some("B".to_owned()))
+            .expect("server identity");
+        studio_runtime_services::entity_publication::install(&store)
+            .await
+            .expect("publisher");
+        store
+            .transaction_with(|tx| {
+                studio_runtime_store::ProjectsRepository::put_project(
+                    tx,
+                    &json!({
+                        "id":"P", "homeServerId":"B", "name":"Project B", "path":"/B/P"
+                    }),
+                )?;
+                AgentRepository::put(
+                    tx,
+                    &AgentRecord::from_value(json!({
+                        "compactions":0,"accountKey":"default","provider":"codex",
+                        "id":"remote-chat","rootId":"remote-chat","epoch":1,
+                        "status":"idle","isLead":true,"name":"Bound to A",
+                        "cwd":"/B/alias","projectId":"P","projectServerId":"A"
+                    }))?,
+                )?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .expect("published project and chat");
+        let workspace = store
+            .test_read_transaction(|tx| SyncDocumentsRepository::workspace_id(tx))
+            .expect("workspace");
+        let state = HttpState::new(
+            "token".into(),
+            workspace,
+            directory.path().to_string_lossy().into_owned(),
+            4620,
+            None,
+            Some(store),
+            None,
+        );
+        let resource = studio_json::from_value(json!({"kind":"state"})).expect("state ref");
+        let frame = studio_json::to_value(
+            initial_snapshot(state, resource, None)
+                .await
+                .expect("server snapshot"),
+        )
+        .expect("frame");
+        let chat = frame["entityChanges"]["documents"]
+            .as_array()
+            .expect("documents")
+            .iter()
+            .find(|row| row["collection"] == "agentSummary" && row["id"] == "remote-chat")
+            .expect("chat summary");
+        assert_eq!(
+            chat["value"]["projectServerId"], "A",
+            "serving B must preserve the stored project home A"
+        );
+    }
+
+    #[tokio::test]
     async fn view_scoped_entities_publish_list_and_detail_through_real_handlers() {
         let directory = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(

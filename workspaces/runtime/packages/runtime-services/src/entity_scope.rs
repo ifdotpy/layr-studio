@@ -772,7 +772,9 @@ fn agent_docs_with_context(
     if wanted.contains("agentSummary")
         && let Some(summary) = summary.as_mut()
     {
-        summary["projectServerId"] = studio_json::to_value(&server)?;
+        if summary["projectServerId"].is_null() {
+            summary["projectServerId"] = studio_json::to_value(&server)?;
+        }
         crate::agent_operational::decorate(summary, context)?;
     }
     for (collection, value) in [
