@@ -564,7 +564,7 @@ async fn limit_failure_refresh_publishes_account_entity_after_recording_failure_
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )

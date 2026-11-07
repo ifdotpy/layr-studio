@@ -355,8 +355,11 @@ mod tests {
                 .as_ref()
                 .expect("store")
                 .transaction(move |tx| {
-                    studio_runtime_store::SyncDocumentsRepository::put_entity(
-                        tx, "desktop", "current", value, false,
+                    studio_runtime_store::observations::put(
+                        tx,
+                        studio_runtime_store::observations::DESKTOP,
+                        "current",
+                        &value,
                     )?;
                     Ok(())
                 })

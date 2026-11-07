@@ -15,12 +15,10 @@ async fn unreadable_limits_do_not_block_publication_or_startup() {
     let (_dir, store) = store().await;
     store
         .transaction(|tx| {
-            studio_runtime_store::SyncDocumentsRepository::put_entity(
+            studio_runtime_store::account_state::put_rate_limit(
                 tx,
-                "rateLimit",
                 "broken",
-                json!({"unexpected": true}),
-                false,
+                &json!({"unexpected": true}),
             )?;
             crate::account_session_runtime::limits::seed_agents(tx)?;
             crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
@@ -33,14 +31,27 @@ async fn unreadable_limits_do_not_block_publication_or_startup() {
 #[tokio::test]
 async fn null_limits_payload_does_not_block_publication_or_startup() {
     let (_dir, store) = store().await;
-    store.transaction(|tx| {
-        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "broken", json!({"unexpected": true}), false)?;
-        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
-        crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
-        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
-        crate::account_session_runtime::limits::seed_agents(tx)?;
-        Ok(())
-    }).await.unwrap();
+    store
+        .transaction(|tx| {
+            studio_runtime_store::account_state::put_rate_limit(
+                tx,
+                "broken",
+                &json!({"unexpected": true}),
+            )?;
+            tx.execute(
+                "UPDATE runtime_rate_limits SET record='null' WHERE id='broken'",
+                [],
+            )?;
+            crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
+            tx.execute(
+                "UPDATE runtime_rate_limits SET record='null' WHERE id='broken'",
+                [],
+            )?;
+            crate::account_session_runtime::limits::seed_agents(tx)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -56,13 +67,13 @@ async fn agent_limit_failure_republishes_account_recovery() {
         let raw = studio_json::OwnedRawJson::from_string(observation.to_string())?;
         let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(raw.as_str(), "default", now)?;
         crate::account_session_runtime::limits::populate_agents(tx, &mut view, now)?;
-        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
+        studio_runtime_store::account_state::put_rate_limit(tx, "default", &view)?;
         Ok(())
     }).await.unwrap();
     let before: i64 = store
         .test_read_transaction(|tx| {
             tx.query_row(
-                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_rate_limits' AND id='default'",
                 [],
                 |row| row.get(0),
             )
@@ -82,7 +93,7 @@ async fn agent_limit_failure_republishes_account_recovery() {
     let after: i64 = store
         .test_read_transaction(|tx| {
             tx.query_row(
-                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_rate_limits' AND id='default'",
                 [],
                 |row| row.get(0),
             )

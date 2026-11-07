@@ -3,8 +3,8 @@ use super::*;
 use rusqlite::OptionalExtension;
 use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_schema::usage_limits::{UsageLimitsData, UsageLimitsResponse};
+use studio_runtime_store::StoreError;
 use studio_runtime_store::account_state;
-use studio_runtime_store::{StoreError, SyncDocumentsRepository};
 
 pub(super) enum LimitsWrite {
     Snapshot(LimitsSnapshot),
@@ -100,7 +100,8 @@ fn commit(
         account_state::LimitsStamp::read(account_state::limits_observation(tx, account)?)?;
     let old = account_state::typed_limits_snapshot(tx, account, &stamp)?;
     let mut stamp_changed = false;
-    let committed_view = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [account], |row| row.get::<_, String>(0)).optional()?.map(|payload| account_state::normalized_limits_view(account, payload.as_bytes(), now).0);
+    let committed_view = account_state::rate_limit_record(tx, account)?
+        .map(|payload| account_state::normalized_limits_view(account, payload.as_bytes(), now).0);
     let mut checking = None;
     let force_projection = matches!(
         &write,
@@ -246,7 +247,7 @@ fn commit(
         crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     }
-    let current_identity: Option<String> = tx.query_row("SELECT json_extract(j.value,'$.accountId') FROM sync_entities e, json_each(CASE WHEN json_valid(e.payload) THEN e.payload ELSE '{}' END,'$.value.accounts') j WHERE e.collection='accounts' AND e.id='current' AND e.deleted=0 AND json_extract(j.value,'$.id')=?1", [account], |row| row.get(0)).optional()?.flatten();
+    let current_identity: Option<String> = tx.query_row("SELECT json_extract(j.value,'$.accountId') FROM runtime_account_summaries e, json_each(CASE WHEN json_valid(e.record) THEN e.record ELSE '{}' END,'$.value.accounts') j WHERE e.id='current' AND json_extract(j.value,'$.id')=?1", [account], |row| row.get(0)).optional()?.flatten();
     let observation_identity = value
         .data
         .as_ref()
@@ -268,7 +269,7 @@ fn commit(
     if let Some(reset_at) = checking {
         mark_checking(&mut view, reset_at);
     }
-    SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
+    account_state::put_rate_limit(tx, account, &view)?;
     Ok((Some(value), true))
 }
 
@@ -300,22 +301,38 @@ pub(super) async fn recovery_deadline(
     account: String,
     attempted: f64,
 ) -> Option<f64> {
-    store.read_async("account-session/recovery-deadline", move |db| {
-        use studio_runtime_schema::usage_limits::RecoveryTiming;
-        let payload: Option<String> = db.query_row(
-            "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
-            [&account], |row| row.get(0),
-        ).optional()?;
-        let Some(payload) = payload else { return Ok::<_, StoreError>(None) };
-        let (value, _) = account_state::normalized_limits_view(&account, payload.as_bytes(), attempted);
-        let checked = value.observation.read_at.into_iter().chain(value.observation.checked_at).fold(0.0, f64::max);
-        Ok(value.projection.agents.values().filter_map(|agent| {
-            match &agent.recovery.as_ref()?.timing {
-                RecoveryTiming::Waiting { reset_at } | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
-                RecoveryTiming::Unknown | RecoveryTiming::Checking { .. } | RecoveryTiming::Confirmed { .. } => None,
-            }
-        }).filter(|reset| *reset > checked.max(attempted)).reduce(f64::min))
-    }).await.ok().flatten()
+    store
+        .read_async("account-session/recovery-deadline", move |db| {
+            use studio_runtime_schema::usage_limits::RecoveryTiming;
+            let payload = account_state::rate_limit_record(db, &account)?;
+            let Some(payload) = payload else {
+                return Ok::<_, StoreError>(None);
+            };
+            let (value, _) =
+                account_state::normalized_limits_view(&account, payload.as_bytes(), attempted);
+            let checked = value
+                .observation
+                .read_at
+                .into_iter()
+                .chain(value.observation.checked_at)
+                .fold(0.0, f64::max);
+            Ok(value
+                .projection
+                .agents
+                .values()
+                .filter_map(|agent| match &agent.recovery.as_ref()?.timing {
+                    RecoveryTiming::Waiting { reset_at }
+                    | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
+                    RecoveryTiming::Unknown
+                    | RecoveryTiming::Checking { .. }
+                    | RecoveryTiming::Confirmed { .. } => None,
+                })
+                .filter(|reset| *reset > checked.max(attempted))
+                .reduce(f64::min))
+        })
+        .await
+        .ok()
+        .flatten()
 }
 
 fn mark_checking(view: &mut studio_runtime_schema::usage_limits::RateLimitView, reset_at: f64) {
@@ -341,9 +358,11 @@ fn decoded_account_views(
     )>,
     StoreError,
 > {
-    let mut query = tx.prepare(
-        "SELECT id,substr(CAST(payload AS BLOB),1,?1) FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
-    )?;
+    if !account_state::has_rate_limits(tx)? {
+        return Ok(Vec::new());
+    }
+    let mut query =
+        tx.prepare("SELECT id,substr(CAST(record AS BLOB),1,?1) FROM runtime_rate_limits")?;
     let rows = query.query_map(
         [account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
@@ -378,12 +397,9 @@ pub(crate) fn publish_agent_change(
     };
     for (account, mut value, unreadable) in views {
         if unreadable {
-            tx.execute(
-                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
-                [&account],
-            )?;
+            account_state::delete_rate_limit(tx, &account)?;
             populate_agents(tx, &mut value, now)?;
-            SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+            account_state::put_rate_limit(tx, &account, &value)?;
             continue;
         }
         let matches = agent.as_ref().is_some_and(|agent| {
@@ -411,7 +427,7 @@ pub(crate) fn publish_agent_change(
         {
             mark_checking(&mut value, reset_at);
         }
-        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+        account_state::put_rate_limit(tx, &account, &value)?;
     }
     Ok(())
 }
@@ -420,10 +436,7 @@ pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<
     let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     for (account, mut value, unreadable) in decoded_account_views(tx, now)? {
         if unreadable {
-            tx.execute(
-                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
-                [&account],
-            )?;
+            account_state::delete_rate_limit(tx, &account)?;
         }
         if matches!(
             value.projection.status,
@@ -433,7 +446,7 @@ pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<
                 studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
         }
         populate_agents(tx, &mut value, now)?;
-        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+        account_state::put_rate_limit(tx, &account, &value)?;
     }
     Ok(())
 }

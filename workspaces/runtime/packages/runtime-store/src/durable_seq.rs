@@ -114,6 +114,13 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     // entry the project grant writers also mark) and per mirrored peer project.
     DurableTable::record("runtime_projects"),
     DurableTable::record("peer_projects"),
+    // Account observations: the rate-limit view of each account, the account list
+    // summary and the cost summary of each account, one document per row.
+    DurableTable::record("runtime_rate_limits"),
+    DurableTable::record("runtime_account_summaries"),
+    DurableTable::record("runtime_account_costs"),
+    DurableTable::record("runtime_session_costs"),
+    DurableTable::record("runtime_desktop_states"),
     // Chat membership edges: an `edge` document per chat edge, built at read time.
     DurableTable::new("graph_edges", "target"),
     // Window sources: a row in its window (`TASK_WINDOW`, `MONITOR_WINDOW`) is sent

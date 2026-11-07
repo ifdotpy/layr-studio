@@ -99,6 +99,7 @@ mod m2026_11_06_chat_fields_on_chats;
 mod m2026_11_06_enum_column_checks;
 mod m2026_11_06_immutable_rows;
 mod m2026_11_06_item_hidden_by;
+mod m2026_11_06_observation_read_time;
 mod m2026_11_06_one_draft_per_chat;
 mod m2026_11_06_peer_team_read_time;
 mod m2026_11_06_process_exit_check;
@@ -1696,6 +1697,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_peer_team_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-observation-read-time",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Account observation copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_observation_read_time::apply(c.transaction),
     },
 ];
 

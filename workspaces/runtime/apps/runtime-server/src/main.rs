@@ -2575,13 +2575,7 @@ mod exit_logging_tests {
             "default",
             1000.0,
         )?;
-        studio_runtime_store::SyncDocumentsRepository::put_entity(
-            tx,
-            "rateLimit",
-            "default",
-            view,
-            false,
-        )?;
+        studio_runtime_store::account_state::put_rate_limit(tx, "default", &view)?;
         Ok(())
     }
     impl studio_runtime_services::account_session_runtime::AccountSessionPort for TickLimits {

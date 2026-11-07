@@ -65,13 +65,16 @@ fn account_destinations(
         id: studio_runtime_schema::account_key::AccountKey,
         eligibility: studio_runtime_schema::agent_progress::AccountEligibility,
     }
-    if !table_exists(transaction, "sync_entities")? {
+    if !table_exists(transaction, "runtime_account_summaries")? {
         return Ok(Vec::new());
     }
-    let raw: Option<String> = transaction.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='accounts' AND id='current' AND deleted=0",
-        [], |row| row.get(0),
-    ).optional()?;
+    let raw: Option<String> = transaction
+        .query_row(
+            "SELECT record FROM runtime_account_summaries WHERE id='current'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };

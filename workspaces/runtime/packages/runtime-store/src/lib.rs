@@ -89,6 +89,7 @@ pub use repositories::checkpoints::{
 };
 pub use repositories::claude_controls::ClaudeControlRepository;
 pub use repositories::cost_aggregate;
+pub use repositories::observations;
 pub use repositories::remote_transport::{
     AccessNonceOutcome, OutboundReservation, RemoteTransportRepository,
 };

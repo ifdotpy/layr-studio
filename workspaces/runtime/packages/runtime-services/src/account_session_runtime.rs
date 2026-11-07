@@ -2513,7 +2513,7 @@ mod persistence_tests {
                     "other",
                     1.0,
                 )?;
-                SyncDocumentsRepository::put_entity(tx, "rateLimit", "other", view, false)?;
+                studio_runtime_store::account_state::put_rate_limit(tx, "other", &view)?;
                 Ok(())
             })
             .await
@@ -2538,7 +2538,7 @@ mod persistence_tests {
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )
@@ -2588,7 +2588,7 @@ mod persistence_tests {
             .await
             .unwrap();
         store.transaction(|tx| {
-            tx.execute_batch("CREATE TRIGGER reject_limits BEFORE INSERT ON sync_entities WHEN NEW.collection='rateLimit' BEGIN SELECT RAISE(ABORT,'injected failure'); END;")?;
+            tx.execute_batch("CREATE TRIGGER reject_limits BEFORE INSERT ON runtime_rate_limits BEGIN SELECT RAISE(ABORT,'injected failure'); END;")?;
             Ok(())
         }).await.unwrap();
         let before = stored_workspace(&store);
@@ -2884,7 +2884,7 @@ mod limits_runtime_tests {
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )
@@ -2955,7 +2955,7 @@ mod limits_runtime_tests {
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )
@@ -2988,7 +2988,7 @@ mod limits_runtime_tests {
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String = store.test_reader().unwrap().query_row("SELECT record FROM runtime_rate_limits WHERE id='default'", [], |row| row.get(0)).unwrap();
                 if studio_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"] == "current" { break; }
                 changes.notified().await;
             }
@@ -3015,18 +3015,33 @@ mod limits_runtime_tests {
             .unwrap()
             .unwrap();
         store.transaction(|tx| {
-            tx.execute_batch("CREATE TRIGGER reject_checking_result BEFORE UPDATE ON sync_entities WHEN NEW.collection='rateLimit' AND json_extract(NEW.payload,'$.value.projection.status.kind')='checking' AND json_extract(NEW.payload,'$.value.observation.data.rateLimits.primary.usedPercent')=0 BEGIN SELECT RAISE(ABORT,'result must finish atomically'); END;")?;
+            tx.execute_batch("CREATE TRIGGER reject_checking_result BEFORE UPDATE ON runtime_rate_limits WHEN json_extract(NEW.record,'$.value.projection.status.kind')='checking' AND json_extract(NEW.record,'$.value.observation.data.rateLimits.primary.usedPercent')=0 BEGIN SELECT RAISE(ABORT,'result must finish atomically'); END;")?;
             Ok(())
         }).await.unwrap();
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String = store
+                    .test_reader()
+                    .unwrap()
+                    .query_row(
+                        "SELECT record FROM runtime_rate_limits WHERE id='default'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
                 let value: Value = studio_json::from_str(&payload).unwrap();
-                if value["value"]["projection"]["status"]["kind"] == "current" && value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"] == 0.0 { break; }
+                if value["value"]["projection"]["status"]["kind"] == "current"
+                    && value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"]
+                        == 0.0
+                {
+                    break;
+                }
                 changes.notified().await;
             }
-        }).await.expect("provider result and completed status publish together");
+        })
+        .await
+        .expect("provider result and completed status publish together");
     }
 
     #[tokio::test]
@@ -3068,11 +3083,22 @@ mod limits_runtime_tests {
         tokio::time::timeout(Duration::from_secs(12), async {
             loop {
                 let value = f.runtime.limits_snapshot("default").unwrap();
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String = store
+                    .test_reader()
+                    .unwrap()
+                    .query_row(
+                        "SELECT record FROM runtime_rate_limits WHERE id='default'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
                 let view: Value = studio_json::from_str(&payload).unwrap();
                 if value.get("error").and_then(Value::as_str).is_some()
                     && view["value"]["projection"]["status"]["kind"] == "current"
-                    && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) {
+                    && view["value"]["projection"]["reset"]["credits"]
+                        .as_array()
+                        .is_some_and(Vec::is_empty)
+                {
                     break;
                 }
                 changes.notified().await;
@@ -3107,7 +3133,7 @@ mod limits_runtime_tests {
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )
@@ -3127,12 +3153,28 @@ mod limits_runtime_tests {
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String = store
+                    .test_reader()
+                    .unwrap()
+                    .query_row(
+                        "SELECT record FROM runtime_rate_limits WHERE id='default'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
                 let view: Value = studio_json::from_str(&payload).unwrap();
-                if view["value"]["projection"]["status"]["kind"] == "current" && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) { break; }
+                if view["value"]["projection"]["status"]["kind"] == "current"
+                    && view["value"]["projection"]["reset"]["credits"]
+                        .as_array()
+                        .is_some_and(Vec::is_empty)
+                {
+                    break;
+                }
                 changes.notified().await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -3150,11 +3192,11 @@ mod limits_runtime_tests {
         .await
         .unwrap();
         store.transaction(|tx| {
-            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0))?;
+            let raw: String = tx.query_row("SELECT record FROM runtime_rate_limits WHERE id='default'", [], |row| row.get(0))?;
             let mut view: Value = studio_json::from_str::<Value>(&raw)?["value"].clone();
             let agent = |reset| json!({"eligibility":{"accountKey":"default","agentId":"a","model":"m","provider":"codex","state":"blocked","validUntil":null,"buckets":[],"overage":"unavailable"},"recovery":{"title":"Limit","message":"Wait","action":{"kind":"none"},"timing":{"kind":"waiting","resetAt":reset}}});
             view["projection"]["agents"] = json!({"a":agent(100.0),"b":agent(200.0)});
-            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
+            studio_runtime_store::account_state::put_rate_limit(tx, "default", &view)?;
             Ok(())
         }).await.unwrap();
         assert_eq!(
@@ -3185,9 +3227,15 @@ mod limits_runtime_tests {
             .unwrap()
             .unwrap();
         let read_view = || -> Value {
-            let payload: String = store.test_reader().unwrap().query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0),
-            ).unwrap();
+            let payload: String = store
+                .test_reader()
+                .unwrap()
+                .query_row(
+                    "SELECT record FROM runtime_rate_limits WHERE id='default'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
             studio_json::from_str::<Value>(&payload).unwrap()["value"].clone()
         };
         assert_eq!(read_view()["projection"]["status"]["kind"], "checking");
@@ -3265,7 +3313,7 @@ mod limits_runtime_tests {
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )
@@ -3303,7 +3351,7 @@ mod limits_runtime_tests {
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                "SELECT record FROM runtime_rate_limits WHERE id='default'",
                 [],
                 |row| row.get(0),
             )

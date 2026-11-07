@@ -152,7 +152,7 @@ pub(crate) fn read_time_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_st
         .chain(
             studio_runtime_services::entity_scope::live_documents(
                 db,
-                r#"["task","monitor","event","messageReceipt","project","peerTeam"]"#,
+                r#"["task","monitor","event","messageReceipt","project","peerTeam","rateLimit","accounts","accountCost","sessionCost","desktop"]"#,
             )
             .expect("window documents"),
         )

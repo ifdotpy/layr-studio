@@ -7,7 +7,7 @@ use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_services::resource_notify::{self, BoundedSource};
 use studio_runtime_services::usage::PricingRefreshOutcome;
-use studio_runtime_store::{ObservedTable, RuntimeStore, StoreError, SyncDocumentsRepository};
+use studio_runtime_store::{ObservedTable, RuntimeStore, StoreError};
 use tokio::sync::mpsc;
 
 // Serialize cost snapshot publication and scan admission, never the scan itself.
@@ -320,6 +320,9 @@ async fn write_entities(
     rows: Vec<(String, Value)>,
     deletions: Option<BTreeSet<String>>,
 ) -> Result<(), StoreError> {
+    // The observation tables own these documents; readers build them at read time.
+    let observation = studio_runtime_store::observations::of_collection(collection)
+        .ok_or(StoreError::RecordContract("not an observation collection"))?;
     store
         .transaction_with(move |tx| {
             let ids = rows
@@ -338,24 +341,17 @@ async fn write_entities(
                         id,
                     });
                 }
-                SyncDocumentsRepository::put_entity(tx, collection, &id, value, false)?;
+                studio_runtime_store::observations::put(tx, observation, &id, &value)?;
             }
             let deleted = match deletions {
                 Some(ids) => ids,
-                None => {
-                    let mut statement = tx.prepare(
-                        "SELECT id FROM sync_entities WHERE collection=?1 AND deleted=0",
-                    )?;
-                    statement
-                        .query_map([collection], |row| row.get::<_, String>(0))?
-                        .collect::<rusqlite::Result<BTreeSet<_>>>()?
-                        .difference(&ids)
-                        .cloned()
-                        .collect()
-                }
+                None => studio_runtime_store::observations::ids(tx, observation)?
+                    .into_iter()
+                    .filter(|id| !ids.contains(id))
+                    .collect(),
             };
             for id in deleted {
-                SyncDocumentsRepository::put_entity(tx, collection, &id, Value::Null, true)?;
+                studio_runtime_store::observations::delete(tx, observation, &id)?;
             }
             Ok(())
         })
@@ -481,19 +477,19 @@ async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
             })
         })
         .collect();
-    // Only this allowlisted DTO reaches sync_entities/RxDB. Login receipts,
+    // Only this allowlisted DTO reaches the account summary table and RxDB. Login receipts,
     // URLs, device codes and credentials stay in the transient auth owner.
     let value = accounts_summary(snapshot);
     let changed_identities = state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?
         .transaction_with(move |tx| {
             let mut changed_identities = Vec::new();
             for (account, current_identity) in pending_accounts {
-                let stored_identity: Option<Option<String>> = tx.query_row("SELECT CASE WHEN json_valid(payload) THEN json_extract(payload,'$.value.observation.data.accountId') END FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [&account], |row| row.get(0)).optional()?;
+                let stored_identity: Option<Option<String>> = tx.query_row("SELECT CASE WHEN json_valid(record) THEN json_extract(record,'$.value.observation.data.accountId') END FROM runtime_rate_limits WHERE id=?1", [&account], |row| row.get(0)).optional()?;
                 let mismatch = studio_runtime_schema::usage_limits::account_identity_mismatch(current_identity.as_deref(), stored_identity.as_ref().and_then(Option::as_deref));
                 if stored_identity.is_none() || mismatch {
                     let observation = studio_runtime_schema::usage_limits::UsageLimitsResponse { account_key: account.clone(), ..Default::default() };
                     let view = studio_runtime_schema::usage_limits::RateLimitView::from_observation(observation, 0.0);
-                    SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, view, false)?;
+                    studio_runtime_store::account_state::put_rate_limit(tx, &account, &view)?;
                     if mismatch { changed_identities.push(account); }
                 }
             }
@@ -502,7 +498,7 @@ async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
                 .map_err(StoreError::SchemaValidation)? {
                 return Err(StoreError::InvalidSyncObject { scope: "accounts".into(), id: "current".into() });
             }
-            let changed = SyncDocumentsRepository::put_entity(tx, "accounts", "current", value, false)?;
+            let changed = studio_runtime_store::observations::put(tx, studio_runtime_store::observations::ACCOUNT_SUMMARIES, "current", &value)?;
             // Lead views read the account destinations at read time; mark them so
             // readers build them again.
             if changed {
@@ -727,15 +723,30 @@ pub(crate) async fn request_cost_refresh(state: &HttpState, key: &str) -> Result
 
 async fn settle_cost_worker_failure(state: &HttpState, key: &str) -> Result<(), StoreError> {
     let key = key.to_owned();
-    state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?.transaction_with(move |tx| {
-        let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='accountCost' AND id=?1 AND deleted=0", [&key], |row| row.get(0))?;
-        let mut value: Value = studio_json::from_str::<Value>(&raw)?["value"].clone();
-        value["refreshing"] = json!(false);
-        value["stale"] = json!(true);
-        value["error"] = json!("Local cost refresh worker failed");
-        SyncDocumentsRepository::put_entity(tx, "accountCost", &key, value, false)?;
-        Ok(())
-    }).await
+    state
+        .store
+        .as_ref()
+        .ok_or(StoreError::ReadTaskFailed)?
+        .transaction_with(move |tx| {
+            let raw: String = studio_runtime_store::observations::record(
+                tx,
+                studio_runtime_store::observations::ACCOUNT_COSTS,
+                &key,
+            )?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+            let mut value: Value = studio_json::from_str::<Value>(&raw)?["value"].clone();
+            value["refreshing"] = json!(false);
+            value["stale"] = json!(true);
+            value["error"] = json!("Local cost refresh worker failed");
+            studio_runtime_store::observations::put(
+                tx,
+                studio_runtime_store::observations::ACCOUNT_COSTS,
+                &key,
+                &value,
+            )?;
+            Ok(())
+        })
+        .await
 }
 
 // Fetching is bounded by the catalog owner's request timeout and daily attempt TTL.
@@ -786,8 +797,8 @@ async fn seed_session_roots(state: &HttpState) -> Result<(), StoreError> {
     let rows = store
         .read_async("bounded-entities/session-cost-seed", |tx| {
             let mut statement = tx.prepare(
-                "SELECT a.id,s.payload FROM runtime_agents a
-             LEFT JOIN sync_entities s ON s.collection='sessionCost' AND s.id=a.id AND s.deleted=0
+                "SELECT a.id,s.record FROM runtime_agents a
+             LEFT JOIN runtime_session_costs s ON s.id=a.id
              WHERE a.deleted_at IS NULL AND json_extract(a.record,'$.isLead')=1",
             )?;
             statement
@@ -1196,6 +1207,14 @@ mod tests {
                         studio_runtime_services::entity_scope::direct_document(tx, &collection, &id)?
                             .and_then(|row| row.payload)
                             .ok_or(StoreError::RecordContract("agent view is absent"))?
+                    } else if collection == "rateLimit" {
+                        studio_runtime_store::account_state::rate_limit_record(tx, &id)?
+                            .ok_or(StoreError::RecordContract("rate limit is absent"))?
+                    } else if let Some(observation) =
+                        studio_runtime_store::observations::of_collection(&collection)
+                    {
+                        studio_runtime_store::observations::record(tx, observation, &id)?
+                            .ok_or(StoreError::RecordContract("observation is absent"))?
                     } else {
                         tx.query_row(
                             "SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0",
@@ -2029,7 +2048,7 @@ mod tests {
         assert!(
             store
                 .test_read_transaction(|tx| Ok(tx.query_row(
-                    "SELECT deleted FROM sync_entities WHERE collection='sessionCost' AND id='a'",
+                    "SELECT NOT EXISTS(SELECT 1 FROM runtime_session_costs WHERE id='a')",
                     [],
                     |row| row.get::<_, bool>(0)
                 )?))
@@ -2240,7 +2259,7 @@ mod tests {
         assert!(
             store
                 .test_read_transaction(|tx| Ok(tx.query_row(
-                    "SELECT deleted FROM sync_entities WHERE collection='sessionCost' AND id='b'",
+                    "SELECT NOT EXISTS(SELECT 1 FROM runtime_session_costs WHERE id='b')",
                     [],
                     |row| row.get::<_, bool>(0)
                 )?))
@@ -2304,12 +2323,10 @@ mod tests {
                 let old = studio_json::from_str(
                     r#"{"accountKey":"default","data":{"accountId":"old"}}"#,
                 )?;
-                SyncDocumentsRepository::put_entity(
+                studio_runtime_store::account_state::put_rate_limit(
                     tx,
-                    "rateLimit",
                     "default",
-                    studio_runtime_schema::usage_limits::RateLimitView::from_observation(old, 0.0),
-                    false,
+                    &studio_runtime_schema::usage_limits::RateLimitView::from_observation(old, 0.0),
                 )?;
                 Ok(())
             })
@@ -2325,12 +2342,10 @@ mod tests {
                 let new = studio_json::from_str(
                     r#"{"accountKey":"default","data":{"accountId":"new"}}"#,
                 )?;
-                SyncDocumentsRepository::put_entity(
+                studio_runtime_store::account_state::put_rate_limit(
                     tx,
-                    "rateLimit",
                     "default",
-                    studio_runtime_schema::usage_limits::RateLimitView::from_observation(new, 0.0),
-                    false,
+                    &studio_runtime_schema::usage_limits::RateLimitView::from_observation(new, 0.0),
                 )?;
                 Ok(())
             })
@@ -2484,7 +2499,18 @@ mod tests {
         publish_costs(&state)
             .await
             .expect("account removal published");
-        assert!(state.store.as_ref().expect("store").test_read_transaction(|tx|Ok(tx.query_row("SELECT deleted FROM sync_entities WHERE collection='accountCost' AND id='default'",[],|row|row.get::<_,bool>(0))?)).expect("tombstone"));
+        assert!(
+            state
+                .store
+                .as_ref()
+                .expect("store")
+                .test_read_transaction(|tx| Ok(tx.query_row(
+                    "SELECT NOT EXISTS(SELECT 1 FROM runtime_account_costs WHERE id='default')",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )?))
+                .expect("tombstone")
+        );
     }
 
     #[tokio::test]
@@ -2512,7 +2538,15 @@ mod tests {
         publish_sessions(&state)
             .await
             .expect("session removal published");
-        assert!(store.test_read_transaction(|tx|Ok(tx.query_row("SELECT deleted FROM sync_entities WHERE collection='sessionCost' AND id='lead'",[],|row|row.get::<_,bool>(0))?)).expect("tombstone"));
+        assert!(
+            store
+                .test_read_transaction(|tx| Ok(tx.query_row(
+                    "SELECT NOT EXISTS(SELECT 1 FROM runtime_session_costs WHERE id='lead')",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )?))
+                .expect("tombstone")
+        );
     }
 
     #[tokio::test]

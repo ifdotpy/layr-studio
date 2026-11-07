@@ -444,7 +444,7 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 10] = [
+const DIRECT_SOURCES: [DirectSource; 15] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -488,6 +488,37 @@ const DIRECT_SOURCES: [DirectSource; 10] = [
         table: durable_seq::PEER_TEAM_WINDOW,
         collections: &["peerTeam"],
     },
+    // Account observations: their rows hold the document envelope.
+    DirectSource {
+        table: studio_runtime_store::account_state::RATE_LIMITS,
+        collections: &["rateLimit"],
+    },
+    DirectSource {
+        table: "runtime_account_summaries",
+        collections: &["accounts"],
+    },
+    DirectSource {
+        table: "runtime_account_costs",
+        collections: &["accountCost"],
+    },
+    DirectSource {
+        table: "runtime_session_costs",
+        collections: &["sessionCost"],
+    },
+    DirectSource {
+        table: "runtime_desktop_states",
+        collections: &["desktop"],
+    },
+];
+
+/// Observation tables: a row's `record` is `{"collection","id","value"}`; the document is
+/// its `value`.
+const OBSERVATION_SOURCES: [&str; 5] = [
+    studio_runtime_store::account_state::RATE_LIMITS,
+    "runtime_account_summaries",
+    "runtime_account_costs",
+    "runtime_session_costs",
+    "runtime_desktop_states",
 ];
 
 /// Direct sources that are `durable_rows` names of derived documents, not tables.
@@ -630,6 +661,13 @@ fn direct_docs(
             "project",
             crate::project_projection::local_project_view(connection, id, &raw),
         ),
+        table if OBSERVATION_SOURCES.contains(&table) => (
+            DIRECT_SOURCES
+                .iter()
+                .find(|source| source.table == table)
+                .map_or("", |source| source.collections[0]),
+            observation_value(&raw),
+        ),
         PEER_PROJECTS => (
             "project",
             studio_json::OwnedRawJson::from_string(raw.clone())
@@ -655,6 +693,22 @@ fn direct_docs(
         }
     }
     Ok(rows)
+}
+
+/// The document value of an observation envelope; an envelope without a value has none.
+fn observation_value(raw: &str) -> StoreResult<Option<studio_json::OwnedRawJson>> {
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(borrow)]
+        value: Option<studio_json::RawJson<'a>>,
+    }
+    let envelope: Envelope<'_> = studio_json::from_str(raw)?;
+    envelope
+        .value
+        .filter(|value| value.as_str() != "null")
+        .map(|value| studio_json::OwnedRawJson::from_string(value.as_str().to_owned()))
+        .transpose()
+        .map_err(Into::into)
 }
 
 /// Units of the agent views in `(after, through]`: one per agent row change or view

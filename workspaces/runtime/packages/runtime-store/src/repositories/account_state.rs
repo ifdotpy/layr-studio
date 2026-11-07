@@ -110,6 +110,54 @@ impl LimitsStamp {
 }
 
 /// Decode one account's stored limits, isolating unreadable and foreign observations.
+/// The table that owns the rate-limit view of each account: the provider observation
+/// and the agent projections of the limits module. A row's `record` is the envelope
+/// `{"collection":"rateLimit","id":account,"value":view}` that readers decode; the client
+/// `rateLimit` document is its `value`, built at read time (#630 item 127).
+pub const RATE_LIMITS: &str = "runtime_rate_limits";
+
+/// Store the rate-limit view of `account`. An unchanged view writes nothing.
+pub fn put_rate_limit<T: serde::Serialize>(
+    connection: &Connection,
+    account: &str,
+    view: &T,
+) -> StoreResult<bool> {
+    let record = studio_json::to_string(
+        &studio_json::json!({"collection": "rateLimit", "id": account, "value": view}),
+    )?;
+    Ok(connection.execute(
+        "INSERT INTO runtime_rate_limits(id,record) VALUES(?1,?2)
+         ON CONFLICT(id) DO UPDATE SET record=excluded.record WHERE record IS NOT excluded.record",
+        rusqlite::params![account, record],
+    )? > 0)
+}
+
+/// Whether the rate-limit table exists; a reduced schema has none.
+pub fn has_rate_limits(connection: &Connection) -> StoreResult<bool> {
+    crate::schema::table_exists(connection, RATE_LIMITS)
+}
+
+/// Remove the rate-limit view of `account`.
+pub fn delete_rate_limit(connection: &Connection, account: &str) -> StoreResult<()> {
+    connection.execute("DELETE FROM runtime_rate_limits WHERE id=?1", [account])?;
+    Ok(())
+}
+
+/// The stored envelope of the rate-limit view of `account`.
+pub fn rate_limit_record(connection: &Connection, account: &str) -> StoreResult<Option<String>> {
+    // A reduced schema without the table has no views.
+    if !crate::schema::table_exists(connection, RATE_LIMITS)? {
+        return Ok(None);
+    }
+    Ok(connection
+        .query_row(
+            "SELECT record FROM runtime_rate_limits WHERE id=?1",
+            [account],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub fn normalized_limits_view(
     account: &str,
     bytes: &[u8],
@@ -167,10 +215,7 @@ pub fn typed_limits_snapshot(
     account: &str,
     stamp: &LimitsStamp,
 ) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
-    let raw: Option<String> = connection.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
-        [account], |row| row.get(0),
-    ).optional()?;
+    let raw = rate_limit_record(connection, account)?;
     Ok(raw.map(|raw| {
         let (view, _) = normalized_limits_view(account, raw.as_bytes(), 0.0);
         let mut response = view.observation;
@@ -423,8 +468,14 @@ pub fn latest_limits_snapshot(
 /// Move persisted v3 workspace snapshots once, without changing their account identity.
 /// Restore bounded, validated per-account observations; invalid accounts remain isolated.
 pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
+    if !crate::schema::table_exists(connection, RATE_LIMITS)? {
+        return Ok(LimitsRead {
+            snapshots: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+    }
     let mut statement = connection.prepare(
-        "SELECT e.id,substr(CAST(e.payload AS BLOB),1,?1),length(CAST(e.payload AS BLOB)),substr(CAST(a.limits_observation AS BLOB),1,?1),length(CAST(a.limits_observation AS BLOB)) FROM sync_entities e LEFT JOIN runtime_account_state a ON a.account=e.id WHERE e.collection='rateLimit' AND e.deleted=0",
+        "SELECT e.id,substr(CAST(e.record AS BLOB),1,?1),length(CAST(e.record AS BLOB)),substr(CAST(a.limits_observation AS BLOB),1,?1),length(CAST(a.limits_observation AS BLOB)) FROM runtime_rate_limits e LEFT JOIN runtime_account_state a ON a.account=e.id",
     )?;
     let mut rows = statement.query(rusqlite::params![MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1])?;
     let mut result = LimitsRead {
@@ -666,11 +717,11 @@ mod tests {
         let db = Connection::open_in_memory().expect("SQLite");
         crate::receipt_schema::create(&db).expect("target schema");
         db.execute_batch(
-            "CREATE TABLE sync_entities(collection TEXT,id TEXT,payload TEXT,deleted INTEGER)",
+            "CREATE TABLE runtime_rate_limits(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
         )
         .expect("entities");
         db.execute(
-            "INSERT INTO sync_entities VALUES('rateLimit','alpha',?1,0)",
+            "INSERT INTO runtime_rate_limits VALUES('alpha',?1)",
             [
                 json!({"value":{"observation":{"accountKey":"alpha","at":1.0,"data":{"accountId":"A"}}}})
                     .to_string(),
@@ -704,7 +755,11 @@ mod tests {
 
     fn database(payload: &Value) -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
-        connection.execute_batch("CREATE TABLE sync_entities(collection TEXT, id TEXT, payload TEXT, deleted INTEGER)").expect("fixture tables");
+        connection
+            .execute_batch(
+                "CREATE TABLE runtime_rate_limits(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
+            )
+            .expect("fixture tables");
         crate::receipt_schema::create(&connection).expect("account state");
         if let Some(accounts) = payload
             .pointer("/value/rateLimitsByAccount")
@@ -713,7 +768,7 @@ mod tests {
             for (key, snapshot) in accounts {
                 connection
                     .execute(
-                        "INSERT INTO sync_entities VALUES('rateLimit',?1,?2,0)",
+                        "INSERT INTO runtime_rate_limits VALUES(?1,?2)",
                         rusqlite::params![
                             key,
                             json!({"value":{"observation":snapshot}}).to_string()
@@ -724,7 +779,7 @@ mod tests {
         } else if payload["value"] == false {
             connection
                 .execute(
-                    "INSERT INTO sync_entities VALUES('rateLimit','default',?1,0)",
+                    "INSERT INTO runtime_rate_limits VALUES('default',?1)",
                     [payload.to_string()],
                 )
                 .expect("invalid fixture row");
@@ -792,13 +847,13 @@ mod tests {
         );
         let db = Connection::open_in_memory().expect("SQLite");
         db.execute(
-            "CREATE TABLE sync_entities(collection TEXT,id TEXT,payload TEXT,deleted INTEGER)",
+            "CREATE TABLE runtime_rate_limits(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
             [],
         )
         .expect("table");
         crate::receipt_schema::create(&db).expect("account state");
         db.execute(
-            "INSERT INTO sync_entities VALUES('rateLimit','default',?1,0)",
+            "INSERT INTO runtime_rate_limits VALUES('default',?1)",
             [deep],
         )
         .expect("row");

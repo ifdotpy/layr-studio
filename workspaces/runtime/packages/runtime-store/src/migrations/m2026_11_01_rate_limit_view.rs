@@ -106,6 +106,8 @@ mod tests {
         db.execute("INSERT INTO runtime_account_state(account,next_generation,journal_ack,recovery_required,streams,limits_observation) VALUES('a',0,0,0,'null',?1)", [r#"{"scope":null,"cursor":0,"at":null,"checkedAt":123}"#]).unwrap();
         let tx = db.transaction().unwrap();
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
+        // The views move to their own table in a later step.
+        super::super::m2026_11_06_observation_read_time::apply(&tx).unwrap();
         let stamp = crate::account_state::limits_observation(&tx, "a")
             .unwrap()
             .unwrap();
@@ -174,17 +176,21 @@ mod tests {
         db.execute_batch("DROP TRIGGER reject_limit_view").unwrap();
         super::super::apply_target(&mut db, MigrationTarget::Canvas).unwrap();
         let seq: i64 = db
-            .query_row("SELECT seq FROM sync_entities WHERE id='a'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_rate_limits' AND id='a'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         let restored = crate::account_state::limits_snapshots(&db).unwrap();
         assert_eq!(restored.snapshots[0].1.account_key, "a");
         super::super::apply_target(&mut db, MigrationTarget::Canvas).unwrap();
         let again: i64 = db
-            .query_row("SELECT seq FROM sync_entities WHERE id='a'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_rate_limits' AND id='a'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(seq, again);
     }

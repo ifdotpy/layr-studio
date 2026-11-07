@@ -402,9 +402,7 @@ impl HostRuntime {
                     ticks.tick().await;
                     let accounts = store
                         .read_async("limits/reset-check", |tx| {
-                            let mut rows = tx.prepare(
-                                "SELECT id FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
-                            )?;
+                            let mut rows = tx.prepare("SELECT id FROM runtime_rate_limits")?;
                             let ids = rows
                                 .query_map([], |row| row.get::<_, String>(0))?
                                 .collect::<rusqlite::Result<Vec<_>>>()?;
