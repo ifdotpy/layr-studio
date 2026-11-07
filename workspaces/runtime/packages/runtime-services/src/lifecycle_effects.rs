@@ -14,6 +14,7 @@
 //! `release_failed_work` in `codex_work.py:1313-1355`.
 
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
+use rusqlite::OptionalExtension;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1049,10 +1050,23 @@ fn cancel_resume(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), M
             continue;
         };
         let id = required_str(record, "id", "Invalid continuation identity")?;
-        let mut stored = ContinuationRepository::snapshot(tx, agent_id, table, Some(id))?
-            .get("record")
-            .cloned()
-            .ok_or(ManagementError::Invalid("Invalid stored continuation"))?;
+        // A copy whose row is gone has no stored wait left; cancel only the copy.
+        let row = tx
+            .query_row(
+                &format!("SELECT 1 FROM {} WHERE id=?1 AND agent=?2", table.name()),
+                rusqlite::params![id, agent_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(studio_runtime_store::StoreError::from)?;
+        let mut stored = if row.is_some() {
+            ContinuationRepository::snapshot(tx, agent_id, table, Some(id))?
+                .get("record")
+                .cloned()
+                .ok_or(ManagementError::Invalid("Invalid stored continuation"))?
+        } else {
+            record.clone()
+        };
         let status = stored.get("status").and_then(Value::as_str).unwrap_or("");
         let should_cancel = if projection == "usageResume" {
             matches!(status, "scheduled" | "started")
@@ -1075,7 +1089,9 @@ fn cancel_resume(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), M
         {
             object.remove("waitingForAuth");
         }
-        ContinuationRepository::put_record(tx, table, agent_id, &stored)?;
+        if row.is_some() {
+            ContinuationRepository::put_record(tx, table, agent_id, &stored)?;
+        }
         if projection == "usageResume"
             && let Some(mut current) = AgentRepository::get(tx, &AgentId::from(agent_id))?
         {
@@ -1766,6 +1782,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(raw, "{");
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_resume_whose_row_is_gone_cancels_only_the_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        let resume = json!({"id":"gone","accountKey":"default","threadId":"t","turnId":"u","epoch":0,"cause":"rate_limit","status":"started","failedAt":1.0,"taskClaims":[]});
+        let agent = json!({"compactions":0,"accountKey":"default","id":"chat","rootId":"chat","epoch":0,"status":"failed","provider":"claude","isLead":true,"name":"Chat","cwd":"/work","usageResume":resume});
+        let saved = agent.clone();
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &AgentRecord::from_value(saved)?)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let effect =
+            LifecycleEffect::new(LifecycleEffectKind::CancelResume, agent, Value::Null, 2.0);
+        store
+            .transaction_with_error(move |tx| cancel_resume(tx, &effect))
+            .await
+            .expect("a missing resume row does not block the stop");
+        let copy = store
+            .read_async("test", |tx| {
+                Ok::<_, ManagementError>(
+                    AgentRepository::get(tx, &AgentId::from("chat"))?
+                        .unwrap()
+                        .usage_resume_value()
+                        .map_err(studio_runtime_store::StoreError::from)?
+                        .unwrap(),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(copy["status"], "cancelled");
     }
 
     #[tokio::test]
