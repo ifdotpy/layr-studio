@@ -1,4 +1,4 @@
-import { observable, runInAction } from "mobx";
+import { observable, observableRef, runInAction } from "mobx";
 import type { SidebarChatRow } from "../generated/observableResources.ts";
 import { sidebarRowFixture } from "./sidebarRowFixture";
 import { AgentSource } from "../generated/api";
@@ -495,3 +495,19 @@ it.each(["parent", "screen"])(
     expect(messages()).toHaveLength(2);
   },
 );
+
+it("tracks row-only fields inside the generated facade's reference array", () => {
+  const row = observable({ ...sidebarRowFixture("lead") });
+  hooks.list = observable({ rows: [row] }, { rows: observableRef });
+  mount();
+  const initial = required(navigationMessages()[0])[0];
+  runInAction(() => {
+    row.projectFolderRevision = 7;
+  });
+  expect(navigationMessages()).toHaveLength(2);
+  expect(initial.navigation.sidebar?.rows[0]?.projectFolderRevision).toBe(0);
+  expect(
+    navigationMessages().at(-1)?.[0].navigation.sidebar?.rows[0]
+      ?.projectFolderRevision,
+  ).toBe(7);
+});

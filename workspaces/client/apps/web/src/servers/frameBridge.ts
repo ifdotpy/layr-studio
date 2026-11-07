@@ -42,7 +42,7 @@ export function useServerFrame(
   const sidebarRows = () => {
     const current = store.sidebar().current;
     return current.status === "live" || current.status === "stale"
-      ? toJS(current.data.rows)
+      ? current.data.rows.map((row) => toJS(row))
       : [];
   };
   const { get, saved } = useServerApi();
