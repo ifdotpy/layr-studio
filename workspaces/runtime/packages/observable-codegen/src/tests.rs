@@ -179,3 +179,22 @@ fn generated_fixture_compiles_and_updates_through_facade() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn singleton_returns_cached_slot_before_computing_the_canonical_key() {
+    let mut document = fixture();
+    document["components"]["schemas"]["ResourceRef"]["oneOf"][0] = json!({
+        "type":"object", "additionalProperties":false,
+        "properties":{"kind":{"type":"string","const":"fixture"}}, "required":["kind"]
+    });
+    let mut resources = resources();
+    resources[0].args.clear();
+    let source = render(&document, &models(), &resources).expect("singleton");
+    let cached = source
+        .find("if (fixtureSlot !== undefined) return fixtureSlot;")
+        .expect("cached return");
+    let key = source
+        .find("const key = subscriptionKey(ref)")
+        .expect("canonical key");
+    assert!(cached < key);
+}

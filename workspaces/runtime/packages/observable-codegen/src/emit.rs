@@ -140,8 +140,9 @@ pub fn render(
         } else {
             writeln!(
                 out,
-                "const {}Slots = new Map<string, ResourceSlot<{}>>();",
-                resource.facade, resource.data
+                "const {}Slots = new {}();",
+                resource.facade,
+                arg_map_type(resource, 0)
             )
             .expect("string");
         }
@@ -151,6 +152,21 @@ pub fn render(
         let facade = &resource.facade;
         let data = &resource.data;
         writeln!(out, "{facade}({}) {{", args(resource)).expect("string");
+        if resource.args.is_empty() {
+            writeln!(out, "if ({facade}Slot !== undefined) return {facade}Slot;").expect("string");
+        } else {
+            let lookup = resource
+                .args
+                .iter()
+                .map(|arg| format!("get({})", arg.name))
+                .collect::<Vec<_>>()
+                .join("?.");
+            writeln!(
+                out,
+                "const cached = {facade}Slots.{lookup};\nif (cached !== undefined) return cached;"
+            )
+            .expect("string");
+        }
         let reference = format!(
             "{{ kind: {}{} }}",
             quote(&resource.kind),
@@ -163,14 +179,33 @@ pub fn render(
         // The canonical subscription key owner is shared with transport.
         writeln!(out,"const ref: Extract<ResourceRef, {{kind: {}}}> = {reference};\nconst key = subscriptionKey(ref);",quote(&resource.kind)).expect("string");
         if resource.args.is_empty() {
-            writeln!(out,"return {facade}Slot ??= runtime.slot({{ key, ref, create: (dto) => new {data}Model(dto), apply: (data, dto) => {{ data.apply(dto); }} }});").expect("string");
+            writeln!(out,"return {facade}Slot = runtime.slot({{ key, ref, create: (dto) => new {data}Model(dto), apply: (data, dto) => {{ data.apply(dto); }} }});").expect("string");
         } else {
-            writeln!(out,"const cached = {facade}Slots.get(key);\nif (cached) return cached;\nconst slot = runtime.slot({{ key, ref, create: (dto) => new {data}Model(dto), apply: (data, dto) => {{ data.apply(dto); }} }});\n{facade}Slots.set(key, slot);\nreturn slot;").expect("string");
+            writeln!(out,"const slot = runtime.slot({{ key, ref, create: (dto) => new {data}Model(dto), apply: (data, dto) => {{ data.apply(dto); }} }});").expect("string");
+            let mut parent = format!("{facade}Slots");
+            for (index, arg) in resource.args.iter().enumerate() {
+                if index + 1 == resource.args.len() {
+                    writeln!(out, "{parent}.set({}, slot);", arg.name).expect("string");
+                } else {
+                    let child = format!("cache{index}");
+                    writeln!(out,"let {child} = {parent}.get({});\nif ({child} === undefined) {{ {child} = new {}(); {parent}.set({}, {child}); }}",arg.name,arg_map_type(resource,index+1),arg.name).expect("string");
+                    parent = child;
+                }
+            }
+            out.push_str("return slot;\n");
         }
         out.push_str("},\n");
     }
     out.push_str("};\n}\n");
     Ok(out)
+}
+fn arg_map_type(resource: &ObservableResource, start: usize) -> String {
+    resource.args[start..]
+        .iter()
+        .rev()
+        .fold(format!("ResourceSlot<{}>", resource.data), |value, arg| {
+            format!("Map<{}, {value}>", arg.brand)
+        })
 }
 fn lower_first(value: &str) -> String {
     let mut chars = value.chars();
