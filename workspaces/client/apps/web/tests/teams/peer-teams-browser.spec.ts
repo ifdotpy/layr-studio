@@ -114,8 +114,8 @@ test("Peer teams browser", async ({
               ];
       const project = state.runtime.projects[0]!;
       project.peerTeamsRevision!++;
-      await page.evaluate(
-        (dto) => window.receivePeerSidebar(dto),
+      await page.evaluate<void, PeerSidebarEntities>(
+        (dto: PeerSidebarEntities) => window.receivePeerSidebar(dto),
         sidebarPayload(sidebarAfterWrite()),
       );
       applied.set(body.request_id, body);
@@ -232,8 +232,8 @@ test("Peer teams browser", async ({
       (value) => window.setFixture(value as Snapshot),
       state,
     );
-    await page.evaluate(
-      (dto) => window.receivePeerSidebar(dto),
+    await page.evaluate<void, PeerSidebarEntities>(
+      (dto: PeerSidebarEntities) => window.receivePeerSidebar(dto),
       sidebarPayload([
         { ...row.a },
         { ...row.b },

@@ -4,10 +4,29 @@ import { createStateMirror } from "../../src/generated/observableResources.ts";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent, Snapshot } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
-export type PeerSidebarEntities = Extract<
-  components["schemas"]["SyncEntityPayload"],
-  { collection: "agentSummary" | "project" | "peerTeam" }
->[];
+type PeerProject = Pick<
+  components["schemas"]["ProjectEntityDto"],
+  "id" | "name" | "path" | "peerTeamsRevision"
+> & {
+  folders?:
+    | Pick<components["schemas"]["ProjectFolder"], "id" | "name" | "parentId">[]
+    | null
+    | undefined;
+};
+/** The fixture serializes project folder identity fields, without open JSON extensions. */
+export type PeerSidebarEntities = (
+  | Extract<
+      components["schemas"]["SyncEntityPayload"],
+      { collection: "agentSummary" | "peerTeam" }
+    >
+  | (Omit<
+      Extract<
+        components["schemas"]["SyncEntityPayload"],
+        { collection: "project" }
+      >,
+      "value"
+    > & { value: PeerProject })
+)[];
 declare global {
   interface Window {
     setFixture: React.Dispatch<React.SetStateAction<Snapshot>>;
