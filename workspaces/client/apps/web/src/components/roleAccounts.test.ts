@@ -69,10 +69,15 @@ describe("role accounts", () => {
     ).toEqual(["Lead:default"]);
   });
 
-  it("skips accounts the chat excludes", () => {
+  it("skips accounts the chat excludes for each role", () => {
     expect(
-      summary(lead({ excludedAccountKeys: ["default", "codex-2"] })),
-    ).toEqual(["Lead:default", "Workers:codex-3:auto", "Review:codex-3:auto"]);
+      summary(
+        lead({
+          workerExcludedAccountKeys: ["codex-2"],
+          reviewerExcludedAccountKeys: ["default", "codex-2", "codex-3"],
+        }),
+      ),
+    ).toEqual(["Lead:default", "Workers:codex-3:auto", "Review:codex-4:auto"]);
   });
 
   it("chooses an automatic account of each role's model provider", () => {

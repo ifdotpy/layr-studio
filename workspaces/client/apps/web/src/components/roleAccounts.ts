@@ -32,9 +32,10 @@ function freest(accounts: UsageAccount[]) {
 /**
  * The account of each role of a chat, at most one per role: Lead, Workers and
  * Review. With subagents off only the lead works. Workers take an account the
- * chat does not exclude, for their model's provider, when they start; the dot
- * shows the one with the most allowance. A reviewer the lead starts keeps the
- * lead's account when the chat allows it and it serves the review model.
+ * chat does not exclude for workers, for their model's provider, when they
+ * start; the dot shows the one with the most allowance. A reviewer the lead
+ * starts keeps the lead's account when the chat allows it for reviewers and it
+ * serves the review model.
  */
 export function roleAccounts(
   lead: Agent,
@@ -48,25 +49,33 @@ export function roleAccounts(
     { role: "Lead", account: leadAccount, automatic: false },
   ];
   if (subagentsOff(lead)) return roles;
-  const excluded = new Set(lead.excludedAccountKeys ?? []);
-  const allowed = accounts.filter((account) => !excluded.has(account.key));
   const serves = (account: UsageAccount, model: string | null | undefined) => {
     const provider = model ? modelProvider(model) : null;
     return !provider || account.provider === provider;
   };
-  const automatic = (role: Role, model: string | null | undefined) => {
-    const eligible = allowed.filter((account) => serves(account, model));
+  const automatic = (
+    role: Role,
+    model: string | null | undefined,
+    excluded: Set<string>,
+  ) => {
+    const eligible = accounts.filter(
+      (account) => !excluded.has(account.key) && serves(account, model),
+    );
     return eligible.length
       ? { role, account: freest(eligible), automatic: true }
       : undefined;
   };
-  const workerModel = lead.workerDefaults?.model;
+  const workers = automatic(
+    "Workers",
+    lead.workerDefaults?.model,
+    new Set(lead.workerExcludedAccountKeys ?? []),
+  );
   // A review without its own model runs on the model of its caller, the lead.
   const reviewModel = lead.reviewDefaults?.model || lead.model;
-  const workers = automatic("Workers", workerModel);
+  const reviewExcluded = new Set(lead.reviewerExcludedAccountKeys ?? []);
   const review =
-    !excluded.has(leadAccount.key) && serves(leadAccount, reviewModel)
+    !reviewExcluded.has(leadAccount.key) && serves(leadAccount, reviewModel)
       ? { role: "Review" as const, account: leadAccount, automatic: false }
-      : automatic("Review", reviewModel);
+      : automatic("Review", reviewModel, reviewExcluded);
   return [...roles, ...(workers ? [workers] : []), ...(review ? [review] : [])];
 }
