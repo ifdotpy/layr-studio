@@ -1,3 +1,4 @@
+import type { components } from "../generated/api.ts";
 import {
   isStudioSettingsTab,
   type StudioSettingsTab,
@@ -90,6 +91,7 @@ export type ServerNavigation = {
   opened: string | null;
   error: string;
 };
+type ReadStateDto = components["schemas"]["ReadStateDto"];
 export type ServerCommand =
   | { action: "open"; id: string; messageId?: string }
   | {
@@ -104,7 +106,7 @@ export type ServerCommand =
   | { action: "refresh" }
   | { action: "terminal"; operation: "toggle" | "new" }
   | { action: "prepare-chat"; id: string }
-  | { action: "mark-unread"; id: string; threadId: string; turnId: string }
+  | { action: "mark-unread"; id: string; target: ReadStateDto }
   | { action: "remove-chat"; id: string; room: boolean }
   | { action: "change-project"; id: string }
   | { action: "project-account"; path: string }
@@ -222,6 +224,20 @@ export function navigationSnapshot(
     error,
   };
 }
+const readStateFields = {
+  threadId: (value: unknown) => typeof value === "string",
+  turnId: (value: unknown) => typeof value === "string",
+  read: (value: unknown) => typeof value === "boolean",
+  revision: (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+} satisfies Record<keyof ReadStateDto, (value: unknown) => boolean>;
+function isReadState(value: unknown): value is ReadStateDto {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fields = value as Record<string, unknown>;
+  return Object.entries(readStateFields).every(([name, valid]) =>
+    valid(fields[name]),
+  );
+}
 export function isServerCommand(value: unknown): value is ServerCommand {
   if (!value || typeof value !== "object") return false;
   const command = value as Record<string, unknown>;
@@ -233,11 +249,7 @@ export function isServerCommand(value: unknown): value is ServerCommand {
   if (command.action === "prepare-chat" || command.action === "change-project")
     return typeof command.id === "string";
   if (command.action === "mark-unread")
-    return (
-      typeof command.id === "string" &&
-      typeof command.threadId === "string" &&
-      typeof command.turnId === "string"
-    );
+    return typeof command.id === "string" && isReadState(command.target);
   if (command.action === "remove-chat")
     return typeof command.id === "string" && typeof command.room === "boolean";
   if (command.action === "project-account")

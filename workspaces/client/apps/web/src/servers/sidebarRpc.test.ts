@@ -257,8 +257,7 @@ it("runs prefetch and unread callbacks in the owning frame and returns its fresh
   const command = {
     action: "mark-unread",
     id: "same",
-    threadId: "thread",
-    turnId: "turn",
+    target: { threadId: "thread", turnId: "turn", read: true, revision: 7 },
   };
   await executeSidebarRequest({ action: "command", command }, refresh, run);
   expect(run).toHaveBeenCalledWith(command);

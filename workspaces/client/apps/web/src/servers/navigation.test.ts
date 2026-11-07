@@ -112,3 +112,33 @@ it("uses the server-visible rows instead of stale move records", () => {
   expect(target.chats[0]?.path).toBe("/source/project");
   expect(target.chats.map((row) => row.id)).toEqual(["moved"]);
 });
+
+it("validates the original completed-result target for mark-unread commands", () => {
+  const target = {
+    threadId: "native",
+    turnId: "turn",
+    read: true,
+    revision: 7,
+  };
+  const command = { action: "mark-unread", id: "same", target };
+  expect(isServerCommand(command)).toBe(true);
+  for (const bad of [
+    null,
+    {},
+    { ...target, revision: -1 },
+    { ...target, revision: 1.5 },
+    { ...target, revision: Infinity },
+    { ...target, read: "true" },
+    { ...target, threadId: null },
+    { ...target, turnId: 1 },
+  ])
+    expect(isServerCommand({ ...command, target: bad })).toBe(false);
+  expect(
+    isServerCommand({
+      action: "mark-unread",
+      id: "same",
+      threadId: "native",
+      turnId: "turn",
+    }),
+  ).toBe(false);
+});

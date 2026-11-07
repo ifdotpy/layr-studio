@@ -79,8 +79,7 @@ it("routes overlapping row ids and the completed-result CAS target to their owni
   expect(executeCommand).toHaveBeenCalledExactlyOnceWith("remote", {
     action: "mark-unread",
     id: "same",
-    threadId: "native-thread",
-    turnId: "completed-turn",
+    target,
   });
   await Promise.resolve();
 });

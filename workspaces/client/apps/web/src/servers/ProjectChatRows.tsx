@@ -1,12 +1,18 @@
 import ChatStatus from "../components/agents/ChatStatus";
-import { ProviderMark } from "../components/AccountTiles";
+import { observer } from "mobx-react-lite";
+import {
+  ChatTitle,
+  ChatIndicator,
+  ChatServerLine,
+} from "../components/chat-row/index.ts";
+export {
+  ChatServerLine,
+  offlineServerDescription,
+} from "../components/chat-row/index.ts";
 import type { SidebarChatRow } from "../generated/observableResources.ts";
 import { keepCompactSidebarChat } from "../components/sidebar/compact.ts";
-import { Badge, Tooltip } from "@mantine/core";
-import { WifiOff } from "lucide-react";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "./serverAliases";
 import "./sidebar-status.css";
-import { providerLabel } from "../generated/providerKind.ts";
 
 export type ProjectChat =
   | (Pick<
@@ -65,55 +71,7 @@ export function shouldShowOldChatsControl(
   return chatCount >= threshold;
 }
 
-export function ChatServerLine({
-  provider,
-  alias,
-  offline = false,
-}: {
-  provider?: string | undefined;
-  alias: string;
-  offline?: boolean;
-}) {
-  return (
-    <span
-      className="chat-server-line"
-      aria-label={`${providerLabel(provider || "")}, ${alias}`}
-    >
-      <ProviderMark provider={provider || ""} />
-      <span className="chat-server-alias" title={alias}>
-        {alias}
-      </span>
-      {offline && (
-        <span className="chat-server-offline-wrap">
-          <Tooltip
-            label={offlineServerDescription(alias)}
-            position="right"
-            withinPortal
-            events={{ hover: true, focus: true, touch: false }}
-          >
-            <Badge
-              className="chat-server-offline"
-              size="xs"
-              color="gray"
-              variant="transparent"
-              leftSection={<WifiOff size={11} aria-hidden="true" />}
-              aria-label={offlineServerDescription(alias)}
-              tabIndex={0}
-            >
-              <span className="chat-server-offline-label">Offline</span>
-            </Badge>
-          </Tooltip>
-        </span>
-      )}
-    </span>
-  );
-}
-
-export function offlineServerDescription(alias: string) {
-  return `${alias} is unreachable. Showing the last known state.`;
-}
-
-export default function ProjectChatRows({
+const ProjectChatRows = observer(function ProjectChatRows({
   chats,
   selected,
   aliases,
@@ -132,8 +90,6 @@ export default function ProjectChatRows({
   open: (chat: ProjectChat) => void;
   setCompact: (value: boolean) => void;
 }) {
-  const isSelected = (chat: ProjectChat) =>
-    selected && selected.id === chat.id && selected.serverId === chat.serverId;
   const shouldCompact = compact && chats.length >= hideOldChatsThreshold;
   const visible = query
     ? chats
@@ -142,33 +98,13 @@ export default function ProjectChatRows({
   return (
     <>
       {visible.map((chat) => (
-        <button
-          className="server-chat"
+        <ProjectChatButton
           key={JSON.stringify([chat.serverId, chat.id])}
-          data-chat={chat.id}
-          aria-current={isSelected(chat) ? "page" : undefined}
-          onClick={() => open(chat)}
-        >
-          <span className="row-copy">
-            <strong>{chat.name}</strong>
-            <ChatServerLine
-              provider={chat.provider || undefined}
-              alias={
-                aliases[chat.serverId || "local"] || DEFAULT_LOCAL_SERVER_ALIAS
-              }
-            />
-          </span>
-          <ChatStatus
-            status={
-              chat.kind === "chat"
-                ? chat.indicator
-                : chat.unread
-                  ? { kind: "unread", label: "Unread result" }
-                  : undefined
-            }
-            provider={chat.provider || undefined}
-          />
-        </button>
+          chat={chat}
+          selected={selected}
+          aliases={aliases}
+          open={open}
+        />
       ))}
       {!query &&
         shouldShowOldChatsControl(chats.length, hideOldChatsThreshold) &&
@@ -182,4 +118,49 @@ export default function ProjectChatRows({
         )}
     </>
   );
-}
+});
+export default ProjectChatRows;
+
+const ProjectChatButton = observer(function ProjectChatButton({
+  chat,
+  selected,
+  aliases,
+  open,
+}: {
+  chat: ProjectChat;
+  selected: { id: string; serverId: string } | undefined;
+  aliases: Record<string, string>;
+  open: (chat: ProjectChat) => void;
+}) {
+  return (
+    <button
+      className="server-chat"
+      data-chat={chat.id}
+      aria-current={
+        selected?.id === chat.id && selected.serverId === chat.serverId
+          ? "page"
+          : undefined
+      }
+      onClick={() => open(chat)}
+    >
+      <span className="row-copy">
+        <ChatTitle row={chat} />
+        <ChatServerLine
+          row={chat}
+          alias={
+            aliases[chat.serverId || "local"] || DEFAULT_LOCAL_SERVER_ALIAS
+          }
+        />
+      </span>
+      {chat.kind === "chat" ? (
+        <ChatIndicator row={chat} />
+      ) : (
+        <ChatStatus
+          status={
+            chat.unread ? { kind: "unread", label: "Unread result" } : undefined
+          }
+        />
+      )}
+    </button>
+  );
+});
