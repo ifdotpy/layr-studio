@@ -53,6 +53,9 @@ const FEATURE_SCHEMA: &str = r#"
                 agent TEXT NOT NULL, created REAL, running INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS task_window_state_history
                 ON task_window_state(created DESC) WHERE NOT running;
+            -- sync_policy::TASK_WINDOW_EVICT_SQL scans live members, excluding retained tombstones.
+            CREATE INDEX IF NOT EXISTS durable_rows_task_window_live
+                ON durable_rows(id) WHERE tbl='task_window' AND deleted=0;
             CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
                 root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
                 team_counts TEXT);

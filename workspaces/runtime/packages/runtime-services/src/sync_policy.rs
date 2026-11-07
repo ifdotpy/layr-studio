@@ -33,11 +33,12 @@ const TASK_RETIRE_BATCH: usize = 100;
 /// Newest finished tasks the renderer task window keeps beside running ones;
 /// the workspace entity advertises it as `tasksHistoryLimit`. Unit: rows.
 pub const TASK_WINDOW_HISTORY_ROWS: usize = 100;
-// Walk the newest finished state first and test membership by PK. Starting
-// with durable_rows scans the retained tombstones and sorts the whole window.
-const TASK_WINDOW_EVICT_SQL: &str = "SELECT s.id FROM task_window_state s INDEXED BY task_window_state_history \
-    CROSS JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 \
-    WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1";
+// Scan only live window members: a history scan cannot stop at the bound when
+// no eviction is needed. Preserve the history index's rowid order for ties.
+const TASK_WINDOW_EVICT_SQL: &str = "SELECT s.id FROM durable_rows w INDEXED BY durable_rows_task_window_live \
+    CROSS JOIN task_window_state s ON s.id=w.id \
+    WHERE w.tbl='task_window' AND w.deleted=0 AND NOT s.running \
+    ORDER BY s.created DESC,s.rowid LIMIT 1 OFFSET ?1";
 /// Restricts a task query to tasks of live (not deleted) agents.
 const LIVE_TASK_AGENT: &str = "json_extract(t.record,'$.agent') IN \
      (SELECT id FROM runtime_agents WHERE deleted_at IS NULL)";
@@ -3841,11 +3842,89 @@ mod tests {
     }
 
     #[test]
+    fn task_window_eviction_cost_ignores_retained_tombstones() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE task_window_state(id TEXT PRIMARY KEY,agent TEXT,created REAL,running INTEGER);
+            CREATE INDEX task_window_state_history ON task_window_state(created DESC) WHERE NOT running;
+            CREATE TABLE durable_rows(tbl TEXT,id TEXT,deleted INTEGER,PRIMARY KEY(tbl,id));
+            CREATE INDEX durable_rows_task_window_live ON durable_rows(id) WHERE tbl='task_window' AND deleted=0;
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+            INSERT INTO task_window_state SELECT printf('task-%05d',10001-x),'agent',x/2,0 FROM n;
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
+            INSERT INTO task_window_state SELECT printf('running-%04d',x),'agent',20000+x,1 FROM n;
+            INSERT INTO durable_rows SELECT 'task_window',id,1 FROM task_window_state;
+            INSERT INTO task_window_state VALUES('missing','agent',19999,0);").unwrap();
+        // IDs run opposite to rowids, so ties must follow insertion order.
+        // The accepted tradeoff is one PK probe per running member as well;
+        // in practice that set is bounded by active agents, not retained history.
+        for (live, running) in [(99, 1), (100, 1), (101, 1), (1000, 1), (101, 1000)] {
+            db.execute(
+                "UPDATE durable_rows SET deleted=1 WHERE tbl='task_window'",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "UPDATE durable_rows SET deleted=0 WHERE tbl='task_window' AND id IN
+                (SELECT id FROM task_window_state WHERE running LIMIT ?1)",
+                [running],
+            )
+            .unwrap();
+            db.execute("UPDATE durable_rows SET deleted=0 WHERE tbl='task_window' AND id IN
+                (SELECT id FROM task_window_state WHERE NOT running AND id!='missing' ORDER BY created DESC,rowid LIMIT ?1)", [live]).unwrap();
+            let mut baseline = db
+                .prepare(
+                    "SELECT s.id FROM task_window_state s INDEXED BY task_window_state_history
+                CROSS JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
+                WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
+                )
+                .unwrap();
+            let expected: Option<String> = baseline
+                .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
+                .optional()
+                .unwrap();
+            let mut query = db.prepare(TASK_WINDOW_EVICT_SQL).unwrap();
+            let actual: Option<String> = query
+                .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
+                .optional()
+                .unwrap();
+            assert_eq!(
+                actual, expected,
+                "live={live}, running={running}, including tied creation times"
+            );
+            let steps = query.get_status(rusqlite::StatementStatus::VmStep);
+            let before = baseline.get_status(rusqlite::StatementStatus::VmStep);
+            eprintln!(
+                "task-window retained=10000 live={live} running={running} vm_steps={before}->{steps}"
+            );
+            assert!(
+                steps < live * 40 + running * 10 + 1000,
+                "eviction scans live members only: live={live}, running={running}, steps={steps}"
+            );
+            let plan = db
+                .prepare(&format!("EXPLAIN QUERY PLAN {TASK_WINDOW_EVICT_SQL}"))
+                .unwrap()
+                .query_map([TASK_WINDOW_HISTORY_ROWS as i64], |row| {
+                    row.get::<_, String>(3)
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            eprintln!("task-window live={live} running={running} plan={plan:?}");
+            assert!(
+                plan.iter()
+                    .any(|step| step.contains("durable_rows_task_window_live")),
+                "{plan:?}"
+            );
+        }
+    }
+
+    #[test]
     fn task_window_eviction_cost_stops_at_history_boundary() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE task_window_state(id TEXT PRIMARY KEY,agent TEXT,created REAL,running INTEGER);
             CREATE INDEX task_window_state_history ON task_window_state(created DESC) WHERE NOT running;
             CREATE TABLE durable_rows(tbl TEXT,id TEXT,deleted INTEGER,PRIMARY KEY(tbl,id));
+            CREATE INDEX durable_rows_task_window_live ON durable_rows(id) WHERE tbl='task_window' AND deleted=0;
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
             INSERT INTO task_window_state SELECT printf('task-%05d',x),'agent',x,0 FROM n;
             INSERT INTO durable_rows SELECT 'task_window',id,created<9899 FROM task_window_state;
