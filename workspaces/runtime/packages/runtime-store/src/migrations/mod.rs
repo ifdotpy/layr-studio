@@ -2272,6 +2272,35 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn retired_start_index_migration_leaves_current_indexes_in_place() {
+        let root = tempfile::tempdir().expect("state");
+        drop(
+            crate::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("current store"),
+        );
+        let mut db = Connection::open(root.path().join("canvas.sqlite3")).expect("database");
+        let tx = db.transaction().expect("transaction");
+        let exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?1)",
+                [crate::startup_recovery::DELETED_UNSETTLED_INDEX],
+                |row| row.get(0),
+            )
+            .expect("index lookup");
+        assert!(exists, "current recovery index exists before migration");
+        let before: i64 = tx
+            .pragma_query_value(None, "schema_version", |row| row.get(0))
+            .expect("schema version");
+        m2026_10_31_retired_start_indexes::apply(&tx).expect("index migration");
+        crate::StartupRecoveryRepository::prepare_agent_indexes(&tx).expect("startup indexes");
+        let after: i64 = tx
+            .pragma_query_value(None, "schema_version", |row| row.get(0))
+            .expect("schema version");
+        assert_eq!(after, before, "current indexes must not be rebuilt");
+    }
+
+    #[tokio::test]
     async fn completed_target_records_catalog_on_first_open() {
         let root = tempfile::tempdir().expect("state");
         let store = crate::RuntimeStore::open(Some(root.path()))
