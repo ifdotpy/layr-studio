@@ -12,8 +12,8 @@ type ChatOperationalStatusDto = DeepReadonly<
   components["schemas"]["ChatOperationalStatus"]
 >;
 class ChatOperationalStatusModel {
-  kind: NonNullable<ChatOperationalStatusDto["kind"]>;
-  label: NonNullable<ChatOperationalStatusDto["label"]>;
+  kind: ChatOperationalStatusDto["kind"];
+  label: ChatOperationalStatusDto["label"];
   constructor(dto: ChatOperationalStatusDto) {
     this.kind = dto.kind;
     this.label = dto.label;
@@ -51,6 +51,148 @@ function createChatOperationalStatusArray(
   dto: readonly ChatOperationalStatusDto[],
 ): ChatOperationalStatusModel[] {
   return dto.map((item) => new ChatOperationalStatusModel(item));
+}
+type CopyProgressDto = DeepReadonly<components["schemas"]["CopyProgress"]>;
+class CopyProgressModel {
+  done: CopyProgressDto["done"];
+  phase: CopyProgressDto["phase"];
+  total: NonNullable<CopyProgressDto["total"]> | null | undefined;
+  unit: CopyProgressDto["unit"];
+  constructor(dto: CopyProgressDto) {
+    this.done = dto.done;
+    this.phase = dto.phase;
+    this.total =
+      dto.total === undefined
+        ? undefined
+        : dto.total === null
+          ? null
+          : dto.total;
+    this.unit = dto.unit;
+    makeObservable(this, {
+      done: observableRef,
+      phase: observableRef,
+      total: observableRef,
+      unit: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: CopyProgressDto): void {
+    {
+      const next = dto.done;
+      if (this.done !== next) this.done = next;
+    }
+    {
+      const next = dto.phase;
+      if (this.phase !== next) this.phase = next;
+    }
+    {
+      const next =
+        dto.total === undefined
+          ? undefined
+          : this.total === undefined
+            ? dto.total === null
+              ? null
+              : dto.total
+            : dto.total === null
+              ? null
+              : this.total === null
+                ? dto.total
+                : dto.total;
+      if (this.total !== next) this.total = next;
+    }
+    {
+      const next = dto.unit;
+      if (this.unit !== next) this.unit = next;
+    }
+  }
+}
+function updateCopyProgress(
+  data: CopyProgressModel,
+  dto: CopyProgressDto,
+): CopyProgressModel {
+  data.apply(dto);
+  return data;
+}
+function equalCopyProgress(
+  left: CopyProgressDto,
+  right: CopyProgressDto,
+): boolean {
+  return (
+    left.done === right.done &&
+    left.phase === right.phase &&
+    (left.total === undefined || right.total === undefined
+      ? left.total === right.total
+      : left.total === null || right.total === null
+        ? left.total === right.total
+        : left.total === right.total) &&
+    left.unit === right.unit
+  );
+}
+function createCopyProgressArray(
+  dto: readonly CopyProgressDto[],
+): CopyProgressModel[] {
+  return dto.map((item) => new CopyProgressModel(item));
+}
+type ReadStateDtoDto = DeepReadonly<components["schemas"]["ReadStateDto"]>;
+class ReadStateDtoModel {
+  read: ReadStateDtoDto["read"];
+  revision: ReadStateDtoDto["revision"];
+  threadId: ReadStateDtoDto["threadId"];
+  turnId: ReadStateDtoDto["turnId"];
+  constructor(dto: ReadStateDtoDto) {
+    this.read = dto.read;
+    this.revision = dto.revision;
+    this.threadId = dto.threadId;
+    this.turnId = dto.turnId;
+    makeObservable(this, {
+      read: observableRef,
+      revision: observableRef,
+      threadId: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ReadStateDtoDto): void {
+    {
+      const next = dto.read;
+      if (this.read !== next) this.read = next;
+    }
+    {
+      const next = dto.revision;
+      if (this.revision !== next) this.revision = next;
+    }
+    {
+      const next = dto.threadId;
+      if (this.threadId !== next) this.threadId = next;
+    }
+    {
+      const next = dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+  }
+}
+function updateReadStateDto(
+  data: ReadStateDtoModel,
+  dto: ReadStateDtoDto,
+): ReadStateDtoModel {
+  data.apply(dto);
+  return data;
+}
+function equalReadStateDto(
+  left: ReadStateDtoDto,
+  right: ReadStateDtoDto,
+): boolean {
+  return (
+    left.read === right.read &&
+    left.revision === right.revision &&
+    left.threadId === right.threadId &&
+    left.turnId === right.turnId
+  );
+}
+function createReadStateDtoArray(
+  dto: readonly ReadStateDtoDto[],
+): ReadStateDtoModel[] {
+  return dto.map((item) => new ReadStateDtoModel(item));
 }
 type SidebarChatListDto = DeepReadonly<
   components["schemas"]["SidebarChatList"]
@@ -97,58 +239,63 @@ function createSidebarChatListArray(
 }
 type SidebarChatRowDto = DeepReadonly<components["schemas"]["SidebarChatRow"]>;
 class SidebarChatRowModel {
-  activityAt: NonNullable<SidebarChatRowDto["activityAt"]>;
-  archived: NonNullable<SidebarChatRowDto["archived"]>;
-  canArchive: NonNullable<SidebarChatRowDto["canArchive"]>;
-  canChangeProject: NonNullable<SidebarChatRowDto["canChangeProject"]>;
-  compactPinned: NonNullable<SidebarChatRowDto["compactPinned"]>;
-  copyProgress: SidebarChatRow_copyProgressModel;
-  groupKey: NonNullable<SidebarChatRowDto["groupKey"]>;
-  id: NonNullable<SidebarChatRowDto["id"]>;
+  activityAt: SidebarChatRowDto["activityAt"];
+  archived: SidebarChatRowDto["archived"];
+  canArchive: SidebarChatRowDto["canArchive"];
+  canChangeProject: SidebarChatRowDto["canChangeProject"];
+  compactPinned: SidebarChatRowDto["compactPinned"];
+  copyProgress: CopyProgressModel | null;
+  groupKey: SidebarChatRowDto["groupKey"];
+  id: SidebarChatRowDto["id"];
+  inFlight: SidebarChatRowDto["inFlight"];
   indicator: ChatOperationalStatusModel;
-  markRead: SidebarChatRow_markReadModel;
-  markUnread: NonNullable<SidebarChatRowDto["markUnread"]>;
-  model: NonNullable<SidebarChatRowDto["model"]>;
-  name: NonNullable<SidebarChatRowDto["name"]>;
-  orderRank: NonNullable<SidebarChatRowDto["orderRank"]>;
-  pinned: NonNullable<SidebarChatRowDto["pinned"]>;
-  projectFolder: NonNullable<SidebarChatRowDto["projectFolder"]>;
-  projectFolderRevision: NonNullable<
-    SidebarChatRowDto["projectFolderRevision"]
-  >;
-  projectId: NonNullable<SidebarChatRowDto["projectId"]>;
-  projectPath: NonNullable<SidebarChatRowDto["projectPath"]>;
-  projectServerId: NonNullable<SidebarChatRowDto["projectServerId"]>;
-  provider: NonNullable<SidebarChatRowDto["provider"]>;
-  searchText: NonNullable<SidebarChatRowDto["searchText"]>;
-  sortKey: NonNullable<SidebarChatRowDto["sortKey"]>;
-  teamId: NonNullable<SidebarChatRowDto["teamId"]>;
-  waitingForLead: NonNullable<SidebarChatRowDto["waitingForLead"]>;
+  markRead: ReadStateDtoModel | null;
+  markUnread: SidebarChatRowDto["markUnread"];
+  model: NonNullable<SidebarChatRowDto["model"]> | null;
+  name: SidebarChatRowDto["name"];
+  orderRank: NonNullable<SidebarChatRowDto["orderRank"]> | null;
+  pinned: SidebarChatRowDto["pinned"];
+  projectFolder: NonNullable<SidebarChatRowDto["projectFolder"]> | null;
+  projectFolderRevision: SidebarChatRowDto["projectFolderRevision"];
+  projectId: NonNullable<SidebarChatRowDto["projectId"]> | null;
+  projectPath: SidebarChatRowDto["projectPath"];
+  projectServerId: NonNullable<SidebarChatRowDto["projectServerId"]> | null;
+  provider: SidebarChatRowDto["provider"];
+  searchText: SidebarChatRowDto["searchText"];
+  sortKey: SidebarChatRowDto["sortKey"];
+  teamId: NonNullable<SidebarChatRowDto["teamId"]> | null;
+  waitingForLead: SidebarChatRowDto["waitingForLead"];
   constructor(dto: SidebarChatRowDto) {
     this.activityAt = dto.activityAt;
     this.archived = dto.archived;
     this.canArchive = dto.canArchive;
     this.canChangeProject = dto.canChangeProject;
     this.compactPinned = dto.compactPinned;
-    this.copyProgress = new SidebarChatRow_copyProgressModel(dto.copyProgress);
+    this.copyProgress =
+      dto.copyProgress === null
+        ? null
+        : new CopyProgressModel(dto.copyProgress);
     this.groupKey = dto.groupKey;
     this.id = dto.id;
+    this.inFlight = dto.inFlight;
     this.indicator = new ChatOperationalStatusModel(dto.indicator);
-    this.markRead = new SidebarChatRow_markReadModel(dto.markRead);
+    this.markRead =
+      dto.markRead === null ? null : new ReadStateDtoModel(dto.markRead);
     this.markUnread = dto.markUnread;
-    this.model = dto.model;
+    this.model = dto.model === null ? null : dto.model;
     this.name = dto.name;
-    this.orderRank = dto.orderRank;
+    this.orderRank = dto.orderRank === null ? null : dto.orderRank;
     this.pinned = dto.pinned;
-    this.projectFolder = dto.projectFolder;
+    this.projectFolder = dto.projectFolder === null ? null : dto.projectFolder;
     this.projectFolderRevision = dto.projectFolderRevision;
-    this.projectId = dto.projectId;
+    this.projectId = dto.projectId === null ? null : dto.projectId;
     this.projectPath = dto.projectPath;
-    this.projectServerId = dto.projectServerId;
+    this.projectServerId =
+      dto.projectServerId === null ? null : dto.projectServerId;
     this.provider = dto.provider;
     this.searchText = dto.searchText;
     this.sortKey = dto.sortKey;
-    this.teamId = dto.teamId;
+    this.teamId = dto.teamId === null ? null : dto.teamId;
     this.waitingForLead = dto.waitingForLead;
     makeObservable(this, {
       activityAt: observableRef,
@@ -159,6 +306,7 @@ class SidebarChatRowModel {
       copyProgress: observableRef,
       groupKey: observableRef,
       id: observableRef,
+      inFlight: observableRef,
       indicator: observableRef,
       markRead: observableRef,
       markUnread: observableRef,
@@ -201,10 +349,12 @@ class SidebarChatRowModel {
       if (this.compactPinned !== next) this.compactPinned = next;
     }
     {
-      const next = updateSidebarChatRow_copyProgress(
-        this.copyProgress,
-        dto.copyProgress,
-      );
+      const next =
+        dto.copyProgress === null
+          ? null
+          : this.copyProgress === null
+            ? new CopyProgressModel(dto.copyProgress)
+            : updateCopyProgress(this.copyProgress, dto.copyProgress);
       if (this.copyProgress !== next) this.copyProgress = next;
     }
     {
@@ -216,11 +366,20 @@ class SidebarChatRowModel {
       if (this.id !== next) this.id = next;
     }
     {
+      const next = dto.inFlight;
+      if (this.inFlight !== next) this.inFlight = next;
+    }
+    {
       const next = updateChatOperationalStatus(this.indicator, dto.indicator);
       if (this.indicator !== next) this.indicator = next;
     }
     {
-      const next = updateSidebarChatRow_markRead(this.markRead, dto.markRead);
+      const next =
+        dto.markRead === null
+          ? null
+          : this.markRead === null
+            ? new ReadStateDtoModel(dto.markRead)
+            : updateReadStateDto(this.markRead, dto.markRead);
       if (this.markRead !== next) this.markRead = next;
     }
     {
@@ -228,7 +387,8 @@ class SidebarChatRowModel {
       if (this.markUnread !== next) this.markUnread = next;
     }
     {
-      const next = dto.model;
+      const next =
+        dto.model === null ? null : this.model === null ? dto.model : dto.model;
       if (this.model !== next) this.model = next;
     }
     {
@@ -236,7 +396,12 @@ class SidebarChatRowModel {
       if (this.name !== next) this.name = next;
     }
     {
-      const next = dto.orderRank;
+      const next =
+        dto.orderRank === null
+          ? null
+          : this.orderRank === null
+            ? dto.orderRank
+            : dto.orderRank;
       if (this.orderRank !== next) this.orderRank = next;
     }
     {
@@ -244,7 +409,12 @@ class SidebarChatRowModel {
       if (this.pinned !== next) this.pinned = next;
     }
     {
-      const next = dto.projectFolder;
+      const next =
+        dto.projectFolder === null
+          ? null
+          : this.projectFolder === null
+            ? dto.projectFolder
+            : dto.projectFolder;
       if (this.projectFolder !== next) this.projectFolder = next;
     }
     {
@@ -253,7 +423,12 @@ class SidebarChatRowModel {
         this.projectFolderRevision = next;
     }
     {
-      const next = dto.projectId;
+      const next =
+        dto.projectId === null
+          ? null
+          : this.projectId === null
+            ? dto.projectId
+            : dto.projectId;
       if (this.projectId !== next) this.projectId = next;
     }
     {
@@ -261,7 +436,12 @@ class SidebarChatRowModel {
       if (this.projectPath !== next) this.projectPath = next;
     }
     {
-      const next = dto.projectServerId;
+      const next =
+        dto.projectServerId === null
+          ? null
+          : this.projectServerId === null
+            ? dto.projectServerId
+            : dto.projectServerId;
       if (this.projectServerId !== next) this.projectServerId = next;
     }
     {
@@ -277,7 +457,12 @@ class SidebarChatRowModel {
       if (this.sortKey !== next) this.sortKey = next;
     }
     {
-      const next = dto.teamId;
+      const next =
+        dto.teamId === null
+          ? null
+          : this.teamId === null
+            ? dto.teamId
+            : dto.teamId;
       if (this.teamId !== next) this.teamId = next;
     }
     {
@@ -303,25 +488,42 @@ function equalSidebarChatRow(
     left.canArchive === right.canArchive &&
     left.canChangeProject === right.canChangeProject &&
     left.compactPinned === right.compactPinned &&
-    equalSidebarChatRow_copyProgress(left.copyProgress, right.copyProgress) &&
+    (left.copyProgress === null || right.copyProgress === null
+      ? left.copyProgress === right.copyProgress
+      : equalCopyProgress(left.copyProgress, right.copyProgress)) &&
     left.groupKey === right.groupKey &&
     left.id === right.id &&
+    left.inFlight === right.inFlight &&
     equalChatOperationalStatus(left.indicator, right.indicator) &&
-    equalSidebarChatRow_markRead(left.markRead, right.markRead) &&
+    (left.markRead === null || right.markRead === null
+      ? left.markRead === right.markRead
+      : equalReadStateDto(left.markRead, right.markRead)) &&
     left.markUnread === right.markUnread &&
-    left.model === right.model &&
+    (left.model === null || right.model === null
+      ? left.model === right.model
+      : left.model === right.model) &&
     left.name === right.name &&
-    left.orderRank === right.orderRank &&
+    (left.orderRank === null || right.orderRank === null
+      ? left.orderRank === right.orderRank
+      : left.orderRank === right.orderRank) &&
     left.pinned === right.pinned &&
-    left.projectFolder === right.projectFolder &&
+    (left.projectFolder === null || right.projectFolder === null
+      ? left.projectFolder === right.projectFolder
+      : left.projectFolder === right.projectFolder) &&
     left.projectFolderRevision === right.projectFolderRevision &&
-    left.projectId === right.projectId &&
+    (left.projectId === null || right.projectId === null
+      ? left.projectId === right.projectId
+      : left.projectId === right.projectId) &&
     left.projectPath === right.projectPath &&
-    left.projectServerId === right.projectServerId &&
+    (left.projectServerId === null || right.projectServerId === null
+      ? left.projectServerId === right.projectServerId
+      : left.projectServerId === right.projectServerId) &&
     left.provider === right.provider &&
     left.searchText === right.searchText &&
     left.sortKey === right.sortKey &&
-    left.teamId === right.teamId &&
+    (left.teamId === null || right.teamId === null
+      ? left.teamId === right.teamId
+      : left.teamId === right.teamId) &&
     left.waitingForLead === right.waitingForLead
   );
 }
@@ -363,153 +565,6 @@ function reconcileSidebarChatRow(
     data.every((item, index) => item === next[index])
     ? data
     : next;
-}
-type SidebarChatRow_copyProgressDto = NonNullable<
-  SidebarChatRowDto["copyProgress"]
->;
-class SidebarChatRow_copyProgressModel {
-  done: NonNullable<SidebarChatRow_copyProgressDto["done"]>;
-  phase: NonNullable<SidebarChatRow_copyProgressDto["phase"]>;
-  total:
-    | NonNullable<NonNullable<SidebarChatRow_copyProgressDto["total"]>>
-    | null
-    | undefined;
-  unit: NonNullable<SidebarChatRow_copyProgressDto["unit"]>;
-  constructor(dto: SidebarChatRow_copyProgressDto) {
-    this.done = dto.done;
-    this.phase = dto.phase;
-    this.total =
-      dto.total === undefined
-        ? undefined
-        : dto.total === null
-          ? null
-          : dto.total;
-    this.unit = dto.unit;
-    makeObservable(this, {
-      done: observableRef,
-      phase: observableRef,
-      total: observableRef,
-      unit: observableRef,
-      apply: action,
-    });
-  }
-  apply(dto: SidebarChatRow_copyProgressDto): void {
-    {
-      const next = dto.done;
-      if (this.done !== next) this.done = next;
-    }
-    {
-      const next = dto.phase;
-      if (this.phase !== next) this.phase = next;
-    }
-    {
-      const next =
-        dto.total === undefined
-          ? undefined
-          : this.total === undefined
-            ? dto.total === null
-              ? null
-              : dto.total
-            : dto.total === null
-              ? null
-              : this.total === null
-                ? dto.total
-                : dto.total;
-      if (this.total !== next) this.total = next;
-    }
-    {
-      const next = dto.unit;
-      if (this.unit !== next) this.unit = next;
-    }
-  }
-}
-function updateSidebarChatRow_copyProgress(
-  data: SidebarChatRow_copyProgressModel,
-  dto: SidebarChatRow_copyProgressDto,
-): SidebarChatRow_copyProgressModel {
-  data.apply(dto);
-  return data;
-}
-function equalSidebarChatRow_copyProgress(
-  left: SidebarChatRow_copyProgressDto,
-  right: SidebarChatRow_copyProgressDto,
-): boolean {
-  return (
-    left.done === right.done &&
-    left.phase === right.phase &&
-    (left.total === undefined || right.total === undefined
-      ? left.total === right.total
-      : left.total === null || right.total === null
-        ? left.total === right.total
-        : left.total === right.total) &&
-    left.unit === right.unit
-  );
-}
-function createSidebarChatRow_copyProgressArray(
-  dto: readonly SidebarChatRow_copyProgressDto[],
-): SidebarChatRow_copyProgressModel[] {
-  return dto.map((item) => new SidebarChatRow_copyProgressModel(item));
-}
-type SidebarChatRow_markReadDto = NonNullable<SidebarChatRowDto["markRead"]>;
-class SidebarChatRow_markReadModel {
-  read: NonNullable<SidebarChatRow_markReadDto["read"]>;
-  revision: NonNullable<SidebarChatRow_markReadDto["revision"]>;
-  threadId: NonNullable<SidebarChatRow_markReadDto["threadId"]>;
-  turnId: NonNullable<SidebarChatRow_markReadDto["turnId"]>;
-  constructor(dto: SidebarChatRow_markReadDto) {
-    this.read = dto.read;
-    this.revision = dto.revision;
-    this.threadId = dto.threadId;
-    this.turnId = dto.turnId;
-    makeObservable(this, {
-      read: observableRef,
-      revision: observableRef,
-      threadId: observableRef,
-      turnId: observableRef,
-      apply: action,
-    });
-  }
-  apply(dto: SidebarChatRow_markReadDto): void {
-    {
-      const next = dto.read;
-      if (this.read !== next) this.read = next;
-    }
-    {
-      const next = dto.revision;
-      if (this.revision !== next) this.revision = next;
-    }
-    {
-      const next = dto.threadId;
-      if (this.threadId !== next) this.threadId = next;
-    }
-    {
-      const next = dto.turnId;
-      if (this.turnId !== next) this.turnId = next;
-    }
-  }
-}
-function updateSidebarChatRow_markRead(
-  data: SidebarChatRow_markReadModel,
-  dto: SidebarChatRow_markReadDto,
-): SidebarChatRow_markReadModel {
-  data.apply(dto);
-  return data;
-}
-function equalSidebarChatRow_markRead(
-  left: SidebarChatRow_markReadDto,
-  right: SidebarChatRow_markReadDto,
-): boolean {
-  return (
-    left.read === right.read &&
-    left.revision === right.revision &&
-    left.threadId === right.threadId &&
-    left.turnId === right.turnId
-  );
-}
-function createSidebarChatRow_markReadArray(
-  dto: readonly SidebarChatRow_markReadDto[],
-): SidebarChatRow_markReadModel[] {
-  return dto.map((item) => new SidebarChatRow_markReadModel(item));
 }
 export type SidebarChatRow = DeepReadonly<
   components["schemas"]["SidebarChatRow"]
