@@ -400,8 +400,8 @@ function reconcileSidebarChatRow(
       throw new Error("Duplicate identity in SidebarChatRow");
     incoming.set(item.id, item);
   }
-  if (data.length === 0 && dto.length > 0)
-    return dto
+  if (data.length === 0 && dto.length > 0) {
+    const rows = dto
       .map((item) => new SidebarChatRowModel(item))
       .sort((left, right) =>
         left.sortKey < right.sortKey
@@ -412,6 +412,9 @@ function reconcileSidebarChatRow(
               ? -1
               : 1,
       );
+    data.push(...rows);
+    return data;
+  }
   const previous = new Map(data.map((item) => [item.id, item]));
   for (let index = data.length - 1; index >= 0; index -= 1) {
     const row = data[index];

@@ -404,7 +404,11 @@ fn emit_model(out: &mut String, model: &Model, parser: &Parser<'_>) {
             writeln!(out, "function reconcile{name}(data: {name}Model[], dto: readonly {name}Dto[]): {name}Model[] {{
 const incoming = new Map<string, {name}Dto>();
 for (const item of dto) {{ if (incoming.has(item.{id})) throw new Error('Duplicate identity in {name}'); incoming.set(item.{id}, item); }}
-if (data.length === 0 && dto.length > 0) return dto.map((item) => new {name}Model(item)).sort((left, right) => left.{order} < right.{order} ? -1 : left.{order} > right.{order} ? 1 : left.{id} < right.{id} ? -1 : 1);
+if (data.length === 0 && dto.length > 0) {{
+const rows = dto.map((item) => new {name}Model(item)).sort((left, right) => left.{order} < right.{order} ? -1 : left.{order} > right.{order} ? 1 : left.{id} < right.{id} ? -1 : 1);
+data.push(...rows);
+return data;
+}}
 const previous = new Map(data.map((item) => [item.{id}, item]));
 for (let index = data.length - 1; index >= 0; index -= 1) {{
 const row = data[index]; if (row === undefined) throw new Error('Invalid removal index');
