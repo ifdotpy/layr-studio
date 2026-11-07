@@ -69,12 +69,31 @@ records the generated store boundary.
 4. Reuse existing leaves before writing new ones. Shared status, progress, title
    and action-menu components live once in `src/components/chat-row/` and serve
    both sidebars and future screens.
-5. Server read models own business policy. Components retain only device-local
-   state such as selection, drafts and expansion.
+5. Server read models own domain precedence and command validation. One shared
+   computed facade owns UI policy; components retain local selection, drafts and
+   expansion. Format reason codes with `src/status/operationalStatus.ts` for both
+   sidebar and conversation indicators. Missing facts make no status claim.
 6. Keep each component file single-purpose. Split a component when it reads
    unrelated observables, and witness field isolation with render probes.
 7. Capture server proofs by value before asynchronous work: `{ ...target }` keeps
    the clicked CAS target stable while generated models continue updating.
+
+## Generated state and screen facades
+
+Use `store.state().current` from the owning server services context. Narrow its
+loading/error/live/stale union before reading the generated `agents`, `projects`,
+`peerTeams`, `workspaces` and `agentTail` maps. Their readonly models and keyed
+apply code are generated from Rust schema metadata; do not create another mirror
+implementation or copy summaries into handwritten Agent objects.
+
+The sidebar is the reference for future screens. Its small MobX facade retains
+raw facts as `.agent` and adds computed presentation. Existing command and local
+control owners stay in place. Lists read membership/order, leaves read fields,
+and search subscribes to tails only while a nonempty query needs them. Use MobX
+computed values for derived counts and grouping: stable collection references do
+not make React `useMemo` dependencies change. The shared formatter and row leaves
+are reusable across screens. See the architecture decision linked above for the
+server/client boundary and lifecycle limits.
 
 ## Component workbench
 

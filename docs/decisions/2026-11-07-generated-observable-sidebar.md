@@ -1,114 +1,89 @@
-# Generated observable sidebar resources
+# Generated observable state and computed sidebar views
 
-Status: Accepted. Source: [issue #994](https://github.com/ifdotpy/layr-studio/issues/994),
-with the owner's pilot simplifications recorded below.
-
-## Context
-
-The sidebar reconstructed status, eligibility, search documents and chat ordering
-from broad Agent snapshots. Every update passed through renderer selectors even
-when a visible row did not change. The server already owns those facts and the
-reference-counted SSE subscription protocol.
+Status: Accepted, contract v5 (2026-11-07). Supersedes the initial render-ready
+sidebar resource pilot for [issue #994](https://github.com/ifdotpy/layr-studio/issues/994).
 
 ## Decision
 
-Rust serde and schemars types own the sidebar read model. `studio-read-models`
-owns the DTOs and pure projections. Server services project each visible chat,
-including the existing operational status projector, and publish full rows
-through the existing entity protocol. A row includes its server-computed sort
-key, group key, search document, action eligibility and read-receipt CAS target.
-Nullable fields are required on the wire and serialize explicit null.
+The server publishes domain facts through existing entities. The existing
+`agentSummary` projection adds an operational reason code, checked wait counts,
+read-receipt CAS proof and mark-unread eligibility. Rust computes precedence;
+it sends no presentation labels, compact rules, search documents or sort keys.
+Summary projection remains read-time. Operational aggregation uses indexed owner
+reads and a bottom-up traversal once per requested batch. This preserves the
+existing canonical summary cost; it does not introduce a materialized cache.
 
-`studio-contracts` refreshes OpenAPI from these owners, then calls the separate
-`studio-observable-codegen` crate. Typed Rust metadata identifies model identity,
-opaque fields, resource arguments and sorting. Generation validates metadata
-against the schema and rejects unsupported shapes with their schema path.
-`contracts:check` checks deterministic committed output.
+A separate `agentTail` state collection reads bounded lead tails directly from
+volatile storage at the existing flush cadence. Its Rust-owned maximum is
+`AGENT_TAIL_MAX_CHARS` Unicode scalar values. Tail changes do not rebuild summary
+operational facts. Workers have no tail entities. Existing project, peer-team
+and workspace entities retain their ownership, including saved sidebar order.
+The dedicated sidebar resource, row DTO, marker namespace and transaction proof
+machinery from the initial pilot are removed.
 
-Generated data classes initialize fields before explicit `makeObservable` calls.
-They compose nested models without inheritance. Generated `apply(dto)` methods
-assign only changed values, recurse through objects, reconcile identified arrays,
-replace changed union variants, clear omitted optional fields, and preserve null.
-Opaque JSON uses reference observation. Mutable classes and their apply methods
-remain private; public interfaces are deep-readonly generated contract views.
+Rust schema metadata selects five collections from the existing `state` resource:
+`agents`, `projects`, `peerTeams`, `workspaces` and `agentTail`.
+`studio-observable-codegen` generates private mutable models and public deeply
+readonly views. `store.state()` has one resource slot and observation atom;
+collection maps delegate to it and do not acquire independent subscriptions.
+Other entity variants remain owned by their existing consumers.
 
-The pilot generates only `store.sidebar()`, for `{kind: "sidebar"}`. Its slot has
-a strict loading/error/live/stale union; only live and stale contain data.
-Generated facades cache typed slots. Keys come from the existing subscription
-key owner. Each server creates its own runtime and facades through its existing
-services context. No global entity graph is introduced.
+Generated apply compares fields, recurses into nested models, preserves omitted,
+null and discriminated-union semantics, and mutates keyed membership only when
+it changes. Snapshot detection scans the input in O(n); observable mutations are
+proportional to changed members. Ordered array insertions and removals still have
+native O(n) shift cost. Equal snapshots and scalar-only updates do not splice
+ordered arrays. Empty, populated and cleared collections retain their identity.
 
-The handwritten `src/store/` runtime adds observation detection. Its per-slot atom
-starts the shared helper on observation; after 100 ms of continuous observation
-the helper acquires the existing subscription module's reference. Unobservation
-releases that reference immediately. The existing module remains the sole owner
-of stale status, reference counting, 20-second grace, its inactive cache bound,
-and batching through `sync/resourceEvents.ts`. Eviction clears the slot's model
-graph. Subscription notifications apply in one MobX action per queued batch.
-Untracked reads, including action handlers, open no subscriptions.
+## Client reference pattern
 
-The sidebar follows the [observable component hierarchy](../../workspaces/client/apps/web/README.md#observable-component-hierarchy):
-list membership, row shells and independently changing leaves form separate
-observer boundaries. Shared title, indicator, progress and action-menu leaves
-are reused across the main and combined sidebars. Selection, expansion, drag state,
-rename drafts and pending command state remain device-local. The server owns the
-final indicator including unread precedence. Only a pending mark-read for the
-exact current CAS target may temporarily display it as read; changing that
-target retires the overlay.
+`src/components/sidebar/viewModel.ts` wraps a generated summary as `.agent`.
+Computed getters add UI policy without copying facts into a compatibility Agent:
+team/folder membership, compact visibility, display identity, activity ordering
+and lazy search text. One list facade serves the main and combined sidebars.
+Existing `useSidebarOrder` owns effective optimistic rank and interleaving;
+existing combined `chatKey` and routing helpers own source identity.
+Each source retains its native generated model references.
 
-Compact visibility combines server `compactPinned` with the Rust-owned
-`COMPACT_RECENT_WINDOW_SECONDS` constant and `activityAt` at render time. Crossing
-the recency boundary takes effect on the next render. This deliberately avoids
-a new timer or server scheduler. Selected rows, search, thresholds and expansion
-remain local presentation choices. Existing folder/team/chat interleaving stays
-with its current owner; the pilot does not introduce a tree framework.
+`src/status/operationalStatus.ts` is the single reason-to-label formatter used by
+sidebar and conversation indicators. It owns English labels and pluralization,
+not precedence. Missing operational facts yield a neutral loading value with no
+status claim. A pending read may display `read_result` only for the exact current
+thread, turn and receipt revision; a changed target retires that overlay.
+Capture CAS proofs by value before asynchronous dispatch.
 
-## Consequences and limitations
+Search reads tail text only for a nonempty query. Structural grouping and order
+never depend on tails. Compact recency uses the generated
+`COMPACT_RECENT_WINDOW_SECONDS` duration at render time; it changes at the next
+render without a new timer. Transient selection, expansion, rename drafts,
+search text and pending commands stay in their existing local owners.
 
-React, Mantine and the visual design stay unchanged. Existing SSE transport,
-cursors, epochs, tombstones, baseline replacement, atomic persistence and
-multi-server identity remain authoritative. There is no polling or second
-transport/recovery path. `sidebarChatRow` is excluded from the broad state
-projection; sidebar consumers use the resource directly.
+Lists observe membership; row shells and shared title, status, progress and menu
+leaves observe their own fields. All model readers are observers, including
+wrappers around non-observer widgets. Never cache derived values in React
+`useMemo` keyed only by stable observable collection identity: use MobX computed
+values or read inside the observer. See the
+[component rules](../../workspaces/client/apps/web/README.md#observable-component-hierarchy).
 
-An abandoned render, such as a component suspending before commit, can retain a
-MobX reaction and acquire interest after 100 ms. Pinned mobx-react-lite 5.1.2 uses
-native finalization with a 10-second timer backstop; finalization releases the
-reference, followed by the existing subscription grace. This is a documented
-render-lifecycle limitation, not a promise of immediate abandoned-render cleanup.
+This is the template for subsequent screen migrations: select existing generated
+collections, add a small computed facade over raw readonly facts, reuse shared
+formatters and leaves, and keep commands and transient controls in their current
+owners. Do not introduce a screen framework, duplicate DTOs or another apply loop.
 
-Conversation and other screens still use their shared status helpers during the
-pilot. This temporarily duplicates the projection across those screens and Rust;
-sidebar callers are migrated without an Agent compatibility projection. Future
-migration removes a helper only when its final caller has moved.
+## Lifecycle and limits
 
-Radio rooms retain their existing sidebar summary path. They are the next
-read-model candidate and are not represented as `SidebarChatRow` values.
+The handwritten store runtime detects observation and delegates acquisition to
+the existing subscription module after 100 ms of continuous observation.
+Unobservation releases its reference; the existing module owns stale state,
+20-second grace, cache eviction, batching, cursors and recovery. Untracked action
+reads open no interest. SSE remains the only server-data transport.
 
-The legacy project summary navigation crosses serialized frame messages and
-retains plain DTOs. Its reused observer leaves do not isolate field updates
-across a whole message replacement. The combined sidebar reconciles mapped rows
-through the generated mirror, preserving model identity and field isolation.
+An abandoned suspended render can retain a MobX reaction until pinned
+mobx-react-lite finalization (including its 10-second timer backstop), followed
+by existing subscription grace. Immediate abandoned-render release is not promised.
+Radio rooms retain their existing summary path. Legacy serialized navigation
+carries native facts; UI facades are created locally, never serialized.
 
-## Alternatives
-
-A handwritten mutable renderer model would create a second contract owner.
-MST or mobx-keystone would add another model system. Subscription hooks would
-preserve per-component wiring, while a new subscription coordinator would
-duplicate the existing lifecycle. A generic resource graph, tree framework and
-deadline scheduler add no necessary behavior to this pilot.
-
-## Pilot line-count exception
-
-The owner accepted the pilot's handwritten line-count miss without expanding
-scope or compressing formatting. Relative to the exact starting Git revision
-`947e17dfb3209bc90afac82a555d82a036a7240f`, production handwritten web source
-TypeScript adds 1,497 lines and removes 1,054 (net +443): store +206; shared row
-leaves +541; Sidebar -43; SidebarRow -195; servers -28; App -1; other -37.
-This count excludes generated output, tests, stories, fixture files and tooling
-configuration. Rust and generated additions are reported separately.
-
-The remaining conversation status owner is `chatStatusModel.ts` (412 lines).
-The shared App catalog module is 134 lines, including its 56-line selector for
-the current agent, team and workers. The next stage moves conversation status
-to server read models and removes these owners when their last callers move.
+The benchmark's conversation guard is a memoized sibling, not a real Conversation
+mount. Its results establish only that guard's isolation. Measurement requires
+an explicitly approved quiet host window; ordinary checks are separate evidence.
