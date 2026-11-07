@@ -9,7 +9,7 @@ import { NativeModelActions } from "./conversation/NativeModelActions.tsx";
 import { ConversationProvider } from "./conversation/navigation.ts";
 import { ExecutionSummaryTrigger } from "./agents/ExecutionSummaryTrigger.tsx";
 import { ClaudeSettings } from "./ClaudeSettings.tsx";
-import TurnHistory from "./conversation/transcript/TurnHistory.tsx";
+import TurnHistory from "./conversation/transcript/TurnHistory.fixture.tsx";
 import { snapshotFixture } from "../snapshotFixture.ts";
 // @vitest-environment happy-dom
 import {

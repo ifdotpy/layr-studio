@@ -1,4 +1,5 @@
-import { memo, useState } from "react";
+import { useState } from "react";
+import { observer } from "mobx-react-lite";
 import {
   BookOpen,
   Check,
@@ -224,7 +225,7 @@ function describe(item: Message, p: Json) {
           "Tool activity",
   };
 }
-export const ToolCard = memo(function ToolCard({
+export const ToolCard = observer(function ToolCard({
   item,
   agentId,
   cwd,
@@ -500,7 +501,7 @@ export function activitySummary(items: Message[]) {
       .join(" · "),
   };
 }
-export default memo(function Activity({
+export default observer(function Activity({
   items,
   agentId,
 }: {

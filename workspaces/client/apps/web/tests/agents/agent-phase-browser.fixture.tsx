@@ -1,3 +1,6 @@
+import { useServerStore } from "../../src/servers/ServerServicesContext";
+import { agentId } from "../../src/generated/observableResources";
+import { resourceData } from "../../src/store/runtime";
 import { observableFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import { useState } from "react";
@@ -265,7 +268,9 @@ window.phase = (id, phase) => {
 };
 function liveAgentView(
   agent: Pick<Agent, "id" | "source" | "nativeStatus"> &
-    NonNullable<ReturnType<typeof useMessages>["liveAgent"]>,
+    import("../../src/deepReadonly").DeepReadonly<
+      NonNullable<Transcript["agent"]>
+    >,
 ): Agent {
   // Mirrors Conversation.tsx's existing cast: the generated context-usage views describe
   // the same stored value; unifying their wire contracts is a post-migration follow-up.
@@ -287,7 +292,10 @@ function Chat({ id, visible }: { id: string; visible: boolean }) {
     status: "running",
     nativeStatus: { phase: "retrying", message: "Provider is reconnecting" },
   } satisfies Agent;
-  const agent = liveAgentView({ ...base, ...messages.liveAgent });
+  const live = resourceData(
+    useServerStore().transcript(agentId(id)).current,
+  )?.agent;
+  const agent = liveAgentView({ ...base, ...live });
   const fixture = observableFixture([agent]);
   return (
     <section

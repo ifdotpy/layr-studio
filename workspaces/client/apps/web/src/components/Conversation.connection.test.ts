@@ -1,3 +1,9 @@
+import { useConversationActions } from "./conversation/navigation.ts";
+import { conversationActionsFixture } from "./observableFixture.tsx";
+vi.mock("./conversation/navigation.ts", async (original) => ({
+  ...(await original<typeof import("./conversation/navigation.ts")>()),
+  useConversationActions: vi.fn(),
+}));
 vi.mock("./questions/requestView", () => ({
   useRequestsView: () => ({ requests: [] }),
 }));
@@ -71,11 +77,11 @@ vi.mock("@mantine/hooks", async (original) => ({
   useMediaQuery: () => false,
   useNetwork: () => ({ online: h.online }),
 }));
-vi.mock("../hooks", async () => {
+vi.mock("../conversation/historySession", async () => {
   const { selectMessageConnection } =
     await import("../hooks/messageConnection");
   return {
-    useMessages: () => ({
+    useConversationHistory: () => ({
       items: [],
       loaded: true,
       connection: selectMessageConnection(h.health, h.activity, h.detail),
@@ -169,34 +175,15 @@ function phaseElements(
   return phaseElements(node.props.children);
 }
 function renderActivity(pending: boolean, currentAgent = agent) {
+  vi.mocked(useConversationActions).mockReturnValue({
+    ...conversationActionsFixture(),
+  });
   const tree = Conversation({
     id: "lead",
     agent: currentAgent,
     detail: currentAgent,
-    getDraft: () => "",
-    subscribeDraft: () => () => {},
-    setDraft: () => {},
-    send: async () => {},
     sending: false,
-    refresh: async () => {},
-    notify: () => {},
     limits: null,
-    accountsState: {
-      data: {
-        accounts: [],
-        archivedAccounts: [],
-        defaultAccountKey: "default",
-        defaultAccountGroups: [],
-        logins: [],
-        supportsDelete: true,
-        supportsDisconnect: true,
-      },
-      error: "",
-      setData: () => {},
-      refresh: async () => null,
-      scope: "fixture",
-    },
-    reloadLimits: () => {},
     offlineSendPending: pending,
     offlineSendDetails: "Failed to fetch",
   });

@@ -1,3 +1,5 @@
+import { messageModels } from "../messages/message-models.fixture";
+import { conversationActionsFixture } from "../../src/components/observableFixture";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
 import { observableFixture } from "../../src/components/observableFixture.tsx";
 const injectedStore = observableFixture();
@@ -118,6 +120,7 @@ sidebar.apply([
   })),
 ]);
 window.receivePeerSidebar = sidebar.apply;
+const models = messageModels(initial.stateDir, initial.threads);
 const Fixture = observer(function Fixture() {
   const [data, setData] = useState(initial);
   const [opened, open] = useState("a");
@@ -129,6 +132,18 @@ const Fixture = observer(function Fixture() {
     const r = await fetch("/snapshot");
     setData(await r.json());
   };
+  models.apply([
+    ...data.runtime.rooms.map((value) => ({
+      collection: "room" as const,
+      id: value.id,
+      value,
+    })),
+    ...data.runtime.peerTeams.map((value) => ({
+      collection: "peerTeam" as const,
+      id: value.id,
+      value,
+    })),
+  ]);
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <div style={{ width: 320, maxWidth: "100vw" }}>
@@ -159,12 +174,11 @@ const Fixture = observer(function Fixture() {
           </SidebarCommandsProvider>
         </injectedStore.Provider>
       </div>
-      <TeamChats
-        data={data}
-        leadId={opened}
-        refresh={refresh}
-        notify={() => {}}
-      />
+      <models.Provider
+        commands={{ ...conversationActionsFixture(open), refresh }}
+      >
+        <TeamChats leadId={opened} />
+      </models.Provider>
     </MantineProvider>
   );
 });

@@ -1,50 +1,73 @@
-import { useState } from "react";
+import { useMemo } from "react";
+import { makeAutoObservable, observableRef, runInAction } from "mobx";
+import { observer } from "mobx-react-lite";
+import {
+  createTextBlobMirror,
+  type TextBlobResponse,
+} from "../../../generated/observableResources";
 import { Button } from "@mantine/core";
 import { errorText } from "../../../api";
 import { useServerApi } from "../../../servers/ServerServicesContext";
 import { fullOutputText } from "./fullOutputCache";
 
 /** Opens the full text of a cut item. It fetches by hash once, on the click. */
-export default function FullOutput({
+export default observer(function FullOutput({
   blob,
 }: {
   blob: { hash: string; size: number };
 }) {
   const { get } = useServerApi();
-  const [text, setText] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const view = useMemo(() => {
+    const state: {
+      output: TextBlobResponse | null;
+      loading: boolean;
+      error: string;
+    } = { output: null, loading: false, error: "" };
+    return makeAutoObservable(state, { output: observableRef });
+  }, [get, blob.hash, blob.size]);
   const open = async () => {
-    setLoading(true);
-    setError("");
+    runInAction(() => {
+      view.loading = true;
+      view.error = "";
+    });
     try {
-      setText(
-        await fullOutputText(blob.hash, async (hash) => {
-          const response = await get("/api/transcript/blob", {
-            query: { hash },
-            timeoutMs: 15000,
-          });
-          return response.text;
-        }),
-      );
+      const text = await fullOutputText(blob.hash, async (hash) => {
+        const response = await get("/api/transcript/blob", {
+          query: { hash },
+          timeoutMs: 15000,
+        });
+        return response.text;
+      });
+      const output = createTextBlobMirror({
+        hash: blob.hash,
+        size: blob.size,
+        text,
+      }).current;
+      runInAction(() => {
+        view.output = output;
+      });
     } catch (failure) {
-      setError(errorText(failure));
+      runInAction(() => {
+        view.error = errorText(failure);
+      });
     } finally {
-      setLoading(false);
+      runInAction(() => {
+        view.loading = false;
+      });
     }
   };
-  if (text !== null) return <pre className="full-output">{text}</pre>;
+  if (view.output) return <pre className="full-output">{view.output.text}</pre>;
   return (
     <>
       <Button
         size="compact-xs"
         variant="subtle"
-        loading={loading}
+        loading={view.loading}
         onClick={() => void open()}
       >
         Open full output ({Math.ceil(blob.size / 1024)} KB)
       </Button>
-      {error && <p className="notice">{error}</p>}
+      {view.error && <p className="notice">{view.error}</p>}
     </>
   );
-}
+});

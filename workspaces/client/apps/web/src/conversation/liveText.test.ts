@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addLiveDelta, withLiveText, type LiveText } from "./liveText";
+import { createLiveText, withLiveText, MAX_LIVE_ITEMS } from "./liveText";
 
 const item = "agent:answer";
-const run = (...deltas: [number, string][]) =>
-  deltas.reduce<ReadonlyMap<string, LiveText>>(
-    (live, [offset, text]) =>
-      addLiveDelta(live, { itemId: item, offset, text }),
-    new Map(),
-  );
+const run = (...deltas: [number, string][]) => {
+  const live = createLiveText();
+  for (const [offset, text] of deltas) live.add({ itemId: item, offset, text });
+  return live;
+};
 
 describe("live text", () => {
   it("shows live text on top of a durable item that lags behind it", () => {
@@ -40,10 +39,11 @@ describe("live text", () => {
   });
 
   it("keeps a bounded number of items", () => {
-    let live: ReadonlyMap<string, LiveText> = new Map();
+    const live = createLiveText();
     for (let index = 0; index < 20; index++)
-      live = addLiveDelta(live, { itemId: `i${index}`, offset: 0, text: "x" });
-    expect(live.size).toBe(8);
-    expect(live.has("i19")).toBe(true);
+      live.add({ itemId: `i${index}`, offset: 0, text: "x" });
+    expect(live.get(`i${20 - MAX_LIVE_ITEMS - 1}`)).toBeUndefined();
+    for (let index = 20 - MAX_LIVE_ITEMS; index < 20; index++)
+      expect(live.get(`i${index}`)?.text).toBe("x");
   });
 });

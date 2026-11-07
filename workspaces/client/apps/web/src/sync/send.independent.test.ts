@@ -3,6 +3,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createCommandClient } from "../commands";
 import { createOutbox, matchesMessageDelivery } from "./send";
 import type { StoredSend } from "../unsent/store.ts";
+import { componentAttachment } from "../components/componentTestFixtures.ts";
+import { DeliveryMoment } from "../generated/deliveryMoment.ts";
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
@@ -46,6 +48,45 @@ class MemoryBuffer {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("keeps the first payload when caller-owned assets and attachments change before an exact retry", async () => {
+  const buffer = new MemoryBuffer();
+  const payloads: string[] = [];
+  const post = vi.fn(async (request) => {
+    payloads.push(JSON.stringify(request));
+    throw new TypeError("reply lost");
+  });
+  const outbox = createOutbox({
+    api: {
+      command: createCommandClient(new MemoryStorage(), post),
+      getStreamSession: () => ({ workspaceId: "workspace" }),
+    } as never,
+    buffer,
+    watchResourceConnection: () => () => {},
+  });
+  const assets = ["first"];
+  const attachment = componentAttachment({ id: "first", name: "First file" });
+  const attachments = [attachment];
+  await outbox.durableSend(
+    {
+      id: "frozen",
+      room: "chat",
+      text: "Original text",
+      assets,
+      delivery: DeliveryMoment.NextTurn,
+    },
+    attachments,
+  );
+  assets.push("new draft asset");
+  attachment.name = "New draft file";
+  attachments.push(componentAttachment({ id: "second" }));
+  await outbox.changeOutbox("frozen", "resume");
+  expect(payloads).toHaveLength(2);
+  expect(payloads[1]).toBe(payloads[0]);
+  expect([...buffer.values.values()][0]?.attachments).toEqual([
+    componentAttachment({ id: "first", name: "First file" }),
+  ]);
+});
 
 it("retries a file send with the original flag and request identity after reload", async () => {
   vi.stubGlobal("navigator", { onLine: true });

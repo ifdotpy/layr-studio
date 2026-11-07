@@ -448,9 +448,6 @@ export function Workspace(props: Props) {
               {section === "changes" && <Changes {...context} />}
               {section === "messages" && (
                 <TeamChats
-                  refresh={props.refresh}
-                  notify={props.notify}
-                  data={props.data}
                   focusItemId={props.initialFocus?.id}
                   focusRequestId={props.initialFocus?.requestId}
                   focusRoomId={props.initialFocus?.roomId}

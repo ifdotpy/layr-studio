@@ -1,3 +1,9 @@
+import { useConversationActions } from "./conversation/navigation.ts";
+import { conversationActionsFixture } from "./observableFixture.tsx";
+vi.mock("./conversation/navigation.ts", async (original) => ({
+  ...(await original<typeof import("./conversation/navigation.ts")>()),
+  useConversationActions: vi.fn(),
+}));
 vi.mock("./questions/requestView", () => ({
   useRequestsView: () => ({ requests: [] }),
 }));
@@ -55,8 +61,8 @@ vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
   useMediaQuery: () => false,
 }));
-vi.mock("../hooks", () => ({
-  useMessages: () => ({ items: [], loaded: true }),
+vi.mock("../conversation/historySession", () => ({
+  useConversationHistory: () => ({ items: [], loaded: true }),
 }));
 vi.mock("./useMessageReceipts", () => ({
   useMessageReceipts: () => new Map(),
@@ -103,34 +109,16 @@ function render(
   reloadLimits: () => void,
   detail: Props["detail"] = agent,
 ) {
+  vi.mocked(useConversationActions).mockReturnValue({
+    ...conversationActionsFixture(),
+    reloadLimits,
+  });
   const element = Conversation({
     id: "lead",
     agent,
     detail,
-    getDraft: () => "",
-    subscribeDraft: () => () => {},
-    setDraft: () => {},
-    send: async () => {},
     sending: false,
-    refresh: async () => {},
-    notify: () => {},
     limits: null,
-    accountsState: {
-      data: {
-        accounts: [],
-        archivedAccounts: [],
-        defaultAccountKey: "default",
-        defaultAccountGroups: [],
-        logins: [],
-        supportsDelete: true,
-        supportsDisconnect: true,
-      },
-      error: "",
-      setData: () => {},
-      refresh: async () => null,
-      scope: "fixture",
-    },
-    reloadLimits,
   });
   // The compact-header observer needs only these browser boundaries.
   vi.stubGlobal("window", {

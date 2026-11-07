@@ -251,6 +251,7 @@ test("Messages loading", async ({ browser }) => {
         { stateDir: state.stateDir, id: cacheFixture(lead.id) },
       );
       await next.goto(origin);
+      await next.locator(`[data-chat="${lead.id}"]`).click();
       await next
         .locator("#conversation-title")
         .filter({ hasText: lead.name! })

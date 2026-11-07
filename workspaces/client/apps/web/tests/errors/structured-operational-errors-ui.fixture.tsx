@@ -1,3 +1,7 @@
+import { observableFixture } from "../../src/components/observableFixture";
+import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
+import { ConversationProvider } from "../../src/components/conversation/navigation";
+import { conversationActionsFixture } from "../../src/components/observableFixture";
 import { RequestFixture } from "../../src/components/questions/requestFixtures";
 import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext";
 import { ApiError } from "../../src/api";
@@ -9,7 +13,6 @@ import { approval } from "../../src/approvalFixtures.ts";
 import { desktopFixture } from "../files/desktop.fixture.ts";
 import type { JsonInput } from "../../src/types.ts";
 import type { AgentEntityDto as Agent } from "../../src/generated/api.ts";
-import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 declare global {
   interface Window {
     readRecordings: () => ReturnType<typeof listRecordings>;
@@ -45,7 +48,7 @@ const agent: Agent = {
   turnId: "turn",
   inFlight: true,
 };
-const snapshot = { ...fixtureSnapshot([agent]), stateDir: "fixture" };
+const models = observableFixture([agent]);
 const noop = () => {};
 const refresh = async () => {};
 let renderId = 0;
@@ -95,29 +98,48 @@ window.renderCase = async (which, value) => {
       ),
     );
   }
-  if (which === "message")
-    component = React.createElement(UserMessages, {
-      data: {
-        ...snapshot,
-        runtime: {
-          ...snapshot.runtime,
-          complaints: [
-            {
-              id: "message",
-              leadId: "lead",
-              author: "lead",
-              authorName: "Lead",
-              recipient: "user",
-              title: "User check",
-              created: 1,
-              version: 1,
-            },
-          ],
+  if (which === "message") {
+    models.apply([
+      {
+        collection: "workspace",
+        id: "workspace",
+        value: { stateDir: "fixture" },
+      },
+      {
+        collection: "complaint",
+        id: "message",
+        value: {
+          id: "message",
+          leadId: "lead",
+          author: "lead",
+          authorName: "Lead",
+          recipient: "user",
+          title: "User check",
+          created: 1,
+          version: 1,
         },
       },
-      refresh,
-      notify: noop,
-    });
+    ]);
+    component = React.createElement(
+      ServerStoreProvider,
+      {
+        value: {
+          ...models.store,
+          complaint: () => ({
+            current: {
+              status: "error" as const,
+              error: new ApiError(value, 503, value),
+            },
+          }),
+        },
+      },
+      React.createElement(
+        ConversationProvider,
+        { value: conversationActionsFixture() },
+        React.createElement(UserMessages),
+      ),
+    );
+  }
   if (which === "background") {
     const task: components["schemas"]["TaskProjection"] = {
       id: "tool",

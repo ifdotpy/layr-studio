@@ -1,3 +1,5 @@
+import { messageModels } from "../messages/message-models.fixture";
+import { conversationActionsFixture } from "../../src/components/observableFixture";
 import type { Agent, Room, Snapshot } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 declare global {
@@ -59,16 +61,15 @@ const data: Snapshot = {
     peerTeams: [],
   },
 };
+const models = messageModels(data.stateDir, data.threads);
+models.apply([{ collection: "room", id: room.id, value: room }]);
 const app = createRoot(document.getElementById("root")!);
 window.showCurrent = () =>
   app.render(
     <MantineProvider theme={theme} defaultColorScheme="dark">
-      <TeamChats
-        data={data}
-        leadId="lead"
-        refresh={async () => {}}
-        notify={() => {}}
-      />
+      <models.Provider commands={conversationActionsFixture()}>
+        <TeamChats leadId="lead" />
+      </models.Provider>
     </MantineProvider>,
   );
 window.showCurrent();

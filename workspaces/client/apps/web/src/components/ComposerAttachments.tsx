@@ -13,7 +13,7 @@ import type { LocalMessageAttachment as Attachment } from "../types";
 export { attachmentLimit } from "../sync/uploads";
 export default function ComposerAttachments(p: {
   notify: (message: string) => void;
-  assets: Attachment[];
+  assets: readonly Attachment[];
   uploading: boolean;
   disabled: boolean;
   add: (files: globalThis.File[]) => Promise<void>;
@@ -181,7 +181,7 @@ function AttachmentImage(p: { asset: Attachment; onPreview: () => void }) {
 }
 
 export function MessageAttachments(p: {
-  assets: Attachment[];
+  assets: readonly Attachment[];
   notify: (message: string) => void;
 }) {
   const [preview, setPreview] = useState<string | null>(null);

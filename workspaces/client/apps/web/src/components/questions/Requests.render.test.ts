@@ -11,7 +11,7 @@ import { requestTestEnvironment, requestTestRoot } from "./requestTestFixture";
 import { useQuestionCards } from "./useQuestionCards";
 import { observer } from "mobx-react-lite";
 import { requestRenderProbe } from "./requestActions";
-import TurnHistory from "../conversation/transcript/TurnHistory";
+import TurnHistory from "../conversation/transcript/TurnHistory.fixture";
 
 const h = vi.hoisted(() => ({
   store: null as ReturnType<typeof createServerStore> | null,

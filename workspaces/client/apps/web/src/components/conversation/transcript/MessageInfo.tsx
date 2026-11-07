@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { useServerApi } from "../../../servers/ServerServicesContext";
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Popover } from "@mantine/core";
@@ -32,7 +33,7 @@ const duration = (value: number) =>
       ? `${Math.max(1, Math.round(value))} ms`
       : `${(value / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s`;
 
-export default function MessageInfo({
+export default observer(function MessageInfo({
   message,
   agentId,
   stateDir,
@@ -286,4 +287,4 @@ export default function MessageInfo({
       </Popover.Dropdown>
     </Popover>
   );
-}
+});

@@ -3,7 +3,11 @@ import { observer, Observer } from "mobx-react-lite";
 import { useAgentCatalog, useAgentDetail } from "./components/agents/state.ts";
 import { SidebarCommandsProvider } from "./components/sidebar/commands.ts";
 import { MarkChatUnreadItem } from "./components/ChatReadActions.tsx";
-import { ConversationProvider } from "./components/conversation/navigation.ts";
+import {
+  ConversationProvider,
+  type ConversationActions,
+  type ConversationSendOptions,
+} from "./components/conversation/navigation.ts";
 import { MessageSendStatus, StopOutcome } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
@@ -147,7 +151,6 @@ import {
   useRetainedArray,
 } from "./hooks";
 import { useSendingMessageRemoval } from "./components/useSendingMessageRemoval";
-import type { Attachment } from "./components/ComposerAttachments";
 import {
   defaultStudioPreferences,
   MAX_HIDE_OLD_CHATS_THRESHOLD,
@@ -1474,13 +1477,7 @@ export default observer(function App({ active = true }: { active?: boolean }) {
       setCreating(false);
     }
   };
-  const send = async (options?: {
-    asTextFile?: boolean;
-    assets?: string[];
-    attachments?: Attachment[];
-    onPersist?: () => void | Promise<void>;
-    delivery?: DeliveryMoment;
-  }) => {
+  const send = async (options?: ConversationSendOptions) => {
     if (schemaMismatch || isApiSchemaMismatch()) return;
     const draftKey = opened || "new",
       draft = getDraft(draftKey),
@@ -2054,6 +2051,49 @@ export default observer(function App({ active = true }: { active?: boolean }) {
     creating,
   );
   const studioErrors = useStudioErrorsState(data?.runtime.studioErrors);
+  // The read hook publishes a new pending snapshot for every read revision.
+  const read = useMemo(() => readState, [readState.pendingReadTargets]);
+  const nativeAction: ConversationActions["nativeAction"] =
+    useCommittedCallback((agent, action) => {
+      void run(() => submitNativeAction(agent, action));
+    });
+  const openActivity: ConversationActions["openActivity"] =
+    useCommittedCallback((activity) => {
+      if (activity.kind === "agent") open(activity.agentId);
+      else if (lead) {
+        setTaskFocus({
+          id: activity.id,
+          leadId: lead.id,
+          requestId: randomUUID(),
+        });
+        setTasksOpen(true);
+      }
+    });
+  const conversationActions = useMemo(
+    () => ({
+      open,
+      getDraft,
+      subscribeDraft,
+      setDraft,
+      send: sendToConversation,
+      refresh,
+      notify,
+      dismissDraft,
+      observeSends,
+      observeRead: readState.observeRead,
+      editSend,
+      branchCreated,
+      newConversation,
+      chooseConversation,
+      accounts,
+      reloadLimits: forceReloadLimits,
+      read,
+      nativeAction,
+      openActivity,
+    }),
+    // All commands above keep their committed identity for this owner.
+    [read, setDraft, forceReloadLimits, accounts],
+  );
   if (!active) return null;
   // A server contract gate must not cover navigation to other server owners.
   if (screen && schemaMismatch)
@@ -2288,26 +2328,7 @@ export default observer(function App({ active = true }: { active?: boolean }) {
     </>
   );
   return (
-    <ConversationProvider
-      value={{
-        open,
-        read: readState,
-        nativeAction: (agent, action) => {
-          void run(() => submitNativeAction(agent, action));
-        },
-        openActivity(activity) {
-          if (activity.kind === "agent") open(activity.agentId);
-          else if (lead) {
-            setTaskFocus({
-              id: activity.id,
-              leadId: lead.id,
-              requestId: randomUUID(),
-            });
-            setTasksOpen(true);
-          }
-        },
-      }}
-    >
+    <ConversationProvider value={conversationActions}>
       <TeamProvider
         value={{
           ...teamArea,
@@ -2719,13 +2740,7 @@ export default observer(function App({ active = true }: { active?: boolean }) {
                   <RadioChat
                     visible={!(mobileClient && sidebar)}
                     key={room.id}
-                    room={room}
-                    data={data}
-                    getDraft={getDraft}
-                    subscribeDraft={subscribeDraft}
-                    setDraft={setDraft}
-                    refresh={refresh}
-                    notify={notify}
+                    roomId={room.id}
                   />
                 ) : (
                   <SelectedConversation
@@ -2735,30 +2750,18 @@ export default observer(function App({ active = true }: { active?: boolean }) {
                       railGeometry ? conversationTitle : undefined
                     }
                     visible={!(mobileClient && sidebar)}
-                    accountsState={accounts}
                     syncWorkspaceId={workspaceId}
                     id={opened}
                     agent={agent}
                     lead={lead || undefined}
                     room={room}
                     legacy={legacy}
-                    snapshot={data}
-                    getDraft={getDraft}
-                    subscribeDraft={subscribeDraft}
-                    setDraft={setDraft}
                     draftConflicts={conversationDraftConflicts}
-                    dismissDraft={dismissDraft}
-                    send={sendToConversation}
                     sending={sending}
                     schemaMismatch={schemaMismatch}
                     outgoing={conversationOutgoing}
                     offlineSendPending={offlineSendFeedback.pending}
                     offlineSendDetails={offlineSendFeedback.details}
-                    onObserved={observeSends}
-                    onReadResult={readState.observeRead}
-                    onOutgoingEdit={editSend}
-                    refresh={refresh}
-                    notify={notify}
                     limits={visibleLimits}
                     limitsAccounts={usageAccounts}
                     limitsLoading={!!limitsLoading[accountKey]}
@@ -2768,11 +2771,6 @@ export default observer(function App({ active = true }: { active?: boolean }) {
                     limitsAccountLabel={
                       selectedAccount?.email || selectedAccount?.label
                     }
-                    reloadLimits={forceReloadLimits}
-                    onSelect={open}
-                    onBranchCreated={branchCreated}
-                    onNewChat={newConversation}
-                    onChooseChat={chooseConversation}
                   />
                 )}
               </UIErrorBoundary>

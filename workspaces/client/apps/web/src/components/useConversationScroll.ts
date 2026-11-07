@@ -43,11 +43,11 @@ export function useConversationScroll(
       followListeners.current.delete(listener);
     };
   }, []);
-  const updateFollow = (value: boolean) => {
+  const updateFollow = useCallback((value: boolean) => {
     if (following.current === value) return;
     following.current = value;
     followListeners.current.forEach((listener) => listener());
-  };
+  }, []);
   const available = useRef(ready);
   available.current = ready;
   const lastTop = useRef(0);
@@ -67,20 +67,23 @@ export function useConversationScroll(
     lastHistoryInput.current = lastScrollInput.current;
     return true;
   }, [hasRecentScrollInput]);
-  const remember = () => {
+  const remember = useCallback(() => {
     const root = scroll.current;
     if (!root) return;
     lastTop.current = root.scrollTop;
     lastHeight.current = root.scrollHeight;
     root.dispatchEvent(new Event("studio-history-remember"));
-  };
-  const setFollow = (value: boolean) => {
-    updateFollow(value);
-    if (value) lastScrollInput.current = -Infinity;
-    if (value)
-      scroll.current?.dispatchEvent(new Event("studio-history-follow"));
-    else remember();
-  };
+  }, []);
+  const setFollow = useCallback(
+    (value: boolean) => {
+      updateFollow(value);
+      if (value) lastScrollInput.current = -Infinity;
+      if (value)
+        scroll.current?.dispatchEvent(new Event("studio-history-follow"));
+      else remember();
+    },
+    [remember, updateFollow],
+  );
   useLayoutEffect(() => {
     lastScrollInput.current = -Infinity;
     lastHistoryInput.current = -Infinity;
@@ -137,7 +140,7 @@ export function useConversationScroll(
     };
   }, [_id]);
 
-  const onScroll = () => {
+  const onScroll = useCallback(() => {
     const root = scroll.current;
     if (!root || !available.current || root.scrollTop === lastTop.current)
       return;
@@ -160,20 +163,20 @@ export function useConversationScroll(
             root.scrollHeight === lastHeight.current)),
     );
     remember();
-  };
+  }, [followTail, hasRecentScrollInput, remember, updateFollow]);
   const revealRequest = useCallback((node: HTMLElement, offset = 12) => {
     updateFollow(false);
     scroll.current?.dispatchEvent(
       new CustomEvent("studio-history-position", { detail: { node, offset } }),
     );
   }, []);
-  const getAnchorId = () => {
+  const getAnchorId = useCallback(() => {
     const detail: { id: string | null } = { id: null };
     scroll.current?.dispatchEvent(
       new CustomEvent("studio-history-anchor-id", { detail }),
     );
     return detail.id;
-  };
+  }, []);
   return {
     scroll,
     content,

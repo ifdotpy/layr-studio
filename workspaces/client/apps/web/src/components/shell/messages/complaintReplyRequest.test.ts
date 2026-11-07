@@ -80,10 +80,8 @@ it("does not turn a successful response into a retry when detail reload fails", 
   const reads: string[] = [];
   const outcome = await submitComplaintResponse(
     request,
-    "session-token",
-    async (body, token) => {
+    async (body) => {
       assert.strictEqual(body, request);
-      assert.equal(token, "session-token");
       writes.push(body);
     },
     async (id) => {

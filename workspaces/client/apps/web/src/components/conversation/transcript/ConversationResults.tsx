@@ -1,3 +1,5 @@
+import { computed } from "mobx";
+import { observer } from "mobx-react-lite";
 import { PanelHeader } from "../../ui/primitives";
 import { Button, Modal } from "@mantine/core";
 import {
@@ -7,7 +9,7 @@ import {
   Image,
   Shapes,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Message } from "../../../types";
 import FilePreview from "../../FilePreview";
 import RichPreview from "../../RichPreview";
@@ -19,7 +21,7 @@ import {
 } from "../../conversation-results/conversationResultModel";
 import "./conversation-results.css";
 
-export default memo(function ConversationResults({
+export default observer(function ConversationResults({
   messages,
   agentId,
   onJump,
@@ -28,7 +30,10 @@ export default memo(function ConversationResults({
   agentId?: string | undefined;
   onJump?: (messageId: string) => void;
 }) {
-  const results = useMemo(() => conversationResults(messages), [messages]);
+  const results = useMemo(
+    () => computed(() => conversationResults(messages)),
+    [messages],
+  ).get();
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
   const [dialogMounted, setDialogMounted] = useState(false);

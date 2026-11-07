@@ -307,7 +307,7 @@ export function createOutbox(options: {
         {
           text: body.text,
           ...(body.asTextFile ? { asTextFile: true } : {}),
-          ...(body.assets ? { assets: body.assets } : {}),
+          ...(body.assets ? { assets: [...body.assets] } : {}),
           ...(body.delivery ? { delivery: body.delivery } : {}),
         },
         body.id,
@@ -317,7 +317,7 @@ export function createOutbox(options: {
         workspaceId,
         localState: { kind: "stored" },
         created: Date.now(),
-        attachments,
+        attachments: attachments.map((attachment) => ({ ...attachment })),
       };
       removed.delete(key(body.room, body.id));
       const persisted = write(value, true);

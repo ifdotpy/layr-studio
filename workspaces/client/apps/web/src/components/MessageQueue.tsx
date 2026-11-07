@@ -1,3 +1,5 @@
+import type { DeepReadonly } from "../deepReadonly";
+type QueueItemDto = DeepReadonly<ApiQueueItemDto>;
 import { useUnsentText } from "../unsent/useUnsentText";
 import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -12,7 +14,11 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { ApiError, errorText, type QueueItemDto } from "../api";
+import {
+  ApiError,
+  errorText,
+  type QueueItemDto as ApiQueueItemDto,
+} from "../api";
 import type { Message } from "../types";
 import "./message-queue.css";
 import { copyText } from "../clipboard/clipboard";
@@ -43,13 +49,13 @@ function isQueueAsset(value: unknown): value is QueueAsset {
   );
 }
 
-function displayQueueAssets(item: QueueItem): QueueAsset[] {
+function displayQueueAssets(item: QueueItem): readonly QueueAsset[] {
   const assets = item.assets ?? [];
   return isServerQueueItem(item) ? assets : assets.filter(isQueueAsset);
 }
 
 type Props = {
-  items: QueueItem[];
+  items: readonly QueueItem[];
   scope: string;
   onEdit: (item: QueueItemDto, text: string) => Promise<void>;
   onCancel: (item: QueueItemDto) => Promise<void>;

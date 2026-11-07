@@ -10,7 +10,7 @@ import type { ComponentHookCell } from "./componentTestFixtures";
 import { required } from "./componentTestFixtures";
 import type { EffectCallback, PropsWithChildren } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { createElement, isValidElement, type ComponentProps } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, Message, Snapshot } from "../types";
@@ -81,6 +81,17 @@ vi.mock("./ProjectDirectoryPicker", () => ({ default: "directory-picker" }));
 
 import { useTurnErrors } from "./useTurnErrors";
 import MessageInfo from "./conversation/transcript/MessageInfo";
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
+
+function messageInfo(props: ComponentProps<typeof MessageInfo>) {
+  const node = MessageInfo(props);
+  if (!isValidElement<{ onClick(): void; onChange(open: boolean): void }>(node))
+    throw new Error("Expected the message info trigger or popover");
+  return node;
+}
 import { ClaudeSettingsView as ClaudeSettings } from "./ClaudeSettings";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
 import ProjectLocationsSettings from "./ProjectLocationsSettings";
@@ -239,7 +250,7 @@ it("message info reads on open and reopen but not streamed turn metadata changes
     streaming: true,
   };
   const read = () =>
-    MessageInfo({
+    messageInfo({
       message,
       agentId: agent.id,
       stateDir: "fixture",
@@ -272,7 +283,7 @@ it("message info reads on open and reopen but not streamed turn metadata changes
 it("message info uses streamed cost and leaves missing cost unavailable", async () => {
   h.get.mockResolvedValue({});
   const read = () =>
-    MessageInfo({
+    messageInfo({
       message: { id: "item", role: "assistant", text: "answer" },
       agentId: agent.id,
       stateDir: "fixture",

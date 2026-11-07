@@ -1,3 +1,5 @@
+import { computed } from "mobx";
+import { createTurnErrorMirror } from "../generated/observableResources";
 import { useAgentDetail } from "./agents/state.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
@@ -6,12 +8,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import "../api";
 import type { Agent, JsonInput, Message } from "../types";
 import { failureMessage } from "./turnFailureReason";
-
-const cachedErrors = new Map<string, Record<string, DeepReadonly<JsonInput>>>();
-const inFlight = new Map<
-  string,
-  Promise<Record<string, DeepReadonly<JsonInput>>>
->();
 
 export function failedTurnsNeedingLookup(
   items: Pick<Message, "turnId" | "turnStatus">[],
@@ -36,6 +32,18 @@ export function failedTurnsNeedingLookup(
 export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
   const detail = useAgentDetail(agent);
   const { get } = useServerApi();
+  // Historical fallbacks belong to this mounted server owner, even when ids
+  // and workspace names collide with another authenticated server.
+  const { cachedErrors, inFlight } = useMemo(
+    () => ({
+      cachedErrors: new Map<string, Record<string, DeepReadonly<JsonInput>>>(),
+      inFlight: new Map<
+        string,
+        Promise<Record<string, DeepReadonly<JsonInput>>>
+      >(),
+    }),
+    [get],
+  );
 
   const scope = `${workspace}:${agent?.id}:${agent?.threadId}`;
   const [lookupAttempt, setLookupAttempt] = useState(0);
@@ -54,41 +62,47 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     [result, scope],
   );
   const cached = cachedErrors.get(scope);
-  const { errors, resolved, existing, turns } = useMemo(() => {
-    const errors = { ...cached, ...current.errors };
-    const resolved = new Set<string>();
-    for (const item of items) {
-      if (item.turnErrorResolved && item.turnId) resolved.add(item.turnId);
-      if (item.turnError && item.turnId) errors[item.turnId] = item.turnError;
-    }
-    const latest = detail?.nativeTurnError;
-    if (latest?.turnId && latest.error) errors[latest.turnId] = latest.error;
-    else if (
-      agent?.status === GeneratedApiAgentStatus.failed &&
-      !agent.turnId &&
-      agent.lastCompletedTurn &&
-      detail?.error
-    )
-      errors[agent.lastCompletedTurn] = detail?.error;
-    const existing = new Set(
-      items.flatMap((item) =>
-        item.nativeNotice === "error" && typeof item.turnId === "string"
-          ? [item.turnId]
-          : [],
-      ),
-    );
-    const turns = failedTurnsNeedingLookup(items, existing);
-    return { errors, resolved, existing, turns };
-  }, [
-    items,
-    cached,
-    current.errors,
-    detail?.nativeTurnError,
-    agent?.status,
-    agent?.turnId,
-    agent?.lastCompletedTurn,
-    detail?.error,
-  ]);
+  const { errors, resolved, existing, turns } = useMemo(
+    () =>
+      computed(() => {
+        const errors = { ...cached, ...current.errors };
+        const resolved = new Set<string>();
+        for (const item of items) {
+          if (item.turnErrorResolved && item.turnId) resolved.add(item.turnId);
+          if (item.turnError && item.turnId)
+            errors[item.turnId] = item.turnError;
+        }
+        const latest = detail?.nativeTurnError;
+        if (latest?.turnId && latest.error)
+          errors[latest.turnId] = latest.error;
+        else if (
+          agent?.status === GeneratedApiAgentStatus.failed &&
+          !agent.turnId &&
+          agent.lastCompletedTurn &&
+          detail?.error
+        )
+          errors[agent.lastCompletedTurn] = detail?.error;
+        const existing = new Set(
+          items.flatMap((item) =>
+            item.nativeNotice === "error" && typeof item.turnId === "string"
+              ? [item.turnId]
+              : [],
+          ),
+        );
+        const turns = failedTurnsNeedingLookup(items, existing);
+        return { errors, resolved, existing, turns };
+      }),
+    [
+      items,
+      cached,
+      current.errors,
+      detail?.nativeTurnError,
+      agent?.status,
+      agent?.turnId,
+      agent?.lastCompletedTurn,
+      detail?.error,
+    ],
+  ).get();
   const pending = turns
     .filter(
       (turn) =>
@@ -133,8 +147,10 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
             requested.includes(turn.turnId) &&
             ["failed", "uncertain"].includes(turn.status || "") &&
             turn.error
-          )
-            recovered[turn.turnId] = turn.error;
+          ) {
+            const error = createTurnErrorMirror(turn).current.error;
+            if (error) recovered[turn.turnId] = error;
+          }
         }
         const previous = cachedErrors.get(scope);
         cachedErrors.delete(scope);
@@ -182,46 +198,50 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       active = false;
     };
   }, [scope, lookupAttempt]);
-  const enriched = useMemo(() => {
-    const last = new Map<string, number>();
-    const unconfirmed = new Set(
-      items
-        .filter((item) => item.turnStatus === "uncertain")
-        .map((item) => item.turnId),
-    );
-    items.forEach((item, index) => {
-      if (item.turnId && typeof item.turnId === "string")
-        last.set(item.turnId, index);
-    });
-    if (!Object.keys(errors).length) return items;
-    return items.flatMap((item, index): Message[] => {
-      const turnId = item.turnId;
-      if (!turnId || typeof turnId !== "string") return [item];
-      const error = errors[turnId];
-      if (!error || existing.has(turnId) || last.get(turnId) !== index)
-        return [item];
-      if (unconfirmed.has(turnId))
-        return [
-          {
-            ...item,
-            turnStatus: "uncertain",
-            turnError: failureMessage(error),
-          },
-        ];
-      return [
-        item,
-        {
-          id: `turn-error:${agent?.id}:${agent?.threadId}:${turnId}`,
-          role: "system",
-          text: "",
-          turnId,
-          turnStatus: "failed",
-          nativeNotice: "error",
-          nativeError: error,
-        },
-      ];
-    });
-  }, [items, errors, existing, agent?.id, agent?.threadId]);
+  const enriched = useMemo(
+    () =>
+      computed(() => {
+        const last = new Map<string, number>();
+        const unconfirmed = new Set(
+          items
+            .filter((item) => item.turnStatus === "uncertain")
+            .map((item) => item.turnId),
+        );
+        items.forEach((item, index) => {
+          if (item.turnId && typeof item.turnId === "string")
+            last.set(item.turnId, index);
+        });
+        if (!Object.keys(errors).length) return items;
+        return items.flatMap((item, index): Message[] => {
+          const turnId = item.turnId;
+          if (!turnId || typeof turnId !== "string") return [item];
+          const error = errors[turnId];
+          if (!error || existing.has(turnId) || last.get(turnId) !== index)
+            return [item];
+          if (unconfirmed.has(turnId))
+            return [
+              {
+                ...item,
+                turnStatus: "uncertain",
+                turnError: failureMessage(error),
+              },
+            ];
+          return [
+            item,
+            {
+              id: `turn-error:${agent?.id}:${agent?.threadId}:${turnId}`,
+              role: "system",
+              text: "",
+              turnId,
+              turnStatus: "failed",
+              nativeNotice: "error",
+              nativeError: error,
+            },
+          ];
+        });
+      }),
+    [items, errors, existing, agent?.id, agent?.threadId],
+  ).get();
   const retry = useCallback(
     (turn: string) => {
       setResult((old) => ({

@@ -22,7 +22,6 @@ it("offers no retry after a fresh expired response", () => {
             state: { kind: "receipt_expired", error: "expired" },
           },
         },
-        edit: async () => {},
       }),
     ),
   );

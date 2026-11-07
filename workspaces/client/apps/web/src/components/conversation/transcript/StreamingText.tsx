@@ -1,21 +1,40 @@
+import { serviceTimeText } from "../../../local-time";
+import { observer } from "mobx-react-lite";
+import { useItemText } from "../../../conversation/liveText";
+import type { Message } from "../../../types";
+import { reportPromptComposerRender } from "../../prompt-composer/renderProbe";
 import NativeMarkdown from "../../../native/NativeMarkdown";
-import { memo, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import PreviewModal from "../../PreviewModal";
 import FilePreview, { type PreviewTarget } from "../../FilePreview";
 import { localFileLink } from "../../fileLinks";
 import { relativeToDocument } from "../../filePreviewFormats";
 
-export default memo(function StreamingText({
-  text,
+export default observer(function StreamingText({
+  text: fallback = "",
+  message,
   streaming = false,
   agentId,
   basePath,
 }: {
-  text: string;
+  text?: string;
+  message?: Message | undefined;
   streaming?: boolean;
   agentId?: string | undefined;
   basePath?: string | undefined;
 }) {
+  const rawText = useItemText(message, fallback);
+  const text = message
+    ? serviceTimeText(
+        rawText,
+        message.at
+          ? new Date(
+              typeof message.at === "number" ? message.at * 1000 : message.at,
+            )
+          : undefined,
+      )
+    : rawText;
+  reportPromptComposerRender("message-text", message?.id, text);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [linkError, setLinkError] = useState("");
   const [linkDialogMounted, setLinkDialogMounted] = useState(false);

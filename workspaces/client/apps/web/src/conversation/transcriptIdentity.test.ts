@@ -1,153 +1,49 @@
-import { required } from "../components/componentTestFixtures.ts";
-import type { Message, JsonValue } from "../types";
-type TranscriptFixture = Pick<Message, "id"> &
-  Partial<Record<keyof Message, unknown>>;
-import assert from "node:assert/strict";
-import { retainTranscriptItems } from "./transcriptIdentity.ts";
+import { expect, it } from "vitest";
+import { createTranscriptMirror } from "../generated/observableResources";
+import { createMessageViews } from "./messageView";
 
-import { it } from "vitest";
-
-it("retains identity for unchanged transcript items and replaces changed data", () => {
-  const previous = [
-    {
-      id: "user",
-      role: "user",
-      text: "Saved input",
-      inputs: [{ id: "request", pending: true }],
-      assets: [{ id: "image" }],
-    },
-    {
-      id: "answer",
-      role: "assistant",
-      text: "First answer",
-      streaming: true as Message["streaming"],
-      turnStatus: "running",
-    },
-    {
-      id: "tool",
-      role: "tool",
-      text: "{}",
-      nativeError: {
-        message: "Failed",
-        metadata: { retry: false } as JsonValue & { retry?: boolean },
+it("generated transcript references preserve native order, nested changes, omission and removal", () => {
+  const initial = {
+    items: [
+      {
+        id: "user",
+        role: "user",
+        text: "saved",
+        inputs: [
+          { id: "input", kind: "user", text: "saved", truncated: false },
+        ],
       },
-    },
-  ] satisfies [TranscriptFixture, TranscriptFixture, TranscriptFixture];
-  // This test reads the same transcript JSON it just serialized.
-  function roundTripTranscript(items: typeof previous): typeof previous {
-    return JSON.parse(JSON.stringify(items));
-  }
-  assert.equal(
-    retainTranscriptItems(previous, roundTripTranscript(previous)),
-    previous,
-  );
-  for (const mutate of [
-    (rows: typeof previous) => {
-      required(rows[0].inputs[0]).pending = false;
-    },
-    (rows: typeof previous) => {
-      required(rows[0].assets[0]).id = "new-image";
-    },
-    (rows: typeof previous) => {
-      rows[1].text = "New answer";
-    },
-    (rows: typeof previous) => {
-      rows[1].streaming = false;
-      rows[1].turnStatus = "completed";
-    },
-    (rows: typeof previous) => {
-      Reflect.deleteProperty(rows[1], "streaming");
-    },
-    (rows: typeof previous) => {
-      rows[2].nativeError.metadata.retry = true;
-    },
-    (rows: typeof previous) => {
-      rows[2].nativeError.metadata = [false];
-    },
-  ]) {
-    const incoming = structuredClone(previous);
-    mutate(incoming);
-    const retained = retainTranscriptItems(previous, incoming);
-    assert.deepEqual(retained, incoming);
-    assert.equal(
-      retained.filter((row, index) => row === previous[index]).length,
-      2,
-    );
-  }
-  const reordered = retainTranscriptItems(
-    previous,
-    structuredClone(previous).reverse(),
-  );
-  assert.equal(reordered[0], previous[2]);
-  assert.equal(reordered[2], previous[0]);
-  assert.deepEqual(retainTranscriptItems(previous, []), []);
-  const extended = [
-    ...structuredClone(previous),
-    { id: "new", role: "system", text: "New notice" },
-  ];
-  assert.deepEqual(retainTranscriptItems(previous, extended), extended);
-  assert.equal(retainTranscriptItems(previous, extended)[0], previous[0]);
-  console.log(
-    "PASS: full JSON snapshots retain unchanged rows; nested edits, removed fields, completion, reordering and deletion remain authoritative",
-  );
-});
-
-it("keeps changed JSON shapes and deeply nested projections authoritative", () => {
-  const row = (value: JsonValue) =>
-    [
-      { id: "message", role: "assistant", value },
-    ] satisfies (TranscriptFixture & { value: JsonValue })[];
-  const changed: [JsonValue, JsonValue][] = [
-    [null, {}],
-    [{}, null],
-    [false, {}],
-    [42, {}],
-    [{}, 42],
-    [[], {}],
-    [{}, []],
-    [["first"], ["second"]],
-    [{ key: "same" }, {}],
-    [{}, { added: "new projection field" }],
-    [{ first: "same" }, { other: "same" }],
-  ];
-
-  for (const [priorValue, incomingValue] of changed) {
-    const previous = row(priorValue);
-    const incoming = row(incomingValue);
-    const retained = retainTranscriptItems(previous, incoming);
-    assert.equal(retained[0], incoming[0]);
-    assert.notEqual(retained[0], previous[0]);
-    assert.deepEqual(retained, incoming);
-  }
-
-  // A JSON-like record may have inherited properties. Matching an inherited
-  // key must not hide the changed own keys in an incoming projection.
-  const previousWithOwnKey = row({ key: "same" });
-  const incomingWithInheritedKey = row(
-    Object.assign(Object.create({ key: "same" }), { other: "same" }),
-  );
-  const inheritedResult = retainTranscriptItems(
-    previousWithOwnKey,
-    incomingWithInheritedKey,
-  );
-  assert.equal(inheritedResult[0], incomingWithInheritedKey[0]);
-
-  const nest = (value: JsonValue, levels: number) => {
-    for (let level = 0; level < levels; level++) value = { child: value };
-    return value;
+      { id: "answer", role: "assistant", text: "first", streaming: true },
+    ],
+    truncated: false,
   };
-  const unchangedAtLimit = row(nest({ leaf: "same" }, 31));
-  assert.equal(
-    retainTranscriptItems(unchangedAtLimit, structuredClone(unchangedAtLimit)),
-    unchangedAtLimit,
-  );
-
-  const deeperPrevious = row(nest({ leaf: "same" }, 34));
-  const deeperIncoming = structuredClone(deeperPrevious);
-  const deeperResult = retainTranscriptItems(deeperPrevious, deeperIncoming);
-  assert.equal(deeperResult[0], deeperIncoming[0]);
-  assert.notEqual(deeperResult[0], deeperPrevious[0]);
-  console.log(
-    "PASS: changed shapes and keys stay authoritative; reference retention respects the JSON comparison depth limit",
-  );
+  const mirror = createTranscriptMirror(initial);
+  const views = createMessageViews("agent");
+  const before = views(mirror.current.items);
+  mirror.apply(structuredClone(initial));
+  expect(views(mirror.current.items)[0]).toBe(before[0]);
+  const answer = mirror.current.items[1]!;
+  mirror.apply({
+    items: [
+      { id: "answer", role: "assistant", text: "finished" },
+      {
+        id: "user",
+        role: "user",
+        text: "saved",
+        inputs: [
+          { id: "input", kind: "user", text: "changed", truncated: false },
+        ],
+      },
+    ],
+    truncated: false,
+  });
+  const next = views(mirror.current.items);
+  expect(next.map((item) => item.id)).toEqual(["answer", "agent:input"]);
+  expect(next[0]).toBe(before[1]);
+  expect(next[1]).toBe(before[0]);
+  expect(next[1]?.text).toBe("changed");
+  expect(answer.streaming).toBeUndefined();
+  expect(answer.text).toBe("finished");
+  mirror.apply({ items: [], truncated: false });
+  expect(views(mirror.current.items)).toEqual([]);
 });

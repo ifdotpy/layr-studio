@@ -10,7 +10,6 @@ export default function OutboxControls({
   onResolved,
 }: {
   entry?: OutgoingMessage | undefined;
-  edit: (entry: OutgoingMessage) => Promise<void>;
   onResolved?: (id: string) => void;
 }) {
   const { changeOutbox } = useServerOutbox();

@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture";
 import type { ComponentProps } from "react";
 import type { Attachment } from "../../src/components/ComposerAttachments";
 import type { Message } from "../../src/types";
@@ -16,7 +17,14 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText";
 import Activity from "../../src/components/conversation/transcript/Activity";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory";
+import History from "../../src/components/conversation/transcript/TurnHistory.fixture";
+function TurnHistory(props: ComponentProps<typeof History>) {
+  return (
+    <AgentModelsFixture agents={props.agent ? [props.agent] : []}>
+      <History {...props} />
+    </AgentModelsFixture>
+  );
+}
 import ComposerAttachments, {
   MessageAttachments,
 } from "../../src/components/ComposerAttachments";

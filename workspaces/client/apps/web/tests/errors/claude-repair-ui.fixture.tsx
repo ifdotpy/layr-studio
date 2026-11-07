@@ -1,10 +1,19 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture";
+import type { ComponentProps } from "react";
 import type { Agent, Message } from "../../src/types.ts";
 
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.tsx";
+import History from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
+function TurnHistory(props: ComponentProps<typeof History>) {
+  return (
+    <AgentModelsFixture agents={props.agent ? [props.agent] : []}>
+      <History {...props} />
+    </AgentModelsFixture>
+  );
+}
 import ClaudeRepairNotice from "../../src/components/ClaudeRepairNotice.tsx";
 import { NativeNotice } from "../../src/components/NativeNotice.tsx";
 const agent: Agent = {

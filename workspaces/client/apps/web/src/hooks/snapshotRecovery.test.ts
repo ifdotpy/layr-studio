@@ -19,7 +19,8 @@ const h = vi.hoisted(() => ({
         detail?: ResourceConnectionDetail,
       ) => void),
 }));
-vi.mock("react", () => ({
+vi.mock("react", async (original) => ({
+  ...(await original<typeof import("react")>()),
   useEffect: (fn: () => void | (() => void)) => h.effects.push(fn),
   useLayoutEffect: vi.fn(),
   useRef: (current: unknown) => ({ current }),

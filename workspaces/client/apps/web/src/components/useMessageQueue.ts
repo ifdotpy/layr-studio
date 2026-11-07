@@ -2,6 +2,8 @@ import { randomUUID } from "../uuid";
 import { outboxRequests } from "../browserPersistence";
 import {
   useServerApi,
+  useServerResources,
+  useServerStore,
   useServerStorage,
   useServerLocalDrafts,
   useServerStorageEventKey,
@@ -12,7 +14,8 @@ import type { QueueItemDto, QueueView } from "../api";
 import { onResume } from "../sync/resume";
 import type { paths } from "../generated/api";
 import { queueMutationMessageId } from "./queueMutationIdentity";
-import { useServerSync } from "../servers/ServerServicesContext";
+import { resourceData } from "../store/runtime";
+import type { DeepReadonly } from "../deepReadonly";
 import { usePendingCommands } from "../usePendingCommands";
 
 type QueueMutation =
@@ -84,8 +87,9 @@ export function useMessageQueue(p: {
   edited?: ((id: string, text: string) => void) | undefined;
   refresh: () => Promise<void>;
 }) {
-  const { subscribeStateProjection } = useServerSync();
-  const { get, syncPost, command } = useServerApi();
+  const store = useServerStore();
+  const resources = useServerResources();
+  const { syncPost, command } = useServerApi();
   const pendingCommands = usePendingCommands();
   const storage = useServerStorage();
   const { updateQueueRequest } = useServerLocalDrafts();
@@ -99,14 +103,6 @@ export function useMessageQueue(p: {
   const key = outboxRequests(storage).key("queueChange", suffix);
   const currentKey = useRef(key);
   currentKey.current = key;
-  const [state, setState] = useState<{
-    key: string;
-    view: QueueView;
-    loaded?: boolean;
-  }>({
-    key,
-    view: emptyQueue,
-  });
   const [failure, setFailure] = useState({ key, text: "" });
   const [pendingState, setPending] = useState<{
     key: string;
@@ -118,57 +114,23 @@ export function useMessageQueue(p: {
   const [busyKey, setBusy] = useState<string | null>(null);
   const locks = useRef(new Set<string>());
   const serial = useRef(0);
-  const view = state.key === key ? state.view : emptyQueue;
+  const current = p.enabled && p.id ? store.state().current : undefined;
+  const view =
+    (current && resourceData(current)?.queues.get(p.id!)) || emptyQueue;
   const pending =
     pendingState.key === key ? pendingState.request : readQueueRequest(suffix);
 
   const reload = useCallback(async () => {
     if (!p.enabled || !p.id) return;
-    const attempt = ++serial.current;
-    const result = await get("/api/queue", {
-      query: { agent: p.id },
-      workspaceId: p.workspaceId,
-    });
-    if (currentKey.current === key && attempt === serial.current) {
-      setState((previous) =>
-        previous.key === key &&
-        result.revision &&
-        previous.view.revision === result.revision
-          ? previous
-          : { key, view: result, loaded: true },
-      );
-      setFailure({ key, text: "" });
-    }
-  }, [key, p.enabled, p.id, p.workspaceId]);
+    // Queue revisions are opaque; only the state stream can order queue facts.
+    // Reopen this server's existing stream instead of applying an unordered GET.
+    resources.replaceStream();
+  }, [resources, p.enabled, p.id]);
 
   useEffect(() => {
     serial.current++;
     setPending({ key, request: readQueueRequest(suffix) });
-    if (!p.enabled || !p.id) return;
-    return subscribeStateProjection(
-      (snapshot) => {
-        const value = snapshot?.runtime.queuesByAgent?.[p.id!];
-        if (value) {
-          setState((previous) =>
-            previous.key === key && previous.view.revision === value.revision
-              ? previous
-              : { key, view: value, loaded: true },
-          );
-          setFailure({ key, text: "" });
-        }
-      },
-      (error) => {
-        if (error) setFailure({ key, text: errorText(error) });
-      },
-    );
-  }, [
-    key,
-    suffix,
-    p.enabled,
-    p.id,
-    subscribeStateProjection,
-    readQueueRequest,
-  ]);
+  }, [key, suffix, readQueueRequest]);
 
   const clearRequest = async (request: QueueMutation) => {
     const next = await updateQueueRequest<unknown>(suffix, null, (current) =>
@@ -279,7 +241,8 @@ export function useMessageQueue(p: {
     items: withdrawn.size
       ? view.items.filter((item) => !withdrawn.has(item.id))
       : view.items,
-    loading: state.key !== key || !state.loaded,
+    loading:
+      !current || (current.status !== "live" && current.status !== "stale"),
     error: failure.key === key ? failure.text : "",
     canReorder: !!view.capabilities?.reorder,
     busy: busyKey === key,
@@ -294,7 +257,7 @@ export function useMessageQueue(p: {
         await execute(request);
       }
     },
-    edit: async (item: QueueItemDto, text: string) => {
+    edit: async (item: DeepReadonly<QueueItemDto>, text: string) => {
       const current = view.items.find((row) => row.id === item.id);
       await mutate({
         action: "edit",
@@ -306,7 +269,7 @@ export function useMessageQueue(p: {
     // Withdraw is a command: the server deletes the queued message (see runtime-schema
     // command.rs). A second click after a lost answer makes a new command, and the server
     // answers that the message already left the queue.
-    cancel: async (item: QueueItemDto) => {
+    cancel: async (item: DeepReadonly<QueueItemDto>) => {
       if (!p.id) throw new Error("The queue belongs to another chat.");
       if (locks.current.has(key))
         throw new Error("Wait for the current queue change.");
@@ -330,7 +293,7 @@ export function useMessageQueue(p: {
         setBusy((value) => (value === key ? null : value));
       }
     },
-    sendNow: (item: QueueItemDto) =>
+    sendNow: (item: DeepReadonly<QueueItemDto>) =>
       mutate({ action: "send_now", id: item.id, expectedText: item.text }),
     reorder: (ids: string[]) => mutate({ action: "reorder", ordered_ids: ids }),
   };

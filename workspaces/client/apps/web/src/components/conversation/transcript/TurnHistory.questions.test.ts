@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { expect, test, vi } from "vitest";
 import type { Agent, Message } from "../../../types";
-import TurnHistory from "./TurnHistory";
+import TurnHistory from "./TurnHistory.fixture";
 import {
   questionCard,
   questionHistoryIndex,

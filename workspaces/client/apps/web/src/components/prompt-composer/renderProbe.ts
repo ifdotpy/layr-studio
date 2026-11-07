@@ -9,7 +9,10 @@ export type PromptComposerRenderProbe = (
     | "turn-history"
     | "history-window-row"
     | "history-row"
-    | "message",
+    | "message"
+    | "message-text"
+    | "message-view"
+    | "history-groups",
   id?: string,
   text?: string,
 ) => void;

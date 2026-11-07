@@ -1,3 +1,4 @@
+import { ServerViewStoreProvider } from "../servers/ServerServicesContext";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useMessages } from "../hooks";
@@ -64,4 +65,10 @@ function History() {
   );
 }
 window.historyRoot = createRoot(document.querySelector("main")!);
-window.historyRoot.render(React.createElement(History));
+window.historyRoot.render(
+  React.createElement(
+    ServerViewStoreProvider,
+    null,
+    React.createElement(History),
+  ),
+);

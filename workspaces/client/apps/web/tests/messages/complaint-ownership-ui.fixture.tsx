@@ -1,34 +1,32 @@
-import type { Complaint, Snapshot } from "../../src/types.ts";
+import type { Complaint } from "../../src/types.ts";
 
 import React from "react";
+import { messageModels } from "./message-models.fixture";
+import { conversationActionsFixture } from "../../src/components/observableFixture";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import UserMessages from "../../src/components/shell/messages/UserMessages.tsx";
+const models = messageModels("ownership-contract", [
+  { id: "lead", name: "Release lead" },
+  { id: "worker", name: "Worker" },
+]);
 const root = createRoot(document.getElementById("root")!);
 let records: Complaint[] = [],
   target: "user" | "lead" = "user";
 const render = () => {
-  // This one-off fixture omits chats/edges and runtime collections unrelated to complaint ownership.
-  const data = {
-    stateDir: "ownership-contract",
-    token: "fixture",
-    threads: [
-      { id: "lead", name: "Release lead" },
-      { id: "worker", name: "Worker" },
-    ],
-    runtime: { complaints: records },
-  } as Snapshot;
+  models.apply(
+    records.map((value) => ({ collection: "complaint", id: value.id, value })),
+  );
   return root.render(
     React.createElement(
       MantineProvider,
       null,
-      React.createElement(UserMessages, {
-        data,
-        target,
-        refresh: async () => {},
-        notify: () => {},
-      }),
+      React.createElement(
+        models.Provider,
+        { commands: conversationActionsFixture() },
+        React.createElement(UserMessages, { target }),
+      ),
     ),
   );
 };

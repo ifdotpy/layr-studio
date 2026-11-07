@@ -8,6 +8,7 @@ import { isMessagePending } from "../messageSendStatus.ts";
 export function isEmptyAssistantMessage(item: Message): boolean {
   return (
     item.role === "assistant" &&
+    !item.streaming &&
     !item.text.trim() &&
     !item.assets?.length &&
     !item.nativeNotice &&

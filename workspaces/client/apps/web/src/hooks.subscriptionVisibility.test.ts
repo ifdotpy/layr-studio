@@ -1,226 +1,148 @@
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { observer } from "mobx-react-lite";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createSubscriptions } from "./sync/subscriptions/module";
+import { createServerStore } from "./store/index";
+import { ServerStoreProvider } from "./servers/ServerServicesContext";
+import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "./generated/sharedValues";
+import { useTranscriptHistory } from "./conversation/historySession";
+import { DEFAULT_SUBSCRIPTION_GRACE_MS } from "./sync/subscriptions/contracts";
+import type { ResourceVersion } from "./sync/resourceEvents";
 import type {
-  ConnectionActivity,
   ConnectionHealth,
+  ConnectionActivity,
 } from "./sync/connectionState";
-import { afterEach, expect, it, vi } from "vitest";
-import type { SubscriptionState } from "./sync/subscriptions/contracts";
-import type { TranscriptPageData } from "./types";
 import type { ResourceConnectionDetail } from "./sync/resourceConnection";
+import type { ResourceLiveDeltaEvent } from "./generated/observableResources";
+
 const h = vi.hoisted(() => ({
-  effects: [] as (() => void | (() => void))[],
-  writes: [] as unknown[],
+  get: vi.fn(),
   connection: undefined as
     | undefined
     | ((
-        status: ConnectionHealth,
-        stream?: ConnectionActivity,
+        health: ConnectionHealth,
+        activity?: ConnectionActivity,
         detail?: ResourceConnectionDetail,
       ) => void),
-  get: vi.fn(),
+  delta: undefined as undefined | ((event: ResourceLiveDeltaEvent) => void),
 }));
-const subscription = vi.hoisted(() =>
-  vi.fn((): SubscriptionState<TranscriptPageData> => ({
-    data: undefined,
-    status: "stale",
-    error: null,
-  })),
-);
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useEffect: (effect: () => void | (() => void)) => h.effects.push(effect),
-  useLayoutEffect: () => {},
-  useRef: (current: unknown) => ({ current }),
-  useState: (initial: unknown) => {
-    let value = typeof initial === "function" ? initial() : initial;
-    return [
-      value,
-      (next: unknown) => {
-        value = typeof next === "function" ? next(value) : next;
-        h.writes.push(value);
-      },
-    ];
+vi.mock("./servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("./servers/ServerServicesContext")>()),
+  useServerApi: () => api,
+  useServerResources: () => resources,
+}));
+const api = { syncGet: h.get };
+const resources = {
+  watchLiveDeltas: (accept: NonNullable<typeof h.delta>) => {
+    h.delta = accept;
+    return () => {
+      h.delta = undefined;
+    };
   },
-  useMemo: (factory: () => unknown) => factory(),
-  useCallback: (callback: unknown) => callback,
-}));
-vi.mock("./sync/subscriptions", () => ({ useSubscription: subscription }));
-vi.mock("./sync/client", () => ({}));
-vi.mock("./sync/transcriptCache", () => ({}));
-vi.mock("./servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ syncGet: h.get }),
-  useServerSync: () => ({}),
-  useServerResources: () => ({
-    watchResourceChanges: vi.fn(),
-    watchResourceConnection: (accept: typeof h.connection) => {
-      h.connection = accept;
-      return () => {
-        h.connection = undefined;
-      };
-    },
-  }),
-  useServerTranscripts: () => ({ peekTranscript: () => undefined }),
-}));
-import { useMessages } from "./hooks";
-let stops: (() => void)[] = [];
+  watchResourceConnection: (accept: NonNullable<typeof h.connection>) => {
+    h.connection = accept;
+    return () => {
+      h.connection = undefined;
+    };
+  },
+};
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+});
 afterEach(() => {
-  stops.forEach((stop) => stop());
-  stops = [];
-  h.effects.length = 0;
-  h.writes.length = 0;
-  h.connection = undefined;
-  subscription.mockReturnValue({
-    data: undefined,
-    status: "stale",
-    error: null,
-  });
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
+  document.body.replaceChildren();
 });
-function runEffects() {
-  stops = h.effects.flatMap((effect) => {
-    const stop = effect();
-    return stop ? [stop] : [];
+
+it("the real history hook opens only visible interest and releases it with its store alive", async () => {
+  const removed = vi.fn();
+  let accept: (version?: ResourceVersion) => void = () => {};
+  const added = vi.fn((_ref, callback) => {
+    accept = callback;
+    return removed;
   });
-}
-
-it("keeps a mounted hidden conversation out of subscription interest", () => {
-  useMessages("hidden-chat", "agent", true, "workspace", "workspace", false);
-  expect(subscription).toHaveBeenLastCalledWith(null);
-});
-it("subscribes the visible managed conversation", () => {
-  useMessages("visible-chat", "agent", true, "workspace", "workspace");
-  expect(subscription).toHaveBeenCalledWith(
-    expect.objectContaining({ kind: "transcript", agentId: "visible-chat" }),
-  );
-});
-
-it.each([
-  { visible: false, status: "stale" },
-  { visible: true, status: "loading" },
-  { visible: true, status: "stale" },
-  { visible: true, status: "error" },
-] as const)(
-  "does not call $status transcript data a lost connection (visible=$visible)",
-  ({ visible, status }) => {
-    subscription.mockReturnValue({
-      data: undefined,
-      status,
-      error: status === "error" ? new Error("Projection unavailable") : null,
-    });
-    useMessages("chat", "agent", true, "workspace", "workspace", visible);
-    runEffects();
-    expect(h.writes).not.toContainEqual(
-      expect.objectContaining({
-        message: expect.stringContaining("Reconnecting"),
-      }),
+  const subscriptions = createSubscriptions({
+    watchResourceChanges: added,
+    watchResourceConnection: (callback) => {
+      callback("live", "open", {});
+      return () => {};
+    },
+  });
+  const store = createServerStore(subscriptions);
+  let session: ReturnType<typeof useTranscriptHistory> | undefined;
+  const View = observer(function View({ visible }: { visible: boolean }) {
+    session = useTranscriptHistory("chat", true, "scope", "workspace", visible);
+    return createElement(
+      "output",
+      null,
+      session.connection?.message || "",
+      session.items.length,
     );
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = async (visible: boolean) =>
+    act(async () => {
+      root.render(
+        createElement(
+          ServerStoreProvider,
+          { value: store },
+          createElement(View, { visible }),
+        ),
+      );
+    });
+  try {
+    await render(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(added).not.toHaveBeenCalled();
+    await render(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(added).toHaveBeenCalledOnce();
+    await act(async () => {
+      accept({ epoch: "fixture", revision: 1 });
+      subscriptions.publish(
+        {
+          kind: "transcript",
+          agentId: "chat",
+          tail: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
+        },
+        {
+          items: [{ id: "one", role: "assistant", text: "hello" }],
+          truncated: false,
+        },
+      );
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(session?.loaded).toBe(true);
+    expect(session?.items[0]?.text).toBe("hello");
+    await act(async () => {
+      h.connection?.("degraded", "connecting");
+    });
+    expect(host.textContent).toContain("Reconnecting");
+    await act(async () => {
+      h.connection?.("live", "open", {});
+    });
+    expect(session?.connection?.message).toBe("");
     expect(h.get).not.toHaveBeenCalled();
-  },
-);
-
-it("tracks actual transport activity independently of transcript freshness", () => {
-  useMessages("chat", "agent", true, "workspace", "workspace");
-  runEffects();
-  expect(h.connection).toBeTypeOf("function");
-  h.connection?.("connecting", "connecting");
-  expect(h.writes).not.toContainEqual(
-    expect.objectContaining({
-      message: expect.stringContaining("Reconnecting"),
-    }),
-  );
-  h.connection?.("live", "open");
-  expect(h.writes.at(-1)).toMatchObject({ health: "live", message: "" });
-  h.connection?.("degraded", "open");
-  expect(h.writes.at(-1)).toMatchObject({
-    message: "Reason unknown. Waiting for server updates…",
-  });
-  h.connection?.("degraded", "connecting");
-  expect(h.writes.at(-1)).toMatchObject({
-    message: "Reason unknown. Reconnecting…",
-  });
-  h.connection?.("live", "open");
-  expect(h.writes.at(-1)).toMatchObject({ health: "live", message: "" });
-  h.connection?.("offline", "stopped");
-  expect(h.writes.at(-1)).toMatchObject({
-    message: "Reason unknown. Connection interrupted.",
-  });
-  h.connection?.("live", "open");
-  expect(h.writes.at(-1)).toMatchObject({ health: "live", message: "" });
-  const updates = h.writes.length;
-  h.connection?.("live", "open");
-  h.connection?.("live", "open");
-  expect(h.writes).toHaveLength(updates);
-  expect(h.get).not.toHaveBeenCalled();
-});
-
-it.each([
-  ["degraded", "preparing", "Preparing connection…"],
-  ["degraded", "waiting-owner", "Waiting for the shared connection…"],
-  ["degraded", "retry-scheduled", "Reason unknown. Retry scheduled."],
-  ["degraded", "connecting", "Reason unknown. Reconnecting…"],
-  ["connecting", "connecting", "Connecting…"],
-  ["connecting", "open", "Waiting for server updates…"],
-  ["offline", "offline", "No network."],
-  ["live", "offline", "No network."],
-  ["degraded", "stopped", "Reason unknown. Connection interrupted."],
-  ["degraded", undefined, "Reason unknown. Connection interrupted."],
-  ["offline", undefined, "Reason unknown. Connection interrupted."],
-  ["degraded", "paused", ""],
-  ["paused", "stopped", ""],
-  ["live", "waiting-owner", ""],
-  ["schema-mismatch", "stopped", ""],
-] as const)(
-  "selects %s health with %s activity through useMessages",
-  (health, activity, message) => {
-    useMessages("chat", "agent", true, "workspace", "workspace");
-    runEffects();
-    h.connection?.(health, activity);
-    expect(h.writes.at(-1)).toMatchObject({ health, activity, message });
-    if (activity !== "connecting")
-      expect(h.writes.at(-1)).not.toMatchObject({
-        message: expect.stringContaining("Reconnecting"),
-      });
-    expect(h.get).not.toHaveBeenCalled();
-  },
-);
-
-it("updates the actual retry deadline and known cause without changing health", () => {
-  useMessages("chat", "agent", true, "workspace", "workspace");
-  runEffects();
-  h.connection?.("degraded", "retry-scheduled", {
-    failure: "heartbeat-timeout",
-    retryAt: 1_792_965_000_000,
-  });
-  expect(h.writes.at(-1)).toMatchObject({
-    health: "degraded",
-    activity: "retry-scheduled",
-    message: expect.stringContaining(
-      "Server updates timed out. Retry scheduled for ",
-    ),
-  });
-  const first = h.writes.at(-1);
-  h.connection?.("degraded", "retry-scheduled", {
-    failure: "heartbeat-timeout",
-    retryAt: 1_792_965_010_000,
-  });
-  expect(h.writes.at(-1)).not.toEqual(first);
-  h.connection?.("live", "open", {});
-  expect(h.writes.at(-1)).toMatchObject({ health: "live", message: "" });
-  expect(h.get).not.toHaveBeenCalled();
-});
-
-it("keeps an intentionally paused stream separate from a lost connection", () => {
-  useMessages("chat", "agent", true, "workspace", "workspace");
-  runEffects();
-  h.connection?.("live");
-  h.connection?.("paused");
-  expect(h.writes.at(-1)).toMatchObject({ health: "paused", message: "" });
-  expect(h.writes).not.toContainEqual(
-    expect.objectContaining({
-      message: expect.stringContaining("Reconnecting"),
-    }),
-  );
-  h.connection?.("connecting");
-  h.connection?.("live");
-  expect(h.writes.at(-1)).toMatchObject({ health: "live", message: "" });
-  expect(h.get).not.toHaveBeenCalled();
+    await render(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DEFAULT_SUBSCRIPTION_GRACE_MS + 1);
+    });
+    expect(removed).toHaveBeenCalled();
+    expect(h.delta).toBeUndefined();
+  } finally {
+    await act(async () => root.unmount());
+    store.dispose();
+    subscriptions.dispose();
+  }
 });

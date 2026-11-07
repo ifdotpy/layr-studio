@@ -18,7 +18,9 @@ import { snapshotFixture } from "../../src/snapshotFixture.ts";
 import type { Room, Snapshot, PeerTeam } from "../../src/types.ts";
 import { radioRoom } from "./radio-fixture.ts";
 
-import React, { useCallback, useRef, useState } from "react";
+import { messageModels } from "../messages/message-models.fixture";
+import { conversationActionsFixture } from "../../src/components/observableFixture";
+import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -77,9 +79,17 @@ window.radio = () => {
 };
 window.setRoom = () => {};
 window.radioOpened = null;
+const models = messageModels(initial.stateDir, initial.threads);
 function Fixture() {
-  const [data] = useState<Snapshot>(initial);
   const [value, setRoom] = useState(room);
+  useLayoutEffect(
+    () =>
+      models.apply([
+        { collection: "room", id: value.id, value },
+        { collection: "peerTeam", id: team.id, value: team },
+      ]),
+    [value],
+  );
   const drafts = useRef<Record<string, string>>({});
   const listeners = useRef(new Map<string, Set<() => void>>());
   const getDraft = useCallback(
@@ -153,15 +163,18 @@ function Fixture() {
             <></>
           </PeerTeamGroup>
         </PeerTeamActionsProvider>
-        <RadioChat
-          room={value}
-          data={data}
-          getDraft={getDraft}
-          subscribeDraft={subscribeDraft}
-          setDraft={setDraft}
-          refresh={refresh}
-          notify={(error) => (window.notifications ??= []).push(error)}
-        />
+        <models.Provider
+          commands={{
+            ...conversationActionsFixture(),
+            getDraft,
+            subscribeDraft,
+            setDraft,
+            refresh,
+            notify: (error) => (window.notifications ??= []).push(error),
+          }}
+        >
+          <RadioChat roomId={value.id} />
+        </models.Provider>
       </div>
     </MantineProvider>
   );

@@ -4,7 +4,7 @@ import React, { useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync, createPortal } from "react-dom";
 import { MantineProvider } from "@mantine/core";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.tsx";
+import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
 import PromptComposer from "../../src/components/prompt-composer/PromptComposer.tsx";
 import { useConversationScroll } from "../../src/components/useConversationScroll.ts";

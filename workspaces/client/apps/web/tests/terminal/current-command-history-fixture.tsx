@@ -1,3 +1,5 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture";
+import type { ComponentProps } from "react";
 import type { Message } from "../../src/types.ts";
 export type HistorySnapshot = {
   label: string;
@@ -16,7 +18,14 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.tsx";
+import History from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
+function TurnHistory(props: ComponentProps<typeof History>) {
+  return (
+    <AgentModelsFixture agents={props.agent ? [props.agent] : []}>
+      <History {...props} />
+    </AgentModelsFixture>
+  );
+}
 function Fixture() {
   const [snapshot, setSnapshot] = useState<HistorySnapshot | null>(null);
   window.applyHistorySnapshot = setSnapshot;

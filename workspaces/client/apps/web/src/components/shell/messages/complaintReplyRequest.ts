@@ -65,14 +65,10 @@ export function complaintResponseStore(storage: Storage, stateDir: string) {
 
 export async function submitComplaintResponse(
   payload: UserComplaintResponse,
-  sessionToken: string,
-  postResponse: (
-    request: UserComplaintResponse,
-    token: string,
-  ) => Promise<unknown>,
+  postResponse: (request: UserComplaintResponse) => Promise<unknown>,
   readDetail: (id: string) => Promise<ComplaintDetail>,
 ): Promise<{ detail: ComplaintDetail } | { reloadError: unknown }> {
-  await postResponse(payload, sessionToken);
+  await postResponse(payload);
   try {
     return { detail: await readDetail(payload.complaint_id) };
   } catch (reloadError) {

@@ -10,6 +10,8 @@ import { requestFixture } from "./requestFixtures";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import { approval, question } from "../../approvalFixtures";
 import Conversation from "../Conversation";
+import { ConversationProvider } from "../conversation/navigation.ts";
+import { conversationActionsFixture } from "../observableFixture.tsx";
 import { requestTestEnvironment } from "./requestTestFixture";
 
 const h = vi.hoisted(() => ({
@@ -36,8 +38,8 @@ vi.mock("../agents/state.ts", async (original) => ({
   ...(await original<typeof import("../agents/state.ts")>()),
   useWorkspace: () => ({ stateDir: "questions" }),
 }));
-vi.mock("../../hooks", () => ({
-  useMessages: () => ({
+vi.mock("../../conversation/historySession", () => ({
+  useConversationHistory: () => ({
     items: h.items,
     loaded: true,
     before: null,
@@ -154,35 +156,17 @@ it.each(["add", "remove"] as const)(
             createElement(
               ServerStoreProvider,
               { value: f.store },
-              createElement(Conversation, {
-                id: "lead",
-                agent,
-                detail: { id: "lead", canSend: true },
-                getDraft: () => "",
-                subscribeDraft: () => () => {},
-                setDraft() {},
-                send: async () => {},
-                sending: false,
-                refresh: async () => {},
-                notify() {},
-                limits: null,
-                reloadLimits() {},
-                accountsState: {
-                  data: {
-                    accounts: [],
-                    archivedAccounts: [],
-                    defaultAccountKey: "default",
-                    defaultAccountGroups: [],
-                    logins: [],
-                    supportsDelete: true,
-                    supportsDisconnect: true,
-                  },
-                  error: "",
-                  setData() {},
-                  refresh: async () => null,
-                  scope: "questions",
-                },
-              }),
+              createElement(
+                ConversationProvider,
+                { value: conversationActionsFixture() },
+                createElement(Conversation, {
+                  id: "lead",
+                  agent,
+                  detail: { id: "lead", canSend: true },
+                  sending: false,
+                  limits: null,
+                }),
+              ),
             ),
           ),
         ),

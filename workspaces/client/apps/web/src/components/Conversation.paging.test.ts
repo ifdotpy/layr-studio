@@ -1,3 +1,9 @@
+import { useConversationActions } from "./conversation/navigation.ts";
+import { conversationActionsFixture } from "./observableFixture.tsx";
+vi.mock("./conversation/navigation.ts", async (original) => ({
+  ...(await original<typeof import("./conversation/navigation.ts")>()),
+  useConversationActions: vi.fn(),
+}));
 vi.mock("./questions/requestView", () => ({
   useRequestsView: () => ({ requests: [] }),
 }));
@@ -80,8 +86,8 @@ vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
   useMediaQuery: () => false,
 }));
-vi.mock("../hooks", () => ({
-  useMessages: () => ({
+vi.mock("../conversation/historySession", () => ({
+  useConversationHistory: () => ({
     items: [],
     loaded: true,
     before: "older",
@@ -135,7 +141,6 @@ import { ConversationView as Conversation } from "./Conversation";
 type Props = ComponentProps<typeof Conversation>;
 const propsFixture: Partial<Props> = {
   id: "lead",
-  getDraft: () => "",
 };
 function elements(node: ReactNode): ReactElement<{
   children?: ReactNode;
@@ -155,6 +160,9 @@ function elements(node: ReactNode): ReactElement<{
 }
 function renderConversation(props: Props) {
   h.refIndex = 0;
+  vi.mocked(useConversationActions).mockReturnValue(
+    conversationActionsFixture(),
+  );
   return Conversation(props);
 }
 afterEach(() => {

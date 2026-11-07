@@ -7,7 +7,10 @@ vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useAgentDetail: () => undefined,
 }));
-import { ProviderKind as GeneratedApiProviderKind } from "../generated/api.ts";
+import {
+  MessageSendStatus,
+  ProviderKind as GeneratedApiProviderKind,
+} from "../generated/api.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, Snapshot } from "../types";
 
@@ -195,9 +198,52 @@ vi.mock("../sync/client", async (importOriginal) => ({
   },
 }));
 
-function receiveReceipts(receipts: unknown[]) {
-  for (const accept of projectionListeners)
-    accept({ runtime: { messageReceipts: receipts } });
+import {
+  createStateMirror,
+  type MessageReceiptEntityDto,
+} from "../generated/observableResources";
+const nativeState = createStateMirror();
+const reconnect = vi.fn();
+const nativeStore = {
+  state: () => ({ current: { status: "live", data: nativeState.current } }),
+};
+vi.mock("../servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("../servers/ServerServicesContext")>()),
+  useServerStore: () => nativeStore,
+  useServerResources: () => ({ replaceStream: reconnect }),
+}));
+function receiveReceipts(receipts: MessageReceiptEntityDto[]) {
+  nativeState.apply(
+    receipts.map((receipt) => ({
+      collection: "messageReceipt",
+      id: receipt.id,
+      value: receipt,
+    })),
+  );
+}
+function publishQueue(revision: string, text: string | null) {
+  nativeState.apply([
+    {
+      collection: "queue",
+      id: "lead",
+      value: {
+        items:
+          text === null
+            ? []
+            : [
+                {
+                  id: "message-one",
+                  text,
+                  created: 1,
+                  kind: "user",
+                  status: MessageSendStatus["queued"],
+                },
+              ],
+        revision,
+        capabilities: { reorder: true, receipts: true },
+      },
+    },
+  ]);
 }
 
 import { useMessageReceipts } from "./useMessageReceipts";
@@ -226,6 +272,8 @@ function mount<T>(action: () => T): T {
 describe("resource read callers", () => {
   beforeEach(() => {
     projectionListeners.clear();
+    nativeState.apply([]);
+    reconnect.mockClear();
     vi.useFakeTimers();
     get.mockReset();
     post.mockReset();
@@ -277,7 +325,11 @@ describe("resource read callers", () => {
       useMessageReceipts("lead", "scope", "workspace", ["message-one"]),
     );
     receiveReceipts([
-      { id: "message-one", agent: "lead", status: "delivered" },
+      {
+        id: "message-one",
+        agent: "lead",
+        status: MessageSendStatus["delivered"],
+      },
     ]);
     await vi.advanceTimersByTimeAsync(0);
     expect(reconcile).not.toHaveBeenCalled();
@@ -344,36 +396,43 @@ describe("resource read callers", () => {
       refresh: vi.fn(async () => {}),
     };
     mount(() => useMessageQueue(props));
-    const publish = (revision: string, text: string) => {
-      for (const accept of projectionListeners)
-        accept({
-          runtime: {
-            queuesByAgent: {
-              lead: {
-                items: [{ id: "message-one", text }],
-                revision,
-                capabilities: { reorder: true, receipts: true },
-              },
-            },
-          },
-        });
-    };
-    publish("v1", "old");
+    publishQueue("v1", "old");
     expect(
       watchers.has(JSON.stringify({ kind: "queue", agentId: "lead" })),
     ).toBe(false);
     await vi.advanceTimersByTimeAsync(0);
     expect(get).not.toHaveBeenCalled();
-    expect(states[0]!.value).toMatchObject({
-      view: { revision: "v1", items: [{ text: "old" }] },
-    });
-    publish("v2", "new");
+    expect(mount(() => useMessageQueue(props)).items).toMatchObject([
+      { text: "old" },
+    ]);
+    publishQueue("v2", "new");
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(states[0]!.value).toMatchObject({
-      view: { revision: "v2", items: [{ text: "new" }] },
-    });
+    expect(mount(() => useMessageQueue(props)).items).toMatchObject([
+      { text: "new" },
+    ]);
     expect(get).not.toHaveBeenCalled();
     expect(syncPost).not.toHaveBeenCalled();
+  });
+
+  it("an acknowledged queue mutation converges from the entity stream without a GET", async () => {
+    const props = {
+      id: "lead",
+      enabled: true,
+      scope: "scope",
+      workspaceId: "workspace",
+      refresh: vi.fn(async () => {}),
+    };
+    publishQueue("v1", "first payload");
+    syncPost.mockResolvedValue({});
+    const queue = mount(() => useMessageQueue(props));
+    const item = queue.items[0]!;
+    await queue.sendNow(item);
+    expect(syncPost).toHaveBeenCalledOnce();
+    expect(reconnect).toHaveBeenCalledOnce();
+    expect(get).not.toHaveBeenCalled();
+    publishQueue("v2", null);
+    expect(mount(() => useMessageQueue(props)).items).toEqual([]);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("retains a request on signature conflict and clears an ordinary refusal", async () => {

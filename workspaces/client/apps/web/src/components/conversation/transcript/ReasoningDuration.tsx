@@ -1,10 +1,11 @@
+import { observer } from "mobx-react-lite";
 import { Brain, Clock3 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Message } from "../../../types";
 import { useVisualActivity } from "../../../hooks/useVisualActivity";
 import "./reasoning-duration.css";
 
-export default function ReasoningDuration({
+export default observer(function ReasoningDuration({
   item,
 }: {
   item: Pick<
@@ -65,4 +66,4 @@ export default function ReasoningDuration({
       </span>
     </div>
   );
-}
+});

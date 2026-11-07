@@ -5,69 +5,40 @@ import { useEffect, useMemo } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import TeamChats from "./TeamChats";
 import { theme } from "../../../theme";
-import type { Snapshot } from "../../../types";
-import { createServerServices } from "../../../servers/serverServices";
-import { ServerServicesProvider } from "../../../servers/ServerServicesContext";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../../observableFixture";
+import { ConversationProvider } from "../../conversation/navigation";
+import { createRoomMirror } from "../../../generated/observableResources";
+import type { RoomEntityDtoFields } from "../../../generated/observableFieldTypes";
 
-const data = {
-  token: "storybook",
-  stateDir: "storybook-messages",
-  threads: [],
-  chats: [],
-  nodes: [],
-  edges: [],
-  runtime: {
-    agents: [],
-    rooms: [],
-    tasks: [],
-    monitors: [],
-    complaints: [],
-    requests: [],
-    rules: [],
-    projects: [],
-    peerTeams: [],
-    events: [],
-    work: [],
-    studioErrors: [],
+const rooms: RoomEntityDtoFields[] = [
+  {
+    id: "broadcast:lead",
+    kind: GeneratedApiRoomKind.broadcast,
+    name: "Team broadcast",
+    rootId: "lead",
+    lastMessage: {
+      created: 1792706400,
+      sender: "lead",
+      seq: 1,
+      text: "Release checks are complete. Review the API changes.",
+    },
   },
-} satisfies Snapshot;
-
-const populated: Snapshot = {
-  ...data,
-  threads: [
-    { id: "lead", name: "Release lead" },
-    { id: "worker", rootId: "lead", name: "API tests" },
-  ],
-  runtime: {
-    ...data.runtime,
-    rooms: [
-      {
-        id: "broadcast:lead",
-        kind: GeneratedApiRoomKind.broadcast,
-        name: "Team broadcast",
-        rootId: "lead",
-        lastMessage: {
-          created: 1792706400,
-          sender: "lead",
-          seq: 1,
-          text: "Release checks are complete. Review the API changes.",
-        },
-      },
-      {
-        id: "private:worker",
-        kind: GeneratedApiRoomKind.private,
-        name: "API tests",
-        members: ["lead", "worker"],
-        lastMessage: {
-          created: 1792706400,
-          sender: "worker",
-          seq: 1,
-          text: "The retry test reproduces the missing receipt.",
-        },
-      },
-    ],
+  {
+    id: "private:worker",
+    kind: GeneratedApiRoomKind.private,
+    name: "API tests",
+    members: ["lead", "worker"],
+    lastMessage: {
+      created: 1792706400,
+      sender: "worker",
+      seq: 1,
+      text: "The retry test reproduces the missing receipt.",
+    },
   },
-};
+];
 function MessagesFixture({
   light = false,
   hasRooms = false,
@@ -77,19 +48,52 @@ function MessagesFixture({
   hasRooms?: boolean;
   narrow?: boolean;
 }) {
-  const services = useMemo(() => {
-    const fixtureServices = createServerServices({
-      id: "local",
-      label: "Storybook",
-      origin: window.location.origin,
+  const models = useMemo(() => {
+    const models = observableFixture([
+      { id: "lead", name: "Release lead" },
+      { id: "worker", rootId: "lead", name: "API tests" },
+    ]);
+    const state = [...models.mirror.current.agents.values()].map((value) => ({
+      collection: "agentSummary" as const,
+      id: value.id,
+      value,
+    }));
+    models.apply([
+      ...state,
+      {
+        collection: "workspace",
+        id: "workspace",
+        value: { stateDir: "storybook-messages" },
+      },
+      ...(hasRooms
+        ? rooms.map((value) => ({
+            collection: "room" as const,
+            id: value.id,
+            value,
+          }))
+        : []),
+    ]);
+    const history = createRoomMirror({
+      room: { id: "private:worker" },
+      messages: [
+        {
+          id: "message-1",
+          room: "private:worker",
+          deliveries: {},
+          sender: "worker",
+          senderName: "API tests",
+          created: 1792706400,
+          seq: 1,
+          text: "The retry test reproduces the missing receipt. I am checking the request identity.",
+        },
+      ],
     });
-    fixtureServices.resources.watchResourceChanges = (_resource, changed) => {
-      changed();
-      return () => {};
-    };
-    return fixtureServices;
-  }, []);
-  useEffect(() => () => services.close(), [services]);
+    models.store.room = () => ({
+      current: { status: "live", data: history.current },
+    });
+    return models;
+  }, [hasRooms]);
+  useEffect(() => () => models.store.dispose(), [models]);
   const { setColorScheme } = useMantineColorScheme();
   useEffect(() => {
     setColorScheme(light ? "light" : "dark");
@@ -104,14 +108,11 @@ function MessagesFixture({
           maxWidth: narrow ? "var(--studio-form-max)" : undefined,
         }}
       >
-        <ServerServicesProvider services={services}>
-          <TeamChats
-            data={hasRooms ? populated : data}
-            leadId="lead"
-            refresh={async () => {}}
-            notify={() => {}}
-          />
-        </ServerServicesProvider>
+        <models.Provider>
+          <ConversationProvider value={conversationActionsFixture()}>
+            <TeamChats leadId="lead" />
+          </ConversationProvider>
+        </models.Provider>
       </div>
     </MantineProvider>
   );
@@ -120,34 +121,6 @@ const meta = {
   title: "Messages/Room list",
   component: MessagesFixture,
   parameters: { layout: "fullscreen" },
-  beforeEach: () => {
-    const original = window.fetch;
-    window.fetch = async (input, init) => {
-      const request = new Request(input, init);
-      if (new URL(request.url).pathname === "/api/agent-chat")
-        return new Response(
-          JSON.stringify({
-            messages: [
-              {
-                id: "message-1",
-                sender: "worker",
-                senderName: "API tests",
-                created: 1792706400,
-                seq: 1,
-                text: "The retry test reproduces the missing receipt. I am checking the request identity.",
-              },
-            ],
-            nextBefore: null,
-            nextAfter: 1,
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      return original(input, init);
-    };
-    return () => {
-      window.fetch = original;
-    };
-  },
 } satisfies Meta<typeof MessagesFixture>;
 export default meta;
 type Story = StoryObj<typeof meta>;

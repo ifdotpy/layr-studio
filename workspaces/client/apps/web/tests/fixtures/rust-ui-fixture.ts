@@ -27,6 +27,7 @@
 //   FIXTURE_SCRIPT                JSON array of provider scripts (prompt, steps)
 //   FIXTURE_PRICING_ARTIFACT      JSON pricing artifact written before agent seeding
 import type { ApiPostPath, PostBody, PostResult } from "../../src/apiTypes.ts";
+import { randomUUID } from "../../src/uuid.ts";
 import type {
   components,
   AgentSummaryEntityDto,
@@ -657,7 +658,7 @@ async function main() {
       id: leadId,
       subagent_concurrency: workers,
       expected_mode_revision: 0,
-      request_id: "fixture-concurrency",
+      request_id: randomUUID(),
     });
   await Promise.all([
     ...Array.from({ length: workers }, (_, index) =>

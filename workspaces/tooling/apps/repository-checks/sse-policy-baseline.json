@@ -156,38 +156,6 @@
     "callee": "localStorage"
   },
   {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
-    "file": "hooks.ts",
-    "callee": "syncGet"
-  },
-  {
     "file": "indexedDb.ts",
     "callee": "indexedDB.deleteDatabase"
   },
@@ -402,5 +370,25 @@
   {
     "file": "sync/uploads.ts",
     "callee": "syncPost"
+  },
+  {
+    "file": "conversation/historySession.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/historySession.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/roomHistory.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/roomHistory.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/roomHistory.ts",
+    "callee": "this.api.syncGet"
   }
 ]

@@ -1,6 +1,6 @@
 import { RequestFixture } from "../../src/components/questions/requestFixtures";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
-import type { Agent, Complaint, Snapshot } from "../../src/types.ts";
+import type { Agent, Complaint } from "../../src/types.ts";
 import { approval } from "../../src/approvalFixtures.ts";
 declare global {
   interface Window {
@@ -9,7 +9,9 @@ declare global {
   }
 }
 
-import React, { useState } from "react";
+import { messageModels } from "../messages/message-models.fixture";
+import { conversationActionsFixture } from "../../src/components/observableFixture";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -64,16 +66,18 @@ const request = approval({
     ],
   },
 });
-// This partial snapshot omits unused collections and runtime fields.
-const base = {
-  stateDir: "workspace-a",
-  token: "fixture",
-  threads: [lead],
-  runtime: { complaints: [complaint] },
-} as Snapshot;
 function Fixture() {
   const [show, setShow] = useState(false),
     [workspace, setWorkspace] = useState("workspace-a");
+  const models = useMemo(() => messageModels(workspace, [lead]), [workspace]);
+  useLayoutEffect(
+    () =>
+      models.apply([
+        { collection: "complaint", id: complaint.id, value: complaint },
+      ]),
+    [models],
+  );
+  useEffect(() => () => models.close(), [models]);
   return (
     <MantineProvider>
       <button onClick={() => setShow(!show)}>Toggle messages</button>
@@ -104,11 +108,9 @@ function Fixture() {
       </RequestFixture>
       <Picker initialPath="/project" onSelect={async () => {}} />
       {show && (
-        <UserMessages
-          data={{ ...base, stateDir: workspace }}
-          refresh={async () => {}}
-          notify={() => {}}
-        />
+        <models.Provider commands={conversationActionsFixture()}>
+          <UserMessages />
+        </models.Provider>
       )}
     </MantineProvider>
   );

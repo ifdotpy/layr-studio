@@ -6,7 +6,7 @@ import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.tsx";
+import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
 import { NativeNotice } from "../../src/components/NativeNotice.tsx";
 const counters = {

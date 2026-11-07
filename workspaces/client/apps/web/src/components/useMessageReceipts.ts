@@ -1,90 +1,38 @@
-import { useServerSync } from "../servers/ServerServicesContext";
-import { useEffect, useRef, useState } from "react";
-import "../api";
-import "../sync/send";
-import { type MessageReceipt } from "../sync/messageReceipts";
+import { autorun, observable, runInAction } from "mobx";
+import { useEffect, useMemo } from "react";
+import { useServerStore } from "../servers/ServerServicesContext";
+import type { MessageReceipt } from "../sync/messageReceipts";
 
+/** Confirmed receipts survive an older retained pending input until it leaves
+ * the requested window. This overlay belongs to this server and conversation. */
 export function useMessageReceipts(
   room: string | null,
   scope: string,
   workspaceId: string | undefined,
   ids: string[],
 ) {
-  const { subscribeStateProjection } = useServerSync();
-
-  const requested = useRef(ids);
-  requested.current = ids;
+  const store = useServerStore();
+  const receipts = useMemo(
+    () => observable.map<string, MessageReceipt>(undefined, { deep: false }),
+    [store, scope, room],
+  );
   const requestedKey = JSON.stringify(ids);
-  const [state, setState] = useState({
-    scope,
-    receipts: new Map<string, MessageReceipt>(),
-  });
   useEffect(() => {
     if (!room || !workspaceId) return;
-    let active = true;
-    const controller = new AbortController();
-    let queued = Promise.resolve();
-    let previousSource: MessageReceipt[] | undefined;
-    let selected: MessageReceipt[] | undefined;
-    const stop = subscribeStateProjection(
-      (snapshot) => {
-        if (!snapshot) return;
-        const source = snapshot.runtime.messageReceipts;
-        if (source === previousSource) return;
-        previousSource = source;
-        const keep = new Set(requested.current);
-        const receipts = (source ?? []).filter(
-          (receipt) => receipt.agent === room && keep.has(receipt.id),
-        );
-        if (
-          selected?.length === receipts.length &&
-          receipts.every((receipt, index) => receipt === selected?.[index])
-        )
-          return;
-        selected = receipts;
-        queued = queued
-          .then(async () => {
-            if (!active || controller.signal.aborted) return;
-            if (!active || controller.signal.aborted) return;
-            setState((previous) => {
-              const next = new Map(
-                previous.scope === scope ? previous.receipts : [],
-              );
-              for (const receipt of receipts) next.set(receipt.id, receipt);
-              // Keep confirmed receipts while retained history still has an old
-              // pending record. Bound this cache to the caller's current IDs.
-              const keep = new Set(requested.current);
-              for (const id of next.keys()) if (!keep.has(id)) next.delete(id);
-              if (
-                previous.scope === scope &&
-                next.size === previous.receipts.size &&
-                [...next].every(
-                  ([id, receipt]) =>
-                    JSON.stringify(receipt) ===
-                    JSON.stringify(previous.receipts.get(id)),
-                )
-              )
-                return previous;
-              return { scope, receipts: next };
-            });
-          })
-          .catch(() => {
-            // A later projection can retry receipts that could not be persisted.
-            previousSource = undefined;
-            selected = undefined;
-          });
-      },
-      () => {
-        // Preserve known receipts until a successful read confirms delivery.
-      },
-    );
-    return () => {
-      active = false;
-      controller.abort();
-      stop();
-    };
-  }, [room, scope, workspaceId, requestedKey, subscribeStateProjection]);
-  return state.scope === scope
-    ? state.receipts
-    : new Map<string, MessageReceipt>();
+    const keep = new Set(ids);
+    return autorun(() => {
+      const current = store.state().current;
+      if (current.status !== "live" && current.status !== "stale") return;
+      const selected = ids.flatMap((id) => {
+        const receipt = current.data.messageReceipts.get(id);
+        return receipt?.agent === room ? [receipt] : [];
+      });
+      runInAction(() => {
+        for (const receipt of selected) receipts.set(receipt.id, receipt);
+        for (const id of receipts.keys())
+          if (!keep.has(id)) receipts.delete(id);
+      });
+    });
+  }, [store, receipts, room, workspaceId, requestedKey]);
+  return receipts;
 }

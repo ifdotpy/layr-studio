@@ -11,11 +11,14 @@ export function mergeTranscript(
   earlier: Message[],
   later: Message[],
 ): Message[] {
+  // The caller supplies older and newer server ranges. Preserve their cursor
+  // order, including equal/backdated timestamps, and replace overlaps in place.
+  const newer = new Map(later.map((item) => [item.id, item]));
+  const present = new Set(earlier.map((item) => item.id));
   return [
-    ...new Map([...earlier, ...later].map((item) => [item.id, item])).values(),
-  ].sort(
-    (a, b) => Number(a.at ?? a.created ?? 0) - Number(b.at ?? b.created ?? 0),
-  );
+    ...earlier.map((item) => newer.get(item.id) || item),
+    ...later.filter((item) => !present.has(item.id)),
+  ];
 }
 
 export function updateLiveTranscriptPage(
@@ -40,7 +43,6 @@ export function updateLiveTranscriptPage(
     page.items = liveItems;
     page.before = null;
   } else {
-    const present = new Set(liveItems.map((item) => item.id));
     // Only an authoritative shared row proves that the retained and fresh
     // ranges are contiguous. Optimistic queue rows can span a history gap.
     const authoritative = new Set(
@@ -65,19 +67,20 @@ export function updateLiveTranscriptPage(
       page.before = snapshot.nextCursor || liveItems[0]?.id || null;
       return;
     }
-    // A live snapshot is authoritative within its range, including removals.
-    const firstAt = Math.min(
-      ...liveItems.map((item) => Number(item.at ?? item.created ?? Infinity)),
+    // Cursor overlap, rather than wall-clock timestamps, proves where the
+    // authoritative live range starts. Retain only the saved prefix before it.
+    const firstShared = page.items.findIndex((item) =>
+      authoritative.has(item.id),
     );
     page.items = mergeTranscript(
-      page.items.filter(
-        (item) =>
-          present.has(item.id) ||
-          (!isMessagePending(item) &&
+      page.items
+        .slice(0, firstShared)
+        .filter(
+          (item) =>
+            !isMessagePending(item) &&
             !item.streamPending &&
-            item.materialized !== false &&
-            Number(item.at ?? item.created ?? 0) < firstAt),
-      ),
+            item.materialized !== false,
+        ),
       liveItems,
     );
   }

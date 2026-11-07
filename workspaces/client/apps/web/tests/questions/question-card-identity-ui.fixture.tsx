@@ -1,3 +1,5 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture";
+import type { ComponentProps } from "react";
 import { observer } from "mobx-react-lite";
 import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
 import { requestFixture } from "../../src/components/questions/requestFixtures";
@@ -15,7 +17,14 @@ import Requests, {
   RequestCard,
   RequestArea,
 } from "../../src/components/questions/Requests.tsx";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.tsx";
+import History from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
+function TurnHistory(props: ComponentProps<typeof History>) {
+  return (
+    <AgentModelsFixture agents={props.agent ? [props.agent] : []}>
+      <History {...props} />
+    </AgentModelsFixture>
+  );
+}
 import {
   questionCard,
   transcriptRequests,

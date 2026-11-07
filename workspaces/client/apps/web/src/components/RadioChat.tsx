@@ -1,21 +1,23 @@
+import { RadioStatus } from "../generated/api";
+import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
+import { useMessageRenderProbe } from "./shell/messages/renderProbe";
 import { randomUUID } from "../uuid";
-import { useServerApi } from "../servers/ServerServicesContext";
+import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
 import { providerLabel } from "../generated/providerKind.ts";
 import { Button, Select, Textarea } from "@mantine/core";
 import { useRef, useState } from "react";
 import { ApiError, errorText, type PostBody } from "../api";
-import { useMessages } from "../hooks";
-import type { Room, Snapshot } from "../types";
+import { useRoomHistory } from "../conversation/roomHistory";
+import { resourceData } from "../store/runtime";
+import { observer, Observer } from "mobx-react-lite";
+import { useConversationActions } from "./conversation/navigation";
+import type { StateCollections } from "../generated/observableResources";
 import AgentAvatar from "./agents/AgentAvatar";
 import MessageDate from "./conversation/transcript/MessageDate";
 import Requests, { RequestArea } from "./questions/Requests";
 import StreamingText from "./conversation/transcript/StreamingText";
 import { useConversationScroll } from "./useConversationScroll";
-import {
-  usePromptDraft,
-  type DraftReader,
-  type DraftSubscription,
-} from "./prompt-composer/PromptComposer";
+import PromptComposer from "./prompt-composer/PromptComposer";
 import "./radio-chat.css";
 
 // Keep the exact command across navigation and reloads until the server confirms it.
@@ -33,30 +35,38 @@ type Attempt = {
   acknowledged?: boolean;
   rejected?: boolean;
 };
-export default function RadioChat({
-  room,
-  data,
-  getDraft,
-  subscribeDraft,
-  setDraft,
-  refresh,
-  notify,
+export default observer(function RadioChat({
+  roomId,
   visible = true,
 }: {
-  room: Room;
-  data: Snapshot;
-  getDraft: DraftReader;
-  subscribeDraft: DraftSubscription;
-  setDraft: (text: string) => void;
-  refresh: () => Promise<void>;
-  notify: (message: string) => void;
+  roomId: string;
   visible?: boolean;
 }) {
-  const { post, save, saved } = useServerApi();
+  const store = useServerStore();
+  const state = resourceData(store.state().current);
+  const room = state?.rooms.get(roomId);
+  if (!state || !room?.radio) return <p role="status">Loading shared chat…</p>;
+  return <RadioScreen room={room} state={state} visible={visible} />;
+});
 
-  const draft = usePromptDraft(room.id, getDraft, subscribeDraft);
+type RadioRoom =
+  StateCollections["rooms"] extends ReadonlyMap<string, infer T> ? T : never;
+const RadioScreen = observer(function RadioScreen({
+  room,
+  state,
+  visible,
+}: {
+  room: RadioRoom;
+  state: StateCollections;
+  visible: boolean;
+}) {
+  useMessageRenderProbe("radio-screen", room.id);
+  const { post, save, saved } = useServerApi();
+  const { getDraft, subscribeDraft, setDraft, refresh, notify } =
+    useConversationActions();
   const radio = room.radio!;
-  const key = `studio-radio-command:${data.stateDir}:${room.id}`;
+  const stateDir = state.workspaces.values().next().value?.stateDir || "";
+  const key = `studio-radio-command:${stateDir}:${room.id}`;
   const [attempt, setAttempt] = useState<Attempt | null>(() =>
     saved(key, null),
   );
@@ -65,16 +75,9 @@ export default function RadioChat({
   const [target, setTarget] = useState("both");
   const locked = useRef(false);
   const members = (room.members || [])
-    .map((id) => data.threads.find((a) => a.id === id))
+    .map((id) => state.agents.get(id))
     .filter((a) => !!a);
-  const messages = useMessages(
-    room.id,
-    "room",
-    false,
-    data.stateDir,
-    "",
-    visible,
-  );
+  const messages = useRoomHistory(room.id, stateDir, visible);
   const { scroll, content, onScroll } = useConversationScroll(
     room.id,
     messages.loaded,
@@ -100,7 +103,7 @@ export default function RadioChat({
         next.body.radio_action === "send" &&
         getDraft(room.id) === next.body.text
       )
-        setDraft("");
+        setDraft("", room.id);
       if (next.rejected) await refresh();
       messages.reload();
       remember(null);
@@ -110,8 +113,7 @@ export default function RadioChat({
       if (
         !next.acknowledged &&
         e instanceof ApiError &&
-        e.status >= 400 &&
-        e.status < 500
+        !serverMutationResponseIsUncertain(e.status, e.response)
       ) {
         next = { ...next, rejected: true };
         remember(next);
@@ -125,8 +127,7 @@ export default function RadioChat({
   const command = (input: RadioActionInput) => {
     if (attempt || locked.current) return;
     const path =
-      room.projectPath ||
-      data.runtime?.peerTeams?.find((t) => t.id === radio.teamId)?.projectPath;
+      room.projectPath || state.peerTeams.get(radio.teamId)?.projectPath;
     if (!path) {
       notify("The shared chat project is unavailable. Refresh Studio.");
       return;
@@ -143,36 +144,29 @@ export default function RadioChat({
       request_id: randomUUID(),
       expected_revision: radio.revision,
     };
-    switch (input.action) {
-      case "pass":
-        void execute({
-          body: {
-            ...base,
-            radio_action: "pass",
-            target: input.target,
-          },
-        });
-        break;
-      case "stop":
-        void execute({ body: { ...base, radio_action: "stop" } });
-        break;
-      case "send":
-        void execute({
-          body: {
-            ...base,
-            radio_action: "send",
-            text: input.text,
-            target: input.target,
-            rounds: input.rounds,
-          },
-        });
-        break;
-    }
+    const body: RadioRequest =
+      input.action === "stop"
+        ? { ...base, radio_action: "stop" }
+        : input.action === "pass"
+          ? { ...base, radio_action: "pass", target: input.target }
+          : {
+              ...base,
+              radio_action: "send",
+              text: input.text,
+              target: input.target,
+              rounds: input.rounds,
+            };
+    void execute({ body });
   };
-  const { busy, inputBlocked, canPass, stopping, speaking, busyNotice } =
-    radio.controls;
+  const { busy, inputBlocked, canPass, stopping, speaking } = radio.controls;
+  const busyNotice = !busy
+    ? null
+    : radio.status === RadioStatus.blocked
+      ? "Resolve the current reply before sending."
+      : radio.status === RadioStatus.stopping
+        ? "Waiting for the reply to stop."
+        : "Current reply finishes first.";
   const frozen = pending || !!attempt;
-  const canSend = !frozen && !inputBlocked && !!draft.trim();
   return (
     <section className="radio-chat" aria-label="Shared chat">
       <div className="radio-participants">
@@ -264,7 +258,7 @@ export default function RadioChat({
               />
             </article>
           ))}
-          <RequestArea scope={data.stateDir} refresh={refresh} notify={notify}>
+          <RequestArea scope={stateDir} refresh={refresh} notify={notify}>
             <Requests
               agentId={radio.active?.agentId}
               turnId={radio.active?.turnId}
@@ -273,90 +267,118 @@ export default function RadioChat({
           </RequestArea>
         </div>
       </div>
-      <form
+      <PromptComposer
+        session={room.id}
+        getDraft={getDraft}
+        subscribeDraft={subscribeDraft}
         className="radio-composer"
         onSubmit={(e) => {
           e.preventDefault();
-          if (canSend)
-            command({ action: "send", text: draft, target, rounds: 1 });
+          const text = getDraft(room.id);
+          if (!frozen && !inputBlocked && text.trim())
+            command({ action: "send", text, target, rounds: 1 });
         }}
       >
-        {radio.error && <p role="alert">{radio.error}</p>}
-        {attempt && (
-          <div className="radio-retry" role="alert">
-            <span>
-              {error || "A previous request needs confirmation."}{" "}
-              {attempt.acknowledged
-                ? "Saved. Refresh to continue."
-                : attempt.rejected
-                  ? "Request rejected. Refresh to continue."
-                  : "The result is unknown. Retry the same request."}
-            </span>
-            <Button
-              size="compact-xs"
-              disabled={pending}
-              onClick={() => void execute(attempt)}
-            >
-              {attempt.acknowledged || attempt.rejected ? "Refresh" : "Retry"}
-            </Button>
-          </div>
-        )}
-        <Textarea
-          aria-label="Message both agents"
-          placeholder="Message the shared chat…"
-          autosize
-          minRows={2}
-          maxRows={7}
-          value={draft}
-          disabled={frozen}
-          onChange={(e) => setDraft(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing &&
-              canSend
-            ) {
-              e.preventDefault();
-              command({ action: "send", text: draft, target, rounds: 1 });
-            }
-          }}
-        />
-        <div className="radio-compose-actions">
-          <Select
-            aria-label="Reply from"
-            data={[
-              { value: "both", label: "Both agents" },
-              ...members.map((a) => ({
-                value: a.id,
-                label: a.name || "Agent",
-              })),
-            ]}
-            value={target}
-            onChange={(value) => setTarget(value || "both")}
-            allowDeselect={false}
-            disabled={frozen || inputBlocked}
-          />
-          <span>
-            {busyNotice ?? (target === "both" ? "One reply each" : "One reply")}
-          </span>
-          {target === "both" && (
-            <Button
-              variant="subtle"
-              disabled={!canSend}
-              title="Two replies each, four replies total"
-              onClick={() =>
-                command({ action: "send", text: draft, target, rounds: 2 })
-              }
-            >
-              Discuss (4 replies)
-            </Button>
-          )}
-          <Button type="submit" disabled={!canSend}>
-            Send
-          </Button>
-        </div>
-      </form>
+        {(draft) => {
+          const canSend = !frozen && !inputBlocked && !!draft.trim();
+          return (
+            <Observer>
+              {() => (
+                <>
+                  {radio.error && <p role="alert">{radio.error}</p>}
+                  {attempt && (
+                    <div className="radio-retry" role="alert">
+                      <span>
+                        {error || "A previous request needs confirmation."}{" "}
+                        {attempt.acknowledged
+                          ? "Saved. Refresh to continue."
+                          : attempt.rejected
+                            ? "Request rejected. Refresh to continue."
+                            : "The result is unknown. Retry the same request."}
+                      </span>
+                      <Button
+                        size="compact-xs"
+                        disabled={pending}
+                        onClick={() => void execute(attempt)}
+                      >
+                        {attempt.acknowledged || attempt.rejected
+                          ? "Refresh"
+                          : "Retry"}
+                      </Button>
+                    </div>
+                  )}
+                  <Textarea
+                    aria-label="Message both agents"
+                    placeholder="Message the shared chat…"
+                    autosize
+                    minRows={2}
+                    maxRows={7}
+                    value={draft}
+                    disabled={frozen}
+                    onChange={(e) => setDraft(e.currentTarget.value, room.id)}
+                    onKeyDown={(e) => {
+                      if (
+                        e.key === "Enter" &&
+                        !e.shiftKey &&
+                        !e.nativeEvent.isComposing &&
+                        canSend
+                      ) {
+                        e.preventDefault();
+                        command({
+                          action: "send",
+                          text: draft,
+                          target,
+                          rounds: 1,
+                        });
+                      }
+                    }}
+                  />
+                  <div className="radio-compose-actions">
+                    <Select
+                      aria-label="Reply from"
+                      data={[
+                        { value: "both", label: "Both agents" },
+                        ...members.map((a) => ({
+                          value: a.id,
+                          label: a.name || "Agent",
+                        })),
+                      ]}
+                      value={target}
+                      onChange={(value) => setTarget(value || "both")}
+                      allowDeselect={false}
+                      disabled={frozen || inputBlocked}
+                    />
+                    <span>
+                      {busyNotice ??
+                        (target === "both" ? "One reply each" : "One reply")}
+                    </span>
+                    {target === "both" && (
+                      <Button
+                        variant="subtle"
+                        disabled={!canSend}
+                        title="Two replies each, four replies total"
+                        onClick={() =>
+                          command({
+                            action: "send",
+                            text: draft,
+                            target,
+                            rounds: 2,
+                          })
+                        }
+                      >
+                        Discuss (4 replies)
+                      </Button>
+                    )}
+                    <Button type="submit" disabled={!canSend}>
+                      Send
+                    </Button>
+                  </div>
+                </>
+              )}
+            </Observer>
+          );
+        }}
+      </PromptComposer>
     </section>
   );
-}
+});

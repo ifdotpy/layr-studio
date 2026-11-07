@@ -1,169 +1,162 @@
-import type {
-  ResourceRef,
-  ResourceData,
-} from "../sync/subscriptions/contracts";
-import type { ComponentHookCell } from "./componentTestFixtures";
-import { type EffectCallback, type ComponentProps } from "react";
-import { componentSnapshot } from "./componentTestFixtures";
+// @vitest-environment happy-dom
+import { act, createElement, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
 import { afterEach, expect, it, vi } from "vitest";
-const h = vi.hoisted(() => ({
-  cursor: 0,
-  cells: [] as ComponentHookCell[],
-  effects: [] as Array<() => void>,
-  data: new Map<string, unknown>(),
-  statuses: new Map<string, string>(),
-  watchConnection: vi.fn((accept: (status: string) => void) => {
-    accept("live");
-    return () => {};
-  }),
-  get: vi.fn(async () => ({})),
-  post: vi.fn(async () => ({ status: "completed", processes: [] })),
-  storage: {},
-  nullRefs: 0,
-  refs: [] as ResourceRef[],
-  errors: new Map<string, Error>(),
-}));
-vi.mock("react", async (original) => {
-  const react = await original<typeof import("react")>();
-  const memo = (factory: () => unknown, deps: unknown[]) => {
-    const index = h.cursor++;
-    const old = h.cells[index];
-    if (!old || deps.some((value, i) => value !== old.deps![i]))
-      h.cells[index] = { deps, value: factory() };
-    return required(h.cells[index]).value;
-  };
-  return {
-    ...react,
-    useState: (initial: unknown) => {
-      const index = h.cursor++;
-      h.cells[index] ??= {
-        value: typeof initial === "function" ? initial() : initial,
-      };
-      return [
-        required(h.cells[index]).value,
-        (value: unknown) => {
-          required(h.cells[index]).value =
-            typeof value === "function"
-              ? value(required(h.cells[index]).value)
-              : value;
-        },
-      ];
-    },
-    useRef: (current: unknown) => {
-      const index = h.cursor++;
-      h.cells[index] ??= {
-        current:
-          current === null && h.nullRefs++ === 0 ? { clientWidth: 0 } : current,
-      };
-      return h.cells[index];
-    },
-    useMemo: memo,
-    useCallback: (callback: unknown, deps: unknown[]) =>
-      memo(() => callback, deps),
-    useEffect: (effect: EffectCallback, deps: unknown[]) => {
-      const index = h.cursor++;
-      const old = h.cells[index];
-      if (!old || !deps || deps.some((value, i) => value !== old.deps![i])) {
-        old?.cleanup?.();
-        h.cells[index] = { deps };
-        h.effects.push(() => {
-          required(h.cells[index]).cleanup =
-            effect() as ComponentHookCell["cleanup"];
-        });
-      }
-    },
-    useLayoutEffect: () => {},
-  };
-});
-vi.mock("../sync/subscriptions", () => ({
-  useSubscription: (ref: ResourceRef | null) => {
-    if (ref) h.refs.push(ref);
-    return {
-      data: ref ? h.data.get(ref.kind) : undefined,
-      status: ref ? (h.statuses.get(ref.kind) ?? "live") : "stale",
-      error: ref ? (h.errors.get(ref.kind) ?? null) : null,
-    };
-  },
-}));
-vi.mock("../sync/client", () => ({}));
-vi.mock("../sync/transcriptCache", () => ({}));
-vi.mock("../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({
-    get: h.get,
-    post: h.post,
-    syncGet: h.get,
-    saved: (_key: string, value: unknown) => value,
-  }),
-  useServerStorage: () => h.storage,
-  useServerServices: () => ({ owner: { id: "local" } }),
-  useServerSync: () => ({}),
-  useServerResources: () => ({ watchResourceConnection: h.watchConnection }),
-  useServerTranscripts: () => ({ peekTranscript: () => undefined }),
-}));
+import {
+  createComplaintMirror,
+  createRoomMirror,
+  createTranscriptMirror,
+} from "../generated/observableResources";
+import { ServerStoreProvider } from "../servers/ServerServicesContext";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "./observableFixture";
+import { ConversationProvider } from "./conversation/navigation";
+import { requestTestEnvironment } from "./questions/requestTestFixture";
 import { UserMessage } from "./shell/messages/UserMessages";
 import { useMessages } from "../hooks";
-const snapshot = () => componentSnapshot([{ id: "lead", epoch: 1 }]);
-function render<T>(fn: () => T, offset = 0) {
-  h.cursor = offset;
-  const result = fn();
-  for (const effect of h.effects.splice(0)) effect();
-  return result;
-}
-afterEach(() => {
-  for (const cell of h.cells) cell?.cleanup?.();
-  h.cells = [];
-  h.effects = [];
-  h.data.clear();
-  h.statuses.clear();
-  h.watchConnection.mockClear();
-  h.get.mockClear();
-  h.post.mockClear();
-  h.nullRefs = 0;
-  h.refs = [];
-  h.errors.clear();
-  vi.unstubAllGlobals();
-});
-it("complaint version changes consume streamed detail without GET /api/complaint", () => {
-  h.nullRefs = 100;
-  const props: ComponentProps<typeof UserMessage> = {
-    message: { id: "message", version: 1 },
-    data: snapshot(),
-    focused: false,
-    requests: new Map(),
-    pendingKey: "replies",
-    refresh: vi.fn(),
-    notify: vi.fn(),
+
+const h = vi.hoisted(() => ({ get: vi.fn(), connection: vi.fn() }));
+vi.mock("../unsent/useUnsentText", async () => {
+  const { useState } = await import("react");
+  return {
+    useUnsentText: () => {
+      const [text, setText] = useState<string | null>(null);
+      return [text, setText, async () => {}];
+    },
   };
-  h.data.set("complaint", {
+});
+vi.mock("../servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("../servers/ServerServicesContext")>()),
+  useServerApi: () => api,
+  useServerResources: () => resources,
+}));
+const api = { get: h.get, syncGet: h.get };
+const resources = {
+  watchLiveDeltas: () => () => {},
+  watchResourceConnection: (
+    accept: (health: "live", activity: "open") => void,
+  ) => {
+    h.connection();
+    accept("live", "open");
+    return () => {};
+  },
+};
+requestTestEnvironment();
+afterEach(() => vi.clearAllMocks());
+
+function fixture() {
+  const models = observableFixture();
+  const transcript = createTranscriptMirror({ items: [], truncated: false });
+  const room = createRoomMirror({ messages: [], room: { id: "team" } });
+  const complaint = createComplaintMirror({
     id: "message",
     version: 1,
     text: "First",
     responses: [],
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "complaint" }>>);
-  render(() => UserMessage(props));
-  h.data.set("complaint", {
-    id: "message",
-    version: 2,
-    text: "Updated",
-    responses: [],
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "complaint" }>>);
-  render(() =>
-    UserMessage({ ...props, message: { ...props.message, version: 2 } }),
-  );
-  expect(h.get).not.toHaveBeenCalled();
+  });
+  const store: typeof models.store = {
+    ...models.store,
+    transcript: () => ({
+      get current() {
+        return { status: "live" as const, data: transcript.current };
+      },
+    }),
+    room: () => ({
+      get current() {
+        return { status: "live" as const, data: room.current };
+      },
+    }),
+    complaint: () => ({
+      get current() {
+        return { status: "live" as const, data: complaint.current };
+      },
+    }),
+  };
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  return {
+    transcript,
+    room,
+    complaint,
+    host,
+    async render(child: ReactNode) {
+      await act(async () =>
+        root.render(
+          createElement(
+            MantineProvider,
+            null,
+            createElement(
+              ServerStoreProvider,
+              { value: store },
+              createElement(
+                ConversationProvider,
+                { value: conversationActionsFixture() },
+                child,
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+    async close() {
+      await act(async () => root.unmount());
+      models.store.dispose();
+    },
+  };
+}
+
+it("complaint version changes consume generated detail through the real message without GET", async () => {
+  const f = fixture();
+  try {
+    await f.render(
+      createElement(UserMessage, {
+        message: { id: "message", version: 1 },
+        scope: "scope",
+        focused: false,
+        requests: new Map(),
+      }),
+    );
+    expect(f.host.textContent).toContain("First");
+    await act(async () =>
+      f.complaint.apply({
+        id: "message",
+        version: 2,
+        text: "Updated",
+        responses: [],
+      }),
+    );
+    expect(f.host.textContent).toContain("Updated");
+    expect(h.get).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
 });
+
 it.each(["agent", "room"] as const)(
-  "%s records update a nonmanaged conversation without a resource GET",
-  (kind) => {
-    h.nullRefs = 100;
-    h.data.set(
-      kind === "agent" ? "transcript" : "room",
-      // Transcript omits truncated; room messages omit senderName, room and deliveries.
-      kind === "agent"
-        ? ({
+  "%s updates reach the compatibility caller without a resource GET",
+  async (kind) => {
+    const f = fixture();
+    function View() {
+      const messages = useMessages("team", kind, false, "scope", "workspace");
+      return createElement(
+        "output",
+        null,
+        messages.items.map((item) => item.text).join("|"),
+      );
+    }
+    try {
+      await f.render(createElement(View));
+      await act(async () => {
+        if (kind === "agent")
+          f.transcript.apply({
             items: [{ id: "new", role: "assistant", text: "Streamed" }],
-          } as ResourceData<Extract<ResourceRef, { kind: "transcript" }>>)
-        : ({
+            truncated: false,
+          });
+        else
+          f.room.apply({
             messages: [
               {
                 id: "new",
@@ -171,42 +164,38 @@ it.each(["agent", "room"] as const)(
                 text: "Streamed",
                 created: 1,
                 sender: "lead",
+                senderName: "Lead",
+                room: "team",
+                deliveries: {},
               },
             ],
             room: { id: "team" },
-          } as ResourceData<Extract<ResourceRef, { kind: "room" }>>),
-    );
-    const read = () =>
-      useMessages("team", kind, false, "workspace", "workspace");
-    render(read);
-    expect(render(read).items.map((item) => item.text)).toEqual(["Streamed"]);
-    expect(h.get).not.toHaveBeenCalled();
+          });
+      });
+      expect(f.host.querySelector("output")?.textContent).toBe("Streamed");
+      expect(h.get).not.toHaveBeenCalled();
+    } finally {
+      await f.close();
+    }
   },
 );
-it("keeps live agent transport after visiting a stale room in the same component", () => {
-  h.nullRefs = 100;
-  h.data.set("room", {
-    messages: [],
-    room: { id: "team" },
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "room" }>>);
-  h.statuses.set("room", "stale");
-  const agent = () =>
-    useMessages("lead", "agent", true, "workspace", "workspace");
-  const room = () =>
-    useMessages("team", "room", true, "workspace", "workspace");
-  render(agent);
-  expect(render(agent).connection).toMatchObject({
-    health: "live",
-    message: "",
-  });
-  render(room);
-  expect(render(room).connection).toBeNull();
-  render(agent);
-  expect(render(agent).connection).toMatchObject({
-    health: "live",
-    message: "",
-  });
-  expect(h.watchConnection).toHaveBeenCalledTimes(2);
-  expect(h.get).not.toHaveBeenCalled();
+
+it("restores agent transport after visiting a room in the same caller", async () => {
+  const f = fixture();
+  function View({ kind }: { kind: "agent" | "room" }) {
+    const messages = useMessages("team", kind, true, "scope", "workspace");
+    return createElement("output", null, messages.connection?.health ?? "room");
+  }
+  try {
+    await f.render(createElement(View, { kind: "agent" }));
+    expect(f.host.querySelector("output")?.textContent).toBe("live");
+    await f.render(createElement(View, { kind: "room" }));
+    expect(f.host.querySelector("output")?.textContent).toBe("room");
+    await f.render(createElement(View, { kind: "agent" }));
+    expect(f.host.querySelector("output")?.textContent).toBe("live");
+    expect(h.connection).toHaveBeenCalledTimes(2);
+    expect(h.get).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
 });
-import { required } from "./componentTestFixtures";

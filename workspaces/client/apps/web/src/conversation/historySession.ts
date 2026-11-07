@@ -1,0 +1,462 @@
+import { useRoomHistory } from "./roomHistory";
+import { useEffect, useMemo } from "react";
+import {
+  autorun,
+  makeAutoObservable,
+  observableRef,
+  reaction,
+  runInAction,
+} from "mobx";
+import {
+  agentId,
+  transcriptTail,
+  createTranscriptMirror,
+} from "../generated/observableResources";
+import { resourceData, type ResourceSlot } from "../store/runtime";
+import {
+  useServerApi,
+  useServerResources,
+  useServerStore,
+} from "../servers/ServerServicesContext";
+import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues";
+import {
+  boundTranscriptItems,
+  boundTranscriptPage,
+  mergeTranscript,
+  updateLiveTranscriptPage,
+  trimTranscriptPageCache,
+  MAX_TRANSCRIPT_PAGE_BYTES,
+} from "../transcriptPageBounds";
+import {
+  selectMessageConnection,
+  type MessageConnection,
+} from "../hooks/messageConnection";
+import { errorText } from "../api";
+import type { Message } from "../types";
+import { createMessageViews } from "./messageView";
+import { createLiveText } from "./liveText";
+
+type Transcript = ReturnType<typeof createTranscriptMirror>["current"];
+type Api = Pick<ReturnType<typeof useServerApi>, "syncGet">;
+type Resources = Pick<
+  ReturnType<typeof useServerResources>,
+  "watchResourceConnection" | "watchLiveDeltas"
+>;
+type CaptureAnchor = () => { id: string | null; endId: string | null };
+type PageQuery = {
+  before?: string;
+  after?: string;
+  around?: string;
+  captureAnchor?: CaptureAnchor | undefined;
+};
+
+/** Navigation and recovery for one selected transcript. The generated facade owns
+ * server facts; this owner retains only a bounded window of model references. */
+export class TranscriptHistory {
+  items: Message[] = [];
+  before: string | null | undefined = null;
+  after: string | null = null;
+  historical = false;
+  pageLoading = false;
+  notice = "";
+  loaded = false;
+  connection: MessageConnection | null = null;
+  readonly live = createLiveText();
+  private version = "";
+  private latest: Transcript | undefined;
+  private anchor: string | undefined;
+  private attempt = 0;
+  private active = false;
+  private readonly views;
+  readonly id: string | null;
+  private readonly slot: ResourceSlot<Transcript> | undefined;
+  private readonly api: Api;
+  private readonly resources: Resources;
+  private readonly managed: boolean;
+  constructor(
+    id: string | null,
+    slot: ResourceSlot<Transcript> | undefined,
+    api: Api,
+    resources: Resources,
+    managed = true,
+  ) {
+    this.id = id;
+    this.slot = slot;
+    this.api = api;
+    this.resources = resources;
+    this.managed = managed;
+    this.views = createMessageViews(id);
+    makeAutoObservable<this, "latest" | "slot" | "api" | "resources" | "views">(
+      this,
+      {
+        items: observableRef,
+        connection: observableRef,
+        latest: observableRef,
+        slot: false,
+        api: false,
+        resources: false,
+        views: false,
+        live: false,
+      },
+      { autoBind: true },
+    );
+  }
+  get size() {
+    return this.items.reduce((bytes, item) => bytes + this.sizeOf(item), 0);
+  }
+  get historyVersion() {
+    return this.version;
+  }
+  private sizeOf(item: Message) {
+    return JSON.stringify(item).length * 2;
+  }
+  private publish(items: Message[]) {
+    if (
+      items.length !== this.items.length ||
+      items.some((item, index) => item !== this.items[index])
+    )
+      this.items = items;
+  }
+  private accept(data: Transcript) {
+    if (
+      data.unavailable ||
+      (this.version &&
+        data.historyVersion &&
+        this.version !== data.historyVersion)
+    ) {
+      this.historical = false;
+      this.before = null;
+      this.after = null;
+      this.items = [];
+      this.attempt++;
+      this.pageLoading = false;
+      this.live.clear();
+    }
+    this.latest = data;
+    this.version = data.historyVersion || "";
+    const incoming = this.views(data.items);
+    const page = {
+      items: this.items,
+      before: this.before,
+      focused: this.historical,
+    };
+    if (!this.managed || !this.items.length) {
+      page.items = incoming;
+      page.before =
+        data.nextCursor || (data.truncated ? data.items[0]?.id : null);
+    } else updateLiveTranscriptPage(page, incoming, data);
+    const bounded = boundTranscriptItems(
+      page.items,
+      this.sizeOf,
+      this.historical ? "oldest" : "newest",
+      this.historical ? this.anchor : undefined,
+    );
+    this.publish(bounded.items);
+    this.before = bounded.droppedOldest
+      ? this.items[0]?.id || page.before
+      : page.before;
+    if (bounded.droppedNewest && this.historical)
+      this.after = this.items.at(-1)?.id || this.after;
+    if (!this.historical) this.after = null;
+    this.notice =
+      data.unavailable ||
+      (data.truncated && !this.managed ? "Recent messages only." : "");
+    this.loaded = true;
+  }
+  start() {
+    this.active = true;
+    const stop = autorun(() => {
+      const current = this.slot?.current;
+      const data = current && resourceData(current);
+      // Only membership/metadata tracks here. Text fields belong to their leaves.
+      if (data) {
+        data.items.forEach((record) => {
+          record.inputs?.forEach((input) => input.id);
+        });
+        void data.historyVersion;
+        void data.nextCursor;
+        void data.truncated;
+        void data.unavailable;
+        runInAction(() => this.accept(data));
+      } else if (!this.id || current?.status === "absent")
+        runInAction(() => {
+          this.loaded = true;
+          this.items = [];
+          this.before = null;
+          this.after = null;
+          this.historical = false;
+          this.latest = undefined;
+          this.attempt++;
+          this.pageLoading = false;
+          this.live.clear();
+          this.notice = this.id ? "This session is no longer available." : "";
+        });
+      if (current && "error" in current && current.error)
+        runInAction(() => {
+          this.notice = errorText(current.error);
+          this.loaded = true;
+        });
+    });
+    const stopConnection =
+      this.id && this.managed
+        ? this.resources.watchResourceConnection((health, activity, detail) =>
+            runInAction(() => {
+              if (health !== "live" || activity !== "open") this.live.clear();
+              const next = selectMessageConnection(health, activity, detail);
+              if (
+                this.connection?.health !== next?.health ||
+                this.connection?.activity !== next?.activity ||
+                this.connection?.message !== next?.message
+              )
+                this.connection = next;
+            }),
+          )
+        : () => {};
+    const stopLive = this.id
+      ? this.resources.watchLiveDeltas((event) => {
+          if (event.agentId === this.id) this.live.add(event);
+        })
+      : () => {};
+    // Mutable models invalidate identity-only byte caches. Recalculate when a
+    // retained field changes; trimming publishes only if a bound is exceeded.
+    const stopDurable = reaction(
+      () => this.items.map((item) => [item.id, item.text] as const),
+      (next, previous) => {
+        const old = new Map(previous);
+        for (const [id, text] of next)
+          if (old.has(id) && old.get(id) !== text) this.live.remove(id);
+      },
+    );
+    const stopBounds = reaction(
+      () => this.items.reduce((bytes, item) => bytes + this.sizeOf(item), 0),
+      (bytes) => {
+        if (bytes <= MAX_TRANSCRIPT_PAGE_BYTES) return;
+        const bounded = boundTranscriptItems(
+          this.items,
+          this.sizeOf,
+          this.historical ? "oldest" : "newest",
+          this.anchor,
+        );
+        this.publish(bounded.items);
+        if (bounded.droppedOldest)
+          this.before = this.items[0]?.id || this.before;
+        if (bounded.droppedNewest)
+          this.after = this.items.at(-1)?.id || this.after;
+      },
+    );
+    return () =>
+      runInAction(() => {
+        this.active = false;
+        this.attempt++;
+        stop();
+        stopConnection();
+        stopLive();
+        stopDurable();
+        stopBounds();
+        this.pageLoading = false;
+        this.live.clear();
+      });
+  }
+  async reload() {
+    if (!this.id) return;
+    const attempt = ++this.attempt;
+    this.pageLoading = false;
+    try {
+      const dto = await this.api.syncGet("/api/transcript", {
+        query: { id: this.id },
+      });
+      if (!this.active || attempt !== this.attempt) return;
+      const mirror = createTranscriptMirror(dto);
+      runInAction(() => this.accept(mirror.current));
+    } catch (error) {
+      if (this.active && attempt === this.attempt)
+        runInAction(() => {
+          this.notice = errorText(error);
+          this.loaded = true;
+        });
+    }
+  }
+  private async fetchPage(query: PageQuery) {
+    if (!this.id || !this.managed || (this.pageLoading && !query.around))
+      return false;
+    const attempt = ++this.attempt;
+    this.pageLoading = true;
+    try {
+      const result = await this.api.syncGet("/api/transcript/page", {
+        query: {
+          id: this.id,
+          limit: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
+          ...(query.before ? { before: query.before } : {}),
+          ...(query.after ? { after: query.after } : {}),
+          ...(query.around ? { around: query.around } : {}),
+        },
+      });
+      if (!this.active || attempt !== this.attempt) return false;
+      if (
+        result.historyVersion &&
+        this.latest?.historyVersion &&
+        result.historyVersion !== this.latest.historyVersion
+      )
+        throw new Error(
+          "The conversation changed. Search or load its history again.",
+        );
+      const page = createTranscriptMirror(result);
+      // Current tail models remain canonical for overlap. A focused page must
+      // keep observing those same fields while live data changes in place.
+      const live = new Map(
+        this.views(this.latest?.items || []).map((item) => [item.id, item]),
+      );
+      const source = this.views(page.current.items).map(
+        (item) => live.get(item.id) || item,
+      );
+      const captured = query.captureAnchor?.();
+      const anchor = captured?.id || this.anchor || query.around;
+      const merged =
+        query.around || (!query.before && !query.after)
+          ? source
+          : query.after
+            ? mergeTranscript(this.items, source)
+            : mergeTranscript(source, this.items);
+      const bounded = boundTranscriptPage(
+        merged,
+        this.sizeOf,
+        query.before
+          ? "older"
+          : query.after
+            ? "newer"
+            : query.around
+              ? "around"
+              : "latest",
+        {
+          before: this.before || null,
+          after: this.after,
+          nextBefore: result.nextCursor || null,
+          nextAfter: result.nextAfterCursor || null,
+        },
+        anchor,
+        captured?.endId || undefined,
+      );
+      runInAction(() => {
+        this.publish(bounded.items);
+        this.before = bounded.before;
+        this.after = bounded.after;
+        this.historical =
+          !!query.around ||
+          (!!(query.before || query.after) && this.historical);
+        this.anchor = anchor;
+        this.loaded = true;
+      });
+      return true;
+    } finally {
+      if (attempt === this.attempt)
+        runInAction(() => {
+          this.pageLoading = false;
+        });
+    }
+  }
+  async older(captureAnchor?: CaptureAnchor) {
+    if (this.before)
+      await this.fetchPage({ before: this.before, captureAnchor });
+  }
+  async newer(captureAnchor?: CaptureAnchor) {
+    if (this.after) await this.fetchPage({ after: this.after, captureAnchor });
+  }
+  setPageAnchor(id: string | null) {
+    this.anchor = id || undefined;
+  }
+  async ensureMessage(id: string) {
+    return (
+      this.items.some((item) => item.id === id || item.sourceId === id) ||
+      this.fetchPage({ around: id })
+    );
+  }
+  async showLatest() {
+    this.attempt++;
+    this.pageLoading = false;
+    if (this.after && !this.historical) {
+      await this.fetchPage({});
+      return;
+    }
+    if (!this.historical) return;
+    this.historical = false;
+    this.after = null;
+    this.items = [];
+    if (this.latest) this.accept(this.latest);
+  }
+}
+
+export function useTranscriptHistory(
+  id: string | null,
+  managed = true,
+  workspace = "",
+  syncWorkspaceId = "",
+  enabled = true,
+) {
+  const store = useServerStore();
+  const api = useServerApi();
+  const resources = useServerResources();
+  // This is the previous paging cache, scoped to the same authenticated owner.
+  const pages = useMemo(
+    () => new Map<string, TranscriptHistory>(),
+    [store, api, resources, managed, workspace, syncWorkspaceId],
+  );
+  const scope = id || "";
+  const session = useMemo(() => {
+    let page = pages.get(scope);
+    if (!page)
+      page = new TranscriptHistory(
+        id,
+        id
+          ? store.transcript(
+              agentId(id),
+              transcriptTail(SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS),
+            )
+          : undefined,
+        api,
+        resources,
+        managed,
+      );
+    pages.delete(scope);
+    pages.set(scope, page);
+    trimTranscriptPageCache(pages, scope);
+    return page;
+  }, [pages, scope, id, store, api, resources, managed]);
+  useEffect(() => {
+    if (!enabled) return;
+    const stop = session.start();
+    const boundCache = reaction(
+      () => session.size,
+      () => trimTranscriptPageCache(pages, scope),
+    );
+    return () => {
+      boundCache();
+      stop();
+    };
+  }, [session, enabled, pages, scope]);
+  return session;
+}
+
+/** Root selection only; each resource keeps its own small navigation owner. */
+export function useConversationHistory(
+  id: string | null,
+  kind: "agent" | "room" | "legacy",
+  managed = false,
+  workspace = "",
+  syncWorkspaceId = "",
+  enabled = true,
+) {
+  const agent = useTranscriptHistory(
+    kind === "agent" ? id : null,
+    managed,
+    workspace,
+    syncWorkspaceId,
+    enabled && kind === "agent",
+  );
+  const room = useRoomHistory(
+    kind !== "agent" ? id : null,
+    workspace,
+    enabled && kind !== "agent",
+    kind === "legacy",
+  );
+  return kind === "agent" ? agent : room;
+}

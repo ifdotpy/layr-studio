@@ -1,14 +1,22 @@
+import { useMessageRenderProbe } from "./renderProbe";
 import { useUnsentText } from "../../../unsent/useUnsentText";
-import { useSubscription } from "../../../sync/subscriptions";
+import {
+  complaintId,
+  type ComplaintDetailResponse,
+  type StateCollections,
+} from "../../../generated/observableResources";
+import { resourceData } from "../../../store/runtime";
+import { useConversationActions } from "../../conversation/navigation";
 import {
   useServerApi,
   useServerStorage,
+  useServerStore,
 } from "../../../servers/ServerServicesContext";
 import { Button, Textarea } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
+import { autorun, observable, runInAction } from "mobx";
+import { observer } from "mobx-react-lite";
 import { ApiError, errorText } from "../../../api";
-import type { Complaint, Snapshot } from "../../../types";
-import type { paths } from "../../../generated/api";
 import "./complaint-book.css";
 import ErrorDescription from "../../ErrorDescription";
 import MessageDate from "../../conversation/transcript/MessageDate";
@@ -24,60 +32,44 @@ import {
 } from "./complaintReplyRequest";
 
 // Preserve confirmed replies while a cached snapshot catches up.
-type ComplaintDetailResponse =
-  paths["/api/complaint"]["get"]["responses"][200]["content"]["application/json"];
-type ComplaintSummary = Complaint;
-type ReplyDraft = Pick<UserComplaintResponse, "text" | "status">;
-
-const caches = new WeakMap<
-  Storage,
-  {
-    confirmedMessages: Map<string, ComplaintDetailResponse>;
-    replyDrafts: Map<string, ReplyDraft>;
-  }
->();
+type ComplaintSummary =
+  StateCollections["complaints"] extends ReadonlyMap<string, infer T>
+    ? T
+    : never;
+const caches = new WeakMap<Storage, Map<string, ComplaintDetailResponse>>();
 function useMessageCache() {
   const storage = useServerStorage();
   let cache = caches.get(storage);
   if (!cache) {
-    cache = { confirmedMessages: new Map(), replyDrafts: new Map() };
+    cache = observable.map(undefined, { deep: false });
     caches.set(storage, cache);
   }
   return cache;
 }
 
-const recipient = (c: ComplaintSummary) => c.recipient;
-
 function MessageResponse({
   detail,
-  token,
   requests,
-  pendingKey,
-  refresh,
-  notify,
+  scope,
   onResponse,
 }: {
   detail: ComplaintDetailResponse;
-  token: string;
   requests: Map<string, UserComplaintResponse>;
-  pendingKey: string;
-  refresh: () => Promise<void>;
-  notify: (s: string) => void;
+  scope: string;
   onResponse: (c: ComplaintDetailResponse) => void;
 }) {
   const { get, post } = useServerApi();
+  const { refresh, notify } = useConversationActions();
   const storage = useServerStorage();
-  const responseStore = complaintResponseStore(
-    storage,
-    pendingKey.slice("studio-message-responses:".length),
-  );
-  const { replyDrafts } = useMessageCache();
+  const responseStore = complaintResponseStore(storage, scope);
 
-  const draftKey = JSON.stringify([pendingKey, detail.id]);
-  const draft = replyDrafts.get(draftKey);
+  const draftKey = JSON.stringify([
+    `studio-message-responses:${scope}`,
+    detail.id,
+  ]);
   const [savedReply, saveReply, clearReply] = useUnsentText("reply", draftKey);
   const previous = requests.get(detail.id);
-  const [text, setText] = useState(previous?.text || draft?.text || "");
+  const [text, setText] = useState(previous?.text || "");
   useEffect(() => {
     if (!previous && savedReply !== null) setText(savedReply);
   }, [savedReply]);
@@ -86,10 +78,6 @@ function MessageResponse({
   const [sending, setSending] = useState(false);
   const [retry, setRetry] = useState(!!previous);
   const [error, setError] = useState<unknown>(null);
-  const saveDraft = (value: ReplyDraft) => {
-    replyDrafts.set(draftKey, value);
-    saveReply(value.text);
-  };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (sending || !text.trim() || text.length > 12000) return;
@@ -114,9 +102,7 @@ function MessageResponse({
     try {
       const outcome = await submitComplaintResponse(
         payload,
-        token,
-        (request, sessionToken) =>
-          post("/api/complaints", request, { sessionToken }),
+        (request) => post("/api/complaints", request),
         (id) => get("/api/complaint", { query: { id } }),
       );
       const remaining = new Map(requests);
@@ -124,9 +110,8 @@ function MessageResponse({
       responseStore.write(remaining);
       requests.delete(detail.id);
       setRetry(false);
-      replyDrafts.delete(draftKey);
-      await clearReply(text);
-      setText("");
+      await clearReply(payload.text);
+      setText((current) => (current === payload.text ? "" : current));
       if ("detail" in outcome) onResponse(outcome.detail);
       else notify(errorText(outcome.reloadError));
       try {
@@ -137,7 +122,7 @@ function MessageResponse({
     } catch (failure) {
       if (failure instanceof ApiError) {
         if (isDefinitiveComplaintRefusal(failure.status)) {
-          await clearReply(text);
+          await clearReply(payload.text);
           const remaining = new Map(requests);
           remaining.delete(detail.id);
           try {
@@ -197,7 +182,7 @@ function MessageResponse({
         disabled={sending || retry}
         onChange={(event) => {
           setText(event.target.value);
-          saveDraft({ text: event.target.value, status });
+          saveReply(event.target.value);
         }}
       />
       {!!error && (
@@ -218,64 +203,57 @@ function MessageResponse({
   );
 }
 
-export default function UserMessages({
-  data,
+export default observer(function UserMessages({
   target = "user",
   hideEmpty = false,
   focusId,
   onlyComplaintId,
   focusRequestId,
-  refresh,
-  notify,
 }: {
-  data: Snapshot;
   target?: "user" | "lead";
   hideEmpty?: boolean;
   focusId?: string | undefined;
   onlyComplaintId?: string;
   focusRequestId?: string | undefined;
-  refresh: () => Promise<void>;
-  notify: (s: string) => void;
 }) {
   const storage = useServerStorage();
-  const pendingKey = `studio-message-responses:${data.stateDir}`;
+  const store = useServerStore();
+  const state = resourceData(store.state().current);
+  const stateDir = state?.workspaces.values().next().value?.stateDir || "";
   const pending = useMemo(() => {
     try {
-      return {
-        requests: new Map(
-          Object.entries(complaintResponseStore(storage, data.stateDir).read()),
-        ),
-        error: "",
-      };
+      return new Map(
+        Object.entries(complaintResponseStore(storage, stateDir).read()),
+      );
     } catch {
-      return {
-        requests: new Map<string, UserComplaintResponse>(),
-        error:
-          "The saved response request cannot be read. Resolve it before sending another response.",
-      };
+      return new Error(
+        "The saved response request cannot be read. Resolve it before sending another response.",
+      );
     }
-  }, [pendingKey, storage]);
-  const records = data.runtime.complaints.filter(
-    (message) =>
-      recipient(message) === target &&
-      (!onlyComplaintId || message.id === onlyComplaintId),
-  );
+  }, [stateDir, storage]);
+  const selected = onlyComplaintId
+    ? state?.complaints.get(onlyComplaintId)
+    : undefined;
+  const records = (
+    onlyComplaintId
+      ? selected
+        ? [selected]
+        : []
+      : [...(state?.complaints.values() || [])]
+  ).filter((message) => message.recipient === target);
   return (
     <section className="user-message-list">
-      {pending.error ? (
-        <p role="alert">{pending.error}</p>
+      {pending instanceof Error ? (
+        <p role="alert">{pending.message}</p>
       ) : (
         records.map((message) => (
           <UserMessage
-            key={JSON.stringify([data.stateDir, message.id])}
+            key={JSON.stringify([stateDir, message.id])}
             message={message}
-            data={data}
+            scope={stateDir}
             focused={message.id === focusId}
             focusRequestId={focusRequestId}
-            requests={pending.requests}
-            pendingKey={pendingKey}
-            refresh={refresh}
-            notify={notify}
+            requests={pending}
           />
         ))
       )}
@@ -284,82 +262,73 @@ export default function UserMessages({
       )}
     </section>
   );
-}
+});
 
-export function UserMessage({
+export const UserMessage = observer(function UserMessage({
   message,
-  data,
+  scope,
   focused,
   focusRequestId,
   requests,
-  pendingKey,
-  refresh,
-  notify,
 }: {
-  message: Complaint;
-  data: Snapshot;
+  message: ComplaintSummary;
+  scope: string;
   focused: boolean;
   focusRequestId?: string | undefined;
   requests: Map<string, UserComplaintResponse>;
-  pendingKey: string;
-  refresh: () => Promise<void>;
-  notify: (s: string) => void;
 }) {
+  useMessageRenderProbe("user-message", message.id);
   const { get } = useServerApi();
-  const { confirmedMessages } = useMessageCache();
+  const store = useServerStore();
+  const confirmedMessages = useMessageCache();
 
-  const confirmedKey = JSON.stringify([data.stateDir, message.id]);
-  const [detail, setDetail] = useState<
-    ComplaintSummary | ComplaintDetailResponse
-  >(() => {
-    const confirmed = confirmedMessages.get(confirmedKey);
-    return confirmed && confirmed.version > (message.version || 0)
-      ? confirmed
-      : message;
-  });
+  const confirmedKey = JSON.stringify([scope, message.id]);
   const [reply, setReply] = useState(focused || requests.has(message.id));
   const [error, setError] = useState<unknown>(null);
-  const streamed = useSubscription({
-    kind: "complaint",
-    complaintId: message.id,
-  });
+  const current = store.complaint(complaintId(message.id)).current;
   useEffect(() => {
     if (focused) setReply(true);
   }, [focused, focusRequestId]);
-  useEffect(() => {
-    if (isComplaintDetail(message)) {
-      setDetail((current) =>
-        (current.version || 0) > (message.version || 0) ? current : message,
-      );
-      if (
-        (confirmedMessages.get(confirmedKey)?.version || 0) <=
-        (message.version || 0)
-      )
-        confirmedMessages.delete(confirmedKey);
-      return;
-    }
-  }, [message, confirmedKey, confirmedMessages]);
-  useEffect(() => {
-    if (streamed.data) {
-      setDetail((current) =>
-        (current.version || 0) > (streamed.data!.version || 0)
-          ? current
-          : streamed.data!,
-      );
-      setError(null);
-    }
-    if (streamed.error) setError(streamed.error);
-  }, [streamed.data, streamed.error]);
+  // Retire only when full authoritative detail has materialized the confirmed version.
+  useEffect(
+    () =>
+      autorun(() => {
+        const latest = resourceData(
+          store.complaint(complaintId(message.id)).current,
+        );
+        const confirmed = confirmedMessages.get(confirmedKey);
+        if (latest && confirmed && latest.version >= confirmed.version)
+          runInAction(() => confirmedMessages.delete(confirmedKey));
+      }),
+    [store, message.id, confirmedMessages, confirmedKey],
+  );
+  const confirmed = confirmedMessages.get(confirmedKey);
+  const source = resourceData(current) || message;
+  const detail =
+    confirmed &&
+    confirmed.version > (isComplaintDetail(source) ? source.version : -1)
+      ? confirmed
+      : source;
+  const remember = (result: ComplaintDetailResponse) =>
+    runInAction(() => {
+      const cached = confirmedMessages.get(confirmedKey);
+      if (!cached || cached.version <= result.version)
+        confirmedMessages.set(confirmedKey, result);
+    });
   const retryDetail = () => {
     void get("/api/complaint", { query: { id: message.id } })
-      .then(setDetail)
+      .then((result) => {
+        remember(result);
+        setError(null);
+      })
       .catch(setError);
   };
   const detailView = isComplaintDetail(detail) ? detail : null;
+  const detailError = error || ("error" in current ? current.error : null);
   const authorName = (id: string) =>
     id === "user"
       ? "You"
-      : data.threads.find((agent) => agent.id === id)?.name ||
+      : resourceData(store.state().current)?.agents.get(id)?.name ||
         message.authorName ||
         id;
   return (
@@ -376,10 +345,10 @@ export function UserMessage({
         text={detailView?.text ?? ""}
         agentId={message.author || undefined}
       />
-      {!detailView && !error && <p role="status">Loading message…</p>}
-      {!!error && (
+      {!detailView && !detailError && <p role="status">Loading message…</p>}
+      {!!detailError && (
         <p role="alert">
-          <ErrorDescription value={error} role="status" />{" "}
+          <ErrorDescription value={detailError} role="status" />{" "}
           <Button onClick={retryDetail}>Retry</Button>
         </p>
       )}
@@ -408,28 +377,16 @@ export function UserMessage({
           {reply && (
             <MessageResponse
               detail={detail}
-              token={data.token}
               requests={requests}
-              pendingKey={pendingKey}
-              refresh={refresh}
-              notify={notify}
-              onResponse={(result) => {
-                const cached = confirmedMessages.get(confirmedKey);
-                if (!cached || cached.version <= result.version)
-                  confirmedMessages.set(confirmedKey, result);
-                setDetail((current) =>
-                  (current.version || 0) > (result.version || 0)
-                    ? current
-                    : result,
-                );
-              }}
+              scope={scope}
+              onResponse={remember}
             />
           )}
         </>
       )}
     </article>
   );
-}
+});
 
 function isComplaintDetail(
   complaint: ComplaintSummary | ComplaintDetailResponse,
