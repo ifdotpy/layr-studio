@@ -71,6 +71,7 @@ beforeEach(() => {
     clientHeight: 669,
     hasAttribute: (name) => attributes.has(name),
     style: Object.assign(style, {
+      getPropertyValue: (key: string) => style.get(key) ?? "",
       setProperty: (key: string, value: string) => {
         style.set(key, value);
       },

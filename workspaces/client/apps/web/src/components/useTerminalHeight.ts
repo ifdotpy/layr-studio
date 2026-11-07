@@ -79,6 +79,10 @@ export function useTerminalHeight(
         if (!observed.has(element)) observer.observe(element);
       }
       observed = targets;
+      // Replaced containers are new children of these; their content is not.
+      structure.disconnect();
+      for (const node of [parent, workspace, conversation])
+        if (node) structure.observe(node, { childList: true });
       const hostTop = Math.max(0, workspace?.getBoundingClientRect().top ?? 0);
       const next = {
         available: Math.max(0, bottom - hostTop - reserved),
@@ -98,9 +102,10 @@ export function useTerminalHeight(
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(measure);
     };
-    const mutations = new MutationObserver(schedule);
     // A chat switch can replace the measured controls without a window resize.
-    mutations.observe(parent, { childList: true, subtree: true });
+    // Only the measured containers' children matter: watching the whole app
+    // subtree ran this measurement for every streamed token and keystroke.
+    const structure = new MutationObserver(schedule);
     const rootStyles = new MutationObserver(schedule);
     rootStyles.observe(document.documentElement, {
       attributes: true,
@@ -114,7 +119,7 @@ export function useTerminalHeight(
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
-      mutations.disconnect();
+      structure.disconnect();
       rootStyles.disconnect();
       window.removeEventListener("resize", schedule);
       window.visualViewport?.removeEventListener("resize", schedule);

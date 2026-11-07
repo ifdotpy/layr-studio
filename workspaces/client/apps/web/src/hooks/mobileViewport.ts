@@ -144,12 +144,24 @@ export function useMobileViewport(active: boolean, compact = false) {
       ])
         root.style.removeProperty(property);
     };
+    // Viewport and scroll events repeat with the same values; an unchanged
+    // value is not written again, so it recalculates no document style and
+    // wakes no observer of the root element.
+    const setRootFlag = (name: string, on: boolean) => {
+      if (root.hasAttribute(name) === on) return;
+      if (on) root.setAttribute(name, "");
+      else root.removeAttribute(name);
+    };
+    const setRootProperty = (name: string, value: string) => {
+      if (root.style.getPropertyValue(name) !== value)
+        root.style.setProperty(name, value);
+    };
     const update = () => {
       cancelAnimationFrame(frame);
       frame = 0;
       if (hasTouchCapability(coarsePointer.matches, navigator.maxTouchPoints))
-        root.setAttribute("data-touch-input", "");
-      else root.removeAttribute("data-touch-input");
+        setRootFlag("data-touch-input", true);
+      else setRootFlag("data-touch-input", false);
       syncTouchListeners();
       if (!compact && !primaryPointer.matches) {
         clear();
@@ -172,9 +184,9 @@ export function useMobileViewport(active: boolean, compact = false) {
       const top = native ? 0 : Math.max(0, viewport?.offsetTop ?? 0);
       if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(top))
         return;
-      root.setAttribute("data-viewport-surface", "");
-      if (native) root.setAttribute("data-viewport-native-keyboard", "");
-      else root.removeAttribute("data-viewport-native-keyboard");
+      setRootFlag("data-viewport-surface", true);
+      if (native) setRootFlag("data-viewport-native-keyboard", true);
+      else setRootFlag("data-viewport-native-keyboard", false);
       const width = viewport?.width || window.innerWidth;
       const sameWidth = !fullWidth || width === fullWidth;
       const editable = document.activeElement as HTMLElement | null;
@@ -201,8 +213,8 @@ export function useMobileViewport(active: boolean, compact = false) {
         fullWidth = width;
       }
       if (keyboard) keyboardRecoveryPending = true;
-      if (keyboard) root.setAttribute("data-viewport-keyboard", "");
-      else root.removeAttribute("data-viewport-keyboard");
+      if (keyboard) setRootFlag("data-viewport-keyboard", true);
+      else setRootFlag("data-viewport-keyboard", false);
       const overlay =
         keyboard &&
         primaryPointer.matches &&
@@ -210,22 +222,22 @@ export function useMobileViewport(active: boolean, compact = false) {
         fullHeight < layoutValues.header.shortLandscapeMaxHeight;
       const surfaceHeight = overlay ? fullHeight : height;
       if (keyboard && height < layoutValues.keyboard.compactMaxHeight)
-        root.setAttribute("data-viewport-keyboard-compact", "");
-      else root.removeAttribute("data-viewport-keyboard-compact");
+        setRootFlag("data-viewport-keyboard-compact", true);
+      else setRootFlag("data-viewport-keyboard-compact", false);
       if (
         primaryPointer.matches &&
         width > fullHeight &&
         fullHeight < layoutValues.header.shortLandscapeMaxHeight
       )
-        root.setAttribute("data-viewport-short-landscape", "");
-      else root.removeAttribute("data-viewport-short-landscape");
-      root.style.setProperty("--mobile-viewport-height", `${surfaceHeight}px`);
-      root.style.setProperty("--mobile-viewport-top", `${top}px`);
-      root.style.setProperty(
+        setRootFlag("data-viewport-short-landscape", true);
+      else setRootFlag("data-viewport-short-landscape", false);
+      setRootProperty("--mobile-viewport-height", `${surfaceHeight}px`);
+      setRootProperty("--mobile-viewport-top", `${top}px`);
+      setRootProperty(
         "--mobile-safe-area-bottom",
         keyboard && !overlay ? "0px" : "var(--viewport-device-safe-bottom)",
       );
-      root.style.setProperty(
+      setRootProperty(
         "--mobile-safe-area-top",
         top > 0
           ? `max(0px, calc(var(--viewport-device-safe-top) - ${top}px))`

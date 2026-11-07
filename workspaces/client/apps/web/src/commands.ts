@@ -9,8 +9,17 @@ import type { PendingCommands } from "./pendingCommands.ts";
 import { randomUUID } from "./uuid.ts";
 import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues.ts";
 
+/**
+ * Whether text has more than `limit` code points. A string never has more
+ * code points than UTF-16 units, so a short draft needs no count: typing does
+ * not build an array of the whole draft for each keystroke.
+ */
+export function codePointsExceed(text: string, limit: number): boolean {
+  return text.length > limit && Array.from(text).length > limit;
+}
+
 export function sendsTextFile(text: string, explicit = false): boolean {
-  return explicit || Array.from(text).length > MAX_MANAGED_MESSAGE_CODEPOINTS;
+  return explicit || codePointsExceed(text, MAX_MANAGED_MESSAGE_CODEPOINTS);
 }
 
 export type CommandRequest = components["schemas"]["CommandRequest"];
