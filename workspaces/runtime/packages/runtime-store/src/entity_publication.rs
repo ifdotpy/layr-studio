@@ -195,23 +195,39 @@ fn push(event: Event) {
     });
 }
 
-/// Capture the old team root before an indexed write can move or remove it.
-pub(crate) fn agent_team_root(connection: &Connection, id: &str) -> StoreResult<Option<String>> {
+/// Capture root and parent before an indexed write can move or remove an agent.
+pub(crate) fn agent_team_owners(connection: &Connection, id: &str) -> StoreResult<Vec<String>> {
     if !active() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    Ok(connection
-        .prepare_cached("SELECT root_id FROM runtime_agents WHERE id=?1")?
-        .query_row([id], |row| row.get(0))
+    let owners = connection
+        .prepare_cached("SELECT root_id,parent_id FROM runtime_agents WHERE id=?1")?
+        .query_row([id], |row| {
+            Ok([
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ])
+        })
         .optional()?
-        .flatten())
+        .unwrap_or_default();
+    Ok(owners.into_iter().flatten().collect())
 }
 
-/// Enqueue roots only after the indexed row has actually changed.
-pub(crate) fn mark_agent_team_roots(id: &str, old_root: Option<&str>, new_root: Option<&str>) {
-    for root in old_root.into_iter().chain(new_root) {
-        if root != id {
-            push(Event::TeamRoot(root.to_owned()));
+/// Existing affected-owner events also carry parents whose live wait changes.
+pub(crate) fn mark_agent_team_owners(
+    id: &str,
+    old_owners: &[String],
+    new_root: Option<&str>,
+    new_parent: Option<&str>,
+) {
+    for owner in old_owners
+        .iter()
+        .map(String::as_str)
+        .chain(new_root)
+        .chain(new_parent)
+    {
+        if owner != id && !owner.is_empty() {
+            push(Event::TeamRoot(owner.to_owned()));
         }
     }
 }

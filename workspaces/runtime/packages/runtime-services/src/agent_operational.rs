@@ -353,6 +353,7 @@ pub(crate) fn affected_owners(
     pending: &studio_runtime_store::PendingEntities,
 ) -> StoreResult<BTreeSet<String>> {
     let mut owners = pending.team_roots.clone();
+    owners.extend(pending.agents.iter().cloned());
     for id in &pending.agents {
         owners.extend(
             tx.query_row(
@@ -388,6 +389,9 @@ pub(crate) fn affected_owners(
                 );
             }
         }
+    }
+    if owners.is_empty() {
+        return Ok(owners);
     }
     let owners_json = studio_json::to_string(&owners)?;
     let owners=tx.prepare_cached("WITH RECURSIVE owners(id) AS (SELECT value FROM json_each(?1) UNION SELECT a.parent_id FROM runtime_agents a JOIN owners o ON a.id=o.id WHERE a.parent_id IS NOT NULL) SELECT id FROM owners")?.query_map([owners_json],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;

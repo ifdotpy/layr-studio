@@ -2932,21 +2932,17 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
     }
 
     pub fn delete(&self, id: &R::Id) -> StoreResult<bool> {
-        let old_root = if R::TABLE == AgentRecord::TABLE {
-            crate::entity_publication::agent_team_root(self.connection, id.as_ref())?
+        let old_owners = if R::TABLE == AgentRecord::TABLE {
+            crate::entity_publication::agent_team_owners(self.connection, id.as_ref())?
         } else {
-            None
+            Vec::new()
         };
         let changed = self.connection.execute(
             &format!("DELETE FROM {} WHERE id=?1", quoted_table::<R>()),
             [id.as_ref()],
         )?;
         if changed == 1 && R::TABLE == AgentRecord::TABLE {
-            crate::entity_publication::mark_agent_team_roots(
-                id.as_ref(),
-                old_root.as_deref(),
-                None,
-            );
+            crate::entity_publication::mark_agent_team_owners(id.as_ref(), &old_owners, None, None);
         }
         Ok(changed == 1)
     }

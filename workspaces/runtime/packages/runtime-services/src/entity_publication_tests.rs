@@ -2510,3 +2510,55 @@ async fn v5_child_input_epoch_and_resolution_invalidate_the_parent_summary() {
         "waiting"
     );
 }
+
+#[tokio::test]
+async fn v5_nested_child_completion_publishes_the_waiting_parent() {
+    let (_directory, store) = store().await;
+    seed_chat(&store, chat(json!({"status":"waiting","autoWake":true}))).await;
+    for (id, parent, status) in [("middle", CHAT, "waiting"), ("leaf", "middle", "running")] {
+        seed_chat(&store,json!({"compactions":0,"provider":"codex","accountKey":"default","id":id,"rootId":CHAT,"parentId":parent,"isLead":false,"epoch":1,"status":status,"autoWake":true})).await;
+    }
+    assert_eq!(
+        client_entity(&store, "agentSummary", "middle")
+            .expect("middle")
+            .1["operationalStatus"]["reason"],
+        "waiting"
+    );
+    let before = store
+        .test_read_transaction(|tx| studio_runtime_store::durable_seq::high(tx))
+        .expect("cursor");
+    store
+        .transaction(|tx| {
+            let mut leaf = AgentRepository::get(tx, &studio_runtime_store::AgentId::from("leaf"))?
+                .expect("leaf")
+                .value();
+            leaf["status"] = json!("completed");
+            AgentRepository::put(tx, &AgentRecord::from_value(leaf)?)
+        })
+        .await
+        .expect("completion");
+    let page = store
+        .test_read_transaction(|tx| {
+            crate::entity_scope::resume(
+                tx,
+                Some(before),
+                Some("[\"agentSummary\"]"),
+                None,
+                None,
+                false,
+                100,
+            )
+        })
+        .expect("delta");
+    let parent = page
+        .rows
+        .iter()
+        .find(|row| row.id == "middle")
+        .expect("nested parent must be invalidated");
+    let payload: Value =
+        studio_json::from_str(parent.payload.as_deref().expect("payload")).expect("wire");
+    assert_eq!(
+        payload["value"]["operationalStatus"]["reason"],
+        "turn_ended"
+    );
+}

@@ -530,7 +530,7 @@ pub fn put(
     let agent_value = agent;
     let agent = object(id, agent)?;
     let record = stored_record(agent)?;
-    let old_root = crate::entity_publication::agent_team_root(connection, id)?;
+    let old_owners = crate::entity_publication::agent_team_owners(connection, id)?;
     let sql = if insert_only {
         "INSERT INTO runtime_agents(id,record) VALUES (?1,?2) ON CONFLICT(id) DO NOTHING"
     } else {
@@ -539,10 +539,11 @@ pub fn put(
     };
     let written = connection.execute_cached(sql, params![id, record])? == 1;
     if written {
-        crate::entity_publication::mark_agent_team_roots(
+        crate::entity_publication::mark_agent_team_owners(
             id,
-            old_root.as_deref(),
+            &old_owners,
             agent.get("rootId").and_then(Value::as_str),
+            agent.get("parentId").and_then(Value::as_str),
         );
     }
     if written || !insert_only {
@@ -558,16 +559,17 @@ pub fn update(connection: &Connection, id: &str, agent: &Value) -> StoreResult<b
     let agent_value = agent;
     let agent = object(id, agent)?;
     let record = stored_record(agent)?;
-    let old_root = crate::entity_publication::agent_team_root(connection, id)?;
+    let old_owners = crate::entity_publication::agent_team_owners(connection, id)?;
     let written = connection.execute_cached(
         "UPDATE runtime_agents SET record=?2 WHERE id=?1 AND record IS NOT ?2",
         params![id, record],
     )? == 1;
     if written {
-        crate::entity_publication::mark_agent_team_roots(
+        crate::entity_publication::mark_agent_team_owners(
             id,
-            old_root.as_deref(),
+            &old_owners,
             agent.get("rootId").and_then(Value::as_str),
+            agent.get("parentId").and_then(Value::as_str),
         );
     }
     let exists = written
