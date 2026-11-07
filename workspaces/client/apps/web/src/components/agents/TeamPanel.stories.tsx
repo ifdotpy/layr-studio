@@ -4,7 +4,7 @@ import { approval, question } from "../../approvalFixtures";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { Agent, Snapshot } from "../../types";
-import { chatIndicators } from "../chat-status/chatStatusModel";
+import { agentIndicators } from "../../status/operationalStatus.ts";
 import TeamPanel from "./TeamPanel";
 
 const now = Math.floor(Date.now() / 1000);
@@ -15,6 +15,7 @@ const lead: Agent = {
   isLead: true,
   source: AgentSource.managed,
   status: AgentStatus.running,
+  operationalStatus: { reason: "working" },
   inFlight: true,
   model: "gpt-6-astra",
   created: now - 195,
@@ -25,6 +26,7 @@ const workerFixtures: Agent[] = [
     id: "question",
     name: "Permissions review",
     status: AgentStatus.approval,
+    operationalStatus: { reason: "needs_input", wait: null },
     role: AgentRole.reviewer,
     overview: { task: "Confirm the allowed command scope" },
   },
@@ -32,6 +34,7 @@ const workerFixtures: Agent[] = [
     id: "error",
     name: "Обновление индексов для нескольких проектов и проверка восстановления после перезапуска",
     status: AgentStatus.failed,
+    operationalStatus: { reason: "failed" },
     error: "Type check failed in the project adapter.",
     overview: { task: "Repair the project migration" },
   },
@@ -39,6 +42,7 @@ const workerFixtures: Agent[] = [
     id: "running",
     name: "Transcript worker",
     status: AgentStatus.running,
+    operationalStatus: { reason: "working" },
     inFlight: true,
     activity: { phase: "tool", at: now - 74 },
     commandProgress: [
@@ -55,6 +59,7 @@ const workerFixtures: Agent[] = [
     id: "child",
     name: "Mobile reviewer",
     status: AgentStatus.running,
+    operationalStatus: { reason: "working" },
     inFlight: true,
     parentId: "running",
     role: AgentRole.reviewer,
@@ -64,6 +69,7 @@ const workerFixtures: Agent[] = [
     id: "paused",
     name: "Package verification",
     status: AgentStatus.paused,
+    operationalStatus: { reason: "stopped" },
     autoWake: false,
     overview: { task: "Wait for the integration branch" },
   },
@@ -71,12 +77,14 @@ const workerFixtures: Agent[] = [
     id: "none",
     name: "Queue recovery",
     status: AgentStatus.idle,
+    operationalStatus: { reason: "ready" },
     overview: { task: "Preserve drafts after reconnect" },
   },
   {
     id: "unread",
     name: "Новые результаты проверки доступности интерфейса",
     status: AgentStatus.completed,
+    operationalStatus: { reason: "unread_result" },
     threadId: "thread-result",
     lastCompletedTurn: "turn-result",
     lastCompletedTurnStatus: "completed",
@@ -89,6 +97,7 @@ const workerFixtures: Agent[] = [
     id: "finished",
     name: "Storage adapter",
     status: AgentStatus.completed,
+    operationalStatus: { reason: "read_result" },
     overview: {
       task: "Inspect request identities",
       result: "Request identities remain stable across retries.",
@@ -98,6 +107,7 @@ const workerFixtures: Agent[] = [
     id: `done-${index}`,
     name: `Completed review ${index + 1}`,
     status: AgentStatus.completed,
+    operationalStatus: { reason: "read_result" },
   })),
 ];
 const workers: Agent[] = workerFixtures.map((agent) => ({
@@ -140,7 +150,7 @@ const snapshot: Snapshot = {
     studioErrors: [],
   },
 };
-const indicators = chatIndicators(snapshot);
+const indicators = agentIndicators(snapshot.threads);
 
 const meta = {
   title: "Agents/Team dispatch",

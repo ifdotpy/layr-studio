@@ -1,4 +1,4 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
+import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus } from "../../generated/api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -19,7 +19,11 @@ vi.mock("../../servers/ServerServicesContext", async (importOriginal) => ({
 import TeamPanel from "./TeamPanel";
 import type { ChatIndicator } from "../chat-status/chatStatusModel";
 
-function renderTeam(deferred = false, workerFilter = "all") {
+function renderTeam(
+  deferred = false,
+  workerFilter = "all",
+  missingSummary = false,
+) {
   const noop = () => {};
   return renderToStaticMarkup(
     createElement(
@@ -43,7 +47,14 @@ function renderTeam(deferred = false, workerFilter = "all") {
         answerIds: new Set<string>(),
         deferredIds: new Set(deferred ? ["approval"] : []),
         indicators: new Map<string, ChatIndicator>([
-          ["approval", { kind: ChatOperationalKind["none"], label: "Ready" }],
+          [
+            "approval",
+            missingSummary
+              ? { kind: "loading", label: "" }
+              : deferred
+                ? { kind: "paused", label: "Question deferred" }
+                : { kind: "answer", label: "Needs your answer" },
+          ],
           ["finished", { kind: ChatOperationalKind["none"], label: "Read" }],
         ]),
         workerQuery: "",
@@ -76,4 +87,10 @@ it("keeps deferred approval out of Needs you and preserves finished filtering", 
   expect(renderTeam(true)).not.toContain('aria-label="Needs you"');
   expect(renderTeam(true, "answer")).not.toContain("Approval worker");
   expect(renderTeam(false, "completed")).not.toContain("Approval worker");
+});
+
+it("does not infer a status claim from raw approval before its operational summary", () => {
+  expect(renderTeam(false, "all", true)).not.toContain(
+    'data-chat-status="answer"',
+  );
 });

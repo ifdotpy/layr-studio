@@ -18,11 +18,6 @@ type Selection = {
   selectWork: ReturnType<typeof createWorkDataSelector>;
 };
 const selectors: Required<Pick<ResourceDataSelectors<Selection>, ScopeKind>> = {
-  sidebar: (_ref, { entities }) => ({
-    rows: entities
-      .filter((row) => row.collection === "sidebarChatRow")
-      .map((row) => row.value),
-  }),
   work: (ref, { entities, selectWork }) => selectWork(entities, ref.agentId),
   agentDetail: (_ref, { entities }) =>
     entities.find((row) => row.collection === "agentDetail")?.value,

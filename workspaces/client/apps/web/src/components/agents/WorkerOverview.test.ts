@@ -1,4 +1,4 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
+import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus } from "../../generated/api";
 import { approval, question } from "../../approvalFixtures";
 import { required } from "../componentTestFixtures.ts";

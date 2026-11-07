@@ -1,4 +1,4 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
+import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus } from "../../generated/api";
 import { RetainedWorktree } from "./RetainedWorktrees";
 import { providerLabel } from "../../generated/providerKind.ts";

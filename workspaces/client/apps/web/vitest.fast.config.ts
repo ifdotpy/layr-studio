@@ -42,6 +42,7 @@ export default {
       "src/servers/CombinedServerSidebar.test.ts",
       "src/servers/receiveSidebarRead.test.ts",
       "src/servers/mergedSidebar.render.test.ts",
+      "src/servers/mergedSidebar.v5.test.ts",
       "src/sync/subscriptions/viewData.test.ts",
       "src/sync/subscriptions/terminalOutput.test.ts",
       "src/sync/subscriptions/server.test.ts",

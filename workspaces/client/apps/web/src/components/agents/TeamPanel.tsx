@@ -1,4 +1,3 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
 import { TeamRetainedWorktrees } from "./RetainedWorktrees";
 import { ActionIcon, Button, TextInput } from "@mantine/core";
 import { ArrowLeft, Search, X } from "lucide-react";
@@ -80,19 +79,6 @@ export default function TeamPanel({
   previewResult,
   remove,
 }: Props) {
-  // Keep the roster, counters and row indicator aligned with the worker's
-  // operational approval state, even before its request projection arrives.
-  const teamIndicators = new Map(indicators);
-  for (const agent of workers) {
-    if (
-      workerState(agent, answerIds, deferredIds) === "answer" &&
-      teamIndicators.get(agent.id)?.kind !== ChatOperationalKind["answer"]
-    )
-      teamIndicators.set(agent.id, {
-        kind: ChatOperationalKind["answer"],
-        label: "Needs your answer",
-      });
-  }
   const byId = new Map(
     [...(lead ? [lead] : []), ...workers].map((a) => [a.id, a]),
   );
@@ -105,7 +91,7 @@ export default function TeamPanel({
         selected={opened === a.id}
         awaitingAnswer={workerState(a, answerIds, deferredIds) === "answer"}
         deferred={deferredIds.has(a.id)}
-        indicator={teamIndicators.get(a.id)}
+        indicator={indicators.get(a.id)}
         open={() => open(a.id)}
         previewResult={() =>
           previewResult({
@@ -128,8 +114,8 @@ export default function TeamPanel({
           .toLowerCase()
           .includes(query),
       )
-    : filterTeamWorkers(ordered, teamIndicators, workerFilter);
-  const { groups, completed } = teamDispatchGroups(shown, teamIndicators);
+    : filterTeamWorkers(ordered, indicators, workerFilter);
+  const { groups, completed } = teamDispatchGroups(shown, indicators);
   const smallTeam = workers.length <= 3;
   const showTeamFilters = !smallTeam || !!workerQuery || workerFilter !== "all";
   return (
@@ -191,7 +177,7 @@ export default function TeamPanel({
         <TeamRetainedWorktrees items={retainedWorktrees} />
         <TeamSummary
           workers={workers}
-          indicators={teamIndicators}
+          indicators={indicators}
           selected={workerFilter}
           onFilter={(value) => {
             setWorkerFilter(value);

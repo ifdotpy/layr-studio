@@ -1,18 +1,26 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
+import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../../generated/api.ts";
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import type { Agent } from "../../types";
-import {
-  chatIndicators,
-  type ChatIndicator,
-} from "../chat-status/chatStatusModel";
+import { type ChatIndicator } from "../chat-status/chatStatusModel";
 import { needsYou, projectStateCounts, projectStateLabel } from "./fleet";
 import ProjectStateCounts from "./ProjectStateCounts";
 import SidebarRow from "../SidebarRow";
-import { sidebarRowFixture } from "../../servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
+import { createStateMirror } from "../../generated/observableResources.ts";
+import { createSidebarRow, localSidebarIdentity } from "./viewModel.ts";
+import { agentIndicators } from "../../status/operationalStatus.ts";
+const rowFixture = (
+  id: string,
+  overrides: Parameters<typeof agentSummaryFixture>[1] = {},
+) =>
+  createSidebarRow(agentSummaryFixture(id, overrides), {
+    ...localSidebarIdentity,
+    collections: createStateMirror().current,
+  });
 
 const chat = (id: string, cwd = "/work/api") =>
   ({ id, cwd, name: `Chat ${id}` }) as Agent;
@@ -79,9 +87,11 @@ describe("fleet presentation", () => {
     };
     expect(needsYou([row], indicators)).toEqual([row]);
     // The operational owner still decides a failed chat is an error.
-    const actual = chatIndicators({
-      threads: [{ ...chat("failed"), source: "managed", status: "failed" }],
-    } as never);
+    const actual = agentIndicators([
+      agentSummaryFixture("failed", {
+        operationalStatus: { reason: "failed" },
+      }),
+    ]);
     expect(projectStateCounts([chat("failed")], actual).error).toBe(1);
   });
 });
@@ -93,13 +103,10 @@ function renderRow(overrides: Partial<Parameters<typeof SidebarRow>[0]> = {}) {
       MantineProvider,
       {},
       createElement(SidebarRow, {
-        row: sidebarRowFixture("answer", {
+        row: rowFixture("answer", {
           name: "Chat answer",
           pinned: true,
-          indicator: {
-            kind: ChatOperationalKind["answer"],
-            label: "Needs your answer",
-          },
+          operationalStatus: { reason: "needs_input", wait: null },
         }),
         selected: true,
         serverAlias: "MAC",
@@ -153,13 +160,15 @@ describe("real fleet strip", () => {
   });
   it("preserves the stall attention cue", () => {
     const html = renderRow({
-      row: sidebarRowFixture("stalled", { waitingForLead: true }),
+      row: rowFixture("stalled", {
+        stall: { taskId: "assignment", since: 1 },
+      }),
     });
     expect(html).toContain('role="status"');
     expect(html).toContain("Waiting for lead");
   });
   it("shows only non-default server identities and retains offline attention", () => {
-    const quiet = renderRow({ row: sidebarRowFixture("quiet") });
+    const quiet = renderRow({ row: rowFixture("quiet") });
     expect(quiet).not.toContain("fleet-server-badge");
     expect(quiet).not.toContain("fleet-chat-meta");
     const remote = renderRow({ serverAlias: "RMT", showServer: true });

@@ -479,7 +479,7 @@ describe("shared resource event transport", () => {
     Source.skipNextAutoHandshake = true;
     const transport = await loadTransport();
     const stop = transport.watchResourceChanges(
-      { kind: "queue", agentId: "agent-one" },
+      { kind: "costs", agentId: "agent-one" },
       vi.fn(),
     );
     await vi.advanceTimersByTimeAsync(0);
@@ -560,8 +560,8 @@ describe("shared resource event transport", () => {
     const subscriptions = createSubscriptions(transport);
     const runtime = createObservableResourceRuntime(subscriptions);
     const a = runtime.slot({
-      key: subscriptionKey({ kind: "sidebar" }),
-      ref: { kind: "sidebar" },
+      key: subscriptionKey({ kind: "costs" }),
+      ref: { kind: "costs" },
       create: () => ({}),
       apply: () => {},
     });
@@ -577,7 +577,7 @@ describe("shared resource event transport", () => {
     await vi.advanceTimersByTimeAsync(31);
     expect(subscriptionPosts).toHaveLength(1);
     expect(subscriptionPosts[0]?.add).toEqual([
-      { resource: { kind: "sidebar" }, since: undefined },
+      { resource: { kind: "costs" }, since: undefined },
       { resource: { kind: "desktop" }, since: undefined },
     ]);
     stop();
@@ -852,7 +852,7 @@ describe("shared resource event transport", () => {
     Source.skipNextAutoHandshake = true;
     const transport = await loadTransport();
     const stop = transport.watchResourceChanges(
-      { kind: "queue", agentId: "agent-one" },
+      { kind: "costs", agentId: "agent-one" },
       vi.fn(),
     );
     await vi.advanceTimersByTimeAsync(20);
@@ -1409,7 +1409,7 @@ describe("shared resource event transport", () => {
     syncDatabase.mockResolvedValue({ workspaceId });
 
     const transport = await loadTransport();
-    const queue = { kind: "queue", agentId: "agent-one" } as const;
+    const queue = { kind: "costs", agentId: "agent-one" } as const;
     const terminal = { kind: "terminal", terminalId: "terminal-one" } as const;
     const queueChanges = vi.fn();
     const terminalChanges = vi.fn();
@@ -1450,9 +1450,9 @@ describe("shared resource event transport", () => {
       epoch: "epoch-one",
       revision: 2,
       reason: "change",
-      resources: [{ kind: "queue", agentId: "another-agent" }],
+      resources: [{ kind: "costs", agentId: "another-agent" }],
       resourceVersions: [
-        { resource: { kind: "queue", agentId: "another-agent" }, revision: 2 },
+        { resource: { kind: "costs", agentId: "another-agent" }, revision: 2 },
       ],
     });
     await vi.advanceTimersByTimeAsync(40);
@@ -1551,7 +1551,7 @@ describe("shared resource event transport", () => {
     );
     await vi.advanceTimersByTimeAsync(1_000);
     const stopQueue = transport.watchResourceChanges(
-      { kind: "queue", agentId: "later" },
+      { kind: "costs", agentId: "later" },
       vi.fn(),
     );
     await vi.advanceTimersByTimeAsync(2_500);
@@ -1568,7 +1568,7 @@ describe("shared resource event transport", () => {
     ).toEqual(
       expect.arrayContaining([
         { kind: "state" },
-        { kind: "queue", agentId: "later" },
+        { kind: "costs", agentId: "later" },
       ]),
     );
     // The state cursor read is reused; only the joining queue is read again.
@@ -1620,7 +1620,7 @@ describe("shared resource event transport", () => {
 
     const transport = await loadTransport();
     const stop = transport.watchResourceChanges(
-      { kind: "queue", agentId: "agent-one" },
+      { kind: "costs", agentId: "agent-one" },
       vi.fn(),
     );
     await vi.advanceTimersByTimeAsync(20);
@@ -1954,7 +1954,7 @@ describe("shared resource event transport", () => {
     vi.stubGlobal("BroadcastChannel", Channel);
 
     const transport = await loadTransport();
-    const local = { kind: "queue", agentId: "resume-queue" } as const;
+    const local = { kind: "costs", agentId: "resume-queue" } as const;
     const onChange = vi.fn();
     const stop = transport.watchResourceChanges(local, onChange);
     await vi.advanceTimersByTimeAsync(20);
@@ -2081,8 +2081,8 @@ describe("shared resource event transport", () => {
     vi.stubGlobal("BroadcastChannel", Channel);
 
     const transport = await loadTransport();
-    const a = { kind: "queue", agentId: "resume-queue-a" } as const;
-    const b = { kind: "queue", agentId: "resume-queue-b" } as const;
+    const a = { kind: "costs", agentId: "resume-queue-a" } as const;
+    const b = { kind: "costs", agentId: "resume-queue-b" } as const;
     const onA = vi.fn();
     const onB = vi.fn();
     let stopA = transport.watchResourceChanges(a, onA);
