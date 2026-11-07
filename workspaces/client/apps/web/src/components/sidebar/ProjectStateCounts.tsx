@@ -1,15 +1,19 @@
+import { useMemo } from "react";
+import { createProjectStatusView, type SidebarChatView } from "./viewModel.ts";
 import { observer } from "mobx-react-lite";
-import {
-  aggregateStates,
-  projectStateLabel,
-  type projectStateCounts,
-} from "./fleet";
+import { aggregateStates, projectStateLabel } from "./fleet";
 
 export default observer(function ProjectStateCounts({
-  view,
+  rows,
+  archived,
 }: {
-  view: { readonly counts: ReturnType<typeof projectStateCounts> };
+  rows: readonly SidebarChatView[];
+  archived: boolean;
 }) {
+  const view = useMemo(
+    () => createProjectStatusView(rows, archived),
+    [rows, archived],
+  );
   const counts = view.counts;
   const label = projectStateLabel(counts);
   if (!label) return null;

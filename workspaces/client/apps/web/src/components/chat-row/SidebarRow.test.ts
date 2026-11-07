@@ -1,9 +1,13 @@
-import { ChatRowActionsContext } from "./actions.ts";
+import { createStateMirror } from "../../generated/observableResources.ts";
+import { useSidebarOrder, type SidebarDragTarget } from "../useSidebarOrder.ts";
+import { rowArea } from "./actions.fixture.ts";
+import { SidebarRowActionsProvider } from "./actions.ts";
 import type { Summary } from "./testFixture.ts";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
 // @vitest-environment happy-dom
 import {
   act,
+  useLayoutEffect,
   createElement,
   Profiler,
   StrictMode,
@@ -14,8 +18,178 @@ import { observer } from "mobx-react-lite";
 import { expect, it, vi } from "vitest";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import SidebarRow from "../SidebarRow.tsx";
+import ProjectStateCounts from "../sidebar/ProjectStateCounts.tsx";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
-import { actions, fixture } from "./testFixture.ts";
+import { actions, fixture, makeRow } from "./testFixture.ts";
+import { observable, runInAction } from "mobx";
+import { type SidebarRowActions } from "./actions.ts";
+
+it("the count leaf observes status without observing chat names", async () => {
+  const f = fixture();
+  const mirror = createStateMirror();
+  const apply = (name: string, reason: "working" | "failed") =>
+    mirror.apply([
+      {
+        collection: "agentSummary",
+        id: "a",
+        value: agentSummaryFixture("a", {
+          name,
+          operationalStatus: { reason },
+        }),
+      },
+    ]);
+  apply("First", "working");
+  const agent = mirror.current.agents.get("a");
+  if (!agent) throw new Error("Missing applied model");
+  const rows = [makeRow(agent)];
+  const rendered = vi.fn();
+  await act(async () =>
+    f.root.render(
+      createElement(
+        Profiler,
+        { id: "counts", onRender: rendered },
+        createElement(ProjectStateCounts, { rows, archived: false }),
+      ),
+    ),
+  );
+  rendered.mockClear();
+  await act(async () => apply("Renamed", "working"));
+  expect(rendered).not.toHaveBeenCalled();
+  await act(async () => apply("Renamed", "failed"));
+  expect(rendered).toHaveBeenCalledTimes(1);
+  expect(
+    document.querySelector(".project-state-counts")?.getAttribute("aria-label"),
+  ).toBe("1 failed");
+  await f.close();
+});
+
+it("isolates sibling rows from rename and pending-read UI changes", async () => {
+  const f = fixture();
+  const ui = observable({
+    aliases: new Map<string, string>(),
+    dragTarget: null as SidebarDragTarget | null,
+    dropDestination: null as string | null,
+    offline: new Set<string>(),
+    opened: null,
+    renaming: null as string | null,
+    renameInPriority: false,
+    name: "",
+    organizing: null,
+    compact: false,
+    markingRead: new Set<string>(),
+    overrides: {},
+  });
+  let sorting: ReturnType<typeof useSidebarOrder>;
+  const area: SidebarRowActions = {
+    ui,
+    commands: () => actions,
+    disabled: (row) => ui.offline.has(row.id),
+    server: (row) => ({
+      alias: ui.aliases.get(row.id) || "Server",
+      show: true,
+      offline: ui.offline.has(row.id),
+    }),
+    bindings: (row) =>
+      sorting.bindings(
+        row.groupKey,
+        row.id,
+        f.model.rows.map((item) => item.id),
+      ),
+  };
+  const renders = new Map<string, number>();
+  const Rows = observer(() => {
+    sorting = useSidebarOrder("codex-sidebar-order:/row-isolation", undefined);
+    useLayoutEffect(() =>
+      runInAction(() => {
+        ui.dragTarget = sorting.target;
+        ui.dropDestination = sorting.destination;
+      }),
+    );
+    return f.model.rows.map((row) =>
+      createElement(
+        Profiler,
+        {
+          key: row.id,
+          id: row.id,
+          onRender: (id) => renders.set(id, (renders.get(id) || 0) + 1),
+        },
+        createElement(SidebarRow, { row }),
+      ),
+    );
+  });
+  await act(async () =>
+    f.root.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(
+          SidebarRowActionsProvider,
+          { value: area },
+          createElement(Rows),
+        ),
+      ),
+    ),
+  );
+  await act(async () => {
+    f.publish([agentSummaryFixture("a"), agentSummaryFixture("b")]);
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  renders.clear();
+  await act(async () =>
+    runInAction(() => {
+      ui.renaming = "a";
+    }),
+  );
+  expect(renders.get("a")).toBeGreaterThan(0);
+  expect(renders.get("b") || 0).toBe(0);
+  await act(async () =>
+    runInAction(() => {
+      ui.renaming = null;
+    }),
+  );
+  await act(async () =>
+    document.querySelector<HTMLButtonElement>(".row-actions")?.click(),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(200));
+  renders.clear();
+  await act(async () =>
+    runInAction(() => {
+      ui.markingRead.add("a");
+    }),
+  );
+  expect(renders.get("a")).toBeGreaterThan(0);
+  expect(renders.get("b") || 0).toBe(0);
+  for (const update of [
+    () => ui.offline.add("a"),
+    () => ui.aliases.set("a", "Changed server"),
+    () => {
+      ui.dropDestination = "convert:a";
+    },
+    () => {
+      ui.dragTarget = {
+        group: f.model.rows[0]!.groupKey,
+        id: "a",
+        after: true,
+      };
+    },
+  ]) {
+    renders.clear();
+    await act(async () =>
+      runInAction(() => {
+        update();
+      }),
+    );
+    expect(renders.get("a")).toBeGreaterThan(0);
+    expect(renders.get("b") || 0).toBe(0);
+  }
+  expect(
+    document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset.folderDrop,
+  ).toBe("true");
+  expect(
+    document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset.dropEdge,
+  ).toBe("after");
+  await f.close();
+});
 
 const commits = vi.hoisted(() => new Map<string, number>());
 function counted<P extends object>(View: ComponentType<P>, id: string) {
@@ -61,21 +235,12 @@ it.each([false, true])(
       parentRenders++;
       return f.model.rows.map((row) =>
         createElement(
-          ChatRowActionsContext.Provider,
-          { value: () => actions, key: row.id },
-          createElement(SidebarRow, {
+          SidebarRowActionsProvider,
+          {
+            value: rowArea(() => actions, {}),
             key: row.id,
-            row,
-            selected: false,
-            serverAlias: "Server",
-            showServer: false,
-            renaming: false,
-            organizing: false,
-            name: "",
-            compact: false,
-            markingRead: false,
-            bindings: {},
-          }),
+          },
+          createElement(SidebarRow, { key: row.id, row }),
         ),
       );
     });
@@ -171,22 +336,12 @@ it("removing pendingRead restores an unchanged target through the real row", asy
   }) {
     return f.model.rows.map((row) =>
       createElement(
-        ChatRowActionsContext.Provider,
-        { value: () => actions, key: row.id },
-        createElement(SidebarRow, {
+        SidebarRowActionsProvider,
+        {
+          value: rowArea(() => actions, { pendingRead: pending }),
           key: row.id,
-          row,
-          pendingRead: pending,
-          selected: false,
-          serverAlias: "Server",
-          showServer: false,
-          renaming: false,
-          organizing: false,
-          name: "",
-          compact: false,
-          markingRead: false,
-          bindings: {},
-        }),
+        },
+        createElement(SidebarRow, { key: row.id, row }),
       ),
     );
   });

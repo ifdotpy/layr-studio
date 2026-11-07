@@ -1,3 +1,4 @@
+import { useSidebarRowState } from "./actions.ts";
 import { observer } from "mobx-react-lite";
 import { WifiOff } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
@@ -5,15 +6,14 @@ import { offlineServerDescription } from "./ChatServerLine.tsx";
 
 export const ChatRowMeta = observer(function ChatRowMeta({
   row,
-  showServer,
-  serverOffline,
-  serverAlias,
 }: {
-  row: Pick<SidebarChatView, "waitingForLead">;
-  showServer: boolean;
-  serverOffline: boolean;
-  serverAlias: string;
+  row: SidebarChatView;
 }) {
+  const {
+    show: showServer,
+    offline: serverOffline,
+    alias: serverAlias,
+  } = useSidebarRowState(row).server;
   const offlineDescription = serverOffline
     ? offlineServerDescription(serverAlias)
     : undefined;

@@ -9,7 +9,7 @@ import { ActionIcon, Button, Menu, TextInput } from "@mantine/core";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
 
-import { useChatRowActions } from "./actions.ts";
+import { useChatRowActions, useSidebarRowState } from "./actions.ts";
 
 const RowActionTarget = observer(
   forwardRef<
@@ -31,31 +31,19 @@ const RowActionTarget = observer(
 
 export const ChatRowActionMenu = observer(function ChatRowActionMenu({
   row,
-  pinned,
-  renaming,
-  name,
-  disabled = false,
-  organizing,
-  compact,
-  markingRead,
   priority = false,
 }: {
   row: SidebarChatView;
-  pinned?: boolean | undefined;
-  renaming: boolean;
-  name: string;
-  disabled?: boolean | undefined;
-  organizing: boolean;
-  compact: boolean;
-  markingRead: boolean;
   priority?: boolean;
 }) {
+  const state = useSidebarRowState(row, priority);
+  const disabled = useSidebarRowState(row).disabled;
   const actions = useChatRowActions(row, priority);
-  return renaming ? (
+  return state.renaming ? (
     <form className="inline-rename" onSubmit={(e) => actions.rename(e)}>
       <TextInput
         aria-label="Chat name"
-        value={name}
+        value={state.name}
         onChange={(e) => actions.name(e.target.value)}
         autoFocus
         maxLength={80}
@@ -82,18 +70,13 @@ export const ChatRowActionMenu = observer(function ChatRowActionMenu({
           Rename
         </Menu.Item>
         <Menu.Divider />
-        <UnreadAction row={row} disabled={disabled} markingRead={markingRead} />
-        <PinAction
-          row={row}
-          pinned={pinned}
-          disabled={disabled}
-          organizing={organizing}
-        />
+        <UnreadAction row={row} />
+        <PinAction row={row} />
         <Menu.Divider />
-        <MoveAction row={row} disabled={disabled} />
-        <ProjectAction row={row} disabled={disabled} compact={compact} />
+        <MoveAction row={row} />
+        <ProjectAction row={row} />
         <Menu.Divider />
-        <ArchiveAction row={row} disabled={disabled} />
+        <ArchiveAction row={row} />
         <Menu.Divider />
         <Menu.Item
           disabled={disabled}

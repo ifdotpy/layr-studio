@@ -1,5 +1,6 @@
+import { rowArea } from "../../src/components/chat-row/actions.fixture.ts";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
-import { ChatRowActionsContext } from "../../src/components/chat-row/actions.ts";
+import { SidebarRowActionsProvider } from "../../src/components/chat-row/actions.ts";
 import { observableFixture } from "../../src/components/observableFixture.tsx";
 const injectedStore = observableFixture();
 import type { Agent } from "../../src/types.ts";
@@ -146,39 +147,34 @@ function Harness() {
           />
         </SidebarCommandsProvider>
       </injectedStore.Provider>
-      <ChatRowActionsContext.Provider
-        value={() => ({
-          prepare: noop,
-          open: noop,
-          pin: noop,
-          rename: noop,
-          name: noop,
-          cancelRename: noop,
-          beginRename: noop,
-          unread: noop,
-          move: noop,
-          changeProject: noop,
-          archive: noop,
-          remove: noop,
-        })}
+      <SidebarRowActionsProvider
+        value={rowArea(
+          () => ({
+            prepare: noop,
+            open: noop,
+            pin: noop,
+            rename: noop,
+            name: noop,
+            cancelRename: noop,
+            beginRename: noop,
+            unread: noop,
+            move: noop,
+            changeProject: noop,
+            archive: noop,
+            remove: noop,
+          }),
+          {
+            serverAlias: "Fixture",
+            bindings: {
+              "data-sidebar-id": "key-row",
+              onKeyDown: () => window.fixtureActions.push(["key", checks]),
+              onDragOver: () => window.fixtureActions.push(["drag", checks]),
+            },
+          },
+        )}
       >
-        <SidebarRow
-          row={keyRow}
-          serverAlias="Fixture"
-          showServer={false}
-          selected={false}
-          renaming={false}
-          name=""
-          organizing={false}
-          compact={false}
-          markingRead={false}
-          bindings={{
-            "data-sidebar-id": "key-row",
-            onKeyDown: () => window.fixtureActions.push(["key", checks]),
-            onDragOver: () => window.fixtureActions.push(["drag", checks]),
-          }}
-        />
-      </ChatRowActionsContext.Provider>
+        <SidebarRow row={keyRow} />
+      </SidebarRowActionsProvider>
     </>
   ) : null;
 }

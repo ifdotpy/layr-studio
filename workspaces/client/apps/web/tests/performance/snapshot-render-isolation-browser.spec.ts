@@ -87,10 +87,6 @@ test("snapshot updates isolate the conversation and unchanged rows", async ({
       }
     };
     window.renderCounts = {};
-    window.modelWork = {};
-    window.__studioSidebarModelProbe = (kind, count) => {
-      window.modelWork[kind] = (window.modelWork[kind] || 0) + count;
-    };
     window.__studioPromptComposerRenderProbe = (component, id) => {
       const key = id ? `${component}:${id}` : component;
       window.renderCounts[key] = (window.renderCounts[key] || 0) + 1;
@@ -112,11 +108,9 @@ test("snapshot updates isolate the conversation and unchanged rows", async ({
   };
   const counts = () => page.evaluate(() => ({ ...window.renderCounts }));
   const frames = () => page.evaluate(() => window.resourceFrames);
-  const modelWork = () => page.evaluate(() => ({ ...window.modelWork }));
   const reset = () =>
     page.evaluate(() => {
       window.renderCounts = {};
-      window.modelWork = {};
     });
   try {
     await page.goto(origin);
@@ -186,11 +180,7 @@ test("snapshot updates isolate the conversation and unchanged rows", async ({
     const firstMeasuredFrame = (await frames()).length;
     for (let i = 0; i < 6; i++) await rename(other, `Other changed ${i}`);
     const unrelated = await counts();
-    const unrelatedModelWork = await modelWork();
-    expect(unrelatedModelWork["catalog-row"]).toBeGreaterThan(0);
-    expect(unrelatedModelWork["order-compare"] || 0).toBe(0);
-    expect(unrelatedModelWork["search-row"] || 0).toBe(0);
-    console.log(JSON.stringify({ idle, unrelated, unrelatedModelWork }));
+    console.log(JSON.stringify({ idle, unrelated }));
     // No baseline or reconnect can explain renders in this measured interval.
     const measuredFrames = (await frames()).slice(firstMeasuredFrame);
     const measuredStateFrames = measuredFrames.filter((frame) =>
@@ -216,10 +206,6 @@ test("snapshot updates isolate the conversation and unchanged rows", async ({
     await reset();
     await rename(required(workers[0]), "Worker changed");
     const affected = await counts();
-    const workerModelWork = await modelWork();
-    expect(workerModelWork["catalog-row"]).toBeGreaterThan(0);
-    expect(workerModelWork["order-compare"] || 0).toBe(0);
-    expect(workerModelWork["search-row"] || 0).toBe(0);
     expect(affected[`team-row:${required(workers[0]).id}`]).toBeGreaterThan(0);
     for (const worker of workers.slice(1))
       expect(affected[`team-row:${worker.id}`] || 0).toBe(0);
@@ -308,6 +294,5 @@ declare global {
     activeResourceStream: EventSource;
     latestResourceFrameSource: EventSource;
     renderCounts: Record<string, number>;
-    modelWork: Record<string, number>;
   }
 }

@@ -2,15 +2,14 @@ import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Folder } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
-import { useChatRowActions } from "./actions.ts";
+import { useChatRowActions, useSidebarRowState } from "./actions.ts";
 
 export const MoveAction = observer(function MoveAction({
   row,
-  disabled,
 }: {
   row: SidebarChatView;
-  disabled: boolean;
 }) {
+  const disabled = useSidebarRowState(row).disabled;
   const actions = useChatRowActions(row);
   return (
     row.projectPath && (

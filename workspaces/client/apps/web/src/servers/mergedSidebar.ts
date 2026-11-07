@@ -5,7 +5,7 @@ import {
   createStateMirror,
   type StateCollections,
 } from "../generated/observableResources.ts";
-import { computed, observable, runInAction } from "mobx";
+import { compareStructural, computed, observable, runInAction } from "mobx";
 import {
   createSidebarViewModel,
   type SidebarAgent,
@@ -735,21 +735,10 @@ export function createMergedSidebarSelector(combined = true) {
   };
   let previous: MergedSidebar | undefined;
   let revision = 0;
-  return (sources: readonly SidebarSource[]) =>
-    runInAction(() => {
-      if (
-        previous &&
-        sources.length === previous.sources.length &&
-        sources.every((source, index) => {
-          const prior = previous?.sources[index];
-          return (
-            source.id === prior?.id &&
-            source.online === prior.online &&
-            source.sidebar === prior.sidebar
-          );
-        })
-      )
-        return previous;
+  const inputs = observable.box<readonly SidebarSource[]>([], { deep: false });
+  const selection = computed(
+    () => {
+      const sources = inputs.get();
       const nextViews = new Map<
         string,
         NonNullable<ReturnType<typeof views.get>>
@@ -790,44 +779,11 @@ export function createMergedSidebarSelector(combined = true) {
         previousOrder &&
         nextOrder &&
         previous!.data.stateDir === next.data.stateDir &&
-        JSON.stringify(previousOrder.groups) ===
-          JSON.stringify(nextOrder.groups)
+        compareStructural(previousOrder.groups, nextOrder.groups)
       )
         next.data.runtime.sidebarOrder = previousOrder;
       else revision++;
-      if (previous) {
-        const retain = <T extends { id: string }>(rows: T[], old: T[]) => {
-          const prior = new Map(old.map((row) => [row.id, row]));
-          const retained = rows.map((row) => {
-            const existing = prior.get(row.id);
-            return existing && JSON.stringify(existing) === JSON.stringify(row)
-              ? existing
-              : row;
-          });
-          return retained.length === old.length &&
-            retained.every((row, index) => row === old[index])
-            ? old
-            : retained;
-        };
-        next.data.runtime.projects = retain(
-          next.data.runtime.projects,
-          previous.data.runtime.projects,
-        );
-        next.data.runtime.rooms = retain(
-          next.data.runtime.rooms,
-          previous.data.runtime.rooms,
-        );
-        next.data.runtime.peerTeams = retain(
-          next.data.runtime.peerTeams,
-          previous.data.runtime.peerTeams,
-        );
-      }
-      if (
-        !previous ||
-        next.data.runtime.projects !== previous.data.runtime.projects ||
-        next.data.runtime.peerTeams !== previous.data.runtime.peerTeams
-      )
-        routing.set(next);
+
       const entries = [...views.entries()];
       if (
         entries.length !== nextViews.size ||
@@ -836,10 +792,29 @@ export function createMergedSidebarSelector(combined = true) {
             entries[index]?.[0] !== id || entries[index]?.[1] !== value,
         )
       )
-        views.replace(nextViews);
+        runInAction(() => views.replace(nextViews));
       previous = next;
       return next;
-    });
+    },
+    { keepAlive: true },
+  );
+  return (sources: readonly SidebarSource[]) => {
+    const prior = inputs.get();
+    if (
+      sources.length !== prior.length ||
+      sources.some(
+        (source, index) =>
+          source.id !== prior[index]?.id ||
+          source.online !== prior[index]?.online ||
+          source.sidebar !== prior[index]?.sidebar ||
+          source.collections !== prior[index]?.collections,
+      )
+    )
+      runInAction(() => inputs.set(sources));
+    const next = selection.get();
+    runInAction(() => routing.set(next));
+    return next;
+  };
 }
 
 /** Classic mode does not construct or traverse a merged model. */

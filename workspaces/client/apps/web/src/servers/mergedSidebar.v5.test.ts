@@ -124,3 +124,70 @@ it("rebinds computed project keys when retained routing metadata changes", () =>
     stop();
   }
 });
+
+it("observes in-place generated project edits without replacing the source envelope", () => {
+  const store = createSidebarSourceStore();
+  const snapshot = (name: string, folder: string) =>
+    sidebarSnapshot(snapshotFixture([]), [
+      {
+        collection: "project",
+        id: "p",
+        value: {
+          id: "p",
+          path: "/p",
+          name,
+          folders: [{ id: "f", name: folder, parentId: null }],
+        },
+      },
+    ]);
+  store.update("local", snapshot("Before", "Folder before"));
+  const sources = store.sources(["local"], new Set(["local"]));
+  const select = createMergedSidebarSelector();
+  const initial = select(sources);
+  const native = sources[0]!.collections.projects.get("p");
+  store.update("local", snapshot("After", "Folder after"));
+  expect(sources[0]!.collections.projects.get("p")).toBe(native);
+  const changed = select(sources);
+  expect(changed.data.runtime.projects[0]?.name).toBe("After");
+  expect(changed.data.runtime.projects[0]?.folders?.[0]?.name).toBe(
+    "Folder after",
+  );
+  expect(changed.data.runtime.projects[0]?.path).toBe(
+    initial.data.runtime.projects[0]?.path,
+  );
+});
+
+it("tracks generated membership and folder compatibility through a retained source", () => {
+  const store = createSidebarSourceStore();
+  const project = (path: string, name: string): SidebarEntity => ({
+    collection: "project",
+    id: "p",
+    value: {
+      id: "p",
+      path,
+      name,
+      folders: [{ id: "f", name: "Folder", parentId: null }],
+    },
+  });
+  store.update(
+    "local",
+    sidebarSnapshot(snapshotFixture([]), [project("/before", "Before")]),
+  );
+  const sources = store.sources(["local"], new Set(["local"]));
+  const select = createMergedSidebarSelector();
+  const names: string[][] = [];
+  const stop = autorun(() =>
+    names.push(select(sources).data.runtime.projects.map((p) => p.name || "")),
+  );
+  try {
+    store.update(
+      "local",
+      sidebarSnapshot(snapshotFixture([]), [project("/after", "After")]),
+    );
+    expect(names.at(-1)).toEqual(["After"]);
+    store.update("local", sidebarSnapshot(snapshotFixture([]), []));
+    expect(names.at(-1)).toEqual([]);
+  } finally {
+    stop();
+  }
+});

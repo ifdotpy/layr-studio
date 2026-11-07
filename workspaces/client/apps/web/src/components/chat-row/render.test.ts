@@ -1,4 +1,5 @@
-import { ChatRowActionsContext } from "./actions.ts";
+import { rowArea } from "./actions.fixture.ts";
+import { SidebarRowActionsProvider } from "./actions.ts";
 import { AgentStatus } from "../../generated/api.ts";
 import type { Summary } from "./testFixture.ts";
 // @vitest-environment happy-dom
@@ -194,20 +195,15 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
           MantineProvider,
           null,
           createElement(
-            ChatRowActionsContext.Provider,
-            { value: () => ({ ...actions, open, unread: nextUnread }) },
-            createElement(SidebarRow, {
-              row,
-              selected: true,
-              serverAlias: "Remote",
-              showServer: true,
-              renaming: false,
-              organizing: false,
-              name: "",
-              compact: false,
-              markingRead: false,
-              bindings: {},
-            }),
+            SidebarRowActionsProvider,
+            {
+              value: rowArea(() => ({ ...actions, open, unread: nextUnread }), {
+                selected: true,
+                serverAlias: "Remote",
+                showServer: true,
+              }),
+            },
+            createElement(SidebarRow, { row }),
           ),
         ),
       ),
@@ -266,13 +262,14 @@ it("renders every server unread eligibility and pending-write menu state", async
               Menu,
               null,
               createElement(
-                ChatRowActionsContext.Provider,
-                { value: () => ({ ...actions, unread }) },
-                createElement(UnreadAction, {
-                  row,
-                  disabled: false,
-                  markingRead,
-                }),
+                SidebarRowActionsProvider,
+                {
+                  value: rowArea(() => ({ ...actions, unread }), {
+                    disabled: false,
+                    markingRead,
+                  }),
+                },
+                createElement(UnreadAction, { row }),
               ),
             ),
           ),

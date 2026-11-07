@@ -19,6 +19,7 @@ import type { DeepReadonly } from "../deepReadonly.ts";
 
 type Order = Readonly<Record<string, readonly string[]>>;
 type Drag = { group: string; id: string };
+export type SidebarDragTarget = Drag & { after: boolean };
 type ServerOrder = DeepReadonly<components["schemas"]["SidebarOrderDto"]>;
 type SidebarOrderResponse = components["schemas"]["SidebarOrderResponse"];
 type Pending = {
@@ -82,9 +83,7 @@ export function useSidebarOrder(
     }
   };
   const drag = useRef<Drag | null>(null);
-  const [target, setTarget] = useState<(Drag & { after: boolean }) | null>(
-    null,
-  );
+  const [target, setTarget] = useState<SidebarDragTarget | null>(null);
   const [announcement, announce] = useState("");
   const [destination, setDestination] = useState<string | null>(null);
   useEffect(() => {
@@ -339,5 +338,14 @@ export function useSidebarOrder(
       if (to) move(group, ids, id, to, after);
     },
   });
-  return { order, rank, bindings, dropBindings, announcement, announce };
+  return {
+    order,
+    target,
+    destination,
+    rank,
+    bindings,
+    dropBindings,
+    announcement,
+    announce,
+  };
 }

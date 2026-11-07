@@ -1,55 +1,15 @@
 import { saved } from "../api";
-import type { StateCollections } from "../generated/observableResources.ts";
-import type { components } from "../generated/api.ts";
-import type { DeepReadonly } from "../deepReadonly.ts";
-import { computed, toJS } from "mobx";
+import {
+  serializeStateCollections,
+  type StateCollections,
+  type StateEntity,
+} from "../generated/observableResources.ts";
+import { computed } from "mobx";
 
-export type SidebarEntity = DeepReadonly<
-  Extract<
-    components["schemas"]["SyncEntityPayload"],
-    {
-      collection:
-        | "agentSummary"
-        | "project"
-        | "peerTeam"
-        | "workspace"
-        | "agentTail";
-    }
-  >
->;
+export type SidebarEntity = StateEntity;
+/** Preserve native facts at the frame serialization boundary. */
+export const sidebarEntities = serializeStateCollections;
 
-/** Preserve native collection identities at the frame serialization boundary. */
-export function sidebarEntities(
-  collections: StateCollections,
-): readonly SidebarEntity[] {
-  return [
-    ...[...collections.agents].map(([id, value]) => ({
-      collection: "agentSummary" as const,
-      id,
-      value: toJS(value),
-    })),
-    ...[...collections.projects].map(([id, value]) => ({
-      collection: "project" as const,
-      id,
-      value: toJS(value),
-    })),
-    ...[...collections.peerTeams].map(([id, value]) => ({
-      collection: "peerTeam" as const,
-      id,
-      value: toJS(value),
-    })),
-    ...[...collections.workspaces].map(([id, value]) => ({
-      collection: "workspace" as const,
-      id,
-      value: toJS(value),
-    })),
-    ...[...collections.agentTail].map(([id, value]) => ({
-      collection: "agentTail" as const,
-      id,
-      value: toJS(value),
-    })),
-  ];
-}
 import type { Room, Snapshot } from "../types";
 import { readPreferenceFields } from "../sync/uiPreferenceStore";
 import type { PreferenceFields } from "../sync/uiPreferenceMerge";

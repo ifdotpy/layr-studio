@@ -1,4 +1,5 @@
-import { ChatRowActionsContext } from "../components/chat-row/actions.ts";
+import { rowArea } from "../components/chat-row/actions.fixture.ts";
+import { SidebarRowActionsProvider } from "../components/chat-row/actions.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from "react";
 import { createRoot } from "react-dom/client";
@@ -79,21 +80,12 @@ it("a combined source update renders only its changed row with overlapping chat 
               onRender: (id) => renders.set(id, (renders.get(id) || 0) + 1),
             },
             createElement(
-              ChatRowActionsContext.Provider,
-              { value: () => actions, key: row.id },
-              createElement(SidebarRow, {
+              SidebarRowActionsProvider,
+              {
+                value: rowArea(() => actions, { bindings }),
                 key: row.id,
-                row,
-                selected: false,
-                serverAlias: "Server",
-                showServer: false,
-                renaming: false,
-                organizing: false,
-                name: "",
-                compact: false,
-                markingRead: false,
-                bindings,
-              }),
+              },
+              createElement(SidebarRow, { key: row.id, row }),
             ),
           ),
         ),

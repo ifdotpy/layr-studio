@@ -2,29 +2,29 @@ import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Pin, PinOff } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
-import { useChatRowActions } from "./actions.ts";
+import { useChatRowActions, useSidebarRowState } from "./actions.ts";
 
 export const PinAction = observer(function PinAction({
   row,
-  pinned,
-  disabled,
-  organizing,
 }: {
   row: SidebarChatView;
-  pinned: boolean | undefined;
-  disabled: boolean;
-  organizing: boolean;
 }) {
+  const disabled = useSidebarRowState(row).disabled;
+  const state = useSidebarRowState(row);
   const actions = useChatRowActions(row);
   return (
     <Menu.Item
-      disabled={disabled || organizing}
+      disabled={disabled || state.organizing}
       leftSection={
-        (pinned ?? row.agent.pinned) ? <PinOff size={14} /> : <Pin size={14} />
+        (state.pinned ?? row.agent.pinned) ? (
+          <PinOff size={14} />
+        ) : (
+          <Pin size={14} />
+        )
       }
       onClick={() => actions.pin()}
     >
-      {(pinned ?? row.agent.pinned) ? "Unpin" : "Pin"}
+      {(state.pinned ?? row.agent.pinned) ? "Unpin" : "Pin"}
     </Menu.Item>
   );
 });

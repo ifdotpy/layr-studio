@@ -1,4 +1,5 @@
-import { ChatRowActionsContext } from "../chat-row/actions.ts";
+import { rowArea } from "../chat-row/actions.fixture.ts";
+import { SidebarRowActionsProvider } from "../chat-row/actions.ts";
 import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../../generated/api.ts";
 import { describe, expect, it } from "vitest";
@@ -70,13 +71,23 @@ describe("fleet presentation", () => {
       "2 working, 1 needs you",
     );
     const html = renderToStaticMarkup(
-      createElement(ProjectStateCounts, { view: { counts } }),
+      createElement(ProjectStateCounts, {
+        archived: false,
+        rows: [
+          rowFixture("working", { operationalStatus: { reason: "working" } }),
+          rowFixture("answer", {
+            operationalStatus: { reason: "needs_input", wait: null },
+          }),
+          rowFixture("error", { operationalStatus: { reason: "failed" } }),
+        ],
+      }),
     );
     expect(html).toContain('aria-label="1 working, 1 needs you, 1 failed"');
     expect(
       renderToStaticMarkup(
         createElement(ProjectStateCounts, {
-          view: { counts: { working: 0, answer: 0, error: 0 } },
+          rows: [],
+          archived: false,
         }),
       ),
     ).toBe("");
@@ -97,46 +108,49 @@ describe("fleet presentation", () => {
   });
 });
 
-function renderRow(overrides: Partial<Parameters<typeof SidebarRow>[0]> = {}) {
+function renderRow(
+  overrides: NonNullable<Parameters<typeof rowArea>[1]> &
+    Partial<Parameters<typeof SidebarRow>[0]> = {},
+) {
   const noop = () => {};
   return renderToStaticMarkup(
     createElement(
       MantineProvider,
       {},
       createElement(
-        ChatRowActionsContext.Provider,
+        SidebarRowActionsProvider,
         {
-          value: () => ({
-            prepare: noop,
-            open: noop,
-            pin: noop,
-            rename: noop,
-            name: noop,
-            cancelRename: noop,
-            beginRename: noop,
-            unread: noop,
-            move: noop,
-            changeProject: noop,
-            archive: noop,
-            remove: noop,
-          }),
+          value: rowArea(
+            () => ({
+              prepare: noop,
+              open: noop,
+              pin: noop,
+              rename: noop,
+              name: noop,
+              cancelRename: noop,
+              beginRename: noop,
+              unread: noop,
+              move: noop,
+              changeProject: noop,
+              archive: noop,
+              remove: noop,
+            }),
+            {
+              id: overrides.row?.id || "answer",
+              selected: true,
+              serverAlias: "MAC",
+              ...overrides,
+            },
+          ),
         },
         createElement(SidebarRow, {
-          row: rowFixture("answer", {
-            name: "Chat answer",
-            pinned: true,
-            operationalStatus: { reason: "needs_input", wait: null },
-          }),
-          selected: true,
-          serverAlias: "MAC",
-          showServer: false,
-          renaming: false,
-          organizing: false,
-          name: "",
-          compact: false,
-          markingRead: false,
-          bindings: {},
-          ...overrides,
+          row:
+            overrides.row ||
+            rowFixture("answer", {
+              name: "Chat answer",
+              pinned: true,
+              operationalStatus: { reason: "needs_input", wait: null },
+            }),
         }),
       ),
     ),

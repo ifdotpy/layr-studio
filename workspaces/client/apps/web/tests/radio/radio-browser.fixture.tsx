@@ -23,7 +23,10 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import RadioChat from "../../src/components/RadioChat.tsx";
-import { PeerTeamGroup } from "../../src/components/shell/messages/PeerTeams.tsx";
+import {
+  PeerTeamGroup,
+  PeerTeamActionsProvider,
+} from "../../src/components/shell/messages/PeerTeams.tsx";
 import "../../src/style.css";
 import "../../src/appearance.css";
 import { theme } from "../../src/theme.ts";
@@ -131,19 +134,25 @@ function Fixture() {
           width: "100%",
         }}
       >
-        <PeerTeamGroup
-          scope="radio-test"
-          team={team}
-          closed={false}
-          toggle={() => {}}
-          edit={() => {}}
-          dissolve={() => {}}
-          roomId={roomId}
-          openRoom={(id) => (window.radioOpened = id)}
-          refresh={refresh}
+        <PeerTeamActionsProvider
+          value={{
+            scope: "radio-test",
+            openRoom: (id) => {
+              window.radioOpened = id;
+            },
+            refresh,
+            room: () => roomId,
+            disabled: () => false,
+            closeForm() {},
+            edit() {},
+            toggle() {},
+            candidates: () => [],
+          }}
         >
-          <></>
-        </PeerTeamGroup>
+          <PeerTeamGroup team={team} closed={false}>
+            <></>
+          </PeerTeamGroup>
+        </PeerTeamActionsProvider>
         <RadioChat
           room={value}
           data={data}
