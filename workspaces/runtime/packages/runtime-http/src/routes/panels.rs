@@ -166,7 +166,31 @@ fn profile_read_error(error: StoreError) -> ApiError {
         {
             ApiError::invalid_stored("runtime_profiles", "<schema>")
         }
-        error => ApiError::stored(error),
+        error @ (StoreError::RequestResult(_)
+        | StoreError::Outbox(_)
+        | StoreError::StateDirectory(_)
+        | StoreError::AlreadyOwned
+        | StoreError::IntermediateReleaseRequired
+        | StoreError::MissingDatabase(_)
+        | StoreError::UnsafeStateDirectory
+        | StoreError::SchemaMismatch(_)
+        | StoreError::Migration { .. }
+        | StoreError::InvalidSyncObject { .. }
+        | StoreError::InvalidSyncObjectField { .. }
+        | StoreError::InvalidStoredRecord { .. }
+        | StoreError::SchemaObjectMismatch { .. }
+        | StoreError::Sqlite(_)
+        | StoreError::CommitOutcomeUnknown(_)
+        | StoreError::Json(_)
+        | StoreError::TranscriptFullTextUnavailable { .. }
+        | StoreError::TranscriptInputsIncomplete { .. }
+        | StoreError::SchemaValidation(_)
+        | StoreError::RecordContract(_)
+        | StoreError::WriterPoisoned
+        | StoreError::WriterActorInitialization(_)
+        | StoreError::WriterActorControl(_)
+        | StoreError::CommitActorOutcomeUnknown(_)
+        | StoreError::ReadTaskFailed) => ApiError::stored(error),
     }
 }
 inventory::submit! {

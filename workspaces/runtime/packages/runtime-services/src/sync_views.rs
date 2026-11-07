@@ -680,9 +680,10 @@ pub(crate) fn invalid_agent_view(id: &str, record: &Value, diagnostic: &str) -> 
     }
     if let Some(provider) = record.get("provider")
         && let Ok(provider) =
-            studio_json::from_value::<studio_runtime_schema::ProviderKind>(provider.clone())
+            <studio_runtime_schema::ProviderKind as serde::Deserialize>::deserialize(provider)
     {
-        view["provider"] = studio_json::to_value(provider).expect("provider serializes");
+        view["provider"] = serde::Serialize::serialize(&provider, studio_json::value::Serializer)
+            .expect("provider serializes");
     }
     for field in ["name", "cwd"] {
         if let Some(value) = record.get(field).filter(|value| value.is_string()) {

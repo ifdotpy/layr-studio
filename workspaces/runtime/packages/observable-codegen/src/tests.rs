@@ -93,7 +93,7 @@ fn selected_collections_use_the_existing_array_resource() {
             .kind,
         UnsupportedShape::Resource
     );
-    bad = resources.clone();
+    bad = resources;
     let duplicate = bad[0].collections[0].clone();
     bad[0].collections.push(duplicate);
     assert_eq!(
@@ -253,7 +253,7 @@ fn deterministic_fixture_and_typed_path_failures() {
             .kind,
         UnsupportedShape::Resource
     );
-    let mut bad_field = document.clone();
+    let mut bad_field = document;
     bad_field["components"]["schemas"]["Row"]["properties"]["apply"] = json!({"type":"string"});
     let error = render(&bad_field, &models(), &resources()).expect_err("method collision");
     assert_eq!(error.kind, UnsupportedShape::Identifier);
@@ -539,7 +539,7 @@ fn all_of_objects_merge_properties_and_required_and_reject_conflicts() {
 fn collection_inventory_is_derived_from_payload_tags_and_rejects_duplicates() {
     let payload = json!({"type":"object","properties":{"collection":{"const":"row"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Row"}}});
     let mut document = fixture();
-    document["components"]["schemas"]["SyncEntityPayload"] = json!({"oneOf":[payload.clone()]});
+    document["components"]["schemas"]["SyncEntityPayload"] = json!({"oneOf":[payload]});
     let generated = render_entity_collections(&document).expect("payload inventory");
     assert!(generated.contains("\"row\": new Map()"));
     document["components"]["schemas"]["SyncEntityPayload"]["oneOf"] =

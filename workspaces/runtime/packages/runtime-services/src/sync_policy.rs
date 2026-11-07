@@ -984,7 +984,8 @@ pub(crate) fn agent_view_documents(
     };
     if let Some(summary) = summary.as_mut() {
         if summary["projectServerId"].is_null() {
-            summary["projectServerId"] = studio_json::to_value(project_server_id)?;
+            summary["projectServerId"] =
+                serde::Serialize::serialize(&project_server_id, studio_json::value::Serializer)?;
         }
         crate::agent_operational::decorate(summary, operational)?;
     }
@@ -4285,7 +4286,7 @@ mod tests {
             .transaction(|tx| {
                 let project = json!({"recordKind":"live","id":"p","path":"/p","peerTeams":[]});
                 ProjectsRepository::put_project(tx, &project)?;
-                let mut prior = project.clone();
+                let mut prior = project;
                 prior["layrReadiness"] = json!({"unexpected":"legacy"});
                 prior["layrSync"] = json!({"unexpected":"legacy"});
                 prior["vault"] = json!({"unexpected":"legacy"});

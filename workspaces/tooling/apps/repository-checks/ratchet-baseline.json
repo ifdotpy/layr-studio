@@ -1654,18 +1654,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-store/tests/analytics_state_check.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec.rs",
-      "fingerprint": "139bd0b3a122af5d05130eaf829c224f00bb2a02fcf82143a45e56e755c4f044:2"
     }
   ],
   "option_option": [
@@ -2049,10 +2037,6 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-store/src/stored_text.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/host_exec_service/lifecycle.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     }
   ],

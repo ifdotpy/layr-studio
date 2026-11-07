@@ -271,7 +271,7 @@ mod tests {
             match value {
                 Value::Array(values) => values.iter().for_each(|value| check(value, count)),
                 Value::Object(values) => values.values().for_each(|value| check(value, count)),
-                _ => {}
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
             }
         }
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

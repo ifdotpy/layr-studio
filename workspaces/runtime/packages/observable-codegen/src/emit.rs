@@ -189,7 +189,11 @@ fn render_all(
         let shape = &roots[&resource.facade];
         let model = match shape {
             Shape::Object(name) => Some(&parser.models[name]),
-            _ => None,
+            Shape::Leaf
+            | Shape::Frozen
+            | Shape::Array(_)
+            | Shape::Nullable(_)
+            | Shape::Union { .. } => None,
         };
         let mut facade = resource.facade.chars();
         let mirror = format!(
@@ -345,7 +349,7 @@ fn projected_field(shape: &Shape, dto: &str, parser: &Parser<'_>) -> String {
             "{} | null",
             projected_field(item, &format!("NonNullable<{dto}>"), parser)
         ),
-        _ => dto.into(),
+        Shape::Leaf | Shape::Frozen | Shape::Object(_) | Shape::Union { .. } => dto.into(),
     }
 }
 fn lower_first(value: &str) -> String {
@@ -385,7 +389,12 @@ fn keyed_name<'a>(shape: &'a Shape, parser: &Parser<'_>) -> Option<&'a str> {
     match shape {
         Shape::Object(name) if parser.models[name].identity.is_some() => Some(name),
         Shape::Union { name, keyed_by, .. } if !keyed_by.is_empty() => Some(name),
-        _ => None,
+        Shape::Leaf
+        | Shape::Frozen
+        | Shape::Object(_)
+        | Shape::Array(_)
+        | Shape::Nullable(_)
+        | Shape::Union { .. } => None,
     }
 }
 fn create(shape: &Shape, value: &str, parser: &Parser<'_>) -> String {

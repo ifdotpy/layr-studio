@@ -331,6 +331,34 @@ pub(crate) fn refresh_task_detail(openapi: &mut studio_json::Value) {
     }
 }
 
+/// Deleted worker cleanup records retain their root identity after team removal.
+pub(crate) fn refresh_retained_worktrees(openapi: &mut studio_json::Value) {
+    use studio_json::json;
+    let schemas = &mut openapi["components"]["schemas"];
+    let mut resource = schemas["AgentDetailResource"].clone();
+    resource["title"] = json!("RetainedWorktreesResource");
+    resource["properties"]["kind"] = json!({"type":"string", "const":"retained-worktrees"});
+    resource["x-studio-entity-scope"] = json!({"collections":["retainedWorktree"],"idField":null,"agentField":"agentId","includeTeamMembers":false});
+    schemas["RetainedWorktreesResource"] = resource;
+    schemas["ResourceRef"]["discriminator"]["mapping"]["retained-worktrees"] =
+        json!("#/components/schemas/RetainedWorktreesResource");
+    let variants = schemas["ResourceRef"]["oneOf"]
+        .as_array_mut()
+        .expect("resource variants");
+    let reference = json!({"$ref":"#/components/schemas/RetainedWorktreesResource"});
+    if !variants.contains(&reference) {
+        variants.push(reference);
+    }
+    schemas["SubscriptionDataMap"]["properties"]["retained-worktrees"] =
+        json!({"type":"array","items":{"$ref":"#/components/schemas/RetainedWorktreeEntityDto"}});
+    let required = schemas["SubscriptionDataMap"]["required"]
+        .as_array_mut()
+        .expect("data kinds");
+    if !required.contains(&json!("retained-worktrees")) {
+        required.push(json!("retained-worktrees"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ResourceRef;
@@ -433,33 +461,5 @@ mod tests {
                 );
             }
         }
-    }
-}
-
-/// Deleted worker cleanup records retain their root identity after team removal.
-pub(crate) fn refresh_retained_worktrees(openapi: &mut studio_json::Value) {
-    use studio_json::json;
-    let schemas = &mut openapi["components"]["schemas"];
-    let mut resource = schemas["AgentDetailResource"].clone();
-    resource["title"] = json!("RetainedWorktreesResource");
-    resource["properties"]["kind"] = json!({"type":"string", "const":"retained-worktrees"});
-    resource["x-studio-entity-scope"] = json!({"collections":["retainedWorktree"],"idField":null,"agentField":"agentId","includeTeamMembers":false});
-    schemas["RetainedWorktreesResource"] = resource;
-    schemas["ResourceRef"]["discriminator"]["mapping"]["retained-worktrees"] =
-        json!("#/components/schemas/RetainedWorktreesResource");
-    let variants = schemas["ResourceRef"]["oneOf"]
-        .as_array_mut()
-        .expect("resource variants");
-    let reference = json!({"$ref":"#/components/schemas/RetainedWorktreesResource"});
-    if !variants.contains(&reference) {
-        variants.push(reference);
-    }
-    schemas["SubscriptionDataMap"]["properties"]["retained-worktrees"] =
-        json!({"type":"array","items":{"$ref":"#/components/schemas/RetainedWorktreeEntityDto"}});
-    let required = schemas["SubscriptionDataMap"]["required"]
-        .as_array_mut()
-        .expect("data kinds");
-    if !required.contains(&json!("retained-worktrees")) {
-        required.push(json!("retained-worktrees"));
     }
 }

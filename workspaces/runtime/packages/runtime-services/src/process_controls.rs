@@ -1334,7 +1334,8 @@ mod claim_identity_tests {
         assert_eq!(running.len(), 1);
         assert!(matches!(&running[0], BackgroundTaskView::Process(_)));
         assert_eq!(
-            studio_json::to_value(&running[0]).unwrap()["value"]["turnId"],
+            serde::Serialize::serialize(&running[0], studio_json::value::Serializer).unwrap()["value"]
+                ["turnId"],
             "turn"
         );
         assert_eq!(after.len(), 1);

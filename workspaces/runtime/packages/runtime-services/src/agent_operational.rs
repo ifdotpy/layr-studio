@@ -59,7 +59,7 @@ pub(crate) struct Context {
     pub answer: bool,
     pub active: bool,
     pub deferred: bool,
-    pub background: bool,
+    pub monitors: u32,
 }
 #[derive(Default, Clone, Copy)]
 struct Progress {
@@ -266,7 +266,7 @@ pub(crate) fn load(
                     || o.process
                     || root_activity.get(id).is_some_and(|flags| flags.1),
                 deferred: o.deferred,
-                background: o.monitors > 0,
+                monitors: o.monitors,
             },
         );
     }
@@ -373,7 +373,7 @@ fn operational(
             || source.has_question == Some(true)
             || source.has_approval == Some(true),
         deferred: context.deferred,
-        background_work: context.background || source.has_background_work == Some(true),
+        background_work: context.monitors > 0 || source.has_background_work == Some(true),
         active: context.active || source.has_background_work == Some(true),
         disk_full,
         unread,
@@ -387,9 +387,10 @@ fn operational(
 pub(crate) fn decorate(summary: &mut Value, context: Option<&Context>) -> StoreResult<()> {
     let source = Source::deserialize(&*summary)?;
     let (operational, mark, eligible) = operational(&source, context);
-    summary["operationalStatus"] = studio_json::to_value(operational)?;
-    summary["markRead"] = studio_json::to_value(mark)?;
-    summary["markUnread"] = studio_json::to_value(eligible)?;
+    summary["operationalStatus"] =
+        serde::Serialize::serialize(&operational, studio_json::value::Serializer)?;
+    summary["markRead"] = serde::Serialize::serialize(&mark, studio_json::value::Serializer)?;
+    summary["markUnread"] = serde::Serialize::serialize(&eligible, studio_json::value::Serializer)?;
     summary["inFlight"] = Value::Bool(source.in_flight == Some(true));
     Ok(())
 }
@@ -522,7 +523,7 @@ mod tests {
 mod owner_matrix_tests {
     use super::*;
     use studio_json::json;
-    fn put(db: &Connection, id: &str, parent: Option<&str>, status: &str, extra: Value) {
+    fn put(db: &Connection, id: &str, parent: Option<&str>, status: &str, extra: &Value) {
         let mut record = json!({"id":id,"rootId":"root","parentId":parent,"isLead":parent.is_none(),"provider":"codex","accountKey":"default","epoch":1,"status":status,"autoWake":true,"source":"managed"});
         record
             .as_object_mut()
@@ -558,8 +559,8 @@ mod owner_matrix_tests {
             ),
         ] {
             let db = studio_runtime_store::test_canvas();
-            put(&db, "root", None, "waiting", json!({}));
-            put(&db, "child", Some("root"), status, extra.clone());
+            put(&db, "root", None, "waiting", &json!({}));
+            put(&db, "child", Some("root"), status, &extra);
             let contexts = load(&db, &["root".into()]).expect("facts");
             let count = contexts["root"]
                 .wait
@@ -597,8 +598,8 @@ mod owner_matrix_tests {
                     ("waiting", json!({"source":"local"}), false),
                 ] {
                     let db = studio_runtime_store::test_canvas();
-                    put(&db, "root", None, "waiting", json!({}));
-                    put(&db, "child", Some("root"), status, extra.clone());
+                    put(&db, "root", None, "waiting", &json!({}));
+                    put(&db, "child", Some("root"), status, &extra);
                     if kind == "monitor" {
                         let monitor = crate::monitor_policy::complete_test_monitor(
                             json!({"id":"work","agent":"child","status":process_status,"epoch":999}),
@@ -651,13 +652,13 @@ mod owner_matrix_tests {
             ),
         ] {
             let db = studio_runtime_store::test_canvas();
-            put(&db, "root", None, "waiting", json!({}));
+            put(&db, "root", None, "waiting", &json!({}));
             let mut fields = json!({"autoWake":false});
             fields
                 .as_object_mut()
                 .expect("fields")
                 .extend(extra.as_object().expect("extra").clone());
-            put(&db, "child", Some("root"), status, fields);
+            put(&db, "child", Some("root"), status, &fields);
             let monitor = crate::monitor_policy::complete_test_monitor(
                 json!({"id":"watch","agent":"child","status":"running","epoch":1}),
             );
@@ -686,9 +687,9 @@ mod owner_matrix_tests {
             }
         }
         let db = studio_runtime_store::test_canvas();
-        put(&db, "root", None, "waiting", json!({}));
-        put(&db, "middle", Some("root"), "waiting", json!({}));
-        put(&db, "child", Some("middle"), "waiting", json!({}));
+        put(&db, "root", None, "waiting", &json!({}));
+        put(&db, "middle", Some("root"), "waiting", &json!({}));
+        put(&db, "child", Some("middle"), "waiting", &json!({}));
         let monitor = crate::monitor_policy::complete_test_monitor(
             json!({"id":"watch","agent":"child","status":"running","epoch":1}),
         );
@@ -706,7 +707,7 @@ mod owner_matrix_tests {
             ("root", "waiting", json!({"source":"local"}), false),
             ("other-root", "waiting", json!({}), false),
         ] {
-            put(&db, "middle", Some(parent), status, extra.clone());
+            put(&db, "middle", Some(parent), status, &extra);
             let contexts = load(&db, &["root".into()]).expect("facts");
             assert_eq!(
                 count(&contexts["root"]),
@@ -714,7 +715,7 @@ mod owner_matrix_tests {
                 "{parent} {status} {extra}"
             );
         }
-        put(&db, "middle", Some("child"), "waiting", json!({}));
+        put(&db, "middle", Some("child"), "waiting", &json!({}));
         let contexts = load(&db, &["middle".into()]).expect("cycle terminates");
         assert_eq!(
             count(&contexts["middle"]),
@@ -723,8 +724,8 @@ mod owner_matrix_tests {
         );
         db.execute("DELETE FROM runtime_monitors", [])
             .expect("clear");
-        put(&db, "middle", Some("root"), "waiting", json!({}));
-        put(&db, "sibling", Some("root"), "waiting", json!({}));
+        put(&db, "middle", Some("root"), "waiting", &json!({}));
+        put(&db, "sibling", Some("root"), "waiting", &json!({}));
         let monitor = crate::monitor_policy::complete_test_monitor(
             json!({"id":"watch","agent":"sibling","status":"running","epoch":1}),
         );
@@ -745,14 +746,14 @@ mod owner_matrix_tests {
     fn v5_wide_roster_1024_uses_one_batch() {
         let db = studio_runtime_store::test_canvas();
         db.execute_batch("BEGIN").expect("fixture transaction");
-        put(&db, "root", None, "waiting", json!({}));
+        put(&db, "root", None, "waiting", &json!({}));
         for index in 0..1024 {
             put(
                 &db,
                 &format!("worker-{index}"),
                 Some("root"),
                 "running",
-                json!({}),
+                &json!({}),
             );
         }
         db.execute_batch("COMMIT").expect("fixtures");
@@ -771,13 +772,13 @@ mod owner_matrix_tests {
     #[test]
     fn v5_children_prune_unmanaged_and_stopped_branches_but_root_activity_uses_root_owner() {
         let db = studio_runtime_store::test_canvas();
-        put(&db, "root", None, "waiting", json!({}));
+        put(&db, "root", None, "waiting", &json!({}));
         put(
             &db,
             "unmanaged",
             Some("root"),
             "running",
-            json!({"source":"registered"}),
+            &json!({"source":"registered"}),
         );
         let contexts = load(&db, &["root".into()]).expect("facts");
         assert!(
@@ -786,15 +787,15 @@ mod owner_matrix_tests {
         );
         db.execute("DELETE FROM runtime_agents WHERE id='unmanaged'", [])
             .expect("remove");
-        put(&db, "wrong-parent", Some("other"), "running", json!({}));
+        put(&db, "wrong-parent", Some("other"), "running", &json!({}));
         let contexts = load(&db, &["root".into()]).expect("facts");
         assert!(contexts["root"].wait.is_none());
         assert!(
             contexts["root"].active,
             "root-owned activity propagates even without a direct child edge"
         );
-        put(&db, "stopped", Some("root"), "paused", json!({}));
-        put(&db, "grandchild", Some("stopped"), "running", json!({}));
+        put(&db, "stopped", Some("root"), "paused", &json!({}));
+        put(&db, "grandchild", Some("stopped"), "running", &json!({}));
         let contexts = load(&db, &["root".into(), "stopped".into()]).expect("facts");
         assert!(
             !contexts["stopped"].active,
@@ -816,7 +817,7 @@ mod owner_matrix_tests {
             "root",
             None,
             "completed",
-            json!({"inFlight":false,"turnId":"current"}),
+            &json!({"inFlight":false,"turnId":"current"}),
         );
         for (status, live) in [
             ("starting", true),
@@ -896,7 +897,7 @@ mod owner_matrix_tests {
                 "root",
                 None,
                 "completed",
-                json!({"inFlight":in_flight,"turnId":"current"}),
+                &json!({"inFlight":in_flight,"turnId":"current"}),
             );
             let task = TaskRecord::new(
                 owner.into(),
@@ -925,7 +926,7 @@ mod owner_matrix_tests {
             Answer, ApprovalId, ApprovalState, Deferral, Principal, Timestamp,
         };
         let db = studio_runtime_store::test_canvas();
-        put(&db, "root", None, "approval", json!({}));
+        put(&db, "root", None, "approval", &json!({}));
         for epoch in [None, Some(1), Some(2)] {
             for state in ["pending", "answered", "deferred"] {
                 db.execute("DELETE FROM approvals", []).expect("clear");
@@ -979,15 +980,15 @@ mod owner_matrix_tests {
             "orphan",
             Some("missing-parent"),
             "paused",
-            json!({"rootId":"missing-root"}),
+            &json!({"rootId":"missing-root"}),
         );
         let mut input = crate::entity_publication::tests::new_question("orphan-input");
         input.agent = AgentId("orphan".into());
         input.epoch = Some(1);
         studio_runtime_store::approvals::create(&db, input, Timestamp(1.0)).expect("orphan input");
         assert!(load(&db, &["orphan".into()]).expect("facts")["orphan"].answer);
-        put(&db, "", None, "idle", json!({"rootId":""}));
-        put(&db, "regular", None, "paused", json!({"rootId":""}));
+        put(&db, "", None, "idle", &json!({"rootId":""}));
+        put(&db, "regular", None, "paused", &json!({"rootId":""}));
         let mut input = crate::entity_publication::tests::new_question("regular-input");
         input.agent = AgentId("regular".into());
         input.epoch = Some(1);
@@ -1011,7 +1012,7 @@ mod owner_matrix_tests {
                         "root",
                         None,
                         status,
-                        json!({"autoWake":auto_wake,"inFlight":in_flight}),
+                        &json!({"autoWake":auto_wake,"inFlight":in_flight}),
                     );
                     let contexts = load(&db, &["root".into()]).expect("facts");
                     let mut summary = json!({"id":"root","status":status,"autoWake":auto_wake,"inFlight":in_flight,"empty":false,"readStateSupported":true});
@@ -1036,13 +1037,13 @@ mod owner_matrix_tests {
             task_record::{NonnegativeNumber, TaskRecord, TaskType},
         };
         let db = studio_runtime_store::test_canvas();
-        put(&db, "root", None, "waiting", json!({}));
+        put(&db, "root", None, "waiting", &json!({}));
         put(
             &db,
             "child",
             Some("root"),
             "paused",
-            json!({"autoWake":false}),
+            &json!({"autoWake":false}),
         );
         let task = TaskRecord::new(
             "child".into(),
@@ -1071,7 +1072,7 @@ mod owner_matrix_tests {
     #[test]
     fn v5_unrelated_complaints_and_work_are_not_operational_inputs() {
         let db = studio_runtime_store::test_canvas();
-        put(&db, "root", None, "idle", json!({}));
+        put(&db, "root", None, "idle", &json!({}));
         let tx = db.unchecked_transaction().expect("fixture transaction");
         for collection in ["complaint", "work"] {
             studio_runtime_store::SyncDocumentsRepository::put_entity(

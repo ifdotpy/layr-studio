@@ -483,7 +483,7 @@ pub(super) fn callback_context_in(
             .and_then(|attempt| attempt.connection_id),
         u64::try_from(agent.epoch).ok(),
         agent.thread_id,
-        agent.turn_id.clone(),
+        agent.turn_id,
     ) else {
         return Ok(None);
     };

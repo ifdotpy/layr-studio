@@ -199,9 +199,7 @@ pub fn ui_summary(
             .get("readState")
             .filter(|v| !v.is_null())
             .map(|v| {
-                studio_json::from_value::<
-                    studio_runtime_schema::agent_entity_nested_extra::ReadStateDto,
-                >(v.clone())
+                <studio_runtime_schema::agent_entity_nested_extra::ReadStateDto as serde::Deserialize>::deserialize(v)
             })
             .transpose()?;
         if studio_read_models::chat_status::mark_read_target(
