@@ -88,6 +88,8 @@ for (const outcome of ["applied", "failed"] as const)
       backend.publishRename("overlap", requestId);
       if (outcome === "applied") {
         required(backend.snapshot.threads[0]).name = "Stream renamed chat";
+        required(backend.snapshot.runtime.agentSummaries?.[0]).name =
+          "Stream renamed chat";
         backend.publishState();
         await expect(
           page

@@ -118,7 +118,7 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
     `
     import type { DeepReadonly } from '../deepReadonly.ts';
     import type { ResourceRef, ResourceData, SubscriptionError } from '../sync/subscriptions/contracts.ts';
-    ${declarations("src/store/runtime.ts", ["ResourceStatus", "ResourceSlot", "ObservableResourceRuntime"])}
+    ${declarations("src/store/runtime.ts", ["ResourceStatus", "ResourceSlot", "ResourceDefinition", "ObservableResourceRuntime"])}
   `,
   );
   write(
@@ -126,12 +126,12 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
     input.production
       ? `
 import assert from 'node:assert/strict';
-import { autorun } from 'mobx';
-import {createStateMirror} from './src/generated/observableResources.ts';
+import { autorun, isObservable, spy } from 'mobx';
+import {createStateMirror, createAgentDetailMirror} from './src/generated/observableResources.ts';
 import type {components} from './src/generated/api.ts';
 import type {DeepReadonly} from './src/deepReadonly.ts';
 type Payload=components['schemas']['SyncEntityPayload'];
-const summary={id:'lead',inFlight:false,markRead:null,markUnread:'unsupported',operationalStatus:{reason:'ready'},projectServerId:null} satisfies components['schemas']['AgentSummaryEntityDto'];
+const summary={id:'lead',inFlight:false,markRead:{threadId:'thread',turnId:'turn',revision:1,read:false},markUnread:'unsupported',operationalStatus:{reason:'ready'},projectServerId:null,movedTo:{server:'server',move:'move'},startWait:{reason:'workspace_copy',epoch:1,progress:{phase:'transferring',done:1,unit:'bytes'}}} satisfies components['schemas']['AgentSummaryEntityDto'];
 const readonlyMembers: readonly string[]=['lead'];
 const dto:DeepReadonly<Payload[]>=[
  {collection:'agentSummary',id:'lead',value:summary},
@@ -152,7 +152,19 @@ mirror.apply(dto.map(item=>item.collection==='agentTail'?{...item,value:{id:'lea
 assert.equal(members,2);assert.equal(status,1);assert.equal(mirror.current.agentTail.get('lead')?.tail,'second');
 mirror.apply(dto.map(item=>item.collection==='agentSummary'?{...item,value:{...summary,operationalStatus:{reason:'waiting',wait:{agents:1,commands:0,monitors:0,inputs:0,event:null}}}}:item));
 assert.equal(agents.get('lead'),lead);assert.equal(lead.operationalStatus.reason,'waiting');assert.equal(status,2);assert.equal(members,2);
-stop();stopStatus();console.log('production selected collection witnesses passed');
+const pointer=lead.movedTo;assert.ok(pointer);assert.ok(Object.isFrozen(pointer));assert.equal(isObservable(pointer),false);assert.notEqual(pointer,summary.movedTo);assert.equal(Object.isFrozen(summary.movedTo),false);
+const receipt=lead.markRead;const wait=lead.startWait;assert.ok(receipt);assert.ok(wait);assert.equal(wait.reason,'workspace_copy');
+let receiptRuns=0, progressRuns=0;const stopReceipt=autorun(()=>{lead.markRead?.read;receiptRuns+=1;});const stopProgress=autorun(()=>{const current=lead.startWait;if(current?.reason==='workspace_copy')current.progress.done;progressRuns+=1;});
+const updated=dto.map(item=>item.collection==='agentSummary'?{...item,value:{...summary,markRead:{...summary.markRead,read:true},startWait:{...summary.startWait,progress:{...summary.startWait.progress,done:2}}}}:item);
+mirror.apply(updated);assert.equal(lead.markRead,receipt);assert.equal(lead.startWait,wait);assert.equal(receiptRuns,2);assert.equal(progressRuns,2);assert.equal(members,2);
+let mutations=0;const stopSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')mutations+=1;});
+mirror.apply(structuredClone(updated));assert.equal(mutations,0);assert.equal(lead.movedTo,pointer);assert.equal(receiptRuns,2);assert.equal(progressRuns,2);
+stopSpy();stopReceipt();stopProgress();stop();stopStatus();
+const detailDto={id:'lead',overview:{task:'task',result:'result'},activity:{phase:'working',at:1,tools:[{id:'tool',name:'run',type:'command'}]},commandProgress:[{monitorId:'monitor',stage:'echo',startedAt:1,lastOutputLine:'one'}],effort:'high',workspaceMode:'shared',nativeThreadBlock:{threadId:'thread',error:null}} satisfies components['schemas']['AgentDetailEntityDto'];
+const detail=createAgentDetailMirror(detailDto);const overview=detail.current.overview;const activity=detail.current.activity;assert.ok(overview);assert.ok(activity);let taskRuns=0,phaseRuns=0;const stopTask=autorun(()=>{overview.task;taskRuns+=1;});const stopPhase=autorun(()=>{activity.phase;phaseRuns+=1;});
+detail.apply({...detailDto,overview:{...detailDto.overview,task:'updated'}});assert.equal(detail.current.overview,overview);assert.equal(detail.current.activity,activity);assert.equal(taskRuns,2);assert.equal(phaseRuns,1);
+let detailMutations=0;const stopDetailSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')detailMutations+=1;});detail.apply(structuredClone({...detailDto,overview:{...detailDto.overview,task:'updated'}}));assert.equal(detailMutations,0);stopDetailSpy();
+detail.apply({id:'lead'});assert.equal(detail.current.overview,undefined);assert.equal(detail.current.activity,undefined);stopTask();stopPhase();console.log('production selected collection frozen-ref/leaf/union/equal-replay witnesses passed');
 `
       : input.collections
         ? `
@@ -168,7 +180,7 @@ const opaque = {payload:'opaque'};
 const row = (id: string): Row => ({id,sortKey:id,title:null,nested:{count:1},tags:[],choice:{kind:'count',count:1},opaque,maybe:null,nil:null,a:null,b:null,c:null,d:null,e:null,f:null});
 const envelope = (value: Row): Payload => ({collection:'row',id:value.id,value});
 let opens = 0;
-const runtime: ObservableResourceRuntime = { slot(definition) {
+const runtime: ObservableResourceRuntime = { keyed() { throw new Error('unused keyed'); }, slot(definition) {
   opens += 1;
   assert.equal(definition.ref.kind, 'state');
   return {current:{status:'loading'}};
@@ -218,7 +230,7 @@ console.log('selected collection facade witnesses passed');
         : `
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
-import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';
+import {fixtureKeyComputations, subscriptionKey} from './src/sync/subscriptions/contracts.ts';
 import { createObservableResources, createFixtureMirror, fixtureArrayOperations, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
 import type { components } from './src/generated/api.ts';
 import type { DeepReadonly } from './src/deepReadonly.ts';
@@ -251,6 +263,14 @@ let latest: Dto = { rows: [row('b', '2'), row('a', '1')], plain: [1, 2] };
 let publish: () => void = () => { throw new Error('slot missing'); };
 let opens = 0;
 const runtime: ObservableResourceRuntime = {
+  keyed(definition) {
+    const slots = new Map<string, import('./src/store/index.ts').ResourceSlot<DeepReadonly<ReturnType<typeof definition.create>>>>();
+    return (ref) => {
+      const key = subscriptionKey(ref); const previous = slots.get(key);
+      if (previous) return previous;
+      const slot = runtime.slot({...definition,ref,key}); slots.set(key,slot);return slot;
+    };
+  },
   slot(definition) {
     opens += 1;
     const data = definition.create(latest as DeepReadonly<import('./src/sync/subscriptions/contracts.ts').ResourceData<typeof definition.ref>>);
@@ -261,7 +281,7 @@ const runtime: ObservableResourceRuntime = {
 const store = createObservableResources(runtime);
 const slot = store.fixture(a, t);
 const firstKeyComputations=fixtureKeyComputations();assert.equal(firstKeyComputations,1);
-assert.equal(slot, store.fixture(a, t)); assert.equal(opens, 1);assert.equal(fixtureKeyComputations(),firstKeyComputations);
+assert.equal(slot, store.fixture(a, t)); assert.equal(opens, 1);assert.equal(fixtureKeyComputations(),firstKeyComputations+1);
 const state = slot.current; assert.equal(state.status, 'live');
 if (state.status !== 'live') throw new Error('expected live');
 const data = state.data;

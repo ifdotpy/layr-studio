@@ -23,13 +23,25 @@ export interface ResourceSlot<T> {
   readonly current: ResourceStatus<T>;
 }
 
+/** Maximum cached unobserved keyed facades per server runtime, in entries. */
+export const MAX_INACTIVE_RESOURCE_FACADES = 128;
+
+export interface ResourceDefinition<R extends ResourceRef, TData> {
+  create(dto: DeepReadonly<ResourceData<R>>): TData;
+  /** Mutable models apply in place; scalar and union roots may be replaced. */
+  apply(data: TData, dto: DeepReadonly<ResourceData<R>>): TData | void;
+}
+
 export interface ObservableResourceRuntime {
-  slot<R extends ResourceRef, TData>(definition: {
-    key: string;
-    ref: R;
-    create(dto: DeepReadonly<ResourceData<R>>): TData;
-    apply(data: TData, dto: DeepReadonly<ResourceData<R>>): void;
-  }): ResourceSlot<DeepReadonly<TData>>;
+  slot<R extends ResourceRef, TData>(
+    definition: ResourceDefinition<R, TData> & {
+      key: string;
+      ref: R;
+    },
+  ): ResourceSlot<DeepReadonly<TData>>;
+  keyed<R extends ResourceRef, TData>(
+    definition: ResourceDefinition<R, TData>,
+  ): (ref: R) => ResourceSlot<DeepReadonly<TData>>;
 }
 
 type Subscriptions = Pick<
@@ -40,7 +52,30 @@ type Subscriptions = Pick<
 /** One runtime belongs to one server. Generated facades retain typed slot
  * identities; this map retains only their lifecycle, never erased model values. */
 export function createObservableResourceRuntime(subscriptions: Subscriptions) {
-  const entries = new Map<string, { dispose(): void; evict(): void }>();
+  type Entry = {
+    observed: boolean;
+    keyed: boolean;
+    dispose(): void;
+    evict(): void;
+  };
+  const entries = new Map<string, Entry>();
+  const touch = (key: string) => {
+    const entry = entries.get(key);
+    if (entry) {
+      entries.delete(key);
+      entries.set(key, entry);
+    }
+  };
+  const trim = () => {
+    const inactive = [...entries.values()].filter(
+      (entry) => entry.keyed && !entry.observed,
+    );
+    for (const entry of inactive.slice(
+      0,
+      Math.max(0, inactive.length - MAX_INACTIVE_RESOURCE_FACADES),
+    ))
+      entry.evict();
+  };
   const pending = new Set<() => void>();
   let disposed = false;
   const stopEvictions = subscriptions.onEvict((ref) => {
@@ -57,81 +92,146 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
     });
   };
 
-  const runtime: ObservableResourceRuntime = {
-    slot({ key, ref, create, apply }) {
-      if (disposed) throw new Error("The observable resource store is closed.");
-      if (entries.has(key)) throw new Error(`Duplicate resource slot: ${key}`);
-      let data: ReturnType<typeof create> | undefined;
-      let current: ResourceStatus<DeepReadonly<ReturnType<typeof create>>> = {
-        status: "loading",
-      };
-      const update = () => {
-        const snapshot = subscriptions.getSnapshot(ref);
-        if (snapshot.data !== undefined) {
-          // Readonly views change no representation. Ref-to-DTO correlation is
-          // checked by the generated facade through ResourceData<R>.
-          const dto = snapshot.data as DeepReadonly<typeof snapshot.data>;
-          if (data === undefined) data = create(dto);
-          else apply(data, dto);
+  function slot<R extends ResourceRef, TData>(
+    {
+      key,
+      ref,
+      create,
+      apply,
+    }: ResourceDefinition<R, TData> & { key: string; ref: R },
+    remove?: () => void,
+  ): ResourceSlot<DeepReadonly<TData>> {
+    if (disposed) throw new Error("The observable resource store is closed.");
+    if (entries.has(key)) throw new Error(`Duplicate resource slot: ${key}`);
+    let data: ReturnType<typeof create> | undefined;
+    let current: ResourceStatus<DeepReadonly<ReturnType<typeof create>>> = {
+      status: "loading",
+    };
+    const update = () => {
+      const snapshot = subscriptions.getSnapshot(ref);
+      if (snapshot.data !== undefined) {
+        // Readonly views change no representation. Ref-to-DTO correlation is
+        // checked by the generated facade through ResourceData<R>.
+        const dto = snapshot.data as DeepReadonly<typeof snapshot.data>;
+        if (data === undefined) data = create(dto);
+        else {
+          const replacement = apply(data, dto);
+          if (replacement !== undefined) data = replacement;
         }
-        const next =
-          snapshot.error !== null && data === undefined
-            ? { status: "error" as const, error: snapshot.error }
-            : data === undefined
-              ? { status: "loading" as const }
-              : {
-                  status:
-                    snapshot.status === "live"
-                      ? ("live" as const)
-                      : ("stale" as const),
-                  data: data as DeepReadonly<typeof data>,
-                  ...(snapshot.error !== null ? { error: snapshot.error } : {}),
-                };
-        if (
-          current.status === next.status &&
-          (!("error" in current) ||
-            ("error" in next && current.error === next.error)) &&
-          (!("error" in next) ||
-            ("error" in current && current.error === next.error))
-        )
-          return;
-        current = next;
-        atom.reportChanged();
-      };
-      const interest = observeInterest(
-        () => {
-          const stop = subscriptions.subscribe(ref, () => schedule(update));
-          schedule(update);
-          return stop;
-        },
-        () => {
-          if (current.status !== "live") return;
-          runInAction(() => {
-            if (current.status === "live") {
-              current = { status: "stale", data: current.data };
-              atom.reportChanged();
-            }
-          });
-        },
-      );
-      const atom = createAtom(key, interest.observed, interest.unobserved);
-      entries.set(key, {
-        dispose: interest.dispose,
-        evict() {
-          pending.delete(update);
-          runInAction(() => {
-            data = undefined;
-            current = { status: "loading" };
+      }
+      const next =
+        snapshot.error !== null && data === undefined
+          ? { status: "error" as const, error: snapshot.error }
+          : data === undefined
+            ? { status: "loading" as const }
+            : {
+                status:
+                  snapshot.status === "live"
+                    ? ("live" as const)
+                    : ("stale" as const),
+                data: data as DeepReadonly<typeof data>,
+                ...(snapshot.error !== null ? { error: snapshot.error } : {}),
+              };
+      if (
+        current.status === next.status &&
+        (!("data" in next) ||
+          ("data" in current && Object.is(current.data, next.data))) &&
+        (!("error" in current) ||
+          ("error" in next && current.error === next.error)) &&
+        (!("error" in next) ||
+          ("error" in current && current.error === next.error))
+      )
+        return;
+      current = next;
+      atom.reportChanged();
+    };
+    const interest = observeInterest(
+      () => {
+        const stop = subscriptions.subscribe(ref, () => schedule(update));
+        schedule(update);
+        return stop;
+      },
+      () => {
+        entry.observed = false;
+        runInAction(() => {
+          if (current.status === "live") {
+            current = { status: "stale", data: current.data };
             atom.reportChanged();
-          });
-        },
-      });
-      return {
-        get current() {
-          atom.reportObserved();
-          return current;
-        },
+          }
+        });
+        trim();
+      },
+    );
+    const atom = createAtom(
+      key,
+      () => {
+        entry.observed = true;
+        touch(key);
+        interest.observed();
+      },
+      interest.unobserved,
+    );
+    const entry: Entry = {
+      observed: false,
+      keyed: remove !== undefined,
+      dispose: interest.dispose,
+      evict() {
+        pending.delete(update);
+        runInAction(() => {
+          data = undefined;
+          current = { status: "loading" };
+          atom.reportChanged();
+        });
+        if (remove && !entry.observed) {
+          entries.delete(key);
+          remove();
+          interest.dispose();
+        }
+      },
+    };
+    entries.set(key, entry);
+    return {
+      get current() {
+        atom.reportObserved();
+        return current;
+      },
+    };
+  }
+  const runtime: ObservableResourceRuntime = {
+    slot,
+    keyed<R extends ResourceRef, TData>(
+      definition: ResourceDefinition<R, TData>,
+    ): (ref: R) => ResourceSlot<DeepReadonly<TData>> {
+      type Cached = {
+        slot: ResourceSlot<DeepReadonly<TData>>;
+        facade: ResourceSlot<DeepReadonly<TData>>;
       };
+      const cache = new Map<string, Cached>();
+      const lookup = (ref: R): Cached => {
+        if (disposed)
+          throw new Error("The observable resource store is closed.");
+        const key = subscriptionKey(ref);
+        let entry = cache.get(key);
+        if (!entry) {
+          const inner = slot({ ...definition, key, ref }, () =>
+            cache.delete(key),
+          );
+          const created: Cached = {
+            slot: inner,
+            facade: {
+              get current() {
+                return (disposed ? created : lookup(ref)).slot.current;
+              },
+            },
+          };
+          entry = created;
+          cache.set(key, entry);
+        }
+        touch(key);
+        trim();
+        return entry;
+      };
+      return (ref) => lookup(ref).facade;
     },
   };
   return {

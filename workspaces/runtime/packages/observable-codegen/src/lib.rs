@@ -15,6 +15,8 @@ pub struct ObservableModel {
     pub(crate) schema: String,
     pub identity: Option<String>,
     pub opaque: Vec<String>,
+    /// When selected, nested fields outside this list remain frozen plain refs.
+    pub tracked_nested: Option<Vec<String>>,
     pub ordered_by: Option<String>,
 }
 impl ObservableModel {
@@ -27,6 +29,7 @@ impl ObservableModel {
             schema: schema.into(),
             identity: None,
             opaque: vec![],
+            tracked_nested: None,
             ordered_by: None,
         }
     }
@@ -40,6 +43,10 @@ impl ObservableModel {
     }
     pub fn opaque(mut self, field: &str) -> Self {
         self.opaque.push(field.into());
+        self
+    }
+    pub fn track_nested(mut self, fields: &[&str]) -> Self {
+        self.tracked_nested = Some(fields.iter().map(|field| (*field).into()).collect());
         self
     }
 }
@@ -81,6 +88,15 @@ impl ObservableCollection {
     }
 }
 impl ObservableResource {
+    pub fn named(kind: &str, facade: &str, schema: &str, args: Vec<ObservableArg>) -> Self {
+        Self {
+            kind: kind.into(),
+            facade: facade.into(),
+            data: schema.into(),
+            args,
+            collections: vec![],
+        }
+    }
     pub fn of<T: JsonSchema>(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
         Self {
             kind: kind.into(),

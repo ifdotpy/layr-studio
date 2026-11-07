@@ -188,6 +188,7 @@ export async function fixture(
     runtime: {
       agents: [agent],
       agentSummaries: [summary],
+      agentDetails: [agent],
       agentTail: [agentTail],
       projects: [
         {

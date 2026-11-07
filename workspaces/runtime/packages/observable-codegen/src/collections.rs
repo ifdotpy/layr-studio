@@ -1,22 +1,16 @@
-use crate::emit::{HEADER, emit_model, emit_union};
 use crate::shape::{Parser, Shape};
 use crate::{
-    GenerationError, ObservableModel, ObservableResource, UnsupportedShape, fail, identifier,
-    quote, schema,
+    GenerationError, ObservableResource, UnsupportedShape, fail, identifier, quote, schema,
 };
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use studio_json::Value;
 
-/// Selected keyed views share the singleton resource's existing interest and status.
-pub(crate) fn render(
+pub(crate) fn parse(
     document: &Value,
-    metadata: &[ObservableModel],
-    resources: &[ObservableResource],
-) -> Result<String, GenerationError> {
-    let [resource] = resources else {
-        return Err(fail("#/resources", UnsupportedShape::Resource));
-    };
+    resource: &ObservableResource,
+    parser: &mut Parser<'_>,
+) -> Result<(), GenerationError> {
     let path = format!("#/resources/{}", resource.kind);
     if !resource.args.is_empty() || resource.collections.is_empty() {
         return Err(fail(&path, UnsupportedShape::Resource));
@@ -27,7 +21,6 @@ pub(crate) fn render(
     let variants = payload["oneOf"]
         .as_array()
         .ok_or_else(|| fail(&path, UnsupportedShape::Union))?;
-    let mut parser = Parser::new(document, metadata);
     let mut tags = BTreeSet::new();
     let mut names = BTreeSet::new();
     for collection in &resource.collections {
@@ -81,21 +74,17 @@ pub(crate) fn render(
             return Err(fail(&path, UnsupportedShape::Shape));
         }
     }
-    for model in metadata {
-        if !parser.models.contains_key(&model.schema) {
-            return Err(fail(
-                &format!("#/components/schemas/{}", model.schema),
-                UnsupportedShape::MissingSchema,
-            ));
-        }
-    }
-    let mut out = String::from(HEADER);
-    for model in parser.models.values() {
-        emit_model(&mut out, model, &parser);
-    }
-    for union in parser.unions.values() {
-        emit_union(&mut out, union);
-    }
+    Ok(())
+}
+pub(crate) fn name(resource: &ObservableResource) -> String {
+    let mut chars = resource.facade.chars();
+    format!(
+        "{}{}Collections",
+        chars.next().expect("identifier").to_ascii_uppercase(),
+        chars.as_str()
+    )
+}
+pub(crate) fn emit(out: &mut String, resource: &ObservableResource) {
     let facade = &resource.facade;
     let mut chars = facade.chars();
     let name = format!(
@@ -167,6 +156,4 @@ pub(crate) fn render(
     }
     out.push_str("} }\n}\n}\n");
     writeln!(out, "export function create{}Mirror(): {{ readonly current: {name}; apply(dto: {name}Dto): void }} {{ const model = new {name}Model([]); return {{ get current(): {name} {{ return model; }}, apply(dto: {name}Dto): void {{ runInAction(() => {{ model.apply(dto); }}); }} }}; }}", name.trim_end_matches("Collections")).expect("string");
-    writeln!(out, "export interface ObservableResources {{ {facade}(): ResourceSlot<{name}>; }}\nexport function createObservableResources(runtime: ObservableResourceRuntime): ObservableResources {{\nlet slot: ResourceSlot<{name}> | undefined;\nreturn {{ {facade}() {{\nif (slot !== undefined) return slot;\nconst ref: Extract<ResourceRef, {{kind: {}}}> = {{kind: {}}};\nreturn slot = runtime.slot({{ key: subscriptionKey(ref), ref, create: (dto) => new {name}Model(dto), apply: (data, dto) => {{ data.apply(dto); }} }});\n}} }};\n}}", quote(&resource.kind), quote(&resource.kind)).expect("string");
-    Ok(out)
 }

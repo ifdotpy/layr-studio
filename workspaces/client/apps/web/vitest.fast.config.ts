@@ -43,6 +43,7 @@ export default {
       "src/sync/subscriptions/store.test.ts",
       "src/store/interest.test.ts",
       "src/store/runtime.test.ts",
+      "src/store/windows.test.ts",
       "src/store/contracts.test.ts",
       "src/store/render.test.ts",
       "src/components/sidebar/viewModel.test.ts",

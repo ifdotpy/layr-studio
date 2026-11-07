@@ -127,6 +127,14 @@ impl<'a> Parser<'a> {
             .or_else(|| value["oneOf"].as_array())
             .filter(|_| !validation_alternatives)
         {
+            if variants.iter().all(|variant| {
+                matches!(
+                    variant["type"].as_str(),
+                    Some("string" | "number" | "integer" | "boolean" | "null")
+                )
+            }) {
+                return Ok(Shape::Leaf);
+            }
             let properties = variants
                 .first()
                 .and_then(|v| v["properties"].as_object())
@@ -218,6 +226,7 @@ impl<'a> Parser<'a> {
                         .identity
                         .iter()
                         .chain(meta.opaque.iter())
+                        .chain(meta.tracked_nested.iter().flatten())
                         .chain(meta.ordered_by.iter())
                     {
                         if !props.contains_key(field) {
@@ -232,9 +241,17 @@ impl<'a> Parser<'a> {
                 let mut fields = vec![];
                 for (field, value) in props {
                     let field_path = format!("{path}/properties/{field}");
-                    identifier(field, &field_path)?;
+                    identifier(&format!("field_{field}"), &field_path)?;
+                    if ["constructor", "__proto__", "prototype", "apply"].contains(&field.as_str())
+                    {
+                        return Err(fail(&field_path, UnsupportedShape::Identifier));
+                    }
                     let ty = format!("{name}Dto[{}]", quote(field));
-                    let opaque = meta.is_some_and(|m| m.opaque.contains(field));
+                    let opaque = meta.is_some_and(|m| m.opaque.contains(field))
+                        || meta
+                            .and_then(|m| m.tracked_nested.as_ref())
+                            .is_some_and(|tracked| !tracked.contains(field))
+                            && self.is_nested(value, &mut BTreeSet::new())?;
                     let shape = if opaque {
                         Shape::Leaf
                     } else {
@@ -296,6 +313,39 @@ impl<'a> Parser<'a> {
             _ if literal(value).is_some() => Ok(Shape::Leaf),
             _ => Err(fail(path, UnsupportedShape::Shape)),
         }
+    }
+    fn is_nested(
+        &self,
+        value: &Value,
+        visiting: &mut BTreeSet<String>,
+    ) -> Result<bool, GenerationError> {
+        if let Some(reference) = value["$ref"].as_str() {
+            if !visiting.insert(reference.into()) {
+                return Err(fail(reference, UnsupportedShape::Recursive));
+            }
+            let name = reference
+                .strip_prefix("#/components/schemas/")
+                .ok_or_else(|| fail(reference, UnsupportedShape::MissingSchema))?;
+            let result = self.is_nested(schema(self.document, name)?, visiting);
+            visiting.remove(reference);
+            return result;
+        }
+        if let Some(base) = nullable_base(value) {
+            return self.is_nested(&base, visiting);
+        }
+        if matches!(value["type"].as_str(), Some("object" | "array")) {
+            return Ok(true);
+        }
+        for key in ["oneOf", "anyOf"] {
+            if let Some(variants) = value[key].as_array() {
+                for variant in variants {
+                    if self.is_nested(variant, visiting)? {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 }
 fn literal(value: &Value) -> Option<String> {

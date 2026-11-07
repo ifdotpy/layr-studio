@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { observer } from "mobx-react-lite";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createServerStore } from "./index.ts";
+import { createServerStore, createObservableResourceRuntime } from "./index.ts";
 import { createSubscriptions } from "../sync/subscriptions/module.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import SidebarRow from "../components/SidebarRow.tsx";
@@ -228,5 +228,52 @@ it("releases an abandoned Suspense render at the pinned finalization backstop, t
   await act(async () => vi.advanceTimersByTimeAsync(20_000));
   expect(f.removed).toHaveBeenCalledTimes(1);
   resume();
+  await f.close();
+});
+
+it("finalizes a keyed abandoned Suspense render through the existing grace owner", async () => {
+  const f = fixture();
+  const runtime = createObservableResourceRuntime(f.subscriptions);
+  const get = runtime.keyed<
+    Extract<
+      import("../sync/subscriptions/contracts.ts").ResourceRef,
+      { kind: "agentDetail" }
+    >,
+    object
+  >({
+    create: () => ({}),
+    apply: () => {},
+  });
+  const slot = get({ kind: "agentDetail", agentId: "worker" });
+  let resume = noop;
+  const pending = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const Abandoned = observer(function Abandoned() {
+    void slot.current;
+    throw pending;
+  });
+  await act(async () =>
+    f.root.render(
+      createElement(
+        Suspense,
+        { fallback: createElement("p", null, "Loading") },
+        createElement(Abandoned),
+      ),
+    ),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  expect(f.added).toHaveBeenCalledTimes(1);
+  expect(f.added.mock.calls[0]?.[0]).toEqual({
+    kind: "agentDetail",
+    agentId: "worker",
+  });
+  await act(async () => f.root.render(createElement("p", null, "Elsewhere")));
+  await act(async () => vi.advanceTimersByTimeAsync(10_000));
+  expect(f.removed).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTimeAsync(20_000));
+  expect(f.removed).toHaveBeenCalledTimes(1);
+  resume();
+  runtime.dispose();
   await f.close();
 });

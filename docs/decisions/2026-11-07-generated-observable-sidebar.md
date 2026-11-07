@@ -87,3 +87,13 @@ carries native facts; UI facades are created locally, never serialized.
 The benchmark's conversation guard is a memoized sibling, not a real Conversation
 mount. Its results establish only that guard's isolation. Measurement requires
 an explicitly approved quiet host window; ordinary checks are separate evidence.
+
+Argument-resource facades use a plain Map LRU, refreshed on lookup, with at most
+`MAX_INACTIVE_RESOURCE_FACADES` (128 entries) unobserved facades per server;
+observed slots are pinned. Eviction resets the slot to observable `loading` and
+drops its model, without changing transport interest or grace; the subscription
+owner's existing FIFO eviction also resets the slot. A retained facade resolves
+the current canonical slot when observed again, through the same 100 ms helper.
+Parents observe `slot.current` and pass its stable live/stale model reference to
+leaves; a reset changes that status so parents retire the previous model rather
+than leaving leaves attached to a silently stale object.

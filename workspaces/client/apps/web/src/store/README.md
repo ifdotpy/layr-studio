@@ -15,3 +15,29 @@ Subscription notifications coalesce in one microtask and apply inside one MobX
 action. Actions reading a facade outside an observer acquire no interest. An
 abandoned React render can retain a reaction until mobx-react-lite finalization;
 the reference is then released through the same subscription grace.
+
+Generated argument facades create one `runtime.keyed({ create, apply })` factory
+per resource kind. Generated branded arguments become a `ResourceRef`; the runtime
+uses the existing `subscriptionKey` for identity. A plain Map LRU retains at most
+`MAX_INACTIVE_RESOURCE_FACADES` unobserved facades across these factories, refreshed
+on lookup; observed slots are pinned. This cache owns only model retention: its
+eviction resets `current` to `loading`, without releasing transport or changing
+the subscription owner's independent FIFO, 20-second grace or inactive bound.
+A held facade resolves the canonical slot on reuse, so it can reacquire normally.
+
+Parents observe `slot.current`, narrow its status and pass the live/stale model
+reference to leaves. In-place apply keeps that model identity. Reset/eviction
+changes the slot status observably, so the parent retires the old model; a detached
+model reference alone carries no subscription interest or validity guarantee.
+Scalar and union roots can return a replacement from `apply`; equal roots leave
+the slot atom unchanged.
+
+Transcript and room facades use the same subscription data observer as handwritten
+consumers. `createDataObserver` attaches `subscribeTranscriptProjection` with the
+complete ref (including tail), preserving the existing local projection's partial
+metadata, contiguous-window checks, durable cursors, epoch handling and oversized
+interval recovery. Room views retain their existing inline/recovery adapter and
+numeric history cursors. The runtime does not page, merge messages, advance cursors
+or issue reads. Wave 3 can pass generated window model references to its history
+UI while keeping `transcriptPageBounds.ts` and the current user-driven page-read
+path as the history owner; drafts and outbox stay handwritten.

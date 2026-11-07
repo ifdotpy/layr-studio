@@ -37,6 +37,7 @@ fn models() -> Vec<ObservableModel> {
         identity: Some("id".into()),
         ordered_by: Some("sortKey".into()),
         opaque: vec!["opaque".into()],
+        tracked_nested: None,
     }]
 }
 
@@ -362,4 +363,31 @@ fn resource_arguments_reject_generated_binding_collisions() {
         assert_eq!(error.kind, UnsupportedShape::Identifier);
         assert_eq!(error.path, format!("#/resources/fixture/args/{name}"));
     }
+}
+
+#[test]
+fn opaque_values_are_frozen_plain_refs_with_structural_equal_replay() {
+    let source = render(&fixture(), &models(), &resources()).expect("fixture");
+    assert!(source.contains("freezePlain(structuredClone(dto.opaque))"));
+    assert!(source.contains("compareStructural(this.opaque, dto.opaque)"));
+}
+
+#[test]
+fn nested_tracking_metadata_keeps_only_selected_nested_models() {
+    let mut metadata = models();
+    metadata[0] = metadata[0].clone().track_nested(&["choice"]);
+    let source = render(&fixture(), &metadata, &resources()).expect("fixture");
+    assert!(!source.contains("class Row_nestedModel"));
+    assert!(source.contains("class Row_choiceVariant0Model"));
+    assert!(source.contains("freezePlain(structuredClone(dto.nested))"));
+    metadata[0] = metadata[0].clone().track_nested(&["missing"]);
+    let error = render(&fixture(), &metadata, &resources()).expect_err("unknown nested field");
+    assert_eq!(error.path, "#/components/schemas/Row/properties/missing");
+}
+
+#[test]
+fn schema_property_names_can_be_typescript_keywords() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Row"]["properties"]["type"] = json!({"type":"string"});
+    render(&document, &models(), &resources()).expect("type is a valid class property");
 }

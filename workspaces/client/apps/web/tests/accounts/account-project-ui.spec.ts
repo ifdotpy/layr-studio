@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { Account } from "../../src/components/Accounts.tsx";
 import type { Project } from "../../src/types.ts";
 import type { AccountRateLimitsDto } from "../playwright.ts";
@@ -183,6 +184,20 @@ async function accountProjectUi(_browser: Browser, nativeOnly: boolean) {
     runtime: {
       viewScopedAgents: nativeOnly,
       agents,
+      ...(nativeOnly
+        ? {
+            agentSummaries: agents.map((agent) =>
+              agentSummaryFixture(agent.id, {
+                name: agent.name,
+                cwd: agent.cwd,
+                projectPath: projects[0]!.path,
+                accountKey: agent.accountKey,
+                threadId: agent.threadId,
+              }),
+            ),
+            agentDetails: agents,
+          }
+        : {}),
       projects,
       projectOrganizationVersion: 1,
       rooms: [],

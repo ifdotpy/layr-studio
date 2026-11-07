@@ -2166,3 +2166,32 @@ it("retains equal project facts while advancing their existing command sequence 
   assert.equal(next.runtime.projects[0], first.runtime.projects[0]);
   assert.equal(next.runtime.projectSequences?.project, 2);
 });
+
+it("keeps the acquired chat send capability across later sidebar summaries", () => {
+  const state = emptyEntityProjection();
+  const summary = agentSummaryFixture("lead");
+  const initial = applyEntityChanges(
+    state,
+    [entityRow("agentSummary", "lead", summary, 1)],
+    true,
+  );
+  assert.equal(initial.threads[0]?.canSend, undefined);
+  const opened = applyEntityChanges(
+    state,
+    [entityRow("agentDetail", "lead", { id: "lead", canSend: true }, 2)],
+    true,
+  );
+  assert.equal(opened.threads[0]?.canSend, true);
+  const renamed = applyEntityChanges(
+    state,
+    [entityRow("agentSummary", "lead", { ...summary, name: "Renamed" }, 3)],
+    true,
+  );
+  assert.equal(renamed.threads[0]?.canSend, true);
+  const blocked = applyEntityChanges(
+    state,
+    [entityRow("agentDetail", "lead", { id: "lead", canSend: false }, 4)],
+    true,
+  );
+  assert.equal(blocked.threads[0]?.canSend, false);
+});

@@ -1,8 +1,16 @@
 import { expect, it } from "vitest";
+import { agentId } from "../generated/observableResources.ts";
 import type { ObservableResources } from "../generated/observableResources.ts";
 
 /** Compiler witnesses exercise exactly the facade consumed by components. */
 function readonlyFacade(store: ObservableResources) {
+  // @ts-expect-error Generated argument facades require a branded agent identity.
+  store.agentDetail("worker");
+  const detail = store.agentDetail(agentId("worker")).current;
+  if (detail.status === "live" || detail.status === "stale") {
+    // @ts-expect-error Server-owned model fields remain readonly through keyed facades.
+    detail.data.overview = null;
+  }
   const slot = store.state();
   // @ts-expect-error A component cannot replace a resource's state.
   slot.current = { status: "loading" };
