@@ -16,6 +16,7 @@ export function pilotAgents(now = Date.now() / 1000): PilotAgent[] {
     isLead: true,
     rootId: `pilot-${i}`,
     cwd: "/fixture",
+    projectPath: "/fixture",
     status: "completed",
     operationalStatus: { reason: "read_result" },
     expectedIndicator: "none",
