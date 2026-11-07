@@ -211,7 +211,8 @@ mod tests {
             Some(store),
             None,
         );
-        let resource = studio_json::from_value(json!({"kind":"state"})).expect("state ref");
+        let resource =
+            ResourceRef::StateResource(studio_runtime_schema::resource_ref::EmptyResource {});
         let frame = studio_json::to_value(
             initial_snapshot(state, resource, None)
                 .await
