@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { formatOperationalStatus } from "./operationalStatus.ts";
 
 describe("operational status presentation", () => {
+  it("makes no status claim before the operational summary arrives", () => {
+    expect(formatOperationalStatus(undefined)).toEqual({
+      kind: "loading",
+      label: "",
+    });
+  });
   it("formats domain reason codes without recomputing precedence", () => {
     const examples = [
       [

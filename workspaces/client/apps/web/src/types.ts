@@ -33,7 +33,14 @@ import type { JsonInput, TranscriptWireItem } from "./apiTypes";
 import type { DeepReadonly } from "./deepReadonly.ts";
 export type { DeepReadonly };
 export type Agent = DeepReadonly<
-  AgentEntityDto & Pick<AgentSummaryEntityDto, "projectPath">
+  AgentEntityDto &
+    Pick<AgentSummaryEntityDto, "projectPath"> &
+    Partial<
+      Pick<
+        AgentSummaryEntityDto,
+        "operationalStatus" | "markRead" | "markUnread"
+      >
+    >
 >;
 export type Chat = ChatEntityDto;
 export type PeerTeam = PeerTeamEntityDto;

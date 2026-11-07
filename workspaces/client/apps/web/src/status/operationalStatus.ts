@@ -2,6 +2,7 @@ import type { components } from "../generated/api.ts";
 
 /** Presentation belongs to the renderer; precedence belongs to the Rust reason. */
 export type ChatIndicatorKind =
+  | "loading"
   | "answer"
   | "error"
   | "working"
@@ -29,8 +30,9 @@ function waitLabel(wait: WaitReasons): string {
 }
 
 export function formatOperationalStatus(
-  status: OperationalStatus,
+  status: OperationalStatus | undefined,
 ): ChatIndicator {
+  if (status === undefined) return { kind: "loading", label: "" };
   switch (status.reason) {
     case "needs_input":
       return {
