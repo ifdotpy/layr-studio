@@ -14,17 +14,12 @@ import * as defaultOutbox from "../sync/send";
 import {
   createContext,
   useContext,
-  useMemo,
   useState,
   useEffect,
   Fragment,
   type ReactNode,
 } from "react";
-import {
-  createSidebarServices,
-  localSidebarServices,
-} from "../components/sidebar/services";
-import { serverSidebarBackend } from "./serverSidebarBackend";
+import { localSidebarServices } from "../components/sidebar/services";
 import * as defaultApi from "../api";
 import * as defaultSync from "../sync/client";
 import { defaultSubscriptions as defaultResources } from "../sync/subscriptions/events";
@@ -74,13 +69,9 @@ export const useServerServices = () => useContext(Context);
 export const useServerApi = () => useServerServices()?.api ?? defaultApi;
 export function useServerSidebarServices() {
   const services = useServerServices();
-  return useMemo(() => {
-    if (!services) return localSidebarServices;
-    // Keep sidebar writes on the same authenticated owner as this screen.
-    const backend = serverSidebarBackend(services, () => true);
-    return createSidebarServices(backend, [backend], () => backend.ownerId);
-  }, [services]);
+  return services?.sidebarServices ?? localSidebarServices;
 }
+export const useServerModelReader = () => useServerServices()?.modelReader;
 export const useServerSync = () => useServerServices()?.sync ?? defaultSync;
 export const useServerResources = () =>
   useServerServices()?.resources ?? defaultResources;

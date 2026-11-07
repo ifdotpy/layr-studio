@@ -237,6 +237,8 @@ export default {
       "src/useProjectDelete.test.ts",
       "src/sync/projectDeleteProjection.test.ts",
       "src/servers/logicalProjects.test.ts",
+      "src/servers/modelReader.test.ts",
+      "src/servers/ServerServices.owners.test.ts",
     ],
   },
 };

@@ -1,3 +1,6 @@
+import { createModelReader } from "./modelReader.ts";
+import { createSidebarServices } from "../components/sidebar/services.tsx";
+import { serverSidebarBackend } from "./serverSidebarBackend.ts";
 import { watchServerName } from "./serverNames";
 import { createUploads, UPLOAD_DATABASE_NAME } from "../sync/uploads";
 import { createServerAudio } from "../native/serverAudio";
@@ -164,7 +167,22 @@ export function createServerServices(server: StudioServer) {
     }
     await initialization;
   }
+  let sidebarServices: ReturnType<typeof createSidebarServices> | undefined;
   return {
+    get sidebarServices(): ReturnType<typeof createSidebarServices> {
+      if (!sidebarServices) {
+        const backend = serverSidebarBackend(this, () => true);
+        sidebarServices = createSidebarServices(
+          backend,
+          [backend],
+          () => backend.ownerId,
+        );
+      }
+      return sidebarServices;
+    },
+    modelReader: createModelReader(transport.owner, (options) =>
+      api.get("/api/models", options),
+    ),
     owner: transport.owner,
     audio,
     chatCreations: createChatCreationStore(storage),

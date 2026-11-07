@@ -13,7 +13,6 @@ import {
   useEffect,
   useRef,
   useState,
-  useMemo,
   type FormEvent,
   type HTMLAttributes,
   type ReactNode,
@@ -30,7 +29,7 @@ import type { DeepReadonly } from "../../../deepReadonly.ts";
 import type { components } from "../../../generated/api.ts";
 export type PeerTeam = DeepReadonly<components["schemas"]["PeerTeamEntityDto"]>;
 import { createArea } from "../../area.ts";
-import { computed, observable, runInAction } from "mobx";
+import { observable, runInAction } from "mobx";
 import type { SidebarChatView } from "../../sidebar/viewModel.ts";
 import type { Project } from "../../ProjectOrganization";
 import "./peer-teams.css";
@@ -511,18 +510,15 @@ const PeerTeamMemberList = observer(function PeerTeamMemberList({
   draft: TeamDraft;
 }) {
   const actions = usePeerTeamActions();
-  const view = useMemo(
-    () => computed(() => actions.candidates(project, team)),
-    [actions, project, team],
-  );
+  const candidates = actions.candidates(project, team);
   return (
     <>
       <div className="peer-team-options">
-        {view.get().map((row) => (
+        {candidates.map((row) => (
           <PeerTeamCandidate key={row.id} row={row} draft={draft} />
         ))}
       </div>
-      {!view.get().length && <p>No available chats.</p>}
+      {!candidates.length && <p>No available chats.</p>}
     </>
   );
 });
@@ -533,14 +529,10 @@ const PeerTeamCandidate = observer(function PeerTeamCandidate({
   row: SidebarChatView;
   draft: TeamDraft;
 }) {
-  const selected = useMemo(
-    () => computed(() => draft.members.includes(row.id)),
-    [draft, row],
-  );
   return (
     <Checkbox
       label={row.agent.name ?? ""}
-      checked={selected.get()}
+      checked={draft.members.includes(row.id)}
       disabled={draft.frozen}
       onChange={(e) =>
         runInAction(() => {

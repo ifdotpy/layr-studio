@@ -25,6 +25,13 @@ import { sidebarRender } from "./renderProbe.ts";
 import { SidebarOrganizationDialogs } from "./SidebarOrganizationDialogs.tsx";
 import { SidebarProjectList } from "./SidebarProjectList.tsx";
 import { useSidebarState } from "./SidebarState.tsx";
+
+const renderAttentionRow: Parameters<
+  typeof SidebarAttention
+>[0]["renderRow"] = (row, priority) => (
+  <SidebarRow key={row.id} row={row} priority={priority} />
+);
+
 export const SidebarContents = observer(function SidebarContents() {
   const sidebar = useSidebarState();
   const commands = useSidebarCommands();
@@ -92,9 +99,7 @@ export const SidebarContents = observer(function SidebarContents() {
       <nav id="chat-list" className="chat-scroll" aria-label="Chats">
         <SidebarAttention
           rows={sidebar.model.visibleRows}
-          renderRow={(row, priority) => (
-            <SidebarRow key={row.id} row={row} priority={priority} />
-          )}
+          renderRow={renderAttentionRow}
         />
         <div className="projects-heading">
           <span className="projects-heading-label">

@@ -65,6 +65,9 @@ import { useWorkerModels } from "../agents/WorkerModelPicker";
 import TeamChats from "./messages/TeamChats";
 import FilePreview, { type PreviewTarget } from "../FilePreview";
 import "./Workspace.css";
+
+const diffHunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)/;
+const diffPathPattern = / b\/(.*)$/;
 import {
   WorkspacePanelHost,
   type WorkspacePanelPresentationProps,
@@ -523,7 +526,7 @@ function Changes(c: Context) {
         inHunk = false;
       }
       if (!inHunk && text.startsWith("+++ b/")) current = text.slice(6);
-      const hunk = text.match(/^@@ -\d+(?:,\d+)? \+(\d+)/);
+      const hunk = text.match(diffHunkPattern);
       if (hunk) {
         line = Number(hunk[1]) - 1;
         inHunk = true;
@@ -532,7 +535,7 @@ function Changes(c: Context) {
         inHunk && !hunk && (text.startsWith("+") || text.startsWith(" "));
       if (newLine) line++;
       const headerPath = text.startsWith("diff --git ")
-        ? text.match(/ b\/(.*)$/)?.[1] || text.slice(11)
+        ? text.match(diffPathPattern)?.[1] || text.slice(11)
         : undefined;
       return {
         text,

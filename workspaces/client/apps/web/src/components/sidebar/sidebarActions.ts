@@ -1,5 +1,7 @@
 import { useSidebarCommands } from "./commands.ts";
-import { runInAction } from "mobx";
+import { computed, runInAction, type IComputedValue } from "mobx";
+import type { Project } from "../ProjectOrganization";
+import type { PeerTeam } from "../shell/messages/PeerTeams";
 import { useRef, useState } from "react";
 import type { SidebarChatView } from "./viewModel.ts";
 import type { FormEvent, HTMLAttributes } from "react";
@@ -86,50 +88,65 @@ export function useSidebarActions(
       };
     },
   }));
-  const [teams] = useState<PeerTeamActions>(() => ({
-    get scope() {
-      return current.current.state.stateDir;
-    },
-    openRoom: (id) => current.current.state.openChat(id),
-    refresh: async () => {
-      await current.current.commands.refresh?.();
-    },
-    closeForm: () => current.current.state.setTeamDialog(null),
-    edit: (team, action) =>
-      current.current.state.setTeamDialog({
-        path: team.projectPath || "",
-        id: team.id,
-        action,
-      }),
-    toggle: (team) =>
-      current.current.state.toggleTree(
-        JSON.stringify([team.projectPath, "team", team.id]),
-      ),
-    room: (team) =>
-      current.current.state.runtime?.rooms?.find(
-        (room) => room.radio?.teamId === team.id,
-      )?.id,
-    disabled: (team) => {
-      const s = current.current.state;
-      return !s.canEdit(
-        s.projectTarget(team.projectPath || "", undefined, team.id),
-      );
-    },
-    candidates: (project, team) => {
-      const s = current.current.state;
-      return s.model.rows.filter(
-        (row) =>
-          row.projectPath === project.path &&
-          s.services.serverForChat(row.id) ===
-            s.services.owner(
-              s.projectTarget(project.path || "", undefined, team?.id),
-            ).ownerId &&
-          !s.peerTeams.some(
-            (other) =>
-              other.id !== team?.id && (other.members || []).includes(row.id),
-          ),
-      );
-    },
-  }));
+  const [teams] = useState<PeerTeamActions>(() => {
+    const candidates = new WeakMap<
+      Project,
+      Map<PeerTeam | undefined, IComputedValue<readonly SidebarChatView[]>>
+    >();
+    return {
+      get scope() {
+        return current.current.state.stateDir;
+      },
+      openRoom: (id) => current.current.state.openChat(id),
+      refresh: async () => {
+        await current.current.commands.refresh?.();
+      },
+      closeForm: () => current.current.state.setTeamDialog(null),
+      edit: (team, action) =>
+        current.current.state.setTeamDialog({
+          path: team.projectPath || "",
+          id: team.id,
+          action,
+        }),
+      toggle: (team) =>
+        current.current.state.toggleTree(
+          JSON.stringify([team.projectPath, "team", team.id]),
+        ),
+      room: (team) =>
+        current.current.state.runtime?.rooms?.find(
+          (room) => room.radio?.teamId === team.id,
+        )?.id,
+      disabled: (team) => {
+        const s = current.current.state;
+        return !s.canEdit(
+          s.projectTarget(team.projectPath || "", undefined, team.id),
+        );
+      },
+      candidates: (project, team) => {
+        let byTeam = candidates.get(project);
+        if (!byTeam) candidates.set(project, (byTeam = new Map()));
+        const view =
+          byTeam.get(team) ??
+          computed(() => {
+            const s = current.current.state;
+            return s.model.rows.filter(
+              (row) =>
+                row.projectPath === project.path &&
+                s.services.serverForChat(row.id) ===
+                  s.services.owner(
+                    s.projectTarget(project.path || "", undefined, team?.id),
+                  ).ownerId &&
+                !s.peerTeams.some(
+                  (other) =>
+                    other.id !== team?.id &&
+                    (other.members || []).includes(row.id),
+                ),
+            );
+          });
+        byTeam.set(team, view);
+        return view.get();
+      },
+    };
+  });
   return { rows, teams };
 }
