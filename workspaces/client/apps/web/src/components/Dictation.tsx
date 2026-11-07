@@ -12,7 +12,7 @@ import { Download, Mic, Square, Trash2 } from "lucide-react";
 import type { Recording } from "../dictation/storage";
 import { useServerRecordings } from "../servers/ServerServicesContext";
 import "./Dictation.css";
-import { BrowserDictation } from "./BrowserDictation";
+import { BrowserDictation, dictationLanguageOptions } from "./BrowserDictation";
 // Older recordings store plain text. New structured diagnostics retain JSON
 // in that same string field; decode only objects and arrays for presentation.
 function recordingDiagnostic(value: unknown): unknown {
@@ -371,24 +371,7 @@ function NativeDictation({
             disabled={!!busy || recording}
             onChange={(event) => setLocale(event.target.value)}
           >
-            {Array.from(
-              new Set([
-                navigator.language,
-                "en-US",
-                "ru-RU",
-                "de-DE",
-                "fr-FR",
-                "es-ES",
-                "pl-PL",
-                "uk-UA",
-              ]),
-            ).map((code) => (
-              <option key={code} value={code}>
-                {new Intl.DisplayNames([navigator.language], {
-                  type: "language",
-                }).of(code) || code}
-              </option>
-            ))}
+            {dictationLanguageOptions()}
           </select>
         </label>
         <button

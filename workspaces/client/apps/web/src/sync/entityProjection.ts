@@ -202,10 +202,6 @@ function projectSnapshotCollections(
       prior && !changed.has("questionHistory")
         ? prior.runtime.questionHistory
         : entityValues(values, "questionHistory"),
-    messageReceipts:
-      prior && !changed.has("messageReceipt")
-        ? prior.runtime.messageReceipts
-        : entityValues(values, "messageReceipt"),
     plans:
       prior && !changed.has("plan")
         ? prior.runtime.plans
@@ -214,10 +210,6 @@ function projectSnapshotCollections(
       prior && !changed.has("annotation")
         ? prior.runtime.annotations
         : entityValues(values, "annotation"),
-    queuesByAgent:
-      prior && !changed.has("queue")
-        ? prior.runtime.queuesByAgent
-        : Object.fromEntries(values.queue),
     accountsSummary:
       prior && !changed.has("accounts")
         ? prior.runtime.accountsSummary

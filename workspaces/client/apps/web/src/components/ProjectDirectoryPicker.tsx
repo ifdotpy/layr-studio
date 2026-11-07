@@ -45,9 +45,10 @@ export default function ProjectDirectoryPicker({
   const { canPickDirectory, pickDirectory } = useServerFileDialogs();
   const { get } = useServerApi();
 
-  const [servers, setServers] = useState<ProjectServerChoice[]>(
-    serverChoices || [{ id: "local", label: "This computer" }],
-  );
+  const [fetchedServers, setServers] = useState<ProjectServerChoice[]>([
+    { id: "local", label: "This computer" },
+  ]);
+  const servers = serverChoices ?? fetchedServers;
   const [server, setServer] = useState(
     initialServer || serverChoices?.[0]?.id || "local",
   );
@@ -55,10 +56,7 @@ export default function ProjectDirectoryPicker({
   const [matches, setMatches] = useState<string[]>([]);
   const selectedServer = servers.find((row) => row.id === server);
   useEffect(() => {
-    if (serverChoices) {
-      setServers(serverChoices);
-      return;
-    }
+    if (serverChoices) return;
     let active = true;
     void readProjectServers(get)
       .then((rows) => {

@@ -4,14 +4,16 @@ import { useConversationActions } from "./conversation/navigation.ts";
 import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Mail } from "lucide-react";
-import { useAgentSummary } from "./agents/state.ts";
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
+import { resourceData } from "../store/runtime.ts";
 
 export const MarkChatUnreadItem = observer(function MarkChatUnreadItem({
   agentId,
 }: {
   agentId: string;
 }) {
-  const agent = useAgentSummary(agentId);
+  const store = useServerStore();
+  const agent = resourceData(store.state().current)?.agents.get(agentId);
   const actions = useConversationActions().read;
   return (
     <Menu.Item

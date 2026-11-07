@@ -1,4 +1,4 @@
-import type { useAgentDetail } from "./agents/state.ts";
+import type { AgentDetailEntityDto } from "../generated/observableResources.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import { displayError, errorDetails } from "../errorPresentation";
 import { currentCapacityRetry } from "../capacityRetry";
@@ -69,7 +69,7 @@ export function NativeError({
   refresh,
 }: {
   agent: Agent;
-  detail?: ReturnType<typeof useAgentDetail> | Agent;
+  detail?: AgentDetailEntityDto | Agent | undefined;
   planType?: string | undefined;
   recovery?: components["schemas"]["LimitRecovery"] | null | undefined;
   openLimits?: () => void;

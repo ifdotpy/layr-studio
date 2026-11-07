@@ -1,5 +1,6 @@
 import type { JsonInput, JsonInputOf, Json } from "../types";
 import type { ApiError, GetResult } from "../api";
+import type { DeepReadonly } from "../deepReadonly.ts";
 
 export type JsonObject = Json;
 
@@ -10,6 +11,7 @@ export type AccountLimitsReadError = Pick<ApiError, "message" | "status"> & {
 };
 export type AccountLimitsSnapshot = UsageLimitsResponse &
   ClientLimitMetadata & { readError?: AccountLimitsReadError };
+export type AccountLimitsData = DeepReadonly<AccountLimitsSnapshot>;
 
 export function limitsReadSucceeded(
   snapshot: Pick<AccountLimitsSnapshot, "error">,
@@ -26,10 +28,10 @@ export function jsonObject(
 }
 
 export function accountLimits(
-  value: AccountLimitsSnapshot | null | undefined,
+  value: AccountLimitsData | null | undefined,
   accountKey: string,
   _accountId?: string | null,
-): AccountLimitsSnapshot | null {
+): AccountLimitsData | null {
   if (!value || value.accountKey !== accountKey) return null;
   return value;
 }

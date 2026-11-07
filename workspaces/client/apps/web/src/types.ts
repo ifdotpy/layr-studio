@@ -69,9 +69,6 @@ type SnapshotRuntime = WorkspaceEntityDto & {
     | Record<string, components["schemas"]["AccountCostResponse"]>
     | undefined;
   accountsSummary?: components["schemas"]["AccountsSummaryDto"] | undefined;
-  queuesByAgent?:
-    | Record<string, components["schemas"]["QueueView"]>
-    | undefined;
   rateLimitsByAccount?:
     | Record<string, components["schemas"]["RateLimitView"]>
     | undefined;
@@ -80,9 +77,6 @@ type SnapshotRuntime = WorkspaceEntityDto & {
     | components["schemas"]["RetainedWorktreeEntityDto"][]
     | undefined;
   questionHistory?: Approval[] | undefined;
-  messageReceipts?:
-    | components["schemas"]["MessageReceiptEntityDto"][]
-    | undefined;
   plans?: components["schemas"]["PlanSummaryEntityDto"][] | undefined;
   annotations?: components["schemas"]["AnnotationEntityDto"][] | undefined;
   studioErrors: components["schemas"]["StudioError"][];

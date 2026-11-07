@@ -239,6 +239,8 @@ export default {
       "src/servers/logicalProjects.test.ts",
       "src/servers/modelReader.test.ts",
       "src/servers/ServerServices.owners.test.ts",
+      "src/components/useAttachmentDrafts.render.test.ts",
+      "src/components/BrowserDictation.languages.test.ts",
     ],
   },
 };

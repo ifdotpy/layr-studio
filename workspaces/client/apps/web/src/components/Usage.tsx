@@ -10,7 +10,7 @@ import { localDateTime, localTime } from "../local-time";
 import {
   accountLimits,
   jsonObject,
-  type AccountLimitsSnapshot,
+  type AccountLimitsData,
 } from "../usage/accountUsage";
 import {
   lazy,
@@ -87,7 +87,7 @@ const displayAccountName = (account?: UsageAccount) =>
       });
 const accountProvider = (account?: UsageAccount) => account?.provider || "";
 
-type UsageLimitSnapshot = AccountLimitsSnapshot;
+type UsageLimitSnapshot = AccountLimitsData;
 
 const number = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);

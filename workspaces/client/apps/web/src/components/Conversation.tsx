@@ -110,7 +110,7 @@ import {
 } from "../types";
 import Usage from "./Usage";
 import type { UsageAccount } from "./Usage";
-import type { AccountLimitsSnapshot } from "../usage/accountUsage";
+import type { AccountLimitsData } from "../usage/accountUsage";
 import PromptNavigator from "./PromptNavigator";
 import { usePromptRecall } from "./usePromptRecall";
 import PromptComposer from "./prompt-composer/PromptComposer";
@@ -315,7 +315,7 @@ export function ConversationView(p: {
   offlineSendDetails?: string;
   sending: boolean;
   schemaMismatch?: boolean;
-  limits: AccountLimitsSnapshot | null;
+  limits: AccountLimitsData | null;
   limitsAccounts?: UsageAccount[];
   limitsLoading?: boolean;
   jumpTarget?: { messageId: string; requestId: string } | undefined;

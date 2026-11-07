@@ -4,6 +4,31 @@ import { Popover } from "@mantine/core";
 import { Mic } from "lucide-react";
 import "./realtime-voice.css";
 
+const dictationLocales = [
+  "en-US",
+  "ru-RU",
+  "de-DE",
+  "fr-FR",
+  "es-ES",
+  "pl-PL",
+  "uk-UA",
+] as const;
+let languageNames: { locale: string; names: Intl.DisplayNames } | undefined;
+export function dictationLanguageOptions() {
+  const locale = navigator.language;
+  if (languageNames?.locale !== locale)
+    languageNames = {
+      locale,
+      names: new Intl.DisplayNames([locale], { type: "language" }),
+    };
+  const names = languageNames.names;
+  return [...new Set([locale, ...dictationLocales])].map((code) => (
+    <option key={code} value={code}>
+      {names.of(code) || code}
+    </option>
+  ));
+}
+
 // Web Speech is implemented by the browser. It is not the Electron speech bridge.
 export type Recognition = {
   lang: string;
@@ -190,24 +215,7 @@ export function BrowserDictation({
               disabled={active}
               onChange={(event) => setLocale(event.target.value)}
             >
-              {[
-                ...new Set([
-                  navigator.language,
-                  "en-US",
-                  "ru-RU",
-                  "de-DE",
-                  "fr-FR",
-                  "es-ES",
-                  "pl-PL",
-                  "uk-UA",
-                ]),
-              ].map((code) => (
-                <option key={code} value={code}>
-                  {new Intl.DisplayNames([navigator.language], {
-                    type: "language",
-                  }).of(code) || code}
-                </option>
-              ))}
+              {dictationLanguageOptions()}
             </select>
           </label>
           {!active && (

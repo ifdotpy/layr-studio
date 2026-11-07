@@ -351,15 +351,9 @@ it("projects bounded workspace summaries and receipts with deletes", () => {
     true,
   );
 
-  assert.ok(
-    first.runtime.messageReceipts !== null &&
-      first.runtime.messageReceipts !== undefined,
-  );
-  assert.ok(
-    first.runtime.messageReceipts[0] !== null &&
-      first.runtime.messageReceipts[0] !== undefined,
-  );
-  assert.equal(first.runtime.messageReceipts[0].status, "queued");
+  const receipt = state.values.messageReceipt.get("m");
+  assert.equal(receipt?.status, "queued");
+  assert.equal("messageReceipts" in first.runtime, false);
 
   assert.ok(first.runtime.plans !== null && first.runtime.plans !== undefined);
   assert.ok(
@@ -394,7 +388,8 @@ it("projects bounded workspace summaries and receipts with deletes", () => {
   );
   assert.equal(next.runtime.annotations.length, 0);
 
-  assert.equal(next.runtime.messageReceipts, first.runtime.messageReceipts);
+  assert.equal(state.values.messageReceipt.get("m"), receipt);
+  assert.equal("messageReceipts" in next.runtime, false);
 });
 
 it("reuses unchanged entity data and bounds transcript and history caches", () => {
@@ -2035,11 +2030,8 @@ it("projects queue stream upserts and deletion without endpoint reads", () => {
   };
   const initial = applyEntityRows(state, [row], true);
 
-  assert.ok(
-    initial.runtime.queuesByAgent !== null &&
-      initial.runtime.queuesByAgent !== undefined,
-  );
-  assert.deepEqual(initial.runtime.queuesByAgent.chat, value);
+  assert.deepEqual(state.values.queue.get("chat"), value);
+  assert.equal("queuesByAgent" in initial.runtime, false);
   const next = applyEntityRows(
     state,
     [
@@ -2054,11 +2046,8 @@ it("projects queue stream upserts and deletion without endpoint reads", () => {
     true,
   );
 
-  assert.ok(
-    next.runtime.queuesByAgent !== null &&
-      next.runtime.queuesByAgent !== undefined,
-  );
-  assert.equal(next.runtime.queuesByAgent.chat, undefined);
+  assert.equal(state.values.queue.has("chat"), false);
+  assert.equal("queuesByAgent" in next.runtime, false);
 });
 
 for (const [collection, field, singleton] of [

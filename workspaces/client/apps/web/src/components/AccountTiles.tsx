@@ -5,10 +5,7 @@ import { Checkbox, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ActionButton } from "./ui/primitives";
-import {
-  accountLimits,
-  type AccountLimitsSnapshot,
-} from "../usage/accountUsage";
+import { accountLimits, type AccountLimitsData } from "../usage/accountUsage";
 import { accountDisplayName, accountTooltip } from "../accountName";
 import { formatPercent } from "./Usage";
 import type { Account } from "./Accounts";
@@ -165,7 +162,7 @@ export function useAccountLimitProjection(account: LimitAccount) {
 
 export function accountLimitView(
   account: LimitAccount,
-  limits: AccountLimitsSnapshot | null,
+  limits: AccountLimitsData | null,
   _signedInOnly = true,
   projection: AccountProjection | null = null,
 ) {

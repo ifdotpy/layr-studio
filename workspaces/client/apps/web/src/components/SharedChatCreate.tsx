@@ -18,6 +18,7 @@ import {
 } from "./models/modelOption";
 import "./agents/execution-settings.css";
 import "./shared-chat-create.css";
+import { observer } from "mobx-react-lite";
 
 type Participant = {
   account_key: string;
@@ -36,7 +37,7 @@ type Creation = {
 export const sharedCreationKey = (scope: string) =>
   `studio-radio-create:${scope}`;
 
-function ParticipantFields({
+const ParticipantFields = observer(function ParticipantFields({
   index,
   value,
   change,
@@ -204,7 +205,7 @@ function ParticipantFields({
       </Popover>
     </div>
   );
-}
+});
 export default function SharedChatCreate({
   data,
   accounts,
